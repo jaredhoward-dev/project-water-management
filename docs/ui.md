@@ -3129,13 +3129,24 @@ The page is two cards, side by side where they fit and stacked on a phone:
   *…, yearly (R 8 990.00 a year)* (*Team* on a team's page), priced from
   `GET /billing/plans` (unpriced until it answers, or if it fails); with one,
   *Manage billing*. Team's Upgrade has an *Editor seats* number field above
-  the buttons (labelled, from the 3 included to 50, a hint under it with
-  each extra seat's monthly and yearly price, named by `aria-describedby`),
+  the buttons (a `NumberInput` spinbutton with `whole`, labelled, from the 3
+  included to 50, a hint under it with each extra seat's monthly and yearly
+  price, named by `aria-describedby`; ArrowUp and ArrowDown step it by one),
   and both buttons price the seats chosen: *Upgrade to Team, monthly
-  (R 3 497.00 a month for 5 editor seats)*. A count outside the range marks
-  the field `aria-invalid` with a message under it and leaves the buttons
-  `aria-disabled` (`plan.ts` `seatOffer`, `parseSeats`, `checkoutTotalMinor`;
-  [billing.md § Team seats at checkout](./billing.md#team-seats-at-checkout)). While `enforced` is false, a note says nothing is refused:
+  (R 3 497.00 a month for 5 editor seats)*. The field starts at the included
+  seats once, when the offer arrives, then keeps exactly what is typed: a
+  blank, a count outside the range, a decimal (*4.5*, *4,5*) or an exponent
+  (*1e1*) stays as typed, marks the field `aria-invalid` with *Choose a whole
+  number of seats from 3 to 50.* under it, and leaves the buttons
+  `aria-disabled` and unpriced (*Upgrade to Team, monthly*), so no price for
+  some other count shows. It always starts at the included seats, not the
+  team's current editors: `AccountPlan` has no member count (`plan.ts`
+  `seatOffer`, `upgradeLabel`, `checkoutTotalMinor`;
+  [billing.md § Team seats at checkout](./billing.md#team-seats-at-checkout)).
+  Once a team has a subscription, a line under it says its seats: *5 editor
+  seats (3 included, 2 extra)*, or *3 editor seats (all included)*
+  (`subscriptionSeatsLine`). It shows no total, since `Subscription` doesn't
+  record whether it is billed monthly or yearly. While `enforced` is false, a note says nothing is refused:
   with no buttons, that plans aren't charged yet; beside them (which can
   charge), only that limits aren't enforced yet (`plan.ts` `shadowNote`). Each
   button asks the API for a URL (`POST …/plan/checkout` or `…/plan/portal`)

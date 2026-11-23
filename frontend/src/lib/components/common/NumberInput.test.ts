@@ -1,5 +1,6 @@
 // NumberInput's markup, rendered with Svelte's server renderer: every field a
-// text box with the decimal keypad (so 12,5 reads the same in every mode), a
+// text box with the decimal keypad (so 12,5 reads the same in every mode; a
+// `whole` field the number keypad), a
 // plain field a spinbutton with its bounds, a grouped one a textbox, and the
 // caller's aria-describedby and aria-invalid kept. What it does as the user
 // types and leaves (the message, invalid text kept through blur) is
@@ -27,6 +28,13 @@ describe('NumberInput markup', () => {
 		expect(tag).toContain('value="50"');
 		expect(tag).toContain('aria-label="Losses on the way, %"');
 		expect(tag).not.toContain('aria-invalid');
+	});
+
+	it('a whole field asks for the number keypad and stays a spinbutton', () => {
+		const { tag } = input({ value: 3, min: 3, max: 50, step: 1, whole: true, id: 'seats' });
+		expect(tag).toContain('inputmode="numeric"');
+		expect(tag).toContain('role="spinbutton"');
+		expect(tag).toContain('aria-valuenow="3"');
 	});
 
 	it('a grouped field is a textbox showing separators', () => {

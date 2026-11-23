@@ -8,25 +8,29 @@
 	// Manage billing (one) when the billing provider isn't manual; each asks the
 	// API for a URL and sends the person there (Stripe's page, or the mock's
 	// local one). Team's Upgrade has a seat field (editor seats, from the
-	// included ones up), and its buttons price the seats chosen. The workspace is English, so a refusal shows the API's own
+	// included ones up; a NumberInput, so text it can't take stays with its
+	// message), and its buttons price the seats chosen, or show no price while
+	// the count is invalid. A team's subscription says its seats. The workspace is English, so a refusal shows the API's own
 	// English message (the billing codes are machine-only); no farmer page shows
 	// any of it. The figures and words come from plan.ts.
 	import { onMount, untrack } from 'svelte';
 	import { replaceState } from '$app/navigation';
 	import { page } from '$app/state';
 	import { api } from '#lib/api/index.js';
+	import NumberInput from '#lib/components/common/NumberInput.svelte';
+	import { provideInvalidFields } from '#lib/components/common/invalidFields.svelte.js';
 	import type { AccountPlan, BillingInterval, BillingRedirect, PlanOffer } from '#lib/api/types.js';
 	import {
 		CONFIRM_DELAYS_MS,
 		billingActions,
 		checkoutNotice,
 		monthName,
-		parseSeats,
 		priceLine,
 		seatHint,
 		seatOffer,
 		shadowNote,
 		subscriptionLine,
+		subscriptionSeatsLine,
 		upgradeLabel,
 		usageRows,
 		type ConfirmState
@@ -72,14 +76,21 @@
 			.catch(() => {});
 	});
 
-	// Team's seats: the field's text, the count it reads as (null when out of range), and what the buttons price.
+	// Team's seats: the count chosen (the included seats once the offer arrives,
+	// then only what the person types), whether the field holds text it can't
+	// take (its own registry, so it never counts as unsaved work elsewhere), and
+	// what the buttons price (null while invalid).
 	const seats = $derived(seatOffer(offer));
-	let seatsText = $state('');
+	const seatFields = provideInvalidFields();
+	let seatValue = $state<number | null>(null);
+	let seatsFilled = false;
 	$effect(() => {
-		if (seats && seatsText === '') seatsText = String(seats.included);
+		if (!seats || seatsFilled) return;
+		seatsFilled = true;
+		seatValue = seats.included;
 	});
-	const seatCount = $derived(seats ? parseSeats(seatsText, seats) : null);
-	const seatsInvalid = $derived(!!seats && seatCount === null);
+	const seatsInvalid = $derived(!!seats && (seatFields.count > 0 || seatValue === null));
+	const seatCount = $derived(seats && !seatsInvalid ? seatValue : null);
 
 	function upgrade(interval: BillingInterval) {
 		if (!checkout) return;
@@ -147,6 +158,7 @@
 	}
 
 	const sub = $derived(subscriptionLine(plan.subscription));
+	const seatsLine = $derived(subscriptionSeatsLine(plan));
 	const rows = $derived(usageRows(plan));
 	const nothingUsed = $derived(rows.every((r) => r.used === 0));
 </script>
@@ -160,6 +172,7 @@
 		<p class="muted price" data-price>{priceLine(plan.plan)}</p>
 		{#if sub}
 			<p class="sub" class:warn={sub.warn} data-subscription={plan.subscription?.status}>{sub.text}</p>
+			{#if seatsLine}<p class="muted sub" data-subscription-seats>{seatsLine}</p>{/if}
 		{:else}
 			<p class="muted sub" data-subscription="none">No subscription: {whose} is on {plan.plan.name}.</p>
 		{/if}
@@ -177,23 +190,19 @@
 			{#if seats}
 				<div class="seats" data-seats>
 					<label for="checkout-seats">Editor seats</label>
-					<input
+					<NumberInput
 						id="checkout-seats"
 						class="input"
-						type="number"
-						inputmode="numeric"
+						whole
 						min={seats.included}
 						max={seats.max}
-						step="1"
-						bind:value={() => seatsText, (v) => (seatsText = v === null || v === undefined ? '' : String(v))}
-						aria-describedby={seatsInvalid ? 'checkout-seats-hint checkout-seats-error' : 'checkout-seats-hint'}
-						aria-invalid={seatsInvalid ? 'true' : undefined}
+						step={1}
+						bind:value={seatValue}
+						invalidMessage="Choose a whole number of seats from {seats.included} to {seats.max}."
+						aria-describedby="checkout-seats-hint"
 						data-seats-input
 					/>
 					<p class="muted seats-hint" id="checkout-seats-hint">{seatHint(seats, offer?.currency ?? 'ZAR')}</p>
-					{#if seatsInvalid}
-						<p class="err" id="checkout-seats-error" data-seats-error>Choose a whole number of seats from {seats.included} to {seats.max}.</p>
-					{/if}
 				</div>
 			{/if}
 			<div class="billing-actions" data-billing-actions>
@@ -305,9 +314,8 @@
 	.seats label {
 		font-weight: 600;
 	}
-	.seats input {
+	.seats :global(input) {
 		width: 6rem;
-		font-variant-numeric: tabular-nums;
 	}
 	.seats-hint {
 		margin: 0;
