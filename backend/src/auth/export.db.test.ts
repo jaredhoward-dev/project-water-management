@@ -173,6 +173,39 @@ describe('GET /auth/me/export', () => {
 		expect(doc.invites).toEqual([]);
 	});
 
+	it('gives the person their own billing account, its subscriptions and counters (323); none to someone who never needed one, nor a team’s', async () => {
+		const [acct] = await asOwner('SELECT id FROM billing_account WHERE user_id = $1', [owner.id]);
+		expect(acct).toBeDefined();
+		// A team the owner runs, with its own account: the team's, never in the person's export.
+		const teamId = (await owner.call('POST', '/teams', { name: 'Export WUA' })).body.team.id as string;
+		await asOwner(`INSERT INTO billing_account (kind, team_id) VALUES ('team', $1) ON CONFLICT (team_id) DO NOTHING`, [teamId]);
+		const [teamAcct] = await asOwner('SELECT id FROM billing_account WHERE team_id = $1', [teamId]);
+		await asOwner(
+			`INSERT INTO subscription (billing_account_id, plan_code, status, provider, external_ref, seats) VALUES ($1, 'pro', 'canceled', 'manual', 'export-test-ref', 1)`,
+			[acct.id]
+		);
+		await asOwner(`INSERT INTO usage_counter (billing_account_id, kind, month, qty) VALUES ($1, 'reports', '2026-10-01', 4)`, [acct.id]);
+		await asOwner(`INSERT INTO usage_counter (billing_account_id, kind, month, qty) VALUES ($1, 'reports', '2026-10-01', 9)`, [teamAcct.id]);
+		try {
+			const { doc, text } = await download(owner);
+			expect(doc.billing).toEqual({
+				account: { id: acct.id, kind: 'user', projectsCreated: expect.any(Number), createdAt: expect.any(String) },
+				subscriptions: [expect.objectContaining({ planCode: 'pro', status: 'canceled', provider: 'manual', externalRef: 'export-test-ref', seats: 1 })],
+				usageCounters: expect.arrayContaining([{ kind: 'reports', month: '2026-10', qty: 4 }])
+			});
+			expect(doc.billing.usageCounters).not.toContainEqual(expect.objectContaining({ qty: 9 }));
+			expect(text).not.toContain(teamAcct.id);
+			// The farmer never made a project or opened their plan: no account (and nothing of the owner's).
+			const theirs = await download(farmer);
+			expect(theirs.doc.billing).toBeNull();
+			expect(theirs.text).not.toContain(acct.id);
+		} finally {
+			await asOwner('DELETE FROM subscription WHERE billing_account_id = $1', [acct.id]);
+			await asOwner(`DELETE FROM usage_counter WHERE billing_account_id = ANY($1) AND month = '2026-10-01'`, [[acct.id, teamAcct.id]]);
+			await asOwner('DELETE FROM team WHERE id = $1', [teamId]);
+		}
+	});
+
 	it('allows one export a minute per account (429 with Retry-After)', async () => {
 		expect((await download(farmer)).res.status).toBe(200);
 		const again = await app.request('/auth/me/export', { headers: { cookie: farmer.cookie, origin: ORIGIN } });
