@@ -68,7 +68,10 @@ const PUBLIC = new Set([
 	// Verify an evidence pack (WP-3.14): the code is printed on the pack, not
 	// a secret; app_verify_pack returns only a pack's printed fields, and
 	// nothing for a draft (evidence/packs.db.test.ts).
-	'GET /verify/:code'
+	'GET /verify/:code',
+	// The plans and their prices (issue #641 Phase 1): public prices, no one's data, read
+	// through app_billing_plans (billing/routes.db.test.ts).
+	'GET /billing/plans'
 ]);
 
 const app = createApp();
@@ -412,6 +415,16 @@ describe('route auth inventory', () => {
 	// Farmers and farmer invites (WP-2.1, WP-2.2): auth-gated like every project route (and farmer-403, projects/role-ladder.db.test.ts).
 	it('inventories the farmer routes as auth-gated', () => {
 		for (const r of ['GET /projects/:id/farmers', 'POST /projects/:id/farmers', 'POST /projects/:id/farmers/bulk', 'PUT /projects/:id/farmers/:userId']) {
+			expect(routes).toContain(r);
+			expect(PUBLIC.has(r)).toBe(false);
+		}
+	});
+
+	// Billing, Phase 1 (issue #641): the plan list is public; your own plan and a team's are auth-gated (billing/routes.db.test.ts: a team's is 404 to all but its admins).
+	it('inventories the billing routes: the plan list public, the account and team plans auth-gated', () => {
+		expect(routes).toContain('GET /billing/plans');
+		expect(PUBLIC.has('GET /billing/plans')).toBe(true);
+		for (const r of ['GET /account/plan', 'GET /teams/:id/plan']) {
 			expect(routes).toContain(r);
 			expect(PUBLIC.has(r)).toBe(false);
 		}
