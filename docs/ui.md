@@ -3128,7 +3128,14 @@ The page is two cards, side by side where they fit and stacked on a phone:
   up): with no subscription, *Upgrade to Pro, monthly (R 899.00 a month)* and
   *…, yearly (R 8 990.00 a year)* (*Team* on a team's page), priced from
   `GET /billing/plans` (unpriced until it answers, or if it fails); with one,
-  *Manage billing*. While `enforced` is false, a note says nothing is refused:
+  *Manage billing*. Team's Upgrade has an *Editor seats* number field above
+  the buttons (labelled, from the 3 included to 50, a hint under it with
+  each extra seat's monthly and yearly price, named by `aria-describedby`),
+  and both buttons price the seats chosen: *Upgrade to Team, monthly
+  (R 3 497.00 a month for 5 editor seats)*. A count outside the range marks
+  the field `aria-invalid` with a message under it and leaves the buttons
+  `aria-disabled` (`plan.ts` `seatOffer`, `parseSeats`, `checkoutTotalMinor`;
+  [billing.md § Team seats at checkout](./billing.md#team-seats-at-checkout)). While `enforced` is false, a note says nothing is refused:
   with no buttons, that plans aren't charged yet; beside them (which can
   charge), only that limits aren't enforced yet (`plan.ts` `shadowNote`). Each
   button asks the API for a URL (`POST …/plan/checkout` or `…/plan/portal`)
@@ -3176,12 +3183,12 @@ Loading, a failed load (with Try again) and the not-found go through
 `common/LoadState.svelte`. A failed load reads "Couldn't look up your plan:"
 (or "this team's plan:") and the error from its code (`errorText`), never the
 server's own text. Tests: `billing/plan.test.ts` (prices, the
-subscription line, the rows), `api/client.test.ts` (the two calls), and
+subscription line, the rows, Team's seat range and price), `api/client.test.ts` (the two calls), and
 `e2e/tests/billing-plan.spec.ts` (both pages, the not-found for a stranger
 and for a team member who isn't an admin, a farmer-only user sent back to
 `/account`, no way to pay, a 360 px phone without sideways scroll, axe at
-both widths, the team's Upgrade to Team, the two priced buttons wrapping at
-360 px); `auth/redirect.test.ts` keeps `/account/plan` English. The
+both widths, the team's Upgrade to Team with its seat field, the two priced
+buttons wrapping at 360 px); `auth/redirect.test.ts` keeps `/account/plan` English. The
 frontend calls `GET /billing/plans` only for the Upgrade buttons' prices
 (the planned pricing page will too).
 
