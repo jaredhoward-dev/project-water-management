@@ -3,7 +3,7 @@
 // shadow mode: usage is counted against the plan's limits, nothing is charged
 // or refused, so a count past its limit is said, never blocked. The workspace
 // is English; plan data never reaches a farmer page.
-import type { AccountPlan, Subscription, UsageCount } from '#lib/api/types.js';
+import type { AccountPlan, Subscription } from '#lib/api/types.js';
 import { fmtDate, fmtNum } from '#lib/format/number.js';
 
 /**
@@ -54,58 +54,82 @@ export function subscriptionLine(s: Subscription | null): { text: string; warn: 
 	}
 }
 
-/** One usage bar: its label, the figures as words, and how full it is (null when unlimited). */
+/** One usage bar: its label, the figures as words, and how full it is (null when there is no bar). */
 export interface UsageRow {
-	key: 'catchments' | 'reports' | 'packsIssued' | 'assistantTokens';
+	key: 'catchments' | 'reports' | 'packsIssued' | 'assistantCost';
 	label: string;
 	used: number;
 	limit: number | null;
-	/** "3 of 5", or "12 used" when unlimited. */
+	/** "3 of 5", "12 used" when unlimited, or "Not included in Free" at a zero limit. */
 	figures: string;
-	/** "Unlimited", "2 left", "At the limit" or "1 over the limit". */
-	status: string;
-	/** 0–1 for the bar; null when unlimited (no bar). */
+	/** "Unlimited", "2 left", "At the limit" or "1 over the limit"; null at a zero limit, where the figures say it all. */
+	status: string | null;
+	/** 0–1 for the bar; null when unlimited or not included (no bar). */
 	fraction: number | null;
+	/** Past the limit, or any use of something the plan doesn't include. */
 	over: boolean;
 	/** A line under the row, when it needs one. */
 	note: string | null;
 }
 
-/** US dollars from millionths ("$1.00"), for the assistant's cost cap. */
+/** US dollars from millionths ("$1.00"), for the assistant's cost. */
 export function fmtUsdMicros(micros: number): string {
 	return `$${fmtNum(micros / 1_000_000, 2)}`;
 }
 
-function row(key: UsageRow['key'], label: string, c: UsageCount, note: string | null = null): UsageRow {
-	const { used, limit } = c;
-	if (limit === null) return { key, label, used, limit, figures: `${fmtNum(used)} used`, status: 'Unlimited', fraction: null, over: false, note };
-	const left = limit - used;
-	const status = left > 0 ? `${fmtNum(left)} left` : left === 0 ? 'At the limit' : `${fmtNum(-left)} over the limit`;
-	const fraction = limit <= 0 ? (used > 0 ? 1 : 0) : Math.min(1, used / limit);
-	return { key, label, used, limit, figures: `${fmtNum(used)} of ${fmtNum(limit)}`, status, fraction, over: left < 0, note };
+interface RowWords {
+	/** The figure as words: a count, or dollars. */
+	fmt: (n: number) => string;
+	/** The verb a zero-limit row uses for its use: "2 issued; not included in Free". */
+	verb: string;
+	/** The plan's name, for a zero limit. */
+	planName: string;
+	note?: string | null;
 }
+
+function row(key: UsageRow['key'], label: string, used: number, limit: number | null, w: RowWords): UsageRow {
+	const note = w.note ?? null;
+	if (limit === null) return { key, label, used, limit, figures: `${w.fmt(used)} used`, status: 'Unlimited', fraction: null, over: false, note };
+	// A zero limit is a thing the plan doesn't include, not a full allowance: no bar, no "At the limit".
+	if (limit <= 0) {
+		const figures = used > 0 ? `${w.fmt(used)} ${w.verb}; not included in ${w.planName}` : `Not included in ${w.planName}`;
+		return { key, label, used, limit, figures, status: null, fraction: null, over: used > 0, note };
+	}
+	const left = limit - used;
+	const status = left > 0 ? `${w.fmt(left)} left` : left === 0 ? 'At the limit' : `${w.fmt(-left)} over the limit`;
+	return { key, label, used, limit, figures: `${w.fmt(used)} of ${w.fmt(limit)}`, status, fraction: Math.min(1, used / limit), over: left < 0, note };
+}
+
+const count = (n: number) => fmtNum(n);
 
 /**
  * The page's four bars, in the order the plan is read: catchments, reports
- * this month, packs issued this month, assistant tokens this month. The
- * assistant is capped by cost, not tokens, so its row says the plan's
- * monthly allowance in dollars beside the count.
+ * this month, packs issued this month, the assistant's spend this month. The
+ * assistant is capped by cost, so its row is in dollars, counted by the UTC
+ * month (the others by South African time), and says when some turns carry
+ * no price, since its figure is then short.
  */
 export function usageRows(p: AccountPlan): UsageRow[] {
 	const u = p.usage;
 	const month = monthName(u.month);
-	const usd = p.plan.limits.assistant_usd_micros_per_month ?? null;
-	const perSeat = p.plan.limits.assistant_usd_micros_per_seat_month ?? null;
-	const assistantNote =
-		usd !== null
-			? `Capped by cost, not tokens: ${fmtUsdMicros(usd)} of assistant use a month.`
-			: perSeat !== null
-				? `Capped by cost, not tokens: ${fmtUsdMicros(perSeat)} of assistant use per seat a month.`
-				: null;
+	const planName = p.plan.name;
+	const cost = u.assistantCost;
+	const notes = ['Counted by the UTC month, which starts at 02:00 South African time on the 1st.'];
+	if (cost.unpricedTurns > 0) notes.unshift(`Some turns unpriced (${fmtNum(cost.unpricedTurns)}), so the true cost is higher.`);
 	return [
-		row('catchments', 'Catchments', u.catchments, 'Active catchments: archived ones don’t count.'),
-		row('reports', `Reports in ${month}`, u.reports),
-		row('packsIssued', `Evidence packs issued in ${month}`, u.packsIssued),
-		row('assistantTokens', `Assistant tokens in ${month}`, u.assistantTokens, assistantNote)
+		row('catchments', 'Catchments', u.catchments.used, u.catchments.limit, {
+			fmt: count,
+			verb: 'counted',
+			planName,
+			note: 'Every catchment billed to this account counts, whoever made it.'
+		}),
+		row('reports', `Reports in ${month}`, u.reports.used, u.reports.limit, { fmt: count, verb: 'made', planName }),
+		row('packsIssued', `Evidence packs issued in ${month}`, u.packsIssued.used, u.packsIssued.limit, { fmt: count, verb: 'issued', planName }),
+		row('assistantCost', `Assistant use in ${month}`, cost.usedUsdMicros, cost.limitUsdMicros, {
+			fmt: fmtUsdMicros,
+			verb: 'used',
+			planName,
+			note: notes.join(' ')
+		})
 	];
 }

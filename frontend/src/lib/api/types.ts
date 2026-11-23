@@ -4687,11 +4687,6 @@ export interface Plan {
 	features: Record<string, unknown>;
 }
 
-/** GET /billing/plans: every plan on offer (public). */
-export interface PlanOffer extends Plan {
-	trialDays: number;
-}
-
 export type SubscriptionStatus = 'trialing' | 'active' | 'past_due' | 'canceled' | 'expired';
 
 export interface Subscription {
@@ -4709,6 +4704,19 @@ export interface UsageCount {
 	limit: number | null;
 }
 
+/**
+ * The assistant's spend this month, in millionths of a US dollar, summed by the
+ * UTC month (the other counts use Africa/Johannesburg's). `limitUsdMicros` is
+ * the plan's monthly allowance (Team: per seat × seats); `unpricedTurns` counts
+ * turns recorded before their cost was, or on a model with no price, so the
+ * true figure is higher when it isn't 0.
+ */
+export interface AssistantCost {
+	usedUsdMicros: number;
+	limitUsdMicros: number | null;
+	unpricedTurns: number;
+}
+
 /** GET /account/plan and GET /teams/:id/plan (team admins; 404 otherwise). */
 export interface AccountPlan {
 	account: { id: string; kind: 'user' | 'team' };
@@ -4721,7 +4729,9 @@ export interface AccountPlan {
 		catchments: UsageCount;
 		reports: UsageCount;
 		packsIssued: UsageCount;
+		/** Weighted tokens, kept for reference; the page shows the cost. */
 		assistantTokens: UsageCount;
+		assistantCost: AssistantCost;
 	};
 	/** BILLING_ENFORCED: false in Phase 1, when limits are counted but nothing is refused. */
 	enforced: boolean;

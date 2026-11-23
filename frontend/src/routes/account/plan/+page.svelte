@@ -1,7 +1,9 @@
 <script lang="ts">
 	// Your account's plan and this month's usage (issue #641 Phase 1, docs/ui.md
 	// § Plan and usage; the body is lib/components/billing/PlanUsage.svelte).
-	// English: the workspace's page, linked from the account page. Plan data
+	// English: the workspace's page, linked from the account page, and outside
+	// the translated paths (lib/auth/session.svelte.ts TRANSLATED_PATHS leaves
+	// /account/plan out, so its lang is English). Plan data
 	// never reaches a farmer page, so a farmer-only user (whose account pages
 	// sit in the farm frame) is sent back to the account page before anything
 	// is read.
@@ -10,6 +12,7 @@
 	import { resolve } from '$app/paths';
 	import { api, type AccountPlan } from '#lib/api/index.js';
 	import { farmFrameReader } from '#lib/auth/frame.js';
+	import { errorText } from '#lib/i18n/apiError.js';
 	import LoadState from '#lib/components/common/LoadState.svelte';
 	import PlanUsage from '#lib/components/billing/PlanUsage.svelte';
 	import SectionHeader from '#lib/components/workspace/SectionHeader.svelte';
@@ -26,7 +29,7 @@
 		try {
 			plan = await api.billing.mine();
 		} catch (e) {
-			loadError = e instanceof Error ? e.message : String(e);
+			loadError = `Couldn’t look up your plan: ${errorText(e)}`;
 		} finally {
 			loading = false;
 		}

@@ -171,4 +171,13 @@ describe('isTranslatedPath', () => {
 			expect(isTranslatedPath(p), p).toBe(false);
 		}
 	});
+
+	it('leaves the English Plan and usage page out of the translated account pages (issue #641)', () => {
+		expect(isTranslatedPath('/account')).toBe(true);
+		expect(isTranslatedPath('/account/alerts')).toBe(true);
+		expect(isTranslatedPath('/account/invitations')).toBe(true);
+		expect(isTranslatedPath('/account/plan')).toBe(false);
+		expect(isTranslatedPath('/app/account/plan', '/app')).toBe(false);
+		expect(isTranslatedPath('/account/planned')).toBe(true);
+	});
 });

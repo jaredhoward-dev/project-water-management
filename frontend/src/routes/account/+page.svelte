@@ -5,7 +5,7 @@
 	// while signed in, two-step sign-in (issue #282, TwoStepSignIn), a link to the alert emails page (WP-2.13), with a
 	// banner when SES stopped delivering to the address (alert emails paused
 	// until the person turns them back on), "download my data" (POPIA,
-	// GET /auth/me/export), a link to Plan and usage outside the farm frame (issue #641), and "delete my account" (issue #112, DELETE
+	// GET /auth/me/export), a link to Plan and usage in the Your data panel, outside the farm frame (issue #641), and "delete my account" (issue #112, DELETE
 	// /auth/me, components/account/DeleteAccount.svelte). The header's account menu links here. docs/ui.md § App
 	// header and account menu, § Language. Its words come from $lib/i18n.
 	import { onMount, tick } from 'svelte';
@@ -367,8 +367,6 @@
 					<p class="link-row"><a class="btn" href={resolve('account/alerts')}>{t('Choose your alert emails')}</a></p>
 					<!-- Invitations to accept or decline (issue #136): an account joins nothing it hasn't accepted. -->
 					<p class="link-row"><a class="btn" href={resolve('account/invitations')}>{t('Your invitations')}</a></p>
-					<!-- Your plan and usage (issue #641): a workspace page, never linked in the farm frame. -->
-					{#if !inFarmFrame()}<p class="link-row"><a class="btn" href={resolve('account/plan')}>{t('Plan and usage')}</a></p>{/if}
 				</section>
 
 				<section class="panel" aria-labelledby="data-h">
@@ -384,6 +382,8 @@
 						</button>
 						<p class="status" role="status" aria-live="polite">{exported ? t('Your data has been downloaded.') : ''}</p>
 					</div>
+					<!-- Your plan and usage (issue #641): a workspace page, never linked in the farm frame. -->
+					{#if !inFarmFrame()}<p class="link-row"><a class="btn" href={resolve('account/plan')}>{t('Plan and usage')}</a></p>{/if}
 				</section>
 
 			</div>

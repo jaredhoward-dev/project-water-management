@@ -28,7 +28,6 @@ import type {
 import type {
 	MapAreaBasis,
 	AccountPlan,
-	PlanOffer,
 	EmailCodeSent,
 	MfaChallenge,
 	MfaMethod,
@@ -757,8 +756,6 @@ export function createApi(baseUrl: string, fetchFn: FetchFn = (...a) => fetch(..
 		},
 		/** Plans and usage (issue #641, Phase 1: counted, never charged or refused). */
 		billing: {
-			/** Every plan on offer (public). */
-			plans: () => request<{ plans: PlanOffer[] }>('GET', '/billing/plans').then((r) => r.plans),
 			/** Your own account's plan and this month's usage. */
 			mine: () => request<AccountPlan>('GET', '/account/plan')
 		},

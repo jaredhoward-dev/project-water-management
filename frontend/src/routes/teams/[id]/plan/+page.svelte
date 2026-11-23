@@ -8,6 +8,7 @@
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { api, ApiError, type AccountPlan } from '#lib/api/index.js';
+	import { errorText } from '#lib/i18n/apiError.js';
 	import LoadState from '#lib/components/common/LoadState.svelte';
 	import PlanUsage from '#lib/components/billing/PlanUsage.svelte';
 
@@ -36,7 +37,7 @@
 			if (id === teamId) plan = p;
 		} catch (e) {
 			if (e instanceof ApiError && e.status === 404) notFound = true;
-			else loadError = e instanceof Error ? e.message : String(e);
+			else loadError = `Couldn’t look up this team’s plan: ${errorText(e)}`;
 		} finally {
 			loading = false;
 		}
@@ -79,7 +80,7 @@
 		padding-bottom: 1.5rem;
 	}
 	.crumbs {
-		font-size: 13px;
+		font-size: var(--font-sm);
 		margin-bottom: 0.35rem;
 	}
 	.page-head {
