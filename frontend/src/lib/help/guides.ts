@@ -1184,7 +1184,7 @@ export const GUIDES: Guide[] = [
 					},
 					{
 						type: 'p',
-						text: 'A team’s plan covers every catchment in it. Its admins see the plan and this month’s usage (catchments, reports, evidence packs issued and the assistant’s spend) from **Plan and usage** on the team’s page; your own catchments’ plan is under **Plan and usage** on your Account page. Where billing is set up, the page has **Upgrade** (to Pro for you, to Team for a team, monthly or yearly, each with its price) or, once there is a subscription, **Manage billing** to change or cancel it. Limits aren’t enforced yet: usage is counted, and nothing is refused.'
+						text: 'A team’s plan covers every catchment in it. Its admins see the plan and this month’s usage (catchments, reports, evidence packs issued and the assistant’s spend) from **Plan and usage** on the team’s page; your own catchments’ plan is under **Plan and usage** on your Account page. Where billing is set up, the page has **Upgrade** (to Pro for you, to Team for a team, monthly or yearly, each with its price; on a team you first choose the editor seats, 3 included, and the buttons show the price for them) or, once there is a subscription, **Manage billing** to change or cancel it. Limits aren’t enforced yet: usage is counted, and nothing is refused.'
 					}
 				]
 			}

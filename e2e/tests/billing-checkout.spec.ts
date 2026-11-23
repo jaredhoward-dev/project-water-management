@@ -9,7 +9,8 @@
 // refused request says the API's words inline and keeps the focus, and a
 // payment the provider hasn't confirmed yet is waited for. A team buys Team
 // with 5 editor seats: the seat field prices the buttons, and the
-// subscription comes back with 5 seats.
+// subscription comes back with 5 seats, which the plan card then says. The
+// seat field keeps what is typed (blank, 1e1, 4,5 stay, with the message).
 import { API_URL } from '../support/env.ts';
 import { expectNoViolations } from '../support/a11y.ts';
 import { expect, test } from '../support/fixtures.ts';
@@ -82,17 +83,47 @@ test('a team buys Team with 5 editor seats: the field prices the buttons, the mo
 	await expect(seats).toHaveValue('3');
 	await expect(seats).toHaveAccessibleDescription(/3 editor seats included; each extra one is R.499\.00 a month or R.4.990\.00 a year\. Up to 50\./);
 
-	// Under the included seats: said under the field, and the buttons do nothing.
+	// Under the included seats: said under the field, the buttons show no price, and they do nothing.
+	const seatsError = plan.locator('#checkout-seats-err');
 	await seats.fill('2');
 	await expect(seats).toHaveAttribute('aria-invalid', 'true');
-	await expect(plan.locator('[data-seats-error]')).toHaveText('Choose a whole number of seats from 3 to 50.');
+	await expect(seatsError).toHaveText('Choose a whole number of seats from 3 to 50.');
+	await expect(seats).toHaveAccessibleDescription(/Choose a whole number of seats from 3 to 50\./);
+	await expect(plan.locator('[data-action="upgrade-month"]')).toHaveAccessibleName('Upgrade to Team, monthly');
+	await expect(plan.locator('[data-action="upgrade-year"]')).toHaveAccessibleName('Upgrade to Team, yearly');
+	await expectNoViolations(page);
 	await expect(plan.locator('[data-action="upgrade-month"]')).toHaveAttribute('aria-disabled', 'true');
 	await plan.locator('[data-action="upgrade-month"]').click();
 	await expect(page).toHaveURL(new RegExp(`/teams/${team.id}/plan$`));
 
-	// 5 seats: R 2 499 + 2 × R 499 = R 3 497 a month.
-	await seats.fill('5');
+	// Cleared, the field stays empty with its message (no default put back); an exponent or a decimal comma is refused, not read.
+	await seats.fill('');
+	await expect(seats).toHaveValue('');
+	await expect(seatsError).toBeVisible();
+	for (const bad of ['1e1', '4,5', '4.5']) {
+		await seats.fill(bad);
+		await expect(seats, bad).toHaveValue(bad);
+		await expect(seats, bad).toHaveAttribute('aria-invalid', 'true');
+	}
+
+	// Backspace over the 3 and type 5: exactly 5, not 35.
+	await seats.fill('3');
 	await expect(seats).not.toHaveAttribute('aria-invalid', 'true');
+	await seats.press('End');
+	await seats.press('Backspace');
+	await expect(seats).toHaveValue('');
+	await seats.pressSequentially('5');
+	await expect(seats).toHaveValue('5');
+
+	// The arrow keys step it by one.
+	await seats.press('ArrowUp');
+	await expect(seats).toHaveValue('6');
+	await seats.press('ArrowDown');
+	await expect(seats).toHaveValue('5');
+
+	// 5 seats: R 2 499 + 2 × R 499 = R 3 497 a month.
+	await expect(seats).not.toHaveAttribute('aria-invalid', 'true');
+	await expect(seatsError).toHaveCount(0);
 	await expect(plan.getByRole('button', { name: /^Upgrade to Team, yearly \(R.34.970\.00 a year for 5 editor seats\)$/ })).toBeVisible();
 	await expectNoViolations(page);
 	await plan.getByRole('button', { name: /^Upgrade to Team, monthly \(R.3.497\.00 a month for 5 editor seats\)$/ }).click();
@@ -102,6 +133,7 @@ test('a team buys Team with 5 editor seats: the field prices the buttons, the mo
 	await page.getByRole('button', { name: 'Pays' }).click();
 	await expect(page).toHaveURL(new RegExp(`/teams/${team.id}/plan$`));
 	await expect(plan.locator('[data-plan-name]')).toHaveText('Team');
+	await expect(plan.locator('[data-subscription-seats]')).toHaveText('5 editor seats (3 included, 2 extra)');
 	const after = await page.context().request.get(`${API_URL}/teams/${team.id}/plan`);
 	expect(((await after.json()) as { subscription: { seats: number } }).subscription.seats).toBe(5);
 });

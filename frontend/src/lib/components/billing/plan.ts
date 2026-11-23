@@ -54,6 +54,21 @@ export function subscriptionLine(s: Subscription | null): { text: string; warn: 
 	}
 }
 
+/**
+ * A team's subscription in editor seats: "5 editor seats (3 included, 2
+ * extra)", or "3 editor seats (all included)"; null with no subscription or on
+ * a personal account. No total is shown: the subscription doesn't record
+ * whether it is billed monthly or yearly (docs/ui.md § Plan and usage).
+ */
+export function subscriptionSeatsLine(p: Pick<AccountPlan, 'account' | 'plan' | 'subscription'>): string | null {
+	const s = p.subscription;
+	if (!s || p.account.kind !== 'team') return null;
+	const included = p.plan.limits?.seats_included ?? 1;
+	const extra = s.seats - included;
+	const seats = `${fmtNum(s.seats)} editor seat${s.seats === 1 ? '' : 's'}`;
+	return extra > 0 ? `${seats} (${fmtNum(included)} included, ${fmtNum(extra)} extra)` : `${seats} (all included)`;
+}
+
 /** One usage bar: its label, the figures as words, and how full it is (null when there is no bar). */
 export interface UsageRow {
 	key: 'catchments' | 'reports' | 'packsIssued' | 'assistantCost';
@@ -172,14 +187,6 @@ export function seatOffer(offer: Offer | null): SeatOffer | null {
 	return { included, max: Math.max(included, MAX_CHECKOUT_SEATS), extraMonthlyMinor: month, extraAnnualMinor: year };
 }
 
-/** The seat field's text as a seat count the API takes (a whole number from the included seats to the maximum), or null. */
-export function parseSeats(text: string, seats: SeatOffer): number | null {
-	const t = text.trim();
-	if (!/^[0-9]{1,4}$/.test(t)) return null;
-	const n = Number(t);
-	return n >= seats.included && n <= seats.max ? n : null;
-}
-
 /** What `seats` editor seats cost at `interval`: the plan's price plus each seat past the included ones. */
 export function checkoutTotalMinor(offer: Offer, interval: BillingInterval, seats: number | null = null): number {
 	const base = interval === 'month' ? offer.priceMonthlyMinor : offer.priceAnnualMinor;
@@ -199,15 +206,19 @@ export function seatHint(seats: SeatOffer, currency: string): string {
  * (`GET /billing/plans`): "Upgrade to Pro, monthly (R 899.00 a month)". With a
  * seat count (Team), the price is for those seats and says so: "Upgrade to
  * Team, monthly (R 3 497.00 a month for 5 editor seats)". Without the offer
- * (still loading, or the call failed) the button reads without it.
+ * (still loading, or the call failed) the button reads without it, and so it
+ * does on an offer that sells seats while no valid count is chosen (`seats`
+ * null): a price for some other count would read as a different offer.
  */
 export function upgradeLabel(name: string, interval: BillingInterval, offer: Offer | null, seats: number | null = null): string {
 	const base = `Upgrade to ${name}, ${interval === 'month' ? 'monthly' : 'yearly'}`;
 	if (!offer) return base;
+	const sellsSeats = !!seatOffer(offer);
+	if (sellsSeats && seats === null) return base;
 	const minor = checkoutTotalMinor(offer, interval, seats);
 	if (!(minor > 0)) return base;
 	const per = interval === 'month' ? 'a month' : 'a year';
-	const forSeats = seats !== null && seatOffer(offer) ? ` for ${fmtNum(seats)} editor seat${seats === 1 ? '' : 's'}` : '';
+	const forSeats = seats !== null && sellsSeats ? ` for ${fmtNum(seats)} editor seat${seats === 1 ? '' : 's'}` : '';
 	return `${base} (${fmtPrice(minor, offer.currency)} ${per}${forSeats})`;
 }
 

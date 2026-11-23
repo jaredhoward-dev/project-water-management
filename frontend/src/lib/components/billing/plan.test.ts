@@ -9,12 +9,12 @@ import {
 	fmtPrice,
 	fmtUsdMicros,
 	monthName,
-	parseSeats,
 	priceLine,
 	seatHint,
 	seatOffer,
 	shadowNote,
 	subscriptionLine,
+	subscriptionSeatsLine,
 	upgradeLabel,
 	usageRows
 } from './plan';
@@ -109,6 +109,23 @@ describe('subscriptionLine', () => {
 		expect(subscriptionLine(sub({ status: 'past_due' }))).toEqual({ text: 'Payment overdue', warn: true });
 		expect(subscriptionLine(sub({ status: 'canceled' }))?.warn).toBe(true);
 		expect(subscriptionLine(sub({ status: 'expired', periodEnd: null }))).toEqual({ text: 'Expired', warn: true });
+	});
+});
+
+describe('subscriptionSeatsLine', () => {
+	const team = (seats: number | null) =>
+		plan({
+			account: { id: 't1', kind: 'team' },
+			plan: { ...plan().plan, code: 'team', name: 'Team', limits: { seats_included: 3 } },
+			subscription: seats === null ? null : sub({ seats })
+		});
+	it('says a team’s seats, the included and the extra ones', () => {
+		expect(subscriptionSeatsLine(team(5))).toBe('5 editor seats (3 included, 2 extra)');
+		expect(subscriptionSeatsLine(team(3))).toBe('3 editor seats (all included)');
+	});
+	it('is nothing with no subscription, or on a personal account', () => {
+		expect(subscriptionSeatsLine(team(null))).toBeNull();
+		expect(subscriptionSeatsLine(plan({ subscription: sub({ seats: 1 }) }))).toBeNull();
 	});
 });
 
@@ -246,18 +263,13 @@ describe('Team seats at checkout', () => {
 		expect(checkoutTotalMinor(pro, 'month', 5)).toBe(89_900);
 	});
 
-	it('parseSeats: a whole number from the included seats to the maximum, else null', () => {
-		const so = seatOffer(team)!;
-		expect(parseSeats('5', so)).toBe(5);
-		expect(parseSeats(' 3 ', so)).toBe(3);
-		expect(parseSeats(String(MAX_CHECKOUT_SEATS), so)).toBe(MAX_CHECKOUT_SEATS);
-		for (const bad of ['2', '0', '', '4.5', '-4', 'five', String(MAX_CHECKOUT_SEATS + 1), '1e1']) expect(parseSeats(bad, so), bad).toBeNull();
-	});
-
 	it('upgradeLabel prices the seats chosen, and says how many', () => {
 		expect(upgradeLabel('Team', 'month', team, 5)).toBe(`Upgrade to Team, monthly (R${NB}3${TS}497.00 a month for 5 editor seats)`);
 		expect(upgradeLabel('Team', 'year', team, 3)).toBe(`Upgrade to Team, yearly (R${NB}24${TS}990.00 a year for 3 editor seats)`);
 		expect(upgradeLabel('Pro', 'month', pro, null)).toBe(`Upgrade to Pro, monthly (R${NB}899.00 a month)`);
+		// No valid count chosen (the field is blank or wrong): no price, rather than one for some other count.
+		expect(upgradeLabel('Team', 'month', team, null)).toBe('Upgrade to Team, monthly');
+		expect(upgradeLabel('Team', 'year', team)).toBe('Upgrade to Team, yearly');
 	});
 
 	it('seatHint names the included seats, each extra one’s prices and the maximum', () => {
