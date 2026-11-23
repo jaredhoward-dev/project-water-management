@@ -876,6 +876,25 @@ plan stays on the issue. Found while building:
       under 90 %.
       **Done (follow-ups, V):** other-zone views fill the base's gaps by nearest neighbour through `raster/utm.ts`'s new inverse (`merge.ts lookupOn`; architecture.md § Dam observations).
 
+## Billing (issue #641)
+
+Phase 1 (shadow mode) is in [billing.md](./billing.md); the later phases
+are #641's checklist. Open items from building it:
+
+- [ ] **Drop the 4-argument `app_assistant_charge`.** Migration 324 keeps
+      it as a wrapper (charged as unpriced) so a backend released before
+      324 keeps charging during the rollout. Durable fix: a forward
+      migration that drops it, after checking nothing calls it
+      (`grep -rn app_assistant_charge backend/src`). Trigger: the
+      `backend@` release carrying 324 is in production and no older
+      backend can be rolled back to.
+- [ ] **Re-check Haiku 5.5's price before it runs.** `assistant/pricing.ts`
+      prices it flat from #641's AWS Price List figures; the Anthropic API
+      prices long prompts higher, and Bedrock's long-prompt rate wasn't
+      checked. Durable fix: read the Bedrock price for the model id the
+      deployment calls and update the table and its test. Trigger:
+      `assistant_free_model_id` (or any setting) pointing at Haiku 5.5.
+
 ## DB tests share the mail outbox (2026-10-02, PR #360)
       **Decided (round 3, N):** a bounded whole-file pass (data-sources.md § ssebop-eta); the build is its own item below.
 - [x] **Guard pending notices as db-setup.ts guards pending jobs.** The
