@@ -2,6 +2,7 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { DAYS } from '#lib/components/farm/format.js';
 import { ORDINAL } from '#lib/components/farm/chart.js';
 import { markedCatalogue } from './fixtureCatalogue';
+import { MESSAGE_IDS } from './messages/ids.generated';
 import { messageId, pluralId } from './msg';
 import { plainText } from './rich';
 import {
@@ -10,6 +11,7 @@ import {
 	i18n,
 	isComplete,
 	joinAnd,
+	loadCatalogue,
 	LOCALES,
 	msg,
 	readStoredLocale,
@@ -120,6 +122,27 @@ describe('wordsLang: the language the words are in', () => {
 		await setLocale('af', marked);
 		expect(wordsLang()).toBe('af');
 	});
+});
+
+describe('isComplete agrees with pnpm check:i18n', () => {
+	// check:i18n (missingSite in scripts/guards/i18n_sheet.mjs) fails an offered
+	// language when any message id has no words: a string, or a counted word
+	// with at least `other`. isComplete counts entries instead (the build keeps
+	// only MESSAGE_COUNT); the two agree because catalogue.test.ts and
+	// check:i18n refuse a stale id. Pinned here on every real catalogue, whole
+	// and with one message taken out.
+	const missing = (c: Catalogue) => MESSAGE_IDS.filter((id) => !(typeof c[id] === 'string' || (typeof c[id] === 'object' && c[id]?.other != null)));
+	for (const code of catalogueLanguages()) {
+		it(`on ${code}`, async () => {
+			const c = await loadCatalogue(code as Parameters<typeof loadCatalogue>[0]);
+			expect(isComplete(c)).toBe(missing(c).length === 0);
+			const [first, ...rest] = Object.keys(c);
+			if (first === undefined) return;
+			const less = Object.fromEntries(rest.map((k) => [k, c[k]!]));
+			expect(isComplete(less), `without ${first}`).toBe(false);
+			expect(missing(less)).toContain(first);
+		});
+	}
 });
 
 describe('tn: plural forms through Intl.PluralRules', () => {
