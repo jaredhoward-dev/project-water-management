@@ -45,7 +45,8 @@ All in `backend/migrations/323_billing.sql`; columns and RLS in
 | --- | --- |
 | `plan` | The plans (`free`, `pro`, `team`): name, monthly and annual price in ZAR cents, `limits` (a closed, CHECK-validated key set; a JSON `null` is unlimited), `features`, trial days, `active`. Written only by migrations |
 | `billing_account` | One per person or team that has needed one, and its lifetime count of projects created |
-| `subscription` | An account's plan, status, seats and period; at most one live per account. Empty in Phase 1 |
+| `subscription` | An account's plan, status, seats and period; at most one live per account. Written by the webhook (326) and the staff grant (330) |
+| `billing_grant_log` | The staff grant's audit log (330): every grant, revocation and expiry ([§ Staff grants](#staff-grants)) |
 | `usage_counter` | Monthly counts per account and kind (`reports`, `packs_issued`); `month` is the first day of the month in Africa/Johannesburg |
 
 The assistant's monthly total is **not** a counter: it is summed from
@@ -582,6 +583,69 @@ invoices, usage records), where the SDK's coverage would outweigh its size.
 - `e2e/tests/billing-checkout.spec.ts`: the plan page's buttons and the mock
   checkout and portal in a browser.
 
+## Staff grants
+
+`backend/migrations/330_staff_grant.sql`, `backend/scripts/billing-grant.ts`
+(issue #641, "Staff overrides"). The operator's tool for manual plans: the
+first client's deal, founding users (Q4's grandfathering), and **v1 B2B
+invoices**. A business that pays by invoice gets a manual Stripe invoice (sent
+from the Stripe dashboard, outside the app), and once it is paid the operator
+grants the plan until the end of the invoiced period. It works with
+`BILLING_PROVIDER` unset.
+
+```bash
+pnpm dev:billing:grant <email|team-id> <plan> [--until YYYY-MM-DD] --reason "…" [--replace] [--by <name>]
+pnpm dev:billing:grant <email|team-id> --revoke --reason "…" [--by <name>]
+pnpm dev:billing:grant <email|team-id> --list
+```
+
+It runs as the schema owner on this checkout's database (like
+`dev:billing:report`); in production the operator calls the same functions as
+the schema owner. An address is used only to find the person's account and
+is printed only as the operator typed it. `--by` defaults to the operator's
+login.
+
+- **What a grant is.** `app_staff_grant_plan(account, plan, until, reason,
+  by, replace)` writes a `provider = 'manual'`, `status = 'active'`
+  subscription (no `external_ref`) and a `grant` row in `billing_grant_log`.
+  `--until` is a South African date: the grant lasts through it and ends at
+  the next SAST midnight, whatever the machine's time zone. Without it the
+  grant lasts until revoked. With an end, `cancel_at_period_end` is true, so
+  the plan page says it ends and the renewal notice never picks a grant up.
+  `free` can't be granted (revoke instead), the end must be in the future and
+  a reason (≤ 500 characters) is required.
+- **Beside a live subscription.** A live **Stripe** subscription is refused,
+  with or without `--replace`: ending it here would leave Stripe billing the
+  customer for a plan we no longer show, and `app_billing_apply` never
+  revives a canceled row. Cancel it in Stripe; the webhook ends it; then
+  grant. A live **mock** or **manual** one is refused unless `--replace`,
+  which cancels it now (a replaced grant gets a `revoke` row, reason
+  `replaced: …`). The same holds the other way: while a grant is live, a
+  Stripe checkout's `subscription.created` is a `conflict` (the one-live
+  index), so revoke the grant before the customer moves to a card.
+- **Expiry.** The worker's tick runs `app_staff_grant_expire()` (worker
+  context only): every live grant whose `period_end` has passed becomes
+  `expired` and gets an `expire` row (`granted_by = 'expiry'`). The account is
+  on Free again, with nothing deleted. "Live" stays 323's status test, so a
+  grant can outlive its end by one tick (5 minutes in production; locally,
+  until a worker runs). A new grant first expires the account's lapsed one,
+  so a late tick never blocks it.
+- **Revoke.** `app_staff_revoke_grant(account, reason, by)` cancels the live
+  grant now (`period_end` now) and logs a `revoke` row; Free again, nothing
+  deleted. It never touches a Stripe or mock subscription.
+- **The log.** `billing_grant_log` is append-only (`water_app` holds SELECT
+  only; only these functions insert). The account's person and its team's
+  admins read their own rows under RLS (`app_billing_account_readable`), and
+  the person's are in "Download my data" (`billing.grants`). That is
+  deliberate: it is the record of their own plan, so **write the reason for
+  the customer to read** (an invoice number, "founding user"), never a private
+  note. `granted_by` (the operator's name) is visible to them too.
+
+Tests: `backend/src/billing/grant.db.test.ts` (grant and the plan page, the
+SAST end under a skewed `TZ`, expiry, a lapsed grant, Stripe refused even
+with `--replace`, mock replaced, revoke, a team's grant and who reads it,
+owner-only) and `backend/scripts/billing-grant.test.ts` (arguments).
+
 ## Later phases
 
 Pointers to [issue #641](https://github.com/jaredhoward-dev/project-water-management/issues/641);
@@ -590,7 +654,7 @@ none of this is built:
 - **Enforcement** ("Enforcement design"): each limit checked in the
   transaction of the action, under an advisory lock per account, answering
   `402 plan_limit` with `{ limit, used, plan }`; soft warnings at 80%;
-  downgrade and lapse without data loss; staff plan grants.
+  downgrade and lapse without data loss. (Staff grants are built: [§ Staff grants](#staff-grants).)
 - **Billing provider** ("Billing provider"): dunning, refunds and invoices.
   The provider seam, the webhook, checkout and the portal are built
   ([§ Webhooks and providers](#webhooks-and-providers),
