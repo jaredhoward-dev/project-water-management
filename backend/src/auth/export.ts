@@ -148,6 +148,8 @@ export const USER_FK_COVERAGE: Record<string, { section: string } | { excluded: 
 	'registration_check.recorded_by': { excluded: 'a check this owner recorded of another member’s registration; it is that member’s, and registration.checked is in auditEvents' },
 	// The person's own billing account (323_billing, issue #641): with its subscriptions and monthly counters. A team's is the team's.
 	'billing_account.user_id': { section: 'billing' },
+	// The annual renewal notices sent to them (329, CPA s14): in billing, beside the subscription each is about.
+	'renewal_notice.user_id': { section: 'billing' },
 	'team.created_by': { excluded: 'the team itself; the membership is in teamMemberships' },
 	'team_member.user_id': { section: 'teamMemberships' },
 	// The person's own display preferences (083): the workspace sections they hid.
@@ -345,7 +347,12 @@ export async function buildSubjectExport(userId: string, now = new Date()) {
 			`SELECT kind, to_char(month, 'YYYY-MM') AS month, qty::float8 AS qty FROM usage_counter WHERE billing_account_id = $1 ORDER BY month DESC, kind`,
 			[billingId]
 		);
-		const billing = billingAccount[0] ? { account: billingAccount[0], subscriptions, usageCounters } : null;
+		const { rows: renewalNotices } = await db.query(
+			`SELECT period_end AS "periodEnd", status, sent_at AS "sentAt", created_at AS "createdAt"
+			 FROM renewal_notice WHERE user_id = $1 ORDER BY period_end DESC`,
+			[userId]
+		);
+		const billing = billingAccount[0] ? { account: billingAccount[0], subscriptions, usageCounters, renewalNotices } : null;
 		// Two-step sign-in (150): own rows only under RLS. The authenticator's state, never its sealed secret or the code hashes.
 		const { rows: twoStepSignIn } = await db.query(
 			`SELECT t.created_at AS "createdAt", t.confirmed_at AS "confirmedAt",

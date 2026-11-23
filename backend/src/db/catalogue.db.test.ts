@@ -288,7 +288,9 @@ const READ_ONLY = new Set([
 	'plan',
 	'billing_account',
 	'subscription',
-	'usage_counter'
+	'usage_counter',
+	// The annual renewal notice's sent-log (329, CPA s14): written only by the worker's definer functions; own rows read.
+	'renewal_notice'
 ]);
 /**
  * Tables with a node column that farmers never read (020_farm_scope.sql).
@@ -349,6 +351,8 @@ const APP_USER_ON_DELETE: Record<string, 'cascade' | 'set null' | 'restrict'> = 
 	// A person's billing account goes with them, its subscriptions and counters with it; the projects it billed stay,
 	// their project.billing_account_id cleared (323_billing).
 	'billing_account.user_id': 'cascade',
+	// A person's renewal notices go with them (329); they go with the subscription anyway.
+	'renewal_notice.user_id': 'cascade',
 	// Who acts for the authority (229): the delegation goes with the account; who proposed or confirmed it is cleared.
 	'authority_delegate.confirmed_by': 'set null',
 	'authority_delegate.proposed_by': 'set null',

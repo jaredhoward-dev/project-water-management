@@ -95,6 +95,9 @@ const builders: Record<string, () => Mail[]> = {
 				templates.packSentMail(TO, { projectId: 'p1', packId: 'k1', projectName: EVIL, title: EVIL, version: 2, shortCode: 'ab12-cd34-ef56', sentBy: EVIL, authority, note })
 			)
 		),
+	// The plan's name is the only text in it that isn't ours (plan.name, written by migrations), escaped all the same.
+	renewalNoticeMail: () =>
+		templates.LOCALES.map((l) => templates.renewalNoticeMail(TO, { plan: EVIL, periodEnd: new Date('2027-03-01T10:00:00Z'), amountMinor: 899000, currency: 'ZAR' }, l)),
 	accountDeletedMail: () =>
 		templates.LOCALES.map((l) => templates.accountDeletedMail(TO, { projects: [EVIL, EVIL], teams: [EVIL] }, l)),
 	erratumNoticeMail: () =>
@@ -153,7 +156,8 @@ describe('every email template, against hostile names', () => {
 			erratumNoticeMail: 'erratum_notice',
 			licenceRecordMail: 'licence_record',
 			mfaResetMail: 'mfa_reset',
-			mfaCodeMail: 'mfa_code'
+			mfaCodeMail: 'mfa_code',
+			renewalNoticeMail: 'renewal_notice'
 		};
 		expect(Object.keys(expected).sort()).toEqual(Object.keys(builders).sort());
 		for (const [name, build] of Object.entries(builders)) for (const m of build()) expect(m.kind, name).toBe(expected[name]);

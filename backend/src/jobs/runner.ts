@@ -8,7 +8,8 @@
 // soon enough to wait for) or the time budget is spent, then
 // send the alert mails those jobs queued (alerts/send.ts) and the evidence
 // pack notices (evidence/notices.ts), and complete or remind the resets of a
-// lost second factor (auth/mfaReset.ts). Every transport ends
+// lost second factor (auth/mfaReset.ts), and send the annual renewal notices
+// (billing/renewal.ts). Every transport ends
 // here: the local worker loop (worker.ts), `pnpm dev:jobs:tick`, the memory
 // transport (tests), and the production worker Lambda (lambda-worker.ts).
 import { sendAlerts, type SendResult } from '../alerts/send.js';
@@ -28,6 +29,7 @@ import { claimJobs, finishJob, type JobStatus, nextJobDueSeconds, purgeJobs, que
 import type { ClaimedJob, HandlerRegistry, JobHandler } from './registry.js';
 import { logEvent } from '../logging/logEvent.js';
 import { type MfaResetTickResult, runMfaResets } from '../auth/mfaReset.js';
+import { type RenewalNoticeResult, runRenewalNotices } from '../billing/renewal.js';
 import { type MirrorTickResult, runMirrorTick } from './handlers/mirror-tick.js';
 import { type DwsTickResult, runDwsTick } from '../feeds/gaugeRecordLoad.js';
 import { type DamsTickResult, runDamsTick } from '../dams/observed/tick.js';
@@ -276,6 +278,8 @@ export interface TickResult {
 	licenceRecords: LicenceRecordResult;
 	/** Resets of a lost second factor (205_mfa_recovery, auth/mfaReset.ts): completed, reminded, purged. */
 	mfaResets: MfaResetTickResult;
+	/** Annual renewal notices queued and sent (329_renewal_notice, billing/renewal.ts; CPA s14). */
+	renewalNotices: RenewalNoticeResult;
 }
 
 /** Positive integer from the environment, or the fallback. */
@@ -325,7 +329,8 @@ export async function runTick(o: TickOptions = {}): Promise<TickResult> {
 		packNotices: { purged: 0, sent: 0, skipped: 0, failed: 0 },
 		erratumNotices: { purged: 0, queued: 0, sent: 0, skipped: 0, failed: 0 },
 		licenceRecords: { due: 0, sent: 0, skipped: 0, failed: 0 },
-		mfaResets: { completed: 0, reminded: 0, purged: 0, failed: 0 }
+		mfaResets: { completed: 0, reminded: 0, purged: 0, failed: 0 },
+		renewalNotices: { queued: 0, sent: 0, skipped: 0, failed: 0 }
 	};
 	result.purged = await withoutUser((db) => purgeJobs(db));
 	result.invitesPurged = await withoutUser((db) => purgeInvites(db));
@@ -397,6 +402,8 @@ export async function runTick(o: TickOptions = {}): Promise<TickResult> {
 	result.licenceRecords = await sendLicenceRecordNotices();
 	// A reset of a lost second factor whose 3-day wait is over is completed here, and a waiting one's daily reminder sent.
 	result.mfaResets = await runMfaResets();
+	// A person's yearly plan 60 business days from its end (CPA s14): queued once per period, sent as its recipient.
+	result.renewalNotices = await runRenewalNotices();
 	result.stats = await withoutUser(queueStats);
 	return result;
 }

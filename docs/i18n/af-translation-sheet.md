@@ -18,4 +18,21 @@ How to write the Afrikaans:
 - The farm pages use plain words, not a modeller’s; `docs/design/farmer-view.md` §5.1 lists the words to use and the ones to avoid.
 - Numbers, dates and units are formatted by the app; don’t translate them.
 
-0 strings: 0 on the site, 0 in emails, 0 in the glossary.
+8 strings: 0 on the site, 8 in emails, 0 in the glossary.
+
+## Emails
+
+### mail.renewal
+
+Email: sent once a year to a person who pays for a yearly plan in their own name, about two to three months before the year ends, as South Africa’s Consumer Protection Act asks. {plan} is the plan’s name (“Pro”); {date} is a date like “3 Mar 2027”; {amount} is a price in rand like “R 8 990,00”.
+
+| Id | English | Context | Afrikaans |
+| --- | --- | --- | --- |
+| `mail.renewal.subject` | Your yearly {plan} plan renews on {date} — {product} | Keep: {date}, {plan}, {product} |  |
+| `mail.renewal.heading` | Your yearly plan renews soon |  |  |
+| `mail.renewal.body` | Your {product} {plan} plan for {email} is a yearly plan. This year of it ends on {date}. | Keep: {date}, {email}, {plan}, {product} |  |
+| `mail.renewal.renews` | Unless you cancel, it renews on {date}, and {amount} is charged for the next year. | Keep: {amount}, {date} |  |
+| `mail.renewal.cancel` | To cancel, or to change to a monthly plan, open your plan page and go to billing from there. If you cancel before {date}, nothing more is charged, and you keep the plan until then. | Keep: {date} |  |
+| `mail.renewal.right` | Under the Consumer Protection Act you can also end a yearly plan at any time, on 20 business days’ notice. |  |  |
+| `mail.renewal.action` | Open your plan |  |  |
+| `mail.renewal.why` | We send this once a year, between 40 and 80 business days before a yearly plan ends, as the Consumer Protection Act asks. |  |  |

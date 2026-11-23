@@ -180,9 +180,14 @@ describe('GET /auth/me/export', () => {
 		const teamId = (await owner.call('POST', '/teams', { name: 'Export WUA' })).body.team.id as string;
 		await asOwner(`INSERT INTO billing_account (kind, team_id) VALUES ('team', $1) ON CONFLICT (team_id) DO NOTHING`, [teamId]);
 		const [teamAcct] = await asOwner('SELECT id FROM billing_account WHERE team_id = $1', [teamId]);
-		await asOwner(
-			`INSERT INTO subscription (billing_account_id, plan_code, status, provider, external_ref, seats) VALUES ($1, 'pro', 'canceled', 'manual', 'export-test-ref', 1)`,
+		const [sub] = await asOwner(
+			`INSERT INTO subscription (billing_account_id, plan_code, status, provider, external_ref, seats) VALUES ($1, 'pro', 'canceled', 'manual', 'export-test-ref', 1) RETURNING id`,
 			[acct.id]
+		);
+		// A renewal notice sent to them (329): as the schema owner, the pipeline isn't under test.
+		await asOwner(
+			`INSERT INTO renewal_notice (subscription_id, period_end, user_id, status, sent_at, settled_at) VALUES ($1, '2027-03-01T10:00:00Z', $2, 'sent', now(), now())`,
+			[sub.id, owner.id]
 		);
 		await asOwner(`INSERT INTO usage_counter (billing_account_id, kind, month, qty) VALUES ($1, 'reports', '2026-10-01', 4)`, [acct.id]);
 		await asOwner(`INSERT INTO usage_counter (billing_account_id, kind, month, qty) VALUES ($1, 'reports', '2026-10-01', 9)`, [teamAcct.id]);
@@ -191,7 +196,8 @@ describe('GET /auth/me/export', () => {
 			expect(doc.billing).toEqual({
 				account: { id: acct.id, kind: 'user', projectsCreated: expect.any(Number), createdAt: expect.any(String) },
 				subscriptions: [expect.objectContaining({ planCode: 'pro', status: 'canceled', provider: 'manual', externalRef: 'export-test-ref', seats: 1 })],
-				usageCounters: expect.arrayContaining([{ kind: 'reports', month: '2026-10', qty: 4 }])
+				usageCounters: expect.arrayContaining([{ kind: 'reports', month: '2026-10', qty: 4 }]),
+				renewalNotices: [{ periodEnd: '2027-03-01T10:00:00.000Z', status: 'sent', sentAt: expect.any(String), createdAt: expect.any(String) }]
 			});
 			expect(doc.billing.usageCounters).not.toContainEqual(expect.objectContaining({ qty: 9 }));
 			expect(text).not.toContain(teamAcct.id);

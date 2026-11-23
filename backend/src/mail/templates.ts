@@ -668,3 +668,45 @@ export function mfaCodeMail(to: string, code: string, reason: MfaCodeReason, loc
 		tr
 	);
 }
+
+export type RenewalNoticeFacts = {
+	/** The plan's name (plan.name: "Pro"). */
+	plan: string;
+	/** When this year of the plan ends (subscription.period_end). */
+	periodEnd: Date;
+	/** The next year's price in minor units (plan.price_annual_minor) and its currency. */
+	amountMinor: number;
+	currency: string;
+};
+
+/** A price in the recipient's language: "R 8 990,00" (en-ZA's grouping and decimal comma). */
+export function moneyText(minor: number, currency: string, locale?: string | null): string {
+	return new Intl.NumberFormat(language(mailLocale(locale)).intl, { style: 'currency', currency }).format(minor / 100);
+}
+
+/**
+ * The annual renewal notice (329_renewal_notice, billing/renewal.ts;
+ * docs/billing.md § Renewal notice): CPA s14(2)(c) asks a supplier to tell an
+ * individual on a fixed-term agreement, 40 to 80 business days before it ends,
+ * that it is ending and what they can do. It names the plan, the date it ends
+ * and renews, what the next year costs, how to cancel (the plan page, which
+ * opens the billing portal), and the Act's right to end it on 20 business
+ * days' notice. The date is South Africa's (the app's zone).
+ */
+export function renewalNoticeMail(to: string, f: RenewalNoticeFacts, locale?: string | null): Mail {
+	const tr = mailT(locale);
+	const date = resetWhen(f.periodEnd, locale).date;
+	const v = { email: to, product: PRODUCT, plan: f.plan, date, amount: moneyText(f.amountMinor, f.currency, locale) };
+	return render(
+		'renewal_notice',
+		to,
+		tr.t('mail.renewal.subject', v),
+		{
+			heading: tr.t('mail.renewal.heading'),
+			paragraphs: [tr.t('mail.renewal.body', v), tr.t('mail.renewal.renews', v), tr.t('mail.renewal.cancel', v), tr.t('mail.renewal.right')],
+			action: { label: tr.t('mail.renewal.action'), url: sitePage('/account/plan') },
+			footer: [tr.t('mail.renewal.why')]
+		},
+		tr
+	);
+}
