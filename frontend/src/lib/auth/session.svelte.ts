@@ -79,8 +79,17 @@ export function isLandingRoot(pathname: string, base: string, signedIn: boolean)
  */
 export const TRANSLATED_PATHS = ['/login', '/register', '/forgot-password', '/reset-password', '/verify-email', '/mfa-reset', '/farm', '/account', '/alerts', '/share', LANDING_PATH];
 
+/**
+ * Workspace pages under a translated path that stay English: Plan and usage
+ * (/account/plan, issue #641) is the workspace's, never a farmer's (a
+ * farmer-only user is sent back to /account), so its words don't go through
+ * t() and its lang is English.
+ */
+export const ENGLISH_PATHS = ['/account/plan'];
+
 export function isTranslatedPath(pathname: string, base = ''): boolean {
-	return matches(TRANSLATED_PATHS, strip(pathname, base));
+	const p = strip(pathname, base);
+	return matches(TRANSLATED_PATHS, p) && !matches(ENGLISH_PATHS, p);
 }
 
 export function isGuestPath(pathname: string, base = ''): boolean {
