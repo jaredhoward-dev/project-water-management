@@ -290,7 +290,9 @@ const READ_ONLY = new Set([
 	'subscription',
 	'usage_counter',
 	// The annual renewal notice's sent-log (329, CPA s14): written only by the worker's definer functions; own rows read.
-	'renewal_notice'
+	'renewal_notice',
+	// The staff grant's log (330): written only by the owner's grant and revoke and the worker's expiry; the account's rows read.
+	'billing_grant_log'
 ]);
 /**
  * Tables with a node column that farmers never read (020_farm_scope.sql).

@@ -356,8 +356,14 @@ export async function buildSubjectExport(userId: string, now = new Date()) {
 			 FROM renewal_notice WHERE user_id = $1 ORDER BY period_end DESC`,
 			[userId]
 		);
+		// The staff grants of their plan (330): what was granted, until when, why and by whom, as the account reads it.
+		const { rows: grants } = await db.query(
+			`SELECT action, plan_code AS "planCode", until, reason, granted_by AS "grantedBy", created_at AS "createdAt"
+			 FROM billing_grant_log WHERE billing_account_id = $1 ORDER BY created_at DESC, id`,
+			[billingId]
+		);
 		// A notice is keyed to the person, not the account, so it is exported even if the account were gone.
-		const billing = billingAccount[0] || renewalNotices.length ? { account: billingAccount[0] ?? null, subscriptions, usageCounters, renewalNotices } : null;
+		const billing = billingAccount[0] || renewalNotices.length ? { account: billingAccount[0] ?? null, subscriptions, usageCounters, renewalNotices, grants } : null;
 		// Two-step sign-in (150): own rows only under RLS. The authenticator's state, never its sealed secret or the code hashes.
 		const { rows: twoStepSignIn } = await db.query(
 			`SELECT t.created_at AS "createdAt", t.confirmed_at AS "confirmedAt",

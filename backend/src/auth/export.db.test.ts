@@ -190,6 +190,9 @@ describe('GET /auth/me/export', () => {
 			[sub.id, owner.id]
 		);
 		await asOwner(`INSERT INTO usage_counter (billing_account_id, kind, month, qty) VALUES ($1, 'reports', '2026-10-01', 4)`, [acct.id]);
+		// A staff grant's log row (330), as the schema owner; and one on the team's account, which isn't theirs.
+		await asOwner(`INSERT INTO billing_grant_log (billing_account_id, action, plan_code, reason, granted_by) VALUES ($1, 'grant', 'pro', 'Export test grant', 'export-op')`, [acct.id]);
+		await asOwner(`INSERT INTO billing_grant_log (billing_account_id, action, plan_code, reason, granted_by) VALUES ($1, 'grant', 'team', 'Team grant', 'export-op')`, [teamAcct.id]);
 		await asOwner(`INSERT INTO usage_counter (billing_account_id, kind, month, qty) VALUES ($1, 'reports', '2026-10-01', 9)`, [teamAcct.id]);
 		try {
 			const { doc, text } = await download(owner);
@@ -197,7 +200,8 @@ describe('GET /auth/me/export', () => {
 				account: { id: acct.id, kind: 'user', projectsCreated: expect.any(Number), externalCustomerRef: null, createdAt: expect.any(String) },
 				subscriptions: [expect.objectContaining({ planCode: 'pro', status: 'canceled', provider: 'manual', externalRef: 'export-test-ref', seats: 1 })],
 				usageCounters: expect.arrayContaining([{ kind: 'reports', month: '2026-10', qty: 4 }]),
-				renewalNotices: [{ periodEnd: '2027-03-01T10:00:00.000Z', status: 'sent', sentAt: expect.any(String), createdAt: expect.any(String) }]
+				renewalNotices: [{ periodEnd: '2027-03-01T10:00:00.000Z', status: 'sent', sentAt: expect.any(String), createdAt: expect.any(String) }],
+				grants: [{ action: 'grant', planCode: 'pro', until: null, reason: 'Export test grant', grantedBy: 'export-op', createdAt: expect.any(String) }]
 			});
 			expect(doc.billing.usageCounters).not.toContainEqual(expect.objectContaining({ qty: 9 }));
 			expect(text).not.toContain(teamAcct.id);
@@ -207,6 +211,7 @@ describe('GET /auth/me/export', () => {
 			expect(theirs.text).not.toContain(acct.id);
 		} finally {
 			await asOwner('DELETE FROM subscription WHERE billing_account_id = $1', [acct.id]);
+			await asOwner('DELETE FROM billing_grant_log WHERE billing_account_id = ANY($1)', [[acct.id, teamAcct.id]]);
 			await asOwner(`DELETE FROM usage_counter WHERE billing_account_id = ANY($1) AND month = '2026-10-01'`, [[acct.id, teamAcct.id]]);
 			await asOwner('DELETE FROM team WHERE id = $1', [teamId]);
 		}
