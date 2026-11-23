@@ -5926,6 +5926,7 @@ Each answer comes from a `323_billing` definer function run as the caller.
 | GET | `/billing/plans` | – | `{ plans: Plan[] }`, the active plans, cheapest first | anyone, signed out included (public allowlist) |
 | GET | `/account/plan` | – | `AccountPlan` for your own account (created on first ask); `Cache-Control: no-store` | signed in |
 | GET | `/teams/:id/plan` | – | `AccountPlan` for the team's account; `404` unless you are a team admin | team admin |
+| POST | `/billing/webhook/:provider` | the provider's event, raw (≤ 256 KiB), signed in `Stripe-Signature: t=…,v1=…` | `200 { received: true, result }`, where `result` is `applied`, `recorded`, `duplicate`, `conflict`, `unknown_account` or `ignored` (a type not acted on); `400 { error: 'invalid signature' \| 'invalid event' }`; `404` unless `:provider` is the configured `BILLING_PROVIDER` and takes webhooks (`mock` or `stripe`; `manual` takes none); `413` over the cap | anyone (public allowlist): the signature over the raw body is the credential ([billing.md § Webhooks and providers](./billing.md#webhooks-and-providers)) |
 
 - `Plan = { code: 'free' \| 'pro' \| 'team', name, priceMonthlyMinor, priceAnnualMinor, currency, limits, features, trialDays }`.
   Prices are minor units (ZAR cents). `limits` keeps the database's
