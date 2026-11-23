@@ -2,8 +2,9 @@
 
 Paid plans for IC-WBT ([issue #641](https://github.com/jaredhoward-dev/project-water-management/issues/641)).
 This page covers **Phase 1, shadow mode**: every plan, limit and count exists
-and is shown, and **nothing is refused**. There is no payment provider yet,
-no checkout and no `402`. The issue holds the full design (tiers, enforcement,
+and is shown, and **nothing is refused** (no `402`). Phase 3's provider
+seam, webhook, checkout and portal are built and run locally behind the mock
+provider; production runs `manual` until the Stripe account exists. The issue holds the full design (tiers, enforcement,
 provider, legal and tax prerequisites); the later phases are listed at the end
 as pointers to it.
 
@@ -156,14 +157,15 @@ suspend action yet).
 
 [api.md § Billing](./api.md#billing): `GET /billing/plans` (public),
 `GET /account/plan` (signed in), `GET /teams/:id/plan` (team admins; `404`
-to anyone else). No farmer route, share link, verify page or email shows plan
+to anyone else), and checkout and the portal for each
+([§ Checkout and portal](#checkout-and-portal)). No farmer route, share link, verify page or email shows plan
 data.
 
 ## Webhooks and providers
 
-Phase 3 groundwork (issue #641 "Billing provider"): the provider seam and the
-webhook route. No Stripe account is opened, no Stripe API is called and no
-`stripe` package is installed; checkout and the portal come later.
+Phase 3 (issue #641 "Billing provider"): the provider seam and the webhook
+route. No Stripe account is opened and no `stripe` package is installed;
+checkout and the portal are [§ Checkout and portal](#checkout-and-portal).
 
 ### Providers
 
@@ -288,6 +290,167 @@ The fixtures are `checkout-completed`, `subscription-created` (trialing),
 - `billing/webhook.db.test.ts`: the route against 326. A signed event applies,
   a replay or a forgery changes nothing, and an unknown account is a `200`.
 
+## Checkout and portal
+
+Phase 3, behind the same providers (`backend/src/billing/provider.ts`). The
+plan page asks the API for a URL and sends the person there; the API never
+sees a card (Stripe Checkout keeps PCI scope at SAQ A, as #641 says).
+
+| Provider | `createCheckout(account, plan, interval)` | `createPortal(account)` |
+| --- | --- | --- |
+| `mock` | a URL to the mock's checkout page on this API | a URL to the mock's portal page on this API |
+| `manual` | `409 billing_unavailable` | `409 billing_unavailable` |
+| `stripe` | makes the account's Stripe customer the first time (stored by 328), then a hosted Checkout session; the URL is Stripe's | a Customer Portal session for the stored customer; `409 billing_no_customer` when there is none |
+
+### Routes
+
+`POST /account/plan/checkout` and `/account/plan/portal` (your own account),
+`POST /teams/:id/plan/checkout` and `/teams/:id/plan/portal` (a team's, for
+its admins) ([api.md § Billing](./api.md#billing)). Each:
+
+1. Resolves the account and checks access as the caller, through 323's
+   functions (`app_my_billing_account`, `app_team_billing_account`,
+   `app_account_plan`): a team's is `404` to a member, a viewer, a farmer on
+   its projects and a stranger, before any provider check, so the answer
+   never depends on the provider.
+2. Refuses `manual` or no provider (`409 billing_unavailable`).
+3. Checkout only: the plan must be the account's kind (Pro for a person,
+   Team for a team), and there must be no live subscription (`409`: Manage
+   billing changes the one there is, so Stripe never holds two).
+4. Calls the provider outside any transaction (a network call never holds a
+   database transaction open). A provider failure, or `stripe` with no key,
+   is `503 billing_provider_error`, never the provider's text (rule 6).
+5. Stores a customer the provider made through
+   `app_billing_set_customer_ref` (328). The first stored customer wins; if
+   another checkout stored a different one first, this one answers `409` and
+   the person tries again, so they never pay into a customer the account
+   doesn't keep.
+6. Answers `{ url }` with `Cache-Control: no-store`, and logs one line
+   (provider, plan, interval; never the URL, which carries a session).
+
+The plan page's success and cancel URLs are `SITE_URL` plus the plan page
+with `?checkout=done` or `?checkout=cancelled`, as the emails' links are.
+
+### Stripe
+
+Three form-encoded POSTs over `fetch` (`provider/stripeApi.ts`):
+`/v1/customers` (metadata `billing_account_id`, idempotency key per account),
+`/v1/checkout/sessions` (subscription mode, the stored customer,
+`client_reference_id` the account, and `metadata` plus
+`subscription_data.metadata` with `billing_account_id` and `plan_code`, which
+the webhook's normaliser reads), and `/v1/billing_portal/sessions`. Each
+pins `Stripe-Version: 2026-10-28.endive`, has a 15 s timeout, and accepts
+only an `https://…stripe.com/` URL back.
+
+The price is inline (`price_data`: the plan table's minor units, currency
+and interval, product name `IC-WBT <plan>`), so `plan` stays the one source
+of prices and nothing has to be set up in Stripe's dashboard first. The
+catch: Stripe's portal can switch plans only between Prices it knows, so
+plan switching there waits for Prices made in the dashboard (the portal
+still handles card updates, invoices and cancellation).
+
+`STRIPE_SECRET_KEY` is read from the environment only. The production check
+refuses `stripe` without a live key (`sk_live_…` or `rk_live_…`); getting it
+into the API Lambda is an open item in [followups.md](./followups.md)
+(§ Billing). Locally the key is never set: the mock needs none, and the unit
+tests mock the HTTP layer (`stripeApi.test.ts`, `provider.test.ts`); nothing
+in the repo calls Stripe for real.
+
+### The mock
+
+The mock's checkout is a page on the API that asks which outcome to
+simulate, as #641's "Local-first" asks (`billing/mockCheckout.ts`):
+
+- **Pays**: `checkout.session.completed` and `customer.subscription.created`
+  (active, a month or a year from now, subscription id `sub_mock_<account>`),
+  each signed with the dev key and posted to `POST /billing/webhook/mock`
+  in-process: the real route, so `app_billing_apply` writes the
+  subscription, as with Stripe. Then `303` to the plan page with
+  `?checkout=done`.
+- **Declines**: the page again, saying the card was declined, nothing sent
+  (Stripe's hosted page keeps the person there too).
+- **Cancels**: `303` back with `?checkout=cancelled`, nothing sent.
+
+The mock portal shows the subscription and offers *Cancel at the end of the
+period* (`customer.subscription.updated` with `cancel_at_period_end`, through
+the webhook the same way) and a link back.
+
+**Where the pages live, and why.** On the backend, as plain HTML forms with
+no script, rather than an SPA route: the outcome is an event signed with
+`BILLING_WEBHOOK_SECRET`, which must stay on the server. A backend page signs
+and posts in the same process; an SPA page would need a dev-only API to do
+the same and would ship its code in the production bundle. Every mock route
+answers `404` unless `BILLING_PROVIDER=mock`, which production refuses.
+
+**The token.** A mock session is not a row: it is the account, the plan,
+interval and price (checkout) or the subscription to change (portal), the
+return URLs and an expiry (an hour), as base64url JSON with an HMAC-SHA256
+under the dev key and its own context string (`provider/mock.ts`), so it is
+never a valid webhook signature and can't be pointed at another account
+(`checkout.db.test.ts`). The forms post their choice in the action's query,
+so no body is read. The two POSTs are exempt from the CSRF check (`app.ts`),
+like `/alerts/unsubscribe`: they come from the API's own origin, which isn't
+a site origin, read no session, and act only for the token's account.
+
+### Which HTTP client: research (2026-11-23)
+
+The question: call Stripe's API with the `stripe` npm package or plain
+`fetch`? **Decision: `fetch`.**
+
+- **The estate.** threkir uses `npm:stripe@23.1.0` on Supabase Edge
+  Functions (`apps/backend/supabase/functions/_shared/stripe.ts`), where it
+  calls many resources and boots from npm anyway. feohledger's billing doc
+  is where the signature and provider-name lessons above come from.
+- **Size.** `stripe@23.1.0` has no dependencies but unpacks to 18.3 MB
+  (`npm view stripe@23.1.0 dist.unpackedSize`). Bundled for Node with
+  esbuild, minified, an entry that creates one Checkout session came to
+  246 KB (34 KB gzipped), all of it in the API Lambda's bundle for three
+  POSTs that take about 120 lines here.
+- **API version.** The SDK pins one version per release (23.1.0:
+  `2026-10-28.endive`, its `apiVersion.js`) and moves it on a major bump;
+  here `STRIPE_API_VERSION` is the same string, sent as `Stripe-Version` on
+  every call, and changes only on purpose, with the normaliser's tests
+  ([Stripe: versioning](https://docs.stripe.com/api/versioning),
+  [Stripe: upgrades](https://docs.stripe.com/upgrades)).
+- **Dependabot.** It would watch the package, but a bump that moves the API
+  version is a behaviour change to review, not a patch to merge; with
+  `fetch` there is no dependency to watch, and the version is a constant in
+  one place.
+- **Webhook types.** The SDK's event types would not replace the
+  normaliser: it reads fields across API eras (the period on the item since
+  `2025-03-31.basil`, the invoice's `parent.subscription_details`), which
+  one pinned type set doesn't describe; the normaliser's tests pin each
+  field. Its `constructEvent` would replace `provider/signature.ts`, which is
+  already built and tested.
+- **What `fetch` costs.** No retries with backoff (a person clicking a
+  button retries; the customer call carries an idempotency key, so a retry
+  can't make a second one) and no response types (only `id` and `url` are
+  read, each checked by shape).
+
+Revisit if the backend comes to call many Stripe resources (refunds,
+invoices, usage records), where the SDK's coverage would outweigh its size.
+
+### Tests
+
+- `billing/provider/stripeApi.test.ts`: what each Stripe call sends (path,
+  headers, form body) and how answers and errors are read, with `fetch`
+  mocked.
+- `billing/provider/mock.test.ts`: the token (forged, expired, other key,
+  not a webhook signature) and that the mock's events normalise to the
+  account and plan.
+- `billing/provider.test.ts`: each provider's checkout and portal, and the
+  coded refusals.
+- `billing/checkout.test.ts`: the routes and the mock pages with the
+  database mocked: 401, 404, the plan per account kind, 409, 503, and that
+  pays posts two signed events to the webhook.
+- `billing/checkout.db.test.ts`: who may start checkout (positive control,
+  and 404 to a member, viewer, farmer and stranger), a mock checkout that
+  pays ends with the subscription live through the webhook and
+  `app_billing_apply`, the portal's cancel, a forged token, and 328's
+  functions.
+- `e2e/tests/billing-checkout.spec.ts`: the plan page's buttons and the mock
+  checkout and portal in a browser.
+
 ## Later phases
 
 Pointers to [issue #641](https://github.com/jaredhoward-dev/project-water-management/issues/641);
@@ -297,8 +460,9 @@ none of this is built:
   transaction of the action, under an advisory lock per account, answering
   `402 plan_limit` with `{ limit, used, plan }`; soft warnings at 80%;
   downgrade and lapse without data loss; staff plan grants.
-- **Billing provider** ("Billing provider"): Stripe Checkout and the Customer
-  Portal, dunning, refunds and invoices. The provider seam and the webhook are
-  built ([§ Webhooks and providers](#webhooks-and-providers)).
+- **Billing provider** ("Billing provider"): dunning, refunds and invoices.
+  The provider seam, the webhook, checkout and the portal are built
+  ([§ Webhooks and providers](#webhooks-and-providers),
+  [§ Checkout and portal](#checkout-and-portal)).
 - **Legal and tax prerequisites**: the Terms' fees section, CPA and ECTA
   positions, VAT; all before the first charge.

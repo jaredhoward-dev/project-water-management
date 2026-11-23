@@ -907,6 +907,22 @@ are #641's checklist. Open items from building it:
       rows older than Stripe's redelivery window plus a margin (Stripe
       retries for up to 3 days; keep 90), and docs/security.md's retention
       row says so. Trigger: `BILLING_PROVIDER=stripe` in production.
+- [ ] **STRIPE_SECRET_KEY has no way into the API Lambda yet.** Checkout and
+      the portal read it (billing/provider.ts), and the production check
+      refuses `stripe` without a live key, but neither infra-secrets nor
+      Terraform carries it. Durable fix: an operator-pasted `stripe_secret_key`
+      (a restricted `rk_live_…` key with Checkout Sessions, Customers and
+      Customer Portal write only) in the API's runtime secret, beside
+      `billing_webhook_secret` (deployment.md), and the Terraform that moves
+      both in when the provider switches. Trigger: the Stripe account exists.
+- [ ] **Checkout sells one seat and no trial.** The Stripe session and the
+      mock's events carry quantity 1 and no `trial_period_days`, so Team's
+      extra seats (`extra_seat_*_minor`) and Pro's and Team's trial days
+      aren't sold yet, and the mock's subscription starts `active`. Durable
+      fix: a seats field on Team's checkout (quantity, with the extra-seat
+      price as a second line item) and the trial from `plan.trial_days`,
+      decided with #641's reverse-trial design. Trigger: Team or a trial is
+      offered to a paying customer.
 
 ## DB tests share the mail outbox (2026-10-02, PR #360)
       **Decided (round 3, N):** a bounded whole-file pass (data-sources.md § ssebop-eta); the build is its own item below.

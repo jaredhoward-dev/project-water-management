@@ -3124,7 +3124,17 @@ The page is two cards, side by side where they fit and stacked on a phone:
   warning colour *Ends …; it won't renew*, *Payment overdue*, *Cancelled* or
   *Expired*. No subscription says the account is on its plan (Free). While
   `enforced` is false, a note says plans aren't charged yet and nothing is
-  refused. There is no upgrade button, checkout or billing portal in Phase 1.
+  refused. Phase 3 adds the billing buttons, shown only when the API's
+  `provider` is `mock` or `stripe` (never with `manual`, production's setting
+  until Stripe is set up): with no subscription, *Upgrade to Pro, monthly* and
+  *…, yearly* (*Team* on a team's page); with one, *Manage billing*. Each asks
+  the API for a URL (`POST …/plan/checkout` or `…/plan/portal`) and sends the
+  person there: Stripe's hosted page, or the mock's local page on the API
+  ([billing.md § Checkout and portal](./billing.md#checkout-and-portal)). A
+  refusal shows inline from its code (`errorText`). Coming back with
+  `?checkout=done` or `?checkout=cancelled` shows a status line (*the payment
+  went through*, or *Nothing was charged*). `e2e/tests/billing-checkout.spec.ts`
+  follows the mock end to end.
 - **Usage in <month>**: one row each for catchments (every catchment billed
   to the account counts, whoever made it; there is no archived state),
   reports, issued evidence packs and the assistant's spend this month. A row

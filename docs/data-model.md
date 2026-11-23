@@ -3808,7 +3808,7 @@ never to a farmer, contributor or viewer.
 | Table | Holds |
 | --- | --- |
 | `plan` | The tiers, `code` (`free`, `pro`, `team`) primary key, `name`, `price_monthly_minor`, `price_annual_minor` (ZAR cents), `currency` (`ZAR`), `limits`, `features`, `trial_days`, `active`. Written only by migrations; anyone reads it |
-| `billing_account` | A person's or a team's: `id`, `kind` (`user`, `team`), `user_id` (cascade) or `team_id` (cascade), exactly one set and each unique (which covers both keys), `projects_created` (every project it has ever billed, Free's lifetime count), `created_at` |
+| `billing_account` | A person's or a team's: `id`, `kind` (`user`, `team`), `user_id` (cascade) or `team_id` (cascade), exactly one set and each unique (which covers both keys), `projects_created` (every project it has ever billed, Free's lifetime count), `external_customer_ref` (328: the payment provider's customer, Stripe's `cus_…`, unique, NULL until the first Stripe checkout; written only by `app_billing_set_customer_ref`), `created_at` |
 | `subscription` | An account's plan over time: `billing_account_id` (cascade), `plan_code`, `status` (`trialing`, `active`, `past_due`, `canceled`, `expired`), `seats`, `period_start`, `period_end`, `trial_end`, `cancel_at_period_end`, `provider` (`mock`, `manual`, `stripe`), `external_ref` (unique per provider), `created_at`. A partial unique index, `subscription_one_live_per_account`, allows one live (trialing, active, past_due) row per account; canceled and expired rows stay as history, so an account can take the same plan again. **No live subscription means Free** |
 | `usage_counter` | Monthly counts per account: (`billing_account_id`, `kind` (`reports`, `packs_issued`), `month`) primary key, `qty`. `month` is the first day of the month in Africa/Johannesburg (`app_billing_month()`) |
 
@@ -3834,6 +3834,12 @@ never to a farmer, contributor or viewer.
 - Functions (all SECURITY DEFINER, pinned `search_path`, granted to
   `water_app`):
   - `app_billing_plans() → SETOF plan`: the active plans, for anyone.
+  - `app_billing_customer_ref(account) → text` (328): the account's provider
+    customer; NULL unless the caller is its person or an admin of its team.
+  - `app_billing_set_customer_ref(account, ref) → text` (328): stores the
+    customer only while none is stored (the first wins) and answers the
+    stored one; NULL for anyone else. Checkout calls it after Stripe makes the
+    customer.
   - `app_my_billing_account() → uuid`: the caller's own account, made if
     missing; NULL with no signed-in user.
   - `app_team_billing_account(team) → uuid`: the team's account, made if
