@@ -146,6 +146,8 @@ export const USER_FK_COVERAGE: Record<string, { section: string } | { excluded: 
 	// The host's checks of the person's professional registration, recorded by a project owner (167_signers): own rows under RLS.
 	'registration_check.user_id': { section: 'registrationChecks' },
 	'registration_check.recorded_by': { excluded: 'a check this owner recorded of another member’s registration; it is that member’s, and registration.checked is in auditEvents' },
+	// The person's own billing account (323_billing, issue #641): with its subscriptions and monthly counters. A team's is the team's.
+	'billing_account.user_id': { section: 'billing' },
 	'team.created_by': { excluded: 'the team itself; the membership is in teamMemberships' },
 	'team_member.user_id': { section: 'teamMemberships' },
 	// The person's own display preferences (083): the workspace sections they hid.
@@ -326,6 +328,24 @@ export async function buildSubjectExport(userId: string, now = new Date()) {
 			 FROM assistant_usage WHERE user_id = $1 ORDER BY month DESC, project_id`,
 			[userId]
 		);
+		// Their own billing account (323_billing; kind 'user', never a team's), its subscriptions and its monthly counters: own rows under RLS.
+		// null when they never needed one.
+		const { rows: billingAccount } = await db.query<{ id: string }>(
+			`SELECT id, kind, projects_created AS "projectsCreated", created_at AS "createdAt" FROM billing_account WHERE user_id = $1`,
+			[userId]
+		);
+		const billingId = billingAccount[0]?.id ?? null;
+		const { rows: subscriptions } = await db.query(
+			`SELECT plan_code AS "planCode", status, seats, period_start AS "periodStart", period_end AS "periodEnd", trial_end AS "trialEnd",
+				cancel_at_period_end AS "cancelAtPeriodEnd", provider, external_ref AS "externalRef", created_at AS "createdAt"
+			 FROM subscription WHERE billing_account_id = $1 ORDER BY created_at DESC, id`,
+			[billingId]
+		);
+		const { rows: usageCounters } = await db.query(
+			`SELECT kind, to_char(month, 'YYYY-MM') AS month, qty::float8 AS qty FROM usage_counter WHERE billing_account_id = $1 ORDER BY month DESC, kind`,
+			[billingId]
+		);
+		const billing = billingAccount[0] ? { account: billingAccount[0], subscriptions, usageCounters } : null;
 		// Two-step sign-in (150): own rows only under RLS. The authenticator's state, never its sealed secret or the code hashes.
 		const { rows: twoStepSignIn } = await db.query(
 			`SELECT t.created_at AS "createdAt", t.confirmed_at AS "confirmedAt",
@@ -384,6 +404,7 @@ export async function buildSubjectExport(userId: string, now = new Date()) {
 			erratumNotices,
 			preferences: prefs,
 			assistantUsage,
+			billing,
 			twoStepSignIn,
 			twoStepSignInResets,
 			twoStepEmail,

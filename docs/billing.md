@@ -25,7 +25,15 @@ and `team_id` is set, each unique).
   is thrown away.
 - Accounts are created on first need: when a project needs one, or when
   someone asks for their own plan (`GET /account/plan`) or a team admin asks
-  for the team's.
+  for the team's. So `GET /account/plan` is a read that writes: the first
+  time a person (a farmer, say, who never made a project) opens the page, it
+  inserts their empty `billing_account` row. That is harmless: the row holds
+  no more than who it belongs to, a zero project count and when it was made;
+  it is on Free like no row at all; it goes with the person
+  (`ON DELETE CASCADE`) and is in their data export; at most one exists per
+  person or team (unique, and the insert is `ON CONFLICT DO NOTHING`, so two
+  first reads at once make one row); and only the signed-in person can make
+  their own (the definer function takes no account id).
 
 ## Tables
 
@@ -68,7 +76,16 @@ so a count commits or rolls back with it (`backend/src/billing/entitlements.ts`
   route). Drafts, sign-offs, withdrawals and verify never count.
 - **Catchments**: not a counter; `app_account_plan` counts the account's
   active projects (not archived, not deleted).
-- **Assistant tokens**: summed from `assistant_usage` (above).
+- **Assistant tokens and cost**: summed from `assistant_usage` (above), in
+  its UTC month. `usage.assistantTokens` is the weighted tokens;
+  `usage.assistantCost` is the dollar cost the backend records per turn
+  (`324_assistant_turn_cost`) against the plan's dollar allowance:
+  `assistant_usd_micros_per_month` (Free $1, Pro $15), or on Team
+  `assistant_usd_micros_per_seat_month` × its seats ($15 each; the live
+  subscription's seats, never fewer than the 3 included). Its
+  `unpricedTurns` counts turns with no price (a model missing from the price
+  table, a charge from an older backend, an expired reservation), so a
+  non-zero count means the cost shown is a floor.
 
 Nothing is refused: a Free account past its five reports a month still gets
 its sixth. The usage and the limit are shown, so the owner can see where they

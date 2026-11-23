@@ -47,7 +47,7 @@ const PLAN = {
 	account: { id: A, kind: 'user' },
 	plan: { code: 'free', name: 'Free', priceMonthlyMinor: 0, priceAnnualMinor: 0, currency: 'ZAR', limits: { catchments: null }, features: {} },
 	subscription: null,
-	usage: { month: '2026-11', catchments: { used: 1, limit: null }, reports: { used: 2, limit: 5 }, packsIssued: { used: 0, limit: 0 }, assistantTokens: { used: 0, limit: null } }
+	usage: { month: '2026-11', catchments: { used: 1, limit: null }, reports: { used: 2, limit: 5 }, packsIssued: { used: 0, limit: 0 }, assistantTokens: { used: 0, limit: null }, assistantCost: { usedUsdMicros: 0, limitUsdMicros: 1000000, unpricedTurns: 0 } }
 };
 const get = (path: string, user?: string) => app.request(path, { headers: user ? { 'x-test-user': user } : {} });
 

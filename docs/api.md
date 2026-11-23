@@ -5935,11 +5935,16 @@ Each answer comes from a `323_billing` definer function run as the caller.
   `null` is unlimited.
 - `AccountPlan = { account: { id, kind: 'user' \| 'team' }, plan: { code, name, priceMonthlyMinor, priceAnnualMinor, currency, limits, features }, subscription, usage, enforced }`:
   - `subscription`: `null` (Free; always in Phase 1) or `{ status, seats, periodStart, periodEnd, trialEnd, cancelAtPeriodEnd }`.
-  - `usage = { month: 'YYYY-MM', catchments, reports, packsIssued, assistantTokens }`,
-    each `{ used, limit }` (`limit` `null` = unlimited). `catchments.used`
+  - `usage = { month: 'YYYY-MM', catchments, reports, packsIssued, assistantTokens, assistantCost }`,
+    each but `assistantCost` `{ used, limit }` (`limit` `null` = unlimited). `catchments.used`
     is the account's active projects; `reports` and `packsIssued` are this
     month's counts (Africa/Johannesburg); `assistantTokens.used` is this
     month's weighted tokens on the account's projects.
+  - `assistantCost = { usedUsdMicros, limitUsdMicros, unpricedTurns }`: the
+    assistant's cost on the account's projects this UTC month in micro-USD
+    (1 USD = 1 000 000), the plan's allowance (`null` = unlimited; on Team,
+    the per-seat allowance × its seats), and how many turns had no price, so
+    a non-zero `unpricedTurns` means `usedUsdMicros` is a floor.
   - `enforced`: the backend's `BILLING_ENFORCED` (default `false`). In
     Phase 1 it is only reported.
 - **What counts.** A server PDF report counts one `reports` when it is queued

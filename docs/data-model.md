@@ -3842,7 +3842,11 @@ never to a farmer, contributor or viewer.
     `reports`, `packsIssued`: the counters; `assistantTokens`: weighted
     tokens summed from `assistant_usage` through
     `project.billing_account_id`, in that table's UTC month), each with its
-    limit; NULL unless the caller is the account's person or an admin of its
+    limit, and `assistantCost` (324: the same rows' `cost_usd_micros` and
+    `unpriced_turns` summed, beside the plan's dollar allowance:
+    `assistant_usd_micros_per_month`, or `assistant_usd_micros_per_seat_month`
+    × the seats, the live subscription's but never fewer than
+    `seats_included`); NULL unless the caller is the account's person or an admin of its
     team. Shape in [api.md](./api.md).
   - `app_entitlements(project) → jsonb`: `{ plan, limits, features,
     status }` for an editor or owner; NULL for anyone else.
