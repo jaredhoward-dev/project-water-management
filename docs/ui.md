@@ -95,7 +95,8 @@ language switch and the farm view's m³ / ML, [§ Language](#language)), a
 **Your data** panel whose **Download my data** button saves the
 data-subject export (`GET /auth/me/export`, a JSON file; the download
 helpers load on click, and a second click within the minute shows the
-server's `429` message in an alert) and a
+server's `429` message in an alert; under it, outside the farm frame, a
+**Plan and usage** link to `/account/plan`, [§ Plan and usage](#plan-and-usage)) and a
 **Password** form
 (current, new, repeat; `POST /auth/change-password`). Changing the password
 signs out every other device while this browser stays signed in. Errors show
@@ -3008,7 +3009,8 @@ roles. *New team* stays in the header, and the empty state explains teams.
 **`/teams/:id`** leads with outcomes. The header has the team's name and
 your role, a summary line ("5 projects (1 red, 4 green) · 4 members ·
 created 26 Sep 2026") and the actions: **Project list**, **Team settings**,
-**Add member** (admins; focuses the add form) and **New project** (members
+**Plan and usage** (admins only, as the API answers; [§ Plan and
+usage](#plan-and-usage)), **Add member** (admins; focuses the add form) and **New project** (members
 and admins; opens the New project dialog with the team preselected). The
 main column is **Projects**: two tiles (EWR bar, alerts firing), then each project worst first with its source
 ("Published run"…), EWR pill, figures age and *Stale* flag, farms short
@@ -3101,11 +3103,13 @@ addresses, one body (`components/billing/PlanUsage.svelte`, its words and
 figures from `billing/plan.ts`):
 
 - **`/account/plan`**: your own account's (`GET /account/plan`), linked as
-  *Plan and usage* from the account page's Alert emails panel. A farmer-only
+  *Plan and usage* from the account page's Your data panel. A farmer-only
   user, whose account pages sit in the farm frame (§ App shell), gets no link,
   and the address sends them back to `/account` before anything is read: no
-  farmer page shows a plan, a price or usage. Outside the farm frame the page
-  is English, like the rest of the workspace.
+  farmer page shows a plan, a price or usage. The page is English, like the
+  rest of the workspace: `/account/plan` is left out of the translated
+  `/account` paths (`lib/auth/session.svelte.ts` `ENGLISH_PATHS`), so its
+  `lang` is English and its words don't go through `t()`.
 - **`/teams/:id/plan`**: a team's (`GET /teams/:id/plan`), linked as *Plan and
   usage* from the team page's header for its admins only. Anyone else gets the
   API's 404, shown as the team page shows a team you can't see ("This team
@@ -3121,24 +3125,34 @@ The page is two cards, side by side where they fit and stacked on a phone:
   *Expired*. No subscription says the account is on its plan (Free). While
   `enforced` is false, a note says plans aren't charged yet and nothing is
   refused. There is no upgrade button, checkout or billing portal in Phase 1.
-- **Usage in <month>**: one row each for catchments (active ones; archived
-  don't count), reports, issued evidence packs and assistant tokens this
-  month. A row with a limit reads "3 of 5 · 2 left" over a bar (`role="meter"`,
-  its value text the same words); past the limit it says "1 over the limit"
-  and the bar turns the warning colour, since Phase 1 counts rather than
-  refuses. A null limit reads "12 used · Unlimited" with no bar. The
-  assistant's row adds the plan's cost cap ("Capped by cost, not tokens: $1.00
-  of assistant use a month", or per seat on Team), since the assistant is
-  limited by cost, not tokens. With nothing used yet, a line says so above
-  the rows.
+- **Usage in <month>**: one row each for catchments (every catchment billed
+  to the account counts, whoever made it; there is no archived state),
+  reports, issued evidence packs and the assistant's spend this month. A row
+  with a limit reads "3 of 5 · 2 left" over a bar (`role="meter"`, its value
+  text the same words); past the limit it says "1 over the limit" and the bar
+  turns the warning colour, since Phase 1 counts rather than refuses. A null
+  limit reads "12 used · Unlimited" with no bar. A zero limit is something
+  the plan doesn't include, not a full allowance: it reads "Not included in
+  Free" with no bar, or "1 issued; not included in Free" in the warning
+  colour when some was used anyway. The assistant's row is in dollars, from
+  `usage.assistantCost` ("$0.42 of $1.00 · $0.58 left", the bar against the
+  plan's monthly allowance, per seat × seats on Team), since the assistant is
+  capped by cost, not tokens; its note says it is counted by the UTC month
+  (from 02:00 South African time on the 1st; the other rows use South African
+  time), and "Some turns unpriced (N), so the true cost is higher" when
+  `unpricedTurns` is above 0. With nothing used yet, a line says so above the
+  rows.
 
 Loading, a failed load (with Try again) and the not-found go through
-`common/LoadState.svelte`. Tests: `billing/plan.test.ts` (prices, the
-subscription line, the rows), `api/client.test.ts` (the three calls), and
-`e2e/tests/billing-plan.spec.ts` (both pages, the not-found, no way to pay, a
-360 px phone without sideways scroll, axe). The client also has `api.billing.plans()`
-(`GET /billing/plans`, every plan on offer) for the planned pricing page; this
-page doesn't read it.
+`common/LoadState.svelte`. A failed load reads "Couldn't look up your plan:"
+(or "this team's plan:") and the error from its code (`errorText`), never the
+server's own text. Tests: `billing/plan.test.ts` (prices, the
+subscription line, the rows), `api/client.test.ts` (the two calls), and
+`e2e/tests/billing-plan.spec.ts` (both pages, the not-found for a stranger
+and for a team member who isn't an admin, a farmer-only user sent back to
+`/account`, no way to pay, a 360 px phone without sideways scroll, axe at
+both widths); `auth/redirect.test.ts` keeps `/account/plan` English. The
+frontend doesn't call `GET /billing/plans`; the planned pricing page will.
 
 ## Network
 
