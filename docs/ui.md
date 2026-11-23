@@ -15519,7 +15519,19 @@ saved unit with the error above them). There it is `segmented`:
 - **`lang`.** `<html lang>` is `wordsLang()` on the translated routes and
   `en` elsewhere: it stays `en` until the Afrikaans catalogue is complete, so
   a page of mostly English words never claims to be Afrikaans. An email is
-  `lang="af"` only when every word in it came from the Afrikaans catalogue.
+  in one language throughout: the reader's when that language's email
+  catalogue has every key `en.ts` has (`isMailComplete`, `mailLanguage` in
+  `mail/i18n/index.ts`), else English, words, plural rules and dates alike,
+  with `<html lang>` naming it. A catalogue one string short sends every
+  email in English rather than a mostly-Afrikaans email marked `en` (read
+  with English pronunciation, WCAG 3.1.1) or an Afrikaans-marked one with
+  English inside; `pnpm check:i18n` fails on that gap for an offered
+  language, so Afrikaans readers get Afrikaans. (`<span lang="en">` around
+  each fallback string was the alternative; it would have threaded marked
+  runs through every subject, heading, button and link label of every
+  template, for a state the guard already forbids.) A run in another
+  language inside an email (a WUA notice written in English) still carries
+  its own `<span lang>` (§ Alerts).
   The landing page is prerendered once per language (issue #137): `/welcome`
   ships `lang="en"` (`app.html`) and `/welcome/af` `lang="af"`, set at build
   time by `hooks.server.ts` from the language its words came out in
@@ -15600,9 +15612,13 @@ saved unit with the error above them). There it is `segmented`:
   English and the fix: `pnpm gen:i18n:export <code> <dir>`, the
   i18n-translator and i18n-checker agents, `pnpm gen:i18n:apply <code> …`.
   So a PR that adds or changes a farmer-facing string carries its
-  translation. Emails and glossary entries don't count (each falls back to
-  English on its own, and `isComplete` doesn't read them); they stay counts
-  in the report. `locale.test.ts` pins that `isComplete`'s entry count and
+  translation. It fails the same way when an offered language lacks an
+  **email** string (`missingMail`: a key of `backend/src/mail/i18n/en.ts`
+  with no words in `<code>.ts`), since such a language's emails go out
+  wholly in English (`mailLanguage`, below), naming each key with its
+  English and the same fix. Glossary entries don't count (each falls back
+  to English on its own, and nothing decides a page's `lang` from them);
+  they stay a count in the report. `locale.test.ts` pins that `isComplete`'s entry count and
   the guard's per-id check (`missingSite`) agree on every real catalogue. A stale
   site translation is moved to the new id once the translator has checked
   it against the new English, or deleted. When the English of a translated
@@ -15625,8 +15641,8 @@ only in the tests.
 
 1. **Table entry.** Add `{ code, name, intl, decimalMark, translating: true }`
    to `LANGUAGES` in `packages/engine/src/languages.ts` (`translating` keeps
-   `pnpm check:i18n` from failing while its site catalogue is still being
-   filled; remove it once the translation run is done): `code` the BCP 47 primary tag
+   `pnpm check:i18n` from failing while its site and email catalogues are
+   still being filled; remove it once the translation run is done): `code` the BCP 47 primary tag
    (2–3 lower-case letters), `name` in the language itself, `intl` the Intl
    locale South Africa writes it in (e.g. `zu-ZA`), `decimalMark` `.` or `,`.
    The next migration run adds the code to the `language` table (no
@@ -15641,14 +15657,15 @@ only in the tests.
      `const HELP_<CODE>` (loaded lazily by `/farm/words`,
      `lib/help/translations.ts`).
    Start each empty: a missing message shows in English, and the page keeps
-   `lang="en"` until the site catalogue is complete. The unit tests fail
+   `lang="en"` until the site catalogue is complete; its emails go out in
+   English until the email catalogue is. The unit tests fail
    until all three exist (`locale.test.ts`, `translations.test.ts`,
    `catalogues.test.ts`).
 3. **Translation run.** `pnpm gen:i18n:export <code> <dir>`, translate,
    `pnpm check:i18n`, `pnpm gen:i18n:apply <code> …` (§ Translation above).
-   Once the site catalogue is complete, delete `translating: true` from the
-   table entry: from then on `pnpm check:i18n` fails on any site message
-   without its words.
+   Once the site and email catalogues are complete, delete `translating: true`
+   from the table entry: from then on `pnpm check:i18n` fails on any site
+   message or email string without its words.
 4. **Layout and axe.** `e2e/tests/lang-layout.spec.ts` already runs once
    per non-English language in the table, so the new one needs no new spec
    file — make sure it (and `language.spec.ts`) passes. From the third

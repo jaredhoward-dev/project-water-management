@@ -5,7 +5,7 @@
 // backend/scripts/migrate.ts) all read it.
 //
 // Adding a language is one entry here (marked `translating: true` until its
-// site catalogue is complete) plus its catalogues (site, email, glossary) and
+// site and email catalogues are complete) plus its catalogues (site, email, glossary) and
 // a translation run: docs/ui.md § Adding a language.
 
 export interface Language {
@@ -21,9 +21,11 @@ export interface Language {
 	 * Its catalogues are still being filled (a language just added): `pnpm
 	 * check:i18n` lists what has no words yet but doesn't fail on it. Without
 	 * this, the language is offered as finished, and check:i18n fails while
-	 * any site message has no translation, since one missing message keeps
-	 * every farmer page at lang="en" (isComplete, frontend/src/lib/i18n/
-	 * locale.svelte.ts). Remove it once the translation run is done.
+	 * any site message or email string has no translation, since one missing
+	 * message keeps every farmer page at lang="en" (isComplete, frontend/src/
+	 * lib/i18n/locale.svelte.ts) and one missing email string sends every
+	 * email in English (mailLanguage, backend/src/mail/i18n/index.ts). Remove
+	 * it once the translation run is done.
 	 */
 	readonly translating?: true;
 }
