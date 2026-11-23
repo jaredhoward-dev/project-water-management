@@ -33,6 +33,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import type { AuthEnv } from '../auth/middleware.js';
 import { type Db, withoutUser, withUser } from '../db/tx.js';
+import { countUsage } from '../billing/entitlements.js';
 import { recordAudit } from '../history/record.js';
 import { readJson } from '../http/body.js';
 import { ApiError, mustChange, notFound } from '../http/errors.js';
@@ -783,6 +784,8 @@ export const packRoutes = new Hono<AuthEnv>()
 			await queuePackReproduce(db, id, packId);
 			// "Pack issued" emails to the editors and the applicant (133_pack_notices), sent by the tick the render wakes.
 			await queuePackNotices(db, packId, 'issued');
+			// Counted against the project's billing account in the issue's transaction (issue #641 Phase 1, shadow mode: never refused).
+			await countUsage(db, id, 'packs_issued');
 			return { pack: issued, jobId: render.jobId };
 		});
 		await wakeWorker(result.jobId);

@@ -77,6 +77,7 @@ import { autoCalibrationRoutes } from './calibration/routes.js';
 import { priorRoutes } from './calibration/prior.js';
 import { outlookRoutes } from './outlooks/routes.js';
 import { teamRoutes } from './teams/routes.js';
+import { accountPlanRoutes, billingPublicRoutes, teamPlanRoutes } from './billing/routes.js';
 import { teamMfaResetRoutes } from './teams/mfa-reset-routes.js';
 import { yieldRoutes } from './yield/routes.js';
 import { futureYieldRoutes } from './future/routes.js';
@@ -273,7 +274,16 @@ export function createApp() {
 	teams.route('/', teamMfaResetRoutes);
 	teams.route('/', teamInviteRoutes);
 	teams.route('/', portfolioRoutes);
+	// The team's plan and usage (issue #641 Phase 1): its admins only, 404 to anyone else.
+	teams.route('/', teamPlanRoutes);
 	app.route('/teams', teams);
+
+	// Billing, Phase 1 (issue #641, shadow mode): the public plan list, and the signed-in person's own plan and usage.
+	app.route('/billing', billingPublicRoutes);
+	const account = new Hono<AuthEnv>();
+	account.use('*', requireUser);
+	account.route('/', accountPlanRoutes);
+	app.route('/account', account);
 
 	const compare = new Hono<AuthEnv>();
 	compare.use('*', requireUser);
