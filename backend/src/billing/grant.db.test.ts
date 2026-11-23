@@ -8,6 +8,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { asOwner, signUp } from '../__tests__/helpers.js';
 import { withoutUser, withUser } from '../db/tx.js';
+import { runTick } from '../jobs/runner.js';
 import { type GrantArgs, parseArgs, runGrant } from '../../scripts/billing-grant.js';
 
 type Person = Awaited<ReturnType<typeof signUp>> & { email: string };
@@ -116,6 +117,19 @@ describe('app_staff_grant_plan', () => {
 		]);
 		// A signed-in user can't run the expiry (only the worker's context).
 		expect(await failure(withUser(p.id, (db) => db.query('SELECT app_staff_grant_expire()')))).toMatch(/^42501/);
+	});
+
+	it('the worker tick runs the expiry: a lapsed grant is counted in staffGrantsExpired and the account is Free', async () => {
+		const p = await person('GrantTick');
+		const account = await accountOf(p);
+		await run([p.email, 'pro', '--until', '2099-06-30', '--reason', 'Tick deal']);
+		await asOwner(
+			`UPDATE subscription SET period_start = now() - interval '2 days', period_end = now() - interval '1 minute' WHERE billing_account_id = $1 AND provider = 'manual' AND status = 'active'`,
+			[account]
+		);
+		const tick = await runTick({ feeds: false, reports: false, alerts: false, maxJobs: 0 });
+		expect(tick.staffGrantsExpired).toBeGreaterThanOrEqual(1);
+		expect((await planOf(p)).plan.code).toBe('free');
 	});
 
 	it('expires a lapsed grant the tick hasn’t reached before a new grant, so it never blocks one', async () => {
