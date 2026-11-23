@@ -221,8 +221,9 @@ checkout. Every payload carries the event's `created` time as `eventCreated`
 | `invoice.payment_failed` | `invoice.payment_failed` | recorded only (Stripe moves the subscription to `past_due` and sends `customer.subscription.updated`) |
 
 The subscription payload is `{ accountId, planCode, status, seats,
-periodStart, periodEnd, trialEnd, cancelAtPeriodEnd, externalRef }`, with
-times as ISO 8601 in UTC (`…Z`). The period is read from the first
+periodStart, periodEnd, trialEnd, cancelAtPeriodEnd, externalRef,
+eventCreated? }`, with times as ISO 8601 in UTC (`…Z`); `eventCreated` is
+absent (or `null`) from the mock and `manual` providers (§ Event order). The period is read from the first
 subscription item (API `2025-03-31.basil` moved it there), else from the
 subscription itself (older versions). An invoice's subscription is read from
 `parent.subscription_details` (basil), else `subscription_details`.
@@ -262,6 +263,11 @@ How each result of `app_billing_apply` is answered:
 | `conflict`, `unknown_account` | `200` (a retry wouldn't change them) | warn, for the operator to read |
 | `invalid` | `400` (326 doesn't record it, so a corrected retry under the same id still applies) | warn |
 
+A database error is the app's generic `500`, which Stripe retries. Each answer
+logs one line (`billing_webhook` or `billing_webhook_rejected`) with the
+provider, type, event id and result or reason. It never logs the payload, the
+account or the secret.
+
 ### Event order
 
 Stripe doesn't deliver events in the order it created them, so 327 orders
@@ -288,11 +294,6 @@ The job tick deletes `billing_event` rows received more than 90 days ago
 window of up to 3 days, so a redelivery always finds its row and is a
 `duplicate`. The function refuses anything under 4 days.
 
-A database error is the app's generic `500`, which Stripe retries. Each answer
-logs one line (`billing_webhook` or `billing_webhook_rejected`) with the
-provider, type, event id and result or reason. It never logs the payload, the
-account or the secret.
-
 ### Locally
 
 `pnpm dev:billing:replay <fixture> [--account <id>] [--new-id]` signs one of
@@ -315,6 +316,25 @@ The fixtures are `checkout-completed`, `subscription-created` (trialing),
 - `config/production.security.test.ts`: production refuses the mock.
 - `billing/webhook.db.test.ts`: the route against 326. A signed event applies,
   a replay or a forgery changes nothing, and an unknown account is a `200`.
+- `billing/apply.db.test.ts`: `app_billing_apply` itself (326, 327) as
+  `water_app` with no user: once only, the status moves, conflicts, unknown
+  accounts and invalid payloads, stale updates by `eventCreated`, and the
+  tick's purge of `billing_event`.
+- `mail/templates.renewal.test.ts`: the renewal email's words in English
+  and Afrikaans (plan, the period end in South African time under the
+  skewed `TZ`, the rand amount, the plan page link), and wholly English when
+  the Afrikaans catalogue is incomplete.
+- `config/devDbReset.test.ts` and `scripts/guards/docker_volumes.test.mjs`
+  aren't billing's, but came in the same round: the guard on
+  `pnpm dev:db:reset`, and that only `dev:docker:wipe` deletes the shared
+  docker volumes ([testing.md § Several checkouts at
+  once](./testing.md#several-checkouts-at-once)).
+
+[§ Renewal notice](#renewal-notice) lists its own tests
+(`businessDays.test.ts`, `renewal.db.test.ts`), and [§ Checkout and portal
+› Tests](#checkout-and-portal) lists checkout's (`checkout.test.ts`,
+`checkout.db.test.ts`, `provider/stripeApi.test.ts`,
+`provider/mock.test.ts`).
 
 ## Renewal notice
 
@@ -467,6 +487,8 @@ in the repo calls Stripe for real.
 The mock's checkout is a page on the API that asks which outcome to
 simulate, as #641's "Local-first" asks (`billing/mockCheckout.ts`):
 
+Each button is named for what it simulates (*Simulate: pays*, …):
+
 - **Pays**: `checkout.session.completed` and `customer.subscription.created`
   (active, a month or a year from now, subscription id `sub_mock_<account>`),
   each signed with the dev key and posted to `POST /billing/webhook/mock`
@@ -477,9 +499,12 @@ simulate, as #641's "Local-first" asks (`billing/mockCheckout.ts`):
   (Stripe's hosted page keeps the person there too).
 - **Cancels**: `303` back with `?checkout=cancelled`, nothing sent.
 
-The mock portal shows the subscription and offers *Cancel at the end of the
-period* (`customer.subscription.updated` with `cancel_at_period_end`, through
-the webhook the same way) and a link back.
+The mock portal shows the subscription by its plan's name and offers *Cancel
+at the end of the period* (`customer.subscription.updated` with
+`cancel_at_period_end`, through the webhook the same way) and a link back.
+The *This page has expired* page (a stale or forged token) and the
+*Something went wrong* page (the webhook refused an event) each link back to
+the plan page.
 
 **Where the pages live, and why.** On the backend, as plain HTML forms with
 no script, rather than an SPA route: the outcome is an event signed with

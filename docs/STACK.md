@@ -295,7 +295,7 @@ pnpm gen:e2e:timings       # refresh e2e/shard-timings.json (CI's e2e shards are
 pnpm gen:liability          # regenerate the known limitations, the engine errata and the methodology hashes from engine-audit.md, engine-errata.md and docs/methodology/ (after changing any)
 pnpm gen:assistant:help     # rewrite backend/src/assistant/helpIndex.json, the help guides and glossary the assistant's search_help reads (after changing any; a guard in test:guards fails until you do)
 pnpm gen:i18n:sheet [lang…]        # rewrite a language's translation sheet (default: every non-English language in
-                             # packages/engine/src/languages.ts); check:i18n checks every language, and fails on an untranslated site string in one not marked translating
+                             # packages/engine/src/languages.ts); check:i18n checks every language, and fails on an untranslated site or email string in one not marked translating
 pnpm gen:i18n:stamp <lang> <id>    # re-stamp a farmer glossary translation from the current English, once the translator has re-checked it
 pnpm gen:i18n:export <lang> <dir>  # a language's untranslated sheet rows as JSON batches (for the i18n-translator agent, .claude/agents/i18n/)
 pnpm gen:i18n:apply <lang> <f.json …>  # write checked words (sheet Id → text; later files win) into that language's catalogues (creating one
