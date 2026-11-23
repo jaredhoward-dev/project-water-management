@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AccountPlan, Subscription } from '#lib/api/types.js';
-import { billingActions, checkoutNotice, fmtPrice, fmtUsdMicros, monthName, priceLine, subscriptionLine, usageRows } from './plan';
+import { CONFIRM_DELAYS_MS, billingActions, checkoutNotice, fmtPrice, fmtUsdMicros, monthName, priceLine, shadowNote, subscriptionLine, upgradeLabel, usageRows } from './plan';
 
 const NB = ' ';
 const TS = ' ';
@@ -174,10 +174,47 @@ describe('billingActions (Phase 3)', () => {
 });
 
 describe('checkoutNotice', () => {
-	it('words the two ways back from checkout, and nothing else', () => {
-		expect(checkoutNotice('done')).toMatchObject({ done: true });
+	it('words the return from checkout, and nothing for anything else', () => {
+		expect(checkoutNotice('done')).toEqual({ text: 'Thank you: the payment went through.', done: true });
 		expect(checkoutNotice('cancelled')).toEqual({ text: 'Checkout was cancelled. Nothing was charged.', done: false });
 		expect(checkoutNotice(null)).toBeNull();
 		expect(checkoutNotice('<script>')).toBeNull();
+	});
+	it('says it is waiting while the provider hasn’t confirmed, then to reload if it never does', () => {
+		expect(checkoutNotice('done', 'waiting')?.text).toBe('Thank you: the payment went through. Waiting for the payment provider to confirm…');
+		expect(checkoutNotice('done', 'unconfirmed')?.text).toContain('hasn’t confirmed it yet. Reload the page in a minute.');
+		// A cancelled checkout has nothing to confirm.
+		expect(checkoutNotice('cancelled', 'waiting')?.text).toBe('Checkout was cancelled. Nothing was charged.');
+	});
+	it('re-reads a bounded number of times', () => {
+		expect(CONFIRM_DELAYS_MS.length).toBeLessThanOrEqual(5);
+		expect(CONFIRM_DELAYS_MS.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(15_000);
+	});
+});
+
+describe('upgradeLabel', () => {
+	const pro = { priceMonthlyMinor: 89_900, priceAnnualMinor: 899_000, currency: 'ZAR' };
+	it('prices each interval from the offer', () => {
+		expect(upgradeLabel('Pro', 'month', pro)).toBe(`Upgrade to Pro, monthly (R${NB}899.00 a month)`);
+		expect(upgradeLabel('Pro', 'year', pro)).toBe(`Upgrade to Pro, yearly (R${NB}8${TS}990.00 a year)`);
+	});
+	it('reads unpriced without the offer or without a price for that interval', () => {
+		expect(upgradeLabel('Team', 'month', null)).toBe('Upgrade to Team, monthly');
+		expect(upgradeLabel('Pro', 'year', { ...pro, priceAnnualMinor: 0 })).toBe('Upgrade to Pro, yearly');
+	});
+});
+
+describe('shadowNote', () => {
+	it('says plans aren’t charged only when there is nothing to pay with', () => {
+		expect(shadowNote(false, false, 'your account')).toBe(
+			'Plans aren’t charged yet. Usage is counted against the plan’s limits so you can see where your account stands, but nothing is refused.'
+		);
+		const beside = shadowNote(false, true, 'this team');
+		expect(beside).toBe('Limits aren’t enforced yet. Usage is counted against the plan’s limits so you can see where this team stands, but nothing is refused.');
+		expect(beside).not.toContain('charged');
+	});
+	it('is gone once limits are enforced', () => {
+		expect(shadowNote(true, false, 'your account')).toBeNull();
+		expect(shadowNote(true, true, 'your account')).toBeNull();
 	});
 });

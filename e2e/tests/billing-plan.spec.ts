@@ -8,7 +8,7 @@ import { acceptInvites, seedRunnableProject } from '../support/api.ts';
 import { API_URL } from '../support/env.ts';
 import { expectNoViolations } from '../support/a11y.ts';
 import { expect, test } from '../support/fixtures.ts';
-import { expectNoSidewaysScroll, resizeTo } from '../support/reflow.ts';
+import { boxesOf, expectNoSidewaysScroll, resizeTo } from '../support/reflow.ts';
 
 test('your plan and usage, from the account page', async ({ page, owner }) => {
 	void owner;
@@ -20,7 +20,8 @@ test('your plan and usage, from the account page', async ({ page, owner }) => {
 	const plan = page.getByRole('region', { name: 'Plan', exact: true });
 	await expect(plan.locator('[data-plan-name]')).toHaveText('Free');
 	await expect(plan.locator('[data-price]')).toHaveText('No charge');
-	await expect(plan.locator('[data-shadow]')).toContainText('Plans aren’t charged yet.');
+	// The e2e API's mock provider shows Upgrade, so the note says limits aren't enforced, never "aren't charged".
+	await expect(plan.locator('[data-shadow]')).toContainText('Limits aren’t enforced yet.');
 
 	// Free counts catchments without a limit; its reports have one, drawn as a bar.
 	const usage = page.getByRole('region', { name: /^Usage in / });
@@ -37,12 +38,16 @@ test('your plan and usage, from the account page', async ({ page, owner }) => {
 
 	// Phase 3: the e2e API runs the mock provider (the code default), so Free offers Upgrade to Pro and nothing to
 	// manage yet (billing-checkout.spec.ts follows the buttons; with BILLING_PROVIDER=manual there are none).
-	await expect(plan.getByRole('button', { name: 'Upgrade to Pro, monthly' })).toBeVisible();
+	await expect(plan.getByRole('button', { name: /^Upgrade to Pro, monthly \(R.899\.00 a month\)$/ })).toBeVisible();
 	await expect(plan.getByRole('button', { name: 'Manage billing' })).toHaveCount(0);
 	await expectNoViolations(page);
 
 	await resizeTo(page, { width: 360, height: 780 });
 	await expectNoSidewaysScroll(page);
+	// The two priced Upgrade buttons wrap rather than push the page sideways.
+	const [month, year] = await boxesOf(plan.locator('[data-action="upgrade-month"]'), plan.locator('[data-action="upgrade-year"]'));
+	for (const b of [month, year]) expect(b.x + b.width).toBeLessThanOrEqual(360);
+	expect(year.y).toBeGreaterThan(month.y);
 	await expectNoViolations(page);
 });
 
@@ -56,7 +61,15 @@ test('a team’s plan is for its admins', async ({ page, owner, signIn }) => {
 	await page.getByRole('link', { name: 'Plan and usage' }).click();
 	await expect(page).toHaveURL(new RegExp(`/teams/${team.id}/plan$`));
 	await expect(page.getByRole('navigation', { name: 'Breadcrumb' }).getByRole('link', { name: 'Plan Team' })).toBeVisible();
-	await expect(page.getByRole('region', { name: 'Plan', exact: true }).locator('[data-plan-name]')).toBeVisible();
+	const plan = page.getByRole('region', { name: 'Plan', exact: true });
+	await expect(plan.locator('[data-plan-name]')).toHaveText('Free');
+	// A team upgrades to Team (migration 323: R 2 499.00 a month, R 24 990.00 a year), never Pro.
+	await expect(plan.getByRole('button', { name: /^Upgrade to Team, monthly \(R.2.499\.00 a month\)$/ })).toBeVisible();
+	await expect(plan.getByRole('button', { name: /^Upgrade to Team, yearly \(R.24.990\.00 a year\)$/ })).toBeVisible();
+	await expect(plan.getByRole('button', { name: /Pro/ })).toHaveCount(0);
+	await expectNoViolations(page);
+	await resizeTo(page, { width: 360, height: 780 });
+	await expectNoSidewaysScroll(page);
 	await expectNoViolations(page);
 
 	// Someone who isn't its admin gets the team's not-found, and no plan.

@@ -3,7 +3,7 @@
 // shadow mode: usage is counted against the plan's limits, nothing is charged
 // or refused, so a count past its limit is said, never blocked. The workspace
 // is English; plan data never reaches a farmer page.
-import type { AccountPlan, Subscription } from '#lib/api/types.js';
+import type { AccountPlan, BillingInterval, Plan, Subscription } from '#lib/api/types.js';
 import { fmtDate, fmtNum } from '#lib/format/number.js';
 
 /**
@@ -146,9 +146,50 @@ export function billingActions(p: AccountPlan): { upgrade: { code: 'pro' | 'team
 	return { upgrade: p.account.kind === 'team' ? { code: 'team', name: 'Team' } : { code: 'pro', name: 'Pro' }, manage: false };
 }
 
-/** The line shown on coming back from checkout (`?checkout=done` or `cancelled`), or null. */
-export function checkoutNotice(q: string | null): { text: string; done: boolean } | null {
-	if (q === 'done') return { text: 'Thank you: the payment went through. If the plan below hasn’t changed yet, reload the page in a minute.', done: true };
+/**
+ * One Upgrade button's words, with the price when the plans are known
+ * (`GET /billing/plans`): "Upgrade to Pro, monthly (R 899.00 a month)". Without
+ * the offer (still loading, or the call failed) the button reads without it.
+ */
+export function upgradeLabel(name: string, interval: BillingInterval, offer: Pick<Plan, 'priceMonthlyMinor' | 'priceAnnualMinor' | 'currency'> | null): string {
+	const base = `Upgrade to ${name}, ${interval === 'month' ? 'monthly' : 'yearly'}`;
+	if (!offer) return base;
+	const minor = interval === 'month' ? offer.priceMonthlyMinor : offer.priceAnnualMinor;
+	if (!(minor > 0)) return base;
+	return `${base} (${fmtPrice(minor, offer.currency)} ${interval === 'month' ? 'a month' : 'a year'})`;
+}
+
+/**
+ * The shadow-mode note while limits aren't enforced, or null once they are.
+ * With no billing buttons it says plans aren't charged; beside Upgrade or
+ * Manage billing (which can charge) it says only that limits aren't enforced.
+ */
+export function shadowNote(enforced: boolean, hasActions: boolean, whose: string): string | null {
+	if (enforced) return null;
+	const rest = `Usage is counted against the plan’s limits so you can see where ${whose} stands, but nothing is refused.`;
+	return hasActions ? `Limits aren’t enforced yet. ${rest}` : `Plans aren’t charged yet. ${rest}`;
+}
+
+/** Where confirming a paid checkout stands: the plan page re-reads the plan a few times until the subscription shows. */
+export type ConfirmState = 'waiting' | 'confirmed' | 'unconfirmed';
+
+/**
+ * The line shown on coming back from checkout (`?checkout=done` or
+ * `cancelled`), or null. A paid checkout is confirmed by the provider's
+ * webhook, which can land after the person is back: until the subscription
+ * shows, the line says it is waiting, and if it still hasn't after the
+ * page's few re-reads, to reload in a minute.
+ */
+export function checkoutNotice(q: string | null, confirm: ConfirmState = 'confirmed'): { text: string; done: boolean } | null {
+	if (q === 'done') {
+		if (confirm === 'waiting') return { text: 'Thank you: the payment went through. Waiting for the payment provider to confirm…', done: true };
+		if (confirm === 'unconfirmed')
+			return { text: 'Thank you: the payment went through, but the payment provider hasn’t confirmed it yet. Reload the page in a minute.', done: true };
+		return { text: 'Thank you: the payment went through.', done: true };
+	}
 	if (q === 'cancelled') return { text: 'Checkout was cancelled. Nothing was charged.', done: false };
 	return null;
 }
+
+/** How long the plan page waits before each re-read while a paid checkout is unconfirmed (ms; bounded: about 15 s in all). */
+export const CONFIRM_DELAYS_MS = [1000, 2000, 3000, 4000, 5000];

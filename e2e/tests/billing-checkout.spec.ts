@@ -5,21 +5,30 @@
 // the real webhook route; nothing leaves the machine. Declines keeps the
 // person on the page, cancels comes back with nothing charged, pays comes
 // back on Pro with Manage billing, and the mock portal cancels at the period
-// end.
+// end. Then the edges: Back from the mock's page leaves the buttons usable, a
+// refused request says the API's words inline and keeps the focus, and a
+// payment the provider hasn't confirmed yet is waited for.
 import { API_URL } from '../support/env.ts';
 import { expectNoViolations } from '../support/a11y.ts';
 import { expect, test } from '../support/fixtures.ts';
+
+// The buttons carry their prices from GET /billing/plans (migration 323's Pro: R 899.00 a month, R 8 990.00 a year).
+const MONTHLY = /^Upgrade to Pro, monthly \(R.899\.00 a month\)$/;
+const YEARLY = /^Upgrade to Pro, yearly \(R.8.990\.00 a year\)$/;
 
 test('upgrade through the mock checkout, then cancel from the mock portal', async ({ page, owner }) => {
 	void owner;
 	await page.goto('/account/plan');
 	const plan = page.getByRole('region', { name: 'Plan', exact: true });
 	await expect(plan.locator('[data-plan-name]')).toHaveText('Free');
-	await expect(plan.getByRole('button', { name: 'Upgrade to Pro, yearly' })).toBeVisible();
+	await expect(plan.getByRole('button', { name: YEARLY })).toBeVisible();
+	// Beside buttons that can charge, the note says only that limits aren't enforced.
+	await expect(plan.locator('[data-shadow]')).toContainText('Limits aren’t enforced yet.');
+	await expect(plan.locator('[data-shadow]')).not.toContainText('charged');
 	await expectNoViolations(page);
 
 	// The mock's page lives on the API, never on the site.
-	await plan.getByRole('button', { name: 'Upgrade to Pro, monthly' }).click();
+	await plan.getByRole('button', { name: MONTHLY }).click();
 	await expect(page).toHaveURL(new RegExp(`^${API_URL}/billing/mock/checkout\\?t=`));
 	await expect(page.getByRole('heading', { level: 1, name: 'Subscribe to Pro' })).toBeVisible();
 	await expect(page.locator('[data-mock-price]')).toHaveText('ZAR 899.00 a month.');
@@ -30,16 +39,21 @@ test('upgrade through the mock checkout, then cancel from the mock portal', asyn
 
 	// Cancels: back on the plan page, nothing charged.
 	await page.getByRole('button', { name: 'Cancels' }).click();
-	await expect(page).toHaveURL(/\/account\/plan\?checkout=cancelled$/);
 	await expect(page.locator('[data-checkout-notice="cancelled"]')).toHaveText('Checkout was cancelled. Nothing was charged.');
+	// Said through the live region, and taken off the address so a reload doesn't say it again; the notice stays.
+	await expect(page.locator('[data-checkout-status]')).toHaveAttribute('role', 'status');
+	await expect(page).toHaveURL(/\/account\/plan$/);
+	await expect(page.locator('[data-checkout-notice="cancelled"]')).toBeVisible();
 	await expect(plan.locator('[data-plan-name]')).toHaveText('Free');
 
 	// Pays: back on Pro, with Manage billing in Upgrade's place.
-	await plan.getByRole('button', { name: 'Upgrade to Pro, monthly' }).click();
+	await plan.getByRole('button', { name: MONTHLY }).click();
 	await expect(page.getByRole('heading', { level: 1, name: 'Subscribe to Pro' })).toBeVisible();
 	await page.getByRole('button', { name: 'Pays' }).click();
-	await expect(page).toHaveURL(/\/account\/plan\?checkout=done$/);
-	await expect(page.locator('[data-checkout-notice="done"]')).toContainText('the payment went through');
+	// The mock posts its webhook before sending the person back, so the plan is already Pro: nothing to wait for.
+	await expect(page.locator('[data-checkout-notice="done"]')).toHaveText('Thank you: the payment went through.');
+	await expect(page.locator('[data-checkout-notice="done"]')).toHaveAttribute('data-confirm', 'confirmed');
+	await expect(page).toHaveURL(/\/account\/plan$/);
 	await expect(plan.locator('[data-plan-name]')).toHaveText('Pro');
 	await expect(plan.locator('[data-subscription="active"]')).toContainText('Renews');
 	await expect(plan.getByRole('button', { name: /^Upgrade/ })).toHaveCount(0);
@@ -53,4 +67,74 @@ test('upgrade through the mock checkout, then cancel from the mock portal', asyn
 	await expect(plan.locator('[data-plan-name]')).toHaveText('Pro');
 	await expect(plan.locator('[data-subscription="active"]')).toContainText('it won\'t renew');
 	await expect(plan.getByRole('button', { name: 'Manage billing' })).toBeVisible();
+});
+
+test('Back from the mock checkout leaves the Upgrade buttons usable', async ({ page, owner }) => {
+	void owner;
+	await page.goto('/account/plan');
+	const plan = page.getByRole('region', { name: 'Plan', exact: true });
+	await plan.getByRole('button', { name: MONTHLY }).click();
+	await expect(page.getByRole('heading', { level: 1, name: 'Subscribe to Pro' })).toBeVisible();
+
+	await page.goBack();
+	await expect(page).toHaveURL(/\/account\/plan$/);
+	// A page restored from the back-forward cache comes back with the press that left still marked busy; pageshow frees it.
+	for (const name of [MONTHLY, YEARLY]) await expect(plan.getByRole('button', { name })).toHaveAttribute('aria-disabled', 'false');
+	await expect(plan).not.toHaveAttribute('aria-busy', 'true');
+	await plan.getByRole('button', { name: YEARLY }).click();
+	await expect(page.getByRole('heading', { level: 1, name: 'Subscribe to Pro' })).toBeVisible();
+});
+
+test('a refused checkout says the API’s words inline and keeps the focus on the button', async ({ page, owner }) => {
+	void owner;
+	// The billing codes are machine-only, so the page shows the API's English message, not a generic line.
+	await page.route(new RegExp(`^${API_URL}/account/plan/checkout$`), (route) =>
+		route.request().method() === 'POST'
+			? route.fulfill({
+					status: 409,
+					contentType: 'application/json',
+					body: JSON.stringify({ error: 'another checkout for this account started at the same time; try again', code: 'billing_checkout_race' })
+				})
+			: route.fallback()
+	);
+	await page.goto('/account/plan');
+	const plan = page.getByRole('region', { name: 'Plan', exact: true });
+	const monthly = plan.getByRole('button', { name: MONTHLY });
+	await monthly.focus();
+	await page.keyboard.press('Enter');
+
+	await expect(plan.locator('[data-billing-error]')).toHaveText(
+		'Couldn’t open billing: another checkout for this account started at the same time; try again'
+	);
+	await expect(plan.getByRole('alert')).not.toContainText('clashes');
+	// aria-disabled, never disabled, while it asks: the focus stays where the person pressed.
+	await expect(monthly).toBeFocused();
+	await expect(monthly).toHaveAttribute('aria-disabled', 'false');
+	await expect(page).toHaveURL(/\/account\/plan$/);
+	await expectNoViolations(page);
+});
+
+test('back from a payment the provider hasn’t confirmed yet, the page waits for it', async ({ page, owner }) => {
+	void owner;
+	// The first read is the real Free plan; the next answers as the webhook would have left it: Pro, active.
+	let reads = 0;
+	await page.route(new RegExp(`^${API_URL}/account/plan$`), async (route) => {
+		if (route.request().method() !== 'GET') return route.fallback();
+		reads += 1;
+		const res = await route.fetch();
+		if (reads === 1) return route.fulfill({ response: res });
+		const body = (await res.json()) as Record<string, unknown> & { plan: Record<string, unknown> };
+		const subscription = { status: 'active', seats: 1, periodStart: null, periodEnd: null, trialEnd: null, cancelAtPeriodEnd: false };
+		return route.fulfill({ response: res, json: { ...body, plan: { ...body.plan, code: 'pro', name: 'Pro' }, subscription } });
+	});
+	await page.goto('/account/plan?checkout=done');
+	const plan = page.getByRole('region', { name: 'Plan', exact: true });
+	const notice = page.locator('[data-checkout-notice="done"]');
+	await expect(notice).toHaveText('Thank you: the payment went through. Waiting for the payment provider to confirm…');
+	await expect(notice).toHaveAttribute('data-confirm', 'confirmed');
+	await expect(notice).toHaveText('Thank you: the payment went through.');
+	await expect(plan.locator('[data-plan-name]')).toHaveText('Pro');
+	await expect(plan.getByRole('button', { name: 'Manage billing' })).toBeVisible();
+	await expect(page).toHaveURL(/\/account\/plan$/);
+	expect(reads).toBe(2);
 });

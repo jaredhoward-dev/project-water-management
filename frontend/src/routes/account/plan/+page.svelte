@@ -35,6 +35,10 @@
 			loading = false;
 		}
 	}
+	/** Re-read the plan in place, without the loading state (which would remount the body and lose its checkout notice). */
+	async function reload() {
+		plan = await api.billing.mine();
+	}
 	onMount(() => {
 		if (inFarmFrame()) void goto(resolve('account'), { replace: true });
 		else void load();
@@ -59,6 +63,7 @@
 					whose="your account"
 					checkout={(interval) => api.billing.checkout(interval)}
 					portal={() => api.billing.portal()}
+					{reload}
 					returned={page.url.searchParams.get('checkout')}
 				/>{/if}
 		</LoadState>
