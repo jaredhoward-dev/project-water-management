@@ -39,6 +39,8 @@
 		"dev:mail:logs": "docker compose logs -f mailpit",
 		"dev:mail:open": "xdg-open http://localhost:8026 || open http://localhost:8026",
 		"dev:mail:bounce": "pnpm -C backend mail:bounce",
+		"//-- billing --": "dev:billing:replay <fixture> [--account <billing account id>] [--new-id] signs a synthetic Stripe-shaped event (backend/fixtures/billing/, by name or path) with the committed dev-only key and posts it to the local API's POST /billing/webhook/mock (BILLING_PROVIDER=mock, the default; needs pnpm dev and dev:db:up). It answers the API's status and result (applied, recorded, duplicate, conflict, unknown_account); a replayed id is a duplicate, --new-id gives a fresh one. docs/billing.md § Webhooks and providers.",
+		"dev:billing:replay": "pnpm -C backend billing:replay",
 		"//-- s3 --": "MinIO: S3-compatible storage for server-side PDF reports and evidence packs' reproduction bundles (STORAGE=local, the default; issuing a pack stores its bundle, so it needs MinIO): API :9002, console http://localhost:9003 (minioadmin / minioadmin, dev-only). The backend creates the water-reports and water-packs buckets on first use. The worker renders reports with the Chromium from test:e2e:install; see docs/run-locally.md § Reports.",
 		"dev:s3:up": "docker compose up -d --wait minio",
 		"dev:s3:down": "docker compose stop minio",

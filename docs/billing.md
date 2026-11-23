@@ -159,6 +159,135 @@ suspend action yet).
 to anyone else). No farmer route, share link, verify page or email shows plan
 data.
 
+## Webhooks and providers
+
+Phase 3 groundwork (issue #641 "Billing provider"): the provider seam and the
+webhook route. No Stripe account is opened, no Stripe API is called and no
+`stripe` package is installed; checkout and the portal come later.
+
+### Providers
+
+`BILLING_PROVIDER` picks one, in `backend/src/billing/provider.ts`:
+
+| Provider | Webhooks | Use |
+| --- | --- | --- |
+| `mock` (code default) | Stripe-shaped events signed with the committed dev-only `BILLING_WEBHOOK_SECRET` in `backend/.env.development` | local dev and tests: the whole path with no Stripe account |
+| `manual` | none (`404`) | subscriptions the operator records by hand; production's setting until Stripe is set up |
+| `stripe` | Stripe's signed events, checked with `BILLING_WEBHOOK_SECRET` (the endpoint's `whsec_…`) | production, once the operator has the account |
+
+Any other value names no provider, and every webhook is `404`. It never falls
+back to the mock: feohledger's billing doc records how a mistyped provider
+name that resolved to its signature-free mock opened its public webhook. The
+production check (`config/production.ts`) refuses an unset `BILLING_PROVIDER`
+(the mock) and anything but `manual` or `stripe` on the API Lambda, and with
+`stripe` it requires a real `BILLING_WEBHOOK_SECRET` (32+ characters, not a
+`dev-only-` placeholder). Terraform sets `BILLING_PROVIDER = "manual"` on the
+API (`infra/lambda.tf`).
+
+### Signature check
+
+`provider/signature.ts` checks Stripe's `Stripe-Signature: t=<unix>,v1=<hex>`
+with `node:crypto`. It was ported from threkir's `_shared/webhook_security.ts`
+(`verifyTimestampedHmac`):
+
+- The HMAC-SHA256 is over `"<t>.<raw body>"`: the bytes as received, never a
+  re-serialised JSON.
+- `t` must be plain digits, and the signed text is the header's own, so
+  `t=+…`, `t=…junk` and a zero-padded `t` fail.
+- Every `v1` is compared, each in constant time (`timingSafeEqual`); Stripe
+  sends two during a secret rotation. `v0` is ignored.
+- The tolerance is 300 s in both directions. A replay of a captured event
+  fails even though its HMAC is good, and a far-future `t` can't buy a long
+  replay window (the half feohledger's doc records once being missed).
+
+The mock signs the same way with the dev key, so the same check serves both.
+
+### Normalised events
+
+`provider/stripe.ts` turns the six types #641 names into what
+`app_billing_apply` (326) takes. The account is the metadata
+`billing_account_id` (a UUID) and the plan its `plan_code`, both set at
+checkout. Every payload carries the event's `created` time as `eventCreated`
+(ISO), which the SQL ignores for now; it is kept for ordering later.
+
+| Stripe type | Normalised type | Effect in 326 |
+| --- | --- | --- |
+| `customer.subscription.created`, `.updated` | `subscription.updated` | the account's subscription upserted by (provider, `externalRef`) |
+| `customer.subscription.deleted` | `subscription.deleted` | status `canceled` |
+| `checkout.session.completed` | `checkout.completed` | recorded only |
+| `invoice.paid` | `invoice.paid` | recorded only |
+| `invoice.payment_failed` | `invoice.payment_failed` | recorded only (Stripe moves the subscription to `past_due` and sends `customer.subscription.updated`) |
+
+The subscription payload is `{ accountId, planCode, status, seats,
+periodStart, periodEnd, trialEnd, cancelAtPeriodEnd, externalRef }`, with
+times as ISO 8601 in UTC (`…Z`). The period is read from the first
+subscription item (API `2025-03-31.basil` moved it there), else from the
+subscription itself (older versions). An invoice's subscription is read from
+`parent.subscription_details` (basil), else `subscription_details`.
+
+Stripe's statuses map as follows:
+
+- `trialing`, `active`, `past_due` and `canceled` keep their names.
+- `unpaid` becomes `past_due`: still owed, not ended.
+- `incomplete_expired` becomes `expired`.
+- `incomplete` and `paused` grant nothing new, so they become
+  `subscription.pending`, recorded only.
+
+Any other Stripe type is answered `200 ignored` and never written: Stripe only
+sends the types the endpoint enables, so one here is a dashboard slip.
+
+### The route
+
+`POST /billing/webhook/:provider` ([api.md § Billing](./api.md#billing)) is
+public: the signature is the credential.
+
+1. `:provider` must name the configured provider, and one that takes webhooks.
+   Otherwise the answer is `404`, before the body is read.
+2. The body is capped at 256 KiB and read once as text.
+3. Then the signature check and the normalisation. Either failing answers
+   `400` with a fixed message (`invalid signature`, `invalid event`).
+4. `app_billing_apply(provider, event id, type, payload)` runs in a
+   transaction with no user (`withoutUser`, like the job tick's definer
+   calls), never as `water` and never with BYPASSRLS. It records the event
+   once (a redelivery is `duplicate`) and is the only writer of subscription
+   status.
+
+How each result of `app_billing_apply` is answered:
+
+| Result | Answer | Log level |
+| --- | --- | --- |
+| `applied`, `recorded`, `duplicate` | `200 { received: true, result }` | info |
+| `conflict`, `unknown_account` | `200` (a retry wouldn't change them) | warn, for the operator to read |
+| `invalid` | `400` (326 doesn't record it, so a corrected retry under the same id still applies) | warn |
+
+A database error is the app's generic `500`, which Stripe retries. Each answer
+logs one line (`billing_webhook` or `billing_webhook_rejected`) with the
+provider, type, event id and result or reason. It never logs the payload, the
+account or the secret.
+
+### Locally
+
+`pnpm dev:billing:replay <fixture> [--account <id>] [--new-id]` signs one of
+the synthetic events in `backend/fixtures/billing/` with the dev key and posts
+it to the running API's `/billing/webhook/mock` ([run-locally.md § Billing
+webhooks](./run-locally.md#billing-webhooks)). Every id in the fixtures is
+invented, and their account is a placeholder UUID that `--account` replaces.
+The fixtures are `checkout-completed`, `subscription-created` (trialing),
+`subscription-updated` (active), `subscription-past-due`,
+`subscription-deleted`, `invoice-paid` and `invoice-payment-failed`.
+
+### Tests
+
+- `billing/provider/signature.test.ts`: good, tampered, stale and future
+  signatures, the wrong secret, several `v1` values, malformed headers.
+- `billing/provider/stripe.test.ts`: each type, the status map, both API eras,
+  and the refusals.
+- `billing/provider.test.ts`: the provider choice.
+- `billing/webhook.test.ts`: the route with the database mocked.
+- `config/production.security.test.ts`: production refuses the mock.
+- `billing/webhook.db.test.ts`: the route against 326. A signed event applies,
+  a replay or a forgery changes nothing, and an unknown account is a `200`.
+
 ## Later phases
 
 Pointers to [issue #641](https://github.com/jaredhoward-dev/project-water-management/issues/641);
@@ -169,7 +298,7 @@ none of this is built:
   `402 plan_limit` with `{ limit, used, plan }`; soft warnings at 80%;
   downgrade and lapse without data loss; staff plan grants.
 - **Billing provider** ("Billing provider"): Stripe Checkout and the Customer
-  Portal behind `BILLING_PROVIDER` (`mock` by default, local-first), the
-  webhook as the only writer of `subscription`, dunning, refunds and invoices.
+  Portal, dunning, refunds and invoices. The provider seam and the webhook are
+  built ([§ Webhooks and providers](#webhooks-and-providers)).
 - **Legal and tax prerequisites**: the Terms' fees section, CPA and ECTA
   positions, VAT; all before the first charge.

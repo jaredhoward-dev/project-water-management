@@ -65,6 +65,8 @@ In a git worktree both URLs point at that worktree's own dev database,
 | `API_PUBLIC_URL` | `http://localhost:3001` | Where a mail client posts an alert's one-click unsubscribe (production: `SITE_URL/api`, the default) |
 | `ALERTS_ENABLED` / `ALERTS_DAILY_CAP` | `true` / `5` | The alert kill switch, and immediate alert emails per person per day |
 | `BILLING_ENFORCED` | `false` (code default) | Whether plan limits refuse anything. Phase 1 is shadow mode: usage is counted and shown, nothing is refused, and the API only reports this as `enforced` ([billing.md](./billing.md#billing_enforced)) |
+| `BILLING_PROVIDER` | `mock` (code default) | The billing provider the webhook route serves: `mock` (events signed with the dev key below), `manual` (no webhooks) or `stripe` ([billing.md § Webhooks and providers](./billing.md#webhooks-and-providers)) |
+| `BILLING_WEBHOOK_SECRET` | `dev-only-billing-webhook-secret-…` (committed, `.env.development`) | Signs and checks billing webhook events. The committed value is a public dev-only key; production refuses the mock, and Stripe's real secret lives in infra-secrets ([deployment.md § 2. Secrets](./deployment.md#2-secrets-one-time-then-as-needed)) |
 | `PUBLIC_API_URL` (frontend) | `http://localhost:3001` | `/api` in production |
 | `PUBLIC_WAF_CAPTCHA_SCRIPT_URL`, `PUBLIC_WAF_CAPTCHA_API_KEY` (frontend) | empty (no sign-in CAPTCHA: there is no WAF locally) | set by `deploy-frontend.yml` from Terraform outputs (security.md § Sign-in CAPTCHA) |
 
@@ -609,6 +611,27 @@ bucket (`PACKS_BUCKET`, created on first use) under its SHA-256, and records
 that hash on the pack. MinIO keeps it like any object: the production
 bucket's Object Lock retention (infra/packs.tf) has no local stand-in. Without
 the worker the pack's PDF stays "rendering"; `pnpm dev:jobs:tick` prints it.
+
+## Billing webhooks
+
+The billing webhook runs locally with the mock provider (`BILLING_PROVIDER=mock`,
+the default) and the dev-only key committed in `backend/.env.development`. No
+Stripe account is needed ([billing.md § Webhooks and providers](./billing.md#webhooks-and-providers)).
+With `pnpm dev` running, find a billing account (`pnpm dev:db:psql`, then
+`SELECT id FROM billing_account;`; a person's is made on their first
+`GET /account/plan`), then:
+
+```bash
+pnpm dev:billing:replay subscription-created --account <id>
+pnpm dev:billing:replay subscription-updated --account <id>
+pnpm dev:billing:replay subscription-updated --account <id>   # the same event id again: duplicate
+pnpm dev:billing:replay subscription-deleted --account <id> --new-id
+```
+
+Each prints the API's status and answer (`applied`, `recorded`, `duplicate`,
+`conflict`, `unknown_account`). Without `--account`, the fixtures' placeholder
+account answers `unknown_account`. The script signs only with a `dev-only-`
+key and posts only to localhost.
 
 ## Assistant
 

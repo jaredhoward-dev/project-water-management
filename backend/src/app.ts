@@ -78,6 +78,7 @@ import { priorRoutes } from './calibration/prior.js';
 import { outlookRoutes } from './outlooks/routes.js';
 import { teamRoutes } from './teams/routes.js';
 import { accountPlanRoutes, billingPublicRoutes, teamPlanRoutes } from './billing/routes.js';
+import { billingWebhookRoutes } from './billing/webhook.js';
 import { teamMfaResetRoutes } from './teams/mfa-reset-routes.js';
 import { yieldRoutes } from './yield/routes.js';
 import { futureYieldRoutes } from './future/routes.js';
@@ -280,6 +281,8 @@ export function createApp() {
 
 	// Billing, Phase 1 (issue #641, shadow mode): the public plan list, and the signed-in person's own plan and usage.
 	app.route('/billing', billingPublicRoutes);
+	// The billing provider's webhook (Phase 3): no session, the signature over the raw body is the credential (billing/webhook.ts).
+	app.route('/billing', billingWebhookRoutes);
 	const account = new Hono<AuthEnv>();
 	account.use('*', requireUser);
 	account.route('/', accountPlanRoutes);

@@ -175,6 +175,12 @@ resource "aws_lambda_function" "backend" {
       # The backend treats an unset value on Lambda as closed too.
       SIGNUP_OPEN = var.signup_open ? "true" : "false"
 
+      # The billing provider the webhook route serves (backend/src/billing/provider.ts,
+      # docs/billing.md § Webhooks and providers). The code default is the mock,
+      # which the backend's production check refuses; manual takes no webhooks
+      # until the operator moves to stripe with its signing secret (deployment.md).
+      BILLING_PROVIDER = "manual"
+
       # Email (ses.tf, docs/deployment.md § Email). MAIL_TRANSPORT must be set:
       # the default `log` sends nothing.
       MAIL_TRANSPORT        = "ses"
