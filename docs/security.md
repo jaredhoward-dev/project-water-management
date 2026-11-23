@@ -1933,7 +1933,11 @@ In short:
   `billing_account`, `subscription` and `usage_counter`; every write goes
   through the SECURITY DEFINER functions (`app_my_billing_account`,
   `app_team_billing_account`, `app_usage_add`) and triggers
-  (`billing.db.test.ts`).
+  (`billing.db.test.ts`). Subscription status is written only by
+  `app_billing_apply` (326), the provider webhook's function, which runs
+  with no user and refuses (`42501`) inside a user's or an API key's
+  transaction; `billing_event`, its de-duplication, is owner-only
+  (`apply.db.test.ts`).
 - **Accounts under RLS** (`068_app_user_rls.sql`). `app_user` had no RLS
   (sign-in reads it before anyone is signed in), so any `water_app`
   transaction, an API key's or the job tick's included, could read every
@@ -4159,6 +4163,7 @@ PDF someone else asked for kept the person as a recipient
 | The assistant's use (262; 324 added the cache tokens and the cost in micro-USD): the person's tokens (input and output) and messages per project and UTC month, as counts only (never the conversation); own rows only under RLS; in "Download my data" (`assistantUsage`) | `assistant_usage` | The month it counts and the 12 after it (`ASSISTANT_USAGE_RETENTION_MONTHS`, 13), then deleted by the job tick (`app_purge_assistant`) | Kept without the name (`user_id` set null), so the month still counts what was spent, until its retention ends | Deleted |
 | The person's billing account (323, issue #641): kind (`user`), its lifetime count of projects created and when it was made; made when their first project needs it or when they open their plan (`GET /account/plan`); own row only under RLS (a team's account is the team's, read by its admins); in "Download my data" (`billing.account`). `project.billing_account_id` points at it | `billing_account` | Until the account is deleted | Deleted (cascades from `app_user`); each project it billed keeps going with `billing_account_id` set null | – (the account isn't the project's) |
 | The billing account's subscriptions (323): plan, status, seats, period, trial end, whether it cancels at period end, the provider and its reference; empty in Phase 1 (no provider); read under RLS by the account's person (or its team's admins); in "Download my data" (`billing.subscriptions`) | `subscription` | Until the account is deleted | Deleted (cascades from `billing_account`) | – |
+| The billing provider's webhook events for the account (326): the provider, its event id and type, when it arrived, what it did, and the account it named; no one reads it under RLS (owner-only); not in "Download my data", which already holds the subscriptions they set | `billing_event` | Until a purge past the providers' retry windows is built (not yet; the table is indexed for it) | Kept without the account (`account_id` set null when the billing account cascades away) | – |
 | The billing account's monthly counts (323): server PDF reports queued and evidence packs issued, per SAST month, counts only; read under RLS as `subscription`; in "Download my data" (`billing.usageCounters`) | `usage_counter` | Until the account is deleted | Deleted (cascades from `billing_account`) | – (counted on the account, not the project) |
 | The assistant's messages per person in the current hour, for the hourly cap (262); no one reads it but the cap's own function | `assistant_rate` | Until its hour is over: the person's next message or the job tick deletes it | Deleted | – |
 | A running assistant turn's reserved budget (264): who began it, on which project, and how many weighted tokens; no one reads it but the assistant's own functions | `assistant_reservation` | While the turn runs: deleted when it is charged, or, if never charged, converted into the usage row in full once it expires (the turn's deadline + 120 s; the next turn or the job tick) | Kept without the name (`user_id` set null) until it is charged or expires | – |
