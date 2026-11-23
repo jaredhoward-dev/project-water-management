@@ -15590,7 +15590,20 @@ saved unit with the error above them). There it is `segmented`:
   placeholder or a bold marker, and on a note or section nothing uses.
   `pnpm check:i18n` prints what has no words yet and lists any stale
   translation, for every language, and fails when a sheet or the id list is
-  out of date, a message can't be read, or a translation is stale. A stale
+  out of date, a message can't be read, or a translation is stale. It also
+  fails when an **offered** language (every row of `LANGUAGES` but English,
+  unless marked `translating: true`) has a site message with no words: the
+  page's `lang` stays `en` until the site catalogue is complete
+  (`isComplete`), so one missing string would make every farm, sign-in,
+  account and `/share` page announce Afrikaans text as English to a screen
+  reader (WCAG 3.1.1). The failure names each untranslated id with its
+  English and the fix: `pnpm gen:i18n:export <code> <dir>`, the
+  i18n-translator and i18n-checker agents, `pnpm gen:i18n:apply <code> …`.
+  So a PR that adds or changes a farmer-facing string carries its
+  translation. Emails and glossary entries don't count (each falls back to
+  English on its own, and `isComplete` doesn't read them); they stay counts
+  in the report. `locale.test.ts` pins that `isComplete`'s entry count and
+  the guard's per-id check (`missingSite`) agree on every real catalogue. A stale
   site translation is moved to the new id once the translator has checked
   it against the new English, or deleted. When the English of a translated
   glossary entry changes, the entry goes back on its sheet (marked "the
@@ -15610,8 +15623,10 @@ translation run. No other code changes; `frontend/src/lib/i18n/testLanguage.test
 fixture repo, never the real one) prove it with a stand-in `xx` that exists
 only in the tests.
 
-1. **Table entry.** Add `{ code, name, intl, decimalMark }` to `LANGUAGES`
-   in `packages/engine/src/languages.ts`: `code` the BCP 47 primary tag
+1. **Table entry.** Add `{ code, name, intl, decimalMark, translating: true }`
+   to `LANGUAGES` in `packages/engine/src/languages.ts` (`translating` keeps
+   `pnpm check:i18n` from failing while its site catalogue is still being
+   filled; remove it once the translation run is done): `code` the BCP 47 primary tag
    (2–3 lower-case letters), `name` in the language itself, `intl` the Intl
    locale South Africa writes it in (e.g. `zu-ZA`), `decimalMark` `.` or `,`.
    The next migration run adds the code to the `language` table (no
@@ -15631,6 +15646,9 @@ only in the tests.
    `catalogues.test.ts`).
 3. **Translation run.** `pnpm gen:i18n:export <code> <dir>`, translate,
    `pnpm check:i18n`, `pnpm gen:i18n:apply <code> …` (§ Translation above).
+   Once the site catalogue is complete, delete `translating: true` from the
+   table entry: from then on `pnpm check:i18n` fails on any site message
+   without its words.
 4. **Layout and axe.** `e2e/tests/lang-layout.spec.ts` already runs once
    per non-English language in the table, so the new one needs no new spec
    file — make sure it (and `language.spec.ts`) passes. From the third

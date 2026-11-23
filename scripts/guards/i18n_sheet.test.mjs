@@ -11,6 +11,9 @@ import {
 	helpGroup,
 	helpHash,
 	IDS,
+	incompleteProblem,
+	isOffered,
+	missingSite,
 	placeholders,
 	renderIds,
 	renderSheet,
@@ -174,5 +177,72 @@ test('a language with no catalogue files yet lists everything untranslated (a fi
 		assert.equal(helpGroup(src.help, src.helpAf).rows.length, 3);
 	} finally {
 		cleanup();
+	}
+});
+
+// ---- Completeness: an offered language must have every site message (check:i18n fails otherwise) ----
+
+const XX_LANGS = (row) => ({
+	'packages/engine/src/languages.ts': `export const LANGUAGES = [
+	{ code: 'en', name: 'English', intl: 'en-ZA', decimalMark: '.' },
+	${row}
+];
+export const LOCALES = LANGUAGES.map((l) => l.code);
+export const DEFAULT_LOCALE = 'en';
+`
+});
+const XX_SITE = (words) => ({ 'frontend/src/lib/i18n/messages/xx.ts': `export const xx = ${JSON.stringify(words)};\n` });
+
+/** The fixture's xx row and sources, with `extra` files on top. */
+async function xxCase(extra) {
+	const { root, cleanup } = makeFixture(extra);
+	try {
+		const [lang] = await translatedLanguages(root);
+		return { lang, src: await sources('xx', await commonSources(root)) };
+	} finally {
+		cleanup();
+	}
+}
+
+test('an offered language with an untranslated site message fails, naming the id, its English and the fix', async () => {
+	const { lang, src } = await xxCase({});
+	assert.equal(isOffered(lang), true);
+	assert.deepEqual(src.missingSiteIds, [messageId('Stand-in message')]);
+	const problem = incompleteProblem(lang, src);
+	assert.ok(problem);
+	assert.match(problem, /Xx .*\(xx\) is offered but 1 site message has no translation/);
+	assert.ok(problem.includes(`${messageId('Stand-in message')}  "Stand-in message"`));
+	assert.match(problem, /pnpm gen:i18n:export xx <dir>/);
+	assert.match(problem, /i18n-translator and i18n-checker/);
+	assert.match(problem, /pnpm gen:i18n:apply xx/);
+});
+
+test('an offered language whose site catalogue is complete passes, even with emails and glossary untranslated', async () => {
+	const { lang, src } = await xxCase(XX_SITE({ [messageId('Stand-in message')]: 'Plaasvervanger' }));
+	assert.deepEqual(src.missingSiteIds, []);
+	assert.equal(incompleteProblem(lang, src), null);
+	assert.equal(src.mail[0].rows.length, 1, 'the email string is still untranslated');
+});
+
+test('a language marked translating: true is reported but never fails for being incomplete', async () => {
+	const { lang, src } = await xxCase(XX_LANGS(`{ code: 'xx', name: 'Xx', intl: 'en-ZA', decimalMark: '.', translating: true }`));
+	assert.equal(isOffered(lang), false);
+	assert.equal(src.missingSiteIds.length, 1);
+	assert.equal(incompleteProblem(lang, src), null);
+	assert.match(report(src).text, /No words yet: 1 site strings/);
+});
+
+test('a counted word is missing until its translation has at least the other form', () => {
+	const messages = site([days]);
+	assert.deepEqual(missingSite(messages, {}), [days.id]);
+	assert.deepEqual(missingSite(messages, { [days.id]: { one: 'dag' } }), [days.id]);
+	assert.deepEqual(missingSite(messages, { [days.id]: { one: 'dag', other: 'dae' } }), []);
+});
+
+test('every offered language in the real table has every site message translated', async () => {
+	const common = await commonSources();
+	for (const lang of await translatedLanguages()) {
+		const src = await sources(lang.code, common);
+		assert.equal(incompleteProblem(lang, src), null);
 	}
 });

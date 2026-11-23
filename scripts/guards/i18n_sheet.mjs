@@ -7,7 +7,8 @@
 //
 //   node scripts/guards/i18n_sheet.mjs [lang...]          write the sheet(s)  (pnpm gen:i18n:sheet)
 //   node scripts/guards/i18n_sheet.mjs --check [lang...]  list what the translator has left, and exit 1 if a
-//                                                          sheet is out of date or a glossary translation is stale
+//                                                          sheet is out of date, a translation is stale, or an
+//                                                          offered language's site catalogue is incomplete
 //                                                          (pnpm check:i18n)
 //
 // With no language given: every non-English language in
@@ -20,6 +21,16 @@
 // (its sourceHash no longer matches): once the translator has re-checked it,
 // `pnpm gen:i18n:stamp <lang> <id>` (i18n_stamp.mjs) stamps it from the new
 // English.
+//
+// An offered language (every row of LANGUAGES but the fallback, unless it is
+// marked `translating: true`) must have every site message translated: the
+// frontend's isComplete (frontend/src/lib/i18n/locale.svelte.ts) keeps
+// <html lang>, plural rules and dates in English until it does, so one missing
+// message makes every farm, sign-in, account and /share page claim to be
+// English while showing that language (WCAG 3.1.1). --check fails, naming the
+// untranslated ids. Emails and the glossary aren't part of it: an email
+// string or glossary entry with no words falls back to English on its own,
+// and isComplete doesn't read them, so they stay a count in the report.
 //
 // A site translation is stale when its id is no longer a message's: the
 // English it was made from changed (the id is a hash of the English,
@@ -139,6 +150,37 @@ export function siteGroups({ messages, af, sections, notes = {} }) {
 		g.rows.push({ key: m.id, english: m.english, context: [meaning, notes[m.english], keep([m.english])].filter(Boolean).join(' ') });
 	}
 	return [...groups.values()].filter((g) => g.rows.length);
+}
+
+/**
+ * The site messages with no translation in `cat`, by id. With no stale ids
+ * (checked separately), this is empty exactly when the frontend's isComplete
+ * (an entry count against MESSAGE_COUNT) is true; locale.test.ts pins that the
+ * two agree on the real catalogue.
+ */
+export function missingSite(messages, cat) {
+	return [...messages.values()].filter((m) => !translated(m, cat)).map((m) => m.id);
+}
+
+/** A language the app offers as finished: every one but those still being translated (`translating: true` in LANGUAGES). */
+export const isOffered = (lang) => lang.translating !== true;
+
+/**
+ * Why an offered language fails check:i18n's completeness rule, or null when
+ * it passes (complete, or still `translating`). `src` is sources()'s result.
+ */
+export function incompleteProblem(lang, src) {
+	if (!isOffered(lang) || src.missingSiteIds.length === 0) return null;
+	const english = (id) => {
+		const m = src.messages.get(id);
+		return m.kind === 'plural' ? m.forms.other : m.english;
+	};
+	return [
+		`${lang.name} (${lang.code}) is offered but ${src.missingSiteIds.length} site message${src.missingSiteIds.length === 1 ? ' has' : 's have'} no translation, so every farmer page keeps <html lang="en"> (isComplete, frontend/src/lib/i18n/locale.svelte.ts):`,
+		...src.missingSiteIds.map((id) => `  ${id}  ${JSON.stringify(english(id))}`),
+		`Translate them: pnpm gen:i18n:export ${lang.code} <dir>, then the i18n-translator and i18n-checker agents (.claude/agents/i18n/), then pnpm gen:i18n:apply ${lang.code} <file.json …> (docs/ui.md § Language).`,
+		`A language still being translated is marked translating: true in ${LANGUAGES_FILE}.`
+	].join('\n');
 }
 
 /** A language's catalogue ids that aren't a current message's: made from English that has since changed, or for a message that is gone. */
@@ -300,7 +342,7 @@ export async function commonSources(root = ROOT) {
 
 /**
  * One language's untranslated strings: { code, messages, problems,
- * staleSiteIds, site, mail, help, helpAf }. `common` is commonSources()'s
+ * staleSiteIds, missingSiteIds, site, mail, help, helpAf }. `common` is commonSources()'s
  * result (shared across languages in one run; computed here when omitted). A
  * language whose site, mail or glossary catalogue file doesn't exist yet is
  * treated as an empty one: its sheet lists everything.
@@ -320,6 +362,7 @@ export async function sources(code, common) {
 		messages,
 		problems,
 		staleSiteIds: staleSite(messages, siteCat),
+		missingSiteIds: missingSite(messages, siteCat),
 		site: siteGroups({ messages, af: siteCat, sections: sheet.SECTIONS, notes: sheet.NOTES }),
 		mail: catalogueGroups({ en: mailEn.en, af: mailCat, sections: mailEn.sections, notes: mailEn.notes }),
 		help: help.FARMER_HELP,
@@ -369,6 +412,11 @@ async function main() {
 			const src = await sources(lang.code, common);
 			console.log(`${lang.name} (${lang.code}): ${report(src).text}`);
 			if (report(src).stale.length) failed = true;
+			const incomplete = incompleteProblem(lang, src);
+			if (incomplete) {
+				console.error(incomplete);
+				failed = true;
+			}
 			const sheet = sheetOf(lang, src);
 			if (read(sheetPath(lang.code)) !== sheet) {
 				console.error(`${sheetPath(lang.code)} is out of date: run pnpm gen:i18n:sheet ${lang.code} and commit it.`);
