@@ -74,6 +74,18 @@ and the `format`):
 echo "SELECT format('DROP DATABASE %I WITH (FORCE)', datname) FROM pg_database WHERE datname ~ '^water_(w|test_w|e2e_)[0-9]{1,2}(_migrate)?\$' \gexec" | docker exec -i water-management-db psql -U water -d water
 ```
 
+## Memory
+
+Vitest starts a worker a core by default. On a many-core laptop that is many
+Node processes at once, and the backend's unit project ran past a per-job
+memory cap and was OOM-killed (20 workers; it passed with 4). The backend
+`unit` project and the engine's fuzz shards therefore cap themselves at
+`min(4, cores − 1)` workers (`backend/vitest.config.ts`,
+`packages/engine/vitest.config.ts`): on CI's 4-core runners that is 3,
+vitest's own default, so CI is unchanged. A run killed with exit 137 or 143
+and no failing test printed is a memory limit, not the code; pass
+`--maxWorkers=2` to go lower.
+
 ## Performance budgets
 
 The perf targets assert wall-clock ceilings, so they are **not** in
