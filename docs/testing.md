@@ -46,6 +46,22 @@ rebuild their schema on every run anyway); `pnpm dev:docker:wipe` deletes the
 volume, every checkout's databases with it
 ([run-locally.md § Common issues](./run-locally.md#common-issues)).
 
+What guards those two: `backend/src/config/devDbReset.test.ts` covers the
+reset's guard (`resetTarget`, `ownDevDbName`: a non-local URL, another port,
+another checkout's database, a test or e2e database and a stray
+`DEV_DB_NAME` are each refused before anything is dropped), and
+`scripts/guards/docker_volumes.test.mjs` that no root script but
+`dev:docker:wipe` deletes the volumes. The rest of
+`backend/scripts/db-reset.ts` (count open connections and refuse,
+`DROP DATABASE`, `CREATE DATABASE`, then `migrate()`) is left untested on
+purpose. A DB test of it would have to drop and create a database the guard
+never names, so it would need a test-only way round the guard, the one thing
+that keeps a reset off the other checkouts' databases on the shared server;
+and what it would add over the guard's test is three SQL statements and
+`migrate()`, which every DB test run already applies to a fresh
+`water_test…`. Change those statements by hand and run `pnpm dev:db:reset`
+once in a worktree to see it.
+
 Until 2026-10-03 every name came from a hash of the path into 98 slots
 (`water_test_w<1–98>`, `water_w<1–98>`, `water_e2e_<1–98>`), and three
 worktrees once shared `water_test_w3`: each run dropped the others' schema

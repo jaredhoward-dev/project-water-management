@@ -83,6 +83,8 @@ export interface CheckoutPlan {
 /** The account's live subscription as app_account_plan answers it, for the mock portal. */
 export interface LiveSubscription {
 	planCode: string;
+	/** The plan's name ("Pro"), for the mock's portal page to show. */
+	planName?: string;
 	status: string;
 	periodStart: string | null;
 	periodEnd: string | null;

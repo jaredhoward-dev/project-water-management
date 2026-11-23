@@ -168,8 +168,13 @@ describe('a render session, over every route', () => {
 		expect(refused).toEqual(expect.arrayContaining(['DELETE /projects/:id', 'GET /projects/:id/runs', 'GET /projects/:id/runs/:runId/export/daily.csv', 'GET /projects/:id/runs/:runId/allocations', 'POST /auth/logout-everywhere', 'GET /auth/me/export']));
 		// What was skipped as public is only the sign-in and token flows, a pack's public verify (its printed fields only),
 		// the published plan list (prices and limits, the same for everyone; docs/billing.md), and the billing
-		// provider's webhook, whose credential is its signature over the raw body, not a session.
-		for (const r of publicRoutes) expect(r).toMatch(/^(GET \/health|POST \/auth\/|POST \/share\/|POST \/alerts\/(unsubscribe|feedback)|GET \/verify\/:code$|GET \/billing\/plans$|POST \/billing\/webhook\/:provider$)/);
+		// provider's webhook, whose credential is its signature over the raw body, not a session; and the mock provider's
+		// checkout and portal pages (dev only: 404 unless BILLING_PROVIDER=mock, which production refuses), whose credential
+		// is the signed one-hour token in ?t= (billing/mockCheckout.ts).
+		for (const r of publicRoutes)
+			expect(r).toMatch(
+				/^(GET \/health|POST \/auth\/|POST \/share\/|POST \/alerts\/(unsubscribe|feedback)|GET \/verify\/:code$|GET \/billing\/plans$|POST \/billing\/webhook\/:provider$|(GET|POST) \/billing\/mock\/(checkout|portal)$)/
+			);
 
 		// The project the session could have harmed is untouched (the refused DELETE and PATCH did nothing).
 		const after = await owner.call('GET', `/projects/${projectId}`);

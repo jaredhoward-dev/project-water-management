@@ -54,7 +54,7 @@ interface AccountState {
 	customerRef: string | null;
 	plan: AccountPlanJson;
 }
-type AccountPlanJson = { plan?: { code?: string }; subscription?: (Omit<LiveSubscription, 'planCode'> & { status: string }) | null };
+type AccountPlanJson = { plan?: { code?: string; name?: string }; subscription?: (Omit<LiveSubscription, 'planCode'> & { status: string }) | null };
 
 /** The account's kind, plan and customer, read as the caller; null when they may not (app_account_plan's own check). */
 async function accountState(db: Db, accountId: string | null): Promise<AccountState | null> {
@@ -101,6 +101,7 @@ async function portal(c: Context<AuthEnv>, resolve: (db: Db) => Promise<string |
 	const live: LiveSubscription | null = sub
 		? {
 				planCode: String(state.plan.plan?.code ?? 'free'),
+				planName: state.plan.plan?.name,
 				status: sub.status,
 				periodStart: sub.periodStart,
 				periodEnd: sub.periodEnd,

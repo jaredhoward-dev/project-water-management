@@ -371,6 +371,19 @@ beforeAll(async () => {
 		`INSERT INTO erratum_notice (erratum_id, project_id, user_id, run_count, status, sent_at, settled_at) VALUES ('ER-1', $1, $2, 1, 'sent', now(), now())`,
 		[projectId, subject.id]
 	);
+	// A yearly renewal notice sent to them (329, CPA s14), on a subscription of their own billing account (opening their
+	// plan page, which makes it): as the schema owner, the renewal pipeline isn't under test. The deletion cascades both away.
+	await call(subject, 'GET', '/account/plan');
+	const [billingAccount] = await asOwner('SELECT id FROM billing_account WHERE user_id = $1', [subject.id]);
+	const [renewing] = await asOwner(
+		`INSERT INTO subscription (billing_account_id, plan_code, status, provider, external_ref, period_start, period_end)
+		 VALUES ($1, 'pro', 'active', 'manual', $2, '2026-03-01T10:00:00Z', '2027-03-01T10:00:00Z') RETURNING id`,
+		[billingAccount.id, `renewal-${tag}`]
+	);
+	await asOwner(
+		`INSERT INTO renewal_notice (subscription_id, period_end, user_id, status, sent_at, settled_at) VALUES ($1, '2027-03-01T10:00:00Z', $2, 'sent', now(), now())`,
+		[renewing.id, subject.id]
+	);
 	// Evidence that names its maker (138, issue #112): a project they imported (with its import report) and a team they
 	// made, each with the owner as a second owner or admin; a run of theirs, nominated as evidence, with a completed
 	// ensemble; and a team scenario. All stay after the deletion, with the maker cleared.
@@ -442,12 +455,16 @@ describe('the data-subject export carries every row USER_FK_COVERAGE files under
 		const stored = rows[0]!.n;
 		// The fixture reaches every sectioned key, so an empty section can't pass for a complete one.
 		expect(stored, `the fixture writes no ${table} row for the subject: add one`).toBeGreaterThan(0);
-		expect(Array.isArray(doc[section]), `export has no "${section}" array`).toBe(true);
+		// A dotted section is a path into the export (billing.renewalNotices); an object there is a one-row-per-person table's row.
+		const found = section.split('.').reduce<unknown>((at, key) => (at != null && typeof at === 'object' ? (at as Doc)[key] : undefined), doc);
+		const isRow = found != null && typeof found === 'object' && !Array.isArray(found);
+		expect(Array.isArray(found) || isRow, `export has no "${section}" array (or row)`).toBe(true);
+		const got = (isRow ? [found] : found) as Doc[];
 		// The audit section also carries the events *about* them (subject.userId); a note's revisions are inside it (only its
 		// author edits a note, 115); every other section is exactly their rows.
-		if (fk === 'audit_event.actor_user_id') expect(doc[section].length).toBeGreaterThanOrEqual(stored);
-		else if (fk === 'note_revision.edited_by') expect(doc[section].flatMap((n: { revisions: unknown[] }) => n.revisions)).toHaveLength(stored);
-		else expect(doc[section]).toHaveLength(stored);
+		if (fk === 'audit_event.actor_user_id') expect(got.length).toBeGreaterThanOrEqual(stored);
+		else if (fk === 'note_revision.edited_by') expect(got.flatMap((n) => n.revisions as unknown[])).toHaveLength(stored);
+		else expect(got).toHaveLength(stored);
 	});
 
 	it('gives every APP_USER_EXPORTED column, with the value stored', async () => {

@@ -106,15 +106,25 @@ personal information under POPIA (see [plan.md questions](./plan.md#questions-fo
   second-factor reset's confirm and cancel tokens, 205, each in its own
   table: `mfa_reset.confirm_hash`, `mfa_reset_cancel`), so each is
   looked up only in its own table and, for email tokens, for its own purpose.
-  The backend reads a credential in exactly four places: the `wm_session`
+  The backend reads a credential in exactly five places: the `wm_session`
   cookie (`auth/session.ts`), `Authorization: Bearer` on `/ingest/*` only
-  (`ingest/auth.ts`), `?token=` on the one-click unsubscribe, and the billing
+  (`ingest/auth.ts`), `?token=` on the one-click unsubscribe, the billing
   provider's `Stripe-Signature` on `POST /billing/webhook/:provider` only
   (`billing/provider/signature.ts`: an HMAC-SHA256 over `t.` + the raw body
   under `BILLING_WEBHOOK_SECRET`, compared in constant time, 300 s either way,
   a 256 KiB body cap; 404 unless the path names the configured provider, and
   `app_billing_apply` runs with no user, docs/billing.md § Webhooks and
-  providers); every other token travels in its public route's JSON body. No route takes a token from a
+  providers), and `?t=` on the mock provider's checkout and portal pages
+  (`GET`/`POST /billing/mock/checkout` and `/billing/mock/portal`,
+  `billing/mockCheckout.ts`; dev only). Those four routes are public: the
+  credential is a signed session token (`billing/provider/mock.ts`: the
+  account, the plan or subscription and the return URLs, HMAC-SHA256 under
+  the dev `BILLING_WEBHOOK_SECRET` with its own context string, so it is
+  never a valid webhook signature), for one account and one hour. They answer
+  `404` unless `BILLING_PROVIDER=mock`, which production refuses (§ Infrastructure,
+  "Production configuration fails closed"), so they never answer on the deployed API. The two POSTs are
+  exempt from the CSRF check (§ Alerts, "The unsubscribe token" › CSRF), docs/billing.md § The
+  mock. Every other token travels in its public route's JSON body. No route takes a token from a
   path parameter. An unsubscribe token turns off only its own subscription,
   whose person, project, kind and farm can never change (trigger
   `alert_subscription_stamp`). `auth/token-confusion.security.db.test.ts`
@@ -1808,12 +1818,17 @@ against its owner, and a farmer's mail naming a neighbour's farm.
     acts on the click, not on arrival, so a mail scanner that opens (and
     even renders) links can't silently switch a farmer's dam alerts off.
     The one-click header is the one-click path.
-  - *CSRF.* `POST /alerts/unsubscribe` is the only route exempt from the
-    `csrf()` check (`app.ts`, exact method and path): a mail client
-    form-posts it from its own servers with no Origin. It reads no session
-    cookie, so a forged cross-site post can do only what the token's holder
-    could do anyway. `routes.test.ts` checks the exemption stays that
-    narrow (the same form post to any other route is refused).
+  - *CSRF.* `POST /alerts/unsubscribe` is exempt from the `csrf()` check
+    (`app.ts`, exact method and path): a mail client form-posts it from its
+    own servers with no Origin. It reads no session cookie, so a forged
+    cross-site post can do only what the token's holder could do anyway.
+    The only other exemptions are the mock billing pages' two form posts
+    (`POST /billing/mock/checkout`, `POST /billing/mock/portal`), on the
+    same reasoning: they post from the API's own origin, which isn't a site
+    origin, read no session, act only for their signed token's account, and
+    answer `404` unless `BILLING_PROVIDER=mock`, which production refuses.
+    `routes.test.ts` checks the exemption stays that narrow (the same form
+    post to any other route is refused).
   - *Rate limiting.* The WAF's per-IP rule on `/api/*`; a 256-bit token
     can't be guessed.
 - **"Was this useful?" (issue #74, `151_alert_feedback`).**
@@ -2755,7 +2770,9 @@ In short:
   Treat a failing RLS test like a failing auth check: never skip it.
 - **Every route needs a session unless it is on the public allowlist**
   (`/health`, register, login, logout, forgot/reset password, verify email,
-  invite info). `backend/src/routes.test.ts` (a unit test, no DB) walks every
+  invite info, and the billing routes [§ Credentials](#credentials-never-stand-in-for-each-other)
+  describes: the plan list, the provider's webhook and the dev-only mock
+  checkout and portal pages). `backend/src/routes.test.ts` (a unit test, no DB) walks every
   registered route and fails if a non-public one answers an anonymous request
   with anything but `401`.
 - **Errors never echo the database.** `backend/src/http/errors.ts` maps
@@ -4166,10 +4183,11 @@ PDF someone else asked for kept the person as a recipient
 | Adds by email, counted for the daily cap: the adder's id and the project's or team's (101) | `invite_throttle` | 24 hours from the window's first add | Lapses with its window | Lapses with its window |
 | Dam traces, counted for the hourly cap: the user's id and the project's (186) | `map_compute_throttle` | One hour from the window's first attempt | Lapses with its window | Lapses with its window |
 | The assistant's use (262; 324 added the cache tokens and the cost in micro-USD): the person's tokens (input and output) and messages per project and UTC month, as counts only (never the conversation); own rows only under RLS; in "Download my data" (`assistantUsage`) | `assistant_usage` | The month it counts and the 12 after it (`ASSISTANT_USAGE_RETENTION_MONTHS`, 13), then deleted by the job tick (`app_purge_assistant`) | Kept without the name (`user_id` set null), so the month still counts what was spent, until its retention ends | Deleted |
-| The person's billing account (323, issue #641): kind (`user`), its lifetime count of projects created and when it was made; made when their first project needs it or when they open their plan (`GET /account/plan`); own row only under RLS (a team's account is the team's, read by its admins); in "Download my data" (`billing.account`). `project.billing_account_id` points at it | `billing_account` | Until the account is deleted | Deleted (cascades from `app_user`); each project it billed keeps going with `billing_account_id` set null | – (the account isn't the project's) |
+| The person's billing account (323, issue #641): kind (`user`), its lifetime count of projects created and when it was made; made when their first project needs it or when they open their plan (`GET /account/plan`); own row only under RLS (a team's account is the team's, read by its admins); its customer reference at the billing provider (328, `external_customer_ref`: Stripe's `cus_…`, set at the first checkout; null under the mock and `manual`); in "Download my data" (`billing.account`, the reference included). `project.billing_account_id` points at it | `billing_account` | Until the account is deleted | Deleted (cascades from `app_user`); each project it billed keeps going with `billing_account_id` set null | – (the account isn't the project's) |
 | The billing account's subscriptions (323): plan, status, seats, period, trial end, whether it cancels at period end, the provider and its reference; empty in Phase 1 (no provider); read under RLS by the account's person (or its team's admins); in "Download my data" (`billing.subscriptions`) | `subscription` | Until the account is deleted | Deleted (cascades from `billing_account`) | – |
 | The billing provider's webhook events for the account (326): the provider, its event id and type, when it arrived, what it did, and the account it named; no one reads it under RLS (owner-only); not in "Download my data", which already holds the subscriptions they set | `billing_event` | 90 days from arrival, then the tick deletes it (327 `app_purge_billing_events`, `BILLING_EVENT_RETENTION_DAYS`; never under 4 days, past Stripe's 3-day redelivery window) | Kept without the account (`account_id` set null when the billing account cascades away) | – |
 | The billing account's monthly counts (323): server PDF reports queued and evidence packs issued, per SAST month, counts only; read under RLS as `subscription`; in "Download my data" (`billing.usageCounters`) | `usage_counter` | Until the account is deleted | Deleted (cascades from `billing_account`) | – (counted on the account, not the project) |
+| The yearly renewal notices sent to the person (329, issue #641; CPA s14(2)(c)): one per subscription and period, with the period end it was about, its send status, attempts, when it was claimed, sent and settled, and a short failure reason; the email's words aren't stored. Written only by the worker's definer functions; own rows readable under RLS; in "Download my data" (`billing.renewalNotices`: period end, status, when sent and when made) | `renewal_notice` | Kept as the record that the notice went, until its subscription or the person's account is deleted | Deleted (cascades from `app_user`, and from `subscription` with the billing account) | – |
 | The assistant's messages per person in the current hour, for the hourly cap (262); no one reads it but the cap's own function | `assistant_rate` | Until its hour is over: the person's next message or the job tick deletes it | Deleted | – |
 | A running assistant turn's reserved budget (264): who began it, on which project, and how many weighted tokens; no one reads it but the assistant's own functions | `assistant_reservation` | While the turn runs: deleted when it is charged, or, if never charged, converted into the usage row in full once it expires (the turn's deadline + 120 s; the next turn or the job tick) | Kept without the name (`user_id` set null) until it is charged or expires | – |
 | Display preferences: the workspace sections a person hid from their sidebar (083); own row only under RLS | `user_preferences` | Until the account is deleted | Deleted | – |
@@ -4653,7 +4671,9 @@ key there would let any read-only principal forge any user's session.
   `mock` or unknown (only `manual` or `stripe`; Terraform sets `manual`,
   pinned by `tests/guardrails.tftest.hcl`), and with `stripe` a
   `BILLING_WEBHOOK_SECRET` shorter than 32 characters or a `dev-only-`
-  placeholder. The committed dev key is a `dev-only-` value `check:env` pins
+  placeholder, or a `STRIPE_SECRET_KEY` that isn't a live key (`sk_live_…`
+  or `rk_live_…`: a test-mode key in production would take no real
+  payments). The committed dev key is a `dev-only-` value `check:env` pins
   (`scripts/guards/check_env_isolation.mjs`), and `pnpm dev:billing:replay`
   signs only with such a key, only to localhost.
 - **WAF:** five per-IP rate limits on CloudFront: a tight 100-requests-per-5-minutes

@@ -67,6 +67,7 @@ In a git worktree both URLs point at that worktree's own dev database,
 | `BILLING_ENFORCED` | `false` (code default) | Whether plan limits refuse anything. Phase 1 is shadow mode: usage is counted and shown, nothing is refused, and the API only reports this as `enforced` ([billing.md](./billing.md#billing_enforced)) |
 | `BILLING_PROVIDER` | `mock` (code default) | The billing provider the webhook route serves: `mock` (events signed with the dev key below), `manual` (no webhooks) or `stripe` ([billing.md § Webhooks and providers](./billing.md#webhooks-and-providers)) |
 | `BILLING_WEBHOOK_SECRET` | `dev-only-billing-webhook-secret-…` (committed, `.env.development`) | Signs and checks billing webhook events. The committed value is a public dev-only key; production refuses the mock, and Stripe's real secret lives in infra-secrets ([deployment.md § 2. Secrets](./deployment.md#2-secrets-one-time-then-as-needed)) |
+| `STRIPE_SECRET_KEY` | unset (never set locally) | Stripe's API key, for checkout and the Customer Portal with `BILLING_PROVIDER=stripe` only. The mock needs none: its checkout and portal are pages on the local API ([billing.md § The mock](./billing.md#the-mock)). Production requires a live key (`sk_live_…` or `rk_live_…`) from infra-secrets; never put a real key in an env file here |
 | `PUBLIC_API_URL` (frontend) | `http://localhost:3001` | `/api` in production |
 | `PUBLIC_WAF_CAPTCHA_SCRIPT_URL`, `PUBLIC_WAF_CAPTCHA_API_KEY` (frontend) | empty (no sign-in CAPTCHA: there is no WAF locally) | set by `deploy-frontend.yml` from Terraform outputs (security.md § Sign-in CAPTCHA) |
 
@@ -1021,7 +1022,7 @@ pnpm test                   # unit tests (engine, frontend, backend) with no DB
 pnpm test:backend:db        # API + RLS tests and catalogue guards (water_test DB; water_test_w<tag> in a worktree); reports/render.db.test.ts renders a real PDF (skips, saying so, without MinIO) and reports/render.origin.db.test.ts drives Chromium (skips without it); under CI both fail instead of skipping (testing.md)
 pnpm test:e2e               # Playwright end-to-end (own water_e2e DB, servers on :3101/:7801; per-worktree slot elsewhere; server-report.spec.ts needs dev:s3:up + dev:mail:up, alerts-mailpit.spec.ts dev:mail:up)
 pnpm test:engine            # engine only; client catchment regression tests run when the data/ fixtures exist
-pnpm check:i18n             # what has no Afrikaans yet, and any stale translation; fails if the sheet (docs/i18n/af-translation-sheet.md) or the message id list is out of date, or a translation is stale, or Afrikaans (an offered language) has a site string with no words
+pnpm check:i18n             # what has no Afrikaans yet, and any stale translation; fails if the sheet (docs/i18n/af-translation-sheet.md) or the message id list is out of date, or a translation is stale, or Afrikaans (an offered language) has a site or email string with no words
 pnpm gen:i18n:sheet         # rewrite it after adding or changing a message, or landing an Afrikaans translation
 pnpm gen:i18n:stamp <id>    # re-stamp a glossary translation from the current English, once the translator has re-checked it
 ```

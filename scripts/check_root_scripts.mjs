@@ -9,11 +9,12 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { volumeWipeProblems } from './guards/docker_volumes.mjs';
+
 const root = new URL('..', import.meta.url).pathname;
 const { scripts } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
-const errors = [];
-/** The one script allowed to delete the shared docker volumes. */
-const VOLUME_WIPE = 'dev:docker:wipe';
+// Only dev:docker:wipe may delete the shared docker volumes (guards/docker_volumes.mjs).
+const errors = volumeWipeProblems(scripts);
 let inGroup = false;
 
 for (const [name, cmd] of Object.entries(scripts)) {
@@ -23,13 +24,6 @@ for (const [name, cmd] of Object.entries(scripts)) {
 	}
 	if (!inGroup) errors.push(`${name}: not under a "//-- <group> --" divider`);
 
-	// Every checkout and session on this machine shares the compose volumes
-	// (every checkout's dev, test and e2e databases, MinIO's data), so only the
-	// script named for it may delete them: dev:db:reset once ran
-	// `docker compose down -v`, and a worktree resetting its own database
-	// wiped everyone's.
-	if (/docker(?:-| )compose\b[^&|;]*\bdown\b[^&|;]*(?:\s-v\b|--volumes)|docker volume (?:rm|prune)/.test(cmd) && name !== VOLUME_WIPE)
-		errors.push(`${name}: deletes the shared docker volumes; only ${VOLUME_WIPE} may (dev:db:reset resets one checkout's database)`);
 	for (const m of cmd.matchAll(/(?:^|\s)((?:bin|scripts|verify|ingest)\/[\w./-]+)/g)) {
 		if (!existsSync(join(root, m[1]))) errors.push(`${name}: missing file ${m[1]}`);
 	}

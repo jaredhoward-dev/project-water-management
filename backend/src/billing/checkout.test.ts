@@ -89,7 +89,7 @@ describe('POST /account/plan/checkout', () => {
 		const html = await page.text();
 		expect(html).toContain('Subscribe to Pro');
 		expect(html).toContain('ZAR 899.00 a month');
-		for (const o of ['pays', 'declines', 'cancels']) expect(html).toContain(`data-outcome="${o}"`);
+		for (const o of ['pays', 'declines', 'cancels']) expect(html).toContain(`data-outcome="${o}">Simulate: ${o}</button>`);
 		expect(html).not.toContain(SECRET);
 	});
 
@@ -155,6 +155,16 @@ describe('POST /account/plan/portal', () => {
 		const page = await app.request(url);
 		expect(await page.text()).toContain('data-mock-subscription="none"');
 	});
+
+	it('names the plan, not its code, on the mock’s portal page', async () => {
+		const sub = { status: 'active', periodStart: '2026-11-01T00:00:00Z', periodEnd: '2026-12-01T00:00:00Z', cancelAtPeriodEnd: false, seats: 1 };
+		answers.set('app_account_plan', [{ plan: { ...planOf('user', sub), plan: { code: 'pro', name: 'Pro' } } }]);
+		const { url } = (await (await post('/account/plan/portal')).json()) as { url: string };
+		const html = await (await app.request(url)).text();
+		expect(html).toContain('Your Pro subscription renews on 2026-12-01.');
+		expect(html).not.toContain('Your pro subscription');
+		expect(html).toContain('href="http://site.test/account/plan" data-action="return"');
+	});
 });
 
 describe('the mock pages', () => {
@@ -181,6 +191,14 @@ describe('the mock pages', () => {
 		expect((await app.request(`/billing/mock/checkout?t=${token()}x`)).status).toBe(404);
 		expect((await app.request(`/billing/mock/checkout?t=${token({ exp: 1 })}`)).status).toBe(404);
 		expect((await app.request(`/billing/mock/portal?t=${token()}`)).status).toBe(404);
+	});
+
+	it('the expired page links back to the plan page', async () => {
+		const res = await app.request(`/billing/mock/checkout?t=${token({ exp: 1 })}`);
+		expect(res.status).toBe(404);
+		const html = await res.text();
+		expect(html).toContain('This page has expired');
+		expect(html).toContain('<a href="http://site.test/account/plan" data-action="return">Back to the plan page</a>');
 	});
 
 	it('cancels: back to the plan page, nothing posted', async () => {
@@ -214,6 +232,18 @@ describe('the mock pages', () => {
 		answers.set('app_billing_apply', [{ result: 'invalid' }]);
 		const res = await app.request(`/billing/mock/checkout?t=${token()}&outcome=pays`, form);
 		expect(res.status).toBe(502);
+		const html = await res.text();
+		expect(html).toContain('Something went wrong');
+		// Back to the plan page the checkout came from, without its ?checkout= outcome.
+		expect(html).toContain('<a href="http://site.test/account/plan" data-action="return">Back to the plan page</a>');
+	});
+
+	it('a team’s failed page links back to the team’s plan page', async () => {
+		answers.set('app_billing_apply', [{ result: 'invalid' }]);
+		const back = 'http://site.test/teams/33333333-3333-4333-8333-333333333333/plan';
+		const res = await app.request(`/billing/mock/checkout?t=${token({ successUrl: `${back}?checkout=done`, cancelUrl: `${back}?checkout=cancelled` })}&outcome=pays`, form);
+		expect(res.status).toBe(502);
+		expect(await res.text()).toContain(`<a href="${back}" data-action="return">`);
 	});
 
 	it('refuses an unknown outcome', async () => {
