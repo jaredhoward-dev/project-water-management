@@ -44,6 +44,9 @@ erDiagram
   model_run ||--o{ seasonal_outlook : "outlook from (063)"
   seasonal_outlook ||--o{ seasonal_outlook_member : "members"
   project  ||--o{ project_import : "import reports"
+  billing_account |o--o{ project : "bills (323)"
+  billing_account ||--o{ subscription : "plan over time"
+  billing_account ||--o{ usage_counter : "monthly counts"
   app_user ||--o{ project_import : "imported"
   app_user ||--o{ job : "acts as"
   project  ||--o{ data_feed : "scheduled feeds"
@@ -3777,6 +3780,70 @@ page holds the conversation and sends it with each turn.
   retention ends) and removes the `assistant_rate` row. A reservation of a
   turn still running keeps counting with its `user_id` cleared, until it is
   charged or expires.
+
+### Billing (323_billing.sql)
+
+Plans, who each project bills to, and monthly usage, in **shadow mode**
+(issue #641 Phase 1): everything is counted, nothing is refused, and no
+function here raises a limit error. Plan data is shown only to an account's
+own person and its team's admins, and to a project's editors and owners;
+never to a farmer, contributor or viewer.
+
+| Table | Holds |
+| --- | --- |
+| `plan` | The tiers, `code` (`free`, `pro`, `team`) primary key, `name`, `price_monthly_minor`, `price_annual_minor` (ZAR cents), `currency` (`ZAR`), `limits`, `features`, `trial_days`, `active`. Written only by migrations; anyone reads it |
+| `billing_account` | A person's or a team's: `id`, `kind` (`user`, `team`), `user_id` (cascade) or `team_id` (cascade), exactly one set and each unique (which covers both keys), `projects_created` (every project it has ever billed, Free's lifetime count), `created_at` |
+| `subscription` | An account's plan over time: `billing_account_id` (cascade), `plan_code`, `status` (`trialing`, `active`, `past_due`, `canceled`, `expired`), `seats`, `period_start`, `period_end`, `trial_end`, `cancel_at_period_end`, `provider` (`mock`, `manual`, `stripe`), `external_ref` (unique per provider), `created_at`. A partial unique index, `subscription_one_live_per_account`, allows one live (trialing, active, past_due) row per account; canceled and expired rows stay as history, so an account can take the same plan again. **No live subscription means Free** |
+| `usage_counter` | Monthly counts per account: (`billing_account_id`, `kind` (`reports`, `packs_issued`), `month`) primary key, `qty`. `month` is the first day of the month in Africa/Johannesburg (`app_billing_month()`) |
+
+- `plan.limits` is a closed key set, because SQL reads it:
+  `app_plan_limits_valid` (a CHECK) requires exactly `catchments`,
+  `editors_per_project`, `live_catchments`, `reports_per_month`,
+  `packs_included_per_month`, `seats_included`,
+  `assistant_usd_micros_per_month` and `assistant_usd_micros_per_seat_month`,
+  each a whole number ≥ 0 or JSON `null` (unlimited). Seeded: Free R0;
+  Pro R899 / R8,990 (15 catchments, 5 editors, $15 assistant); Team
+  R2,499 / R24,990 (50 catchments, 3 seats, 3 packs a month, $15 a seat).
+- `project.billing_account_id` (nullable, set null, indexed): a team
+  project bills to its team's account, any other to its creator's.
+  Backfilled by `billing_backfill()` (owner-only, idempotent); set on insert
+  and on a move into or out of a team by `project_billing_account_set`
+  (SECURITY DEFINER; it makes the account if missing and counts the project
+  on it). `water_app` can't write the column itself
+  (`project_billing_account_guard`, `42501`).
+- `water_app` has SELECT only on all four tables. RLS: `plan` for everyone;
+  `billing_account` for its person and its team's admins;
+  `subscription` and `usage_counter` through `app_billing_account_readable`
+  (the same rule). Writes go through SECURITY DEFINER functions only.
+- Functions (all SECURITY DEFINER, pinned `search_path`, granted to
+  `water_app`):
+  - `app_billing_plans() → SETOF plan`: the active plans, for anyone.
+  - `app_my_billing_account() → uuid`: the caller's own account, made if
+    missing; NULL with no signed-in user.
+  - `app_team_billing_account(team) → uuid`: the team's account, made if
+    missing, for a team admin; NULL for anyone else.
+  - `app_account_plan(account) → jsonb`: the account, its plan, its live
+    subscription and this month's usage (`catchments`: projects it bills;
+    `reports`, `packsIssued`: the counters; `assistantTokens`: weighted
+    tokens summed from `assistant_usage` through
+    `project.billing_account_id`, in that table's UTC month), each with its
+    limit; NULL unless the caller is the account's person or an admin of its
+    team. Shape in [api.md](./api.md).
+  - `app_entitlements(project) → jsonb`: `{ plan, limits, features,
+    status }` for an editor or owner; NULL for anyone else.
+  - `app_usage_add(project, kind, qty = 1)`: adds to the project's
+    account's counter for this SAST month; any role on the project
+    (`42501` otherwise), an unknown kind or `qty < 1` is `22023`. A project
+    with no account counts nowhere. Never refuses for a limit.
+- Projects have no archived state yet, so `catchments.used` counts every
+  project the account bills.
+- Account deletion: the person's `billing_account` goes with the
+  `app_user` row, its subscriptions and counters with it; the projects it
+  billed stay, with `billing_account_id` cleared (a co-owner's account
+  doesn't take them over; moving a project's billing owner is later work).
+  Deleting a team does the same for the team's account, and its projects
+  (moved out of the team by the key's set null) bill to their creators.
+  Tested in `src/billing/billing.db.test.ts`.
 
 ### Two-step sign-in (150_mfa.sql, 206_mfa_email_code.sql)
 

@@ -280,7 +280,14 @@ const READ_ONLY = new Set([
 	'soil_dataset',
 	'soil_cell_reference',
 	'gr4j_donor_dataset',
-	'gr4j_donor'
+	'gr4j_donor',
+	// Billing (323_billing, issue #641): the plans are written only by migrations; an account, its subscriptions and its
+	// monthly counters only by 323's SECURITY DEFINER functions and the project trigger. Read by the account's person and
+	// its team's admins (plans by anyone).
+	'plan',
+	'billing_account',
+	'subscription',
+	'usage_counter'
 ]);
 /**
  * Tables with a node column that farmers never read (020_farm_scope.sql).
@@ -338,6 +345,9 @@ const APP_USER_ON_DELETE: Record<string, 'cascade' | 'set null' | 'restrict'> = 
 	'assistant_reservation.user_id': 'set null',
 	'api_key.revoked_by': 'set null',
 	'audit_event.actor_user_id': 'set null',
+	// A person's billing account goes with them, its subscriptions and counters with it; the projects it billed stay,
+	// their project.billing_account_id cleared (323_billing).
+	'billing_account.user_id': 'cascade',
 	// Who acts for the authority (229): the delegation goes with the account; who proposed or confirmed it is cleared.
 	'authority_delegate.confirmed_by': 'set null',
 	'authority_delegate.proposed_by': 'set null',
