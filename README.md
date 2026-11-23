@@ -65,7 +65,7 @@ Details: [docs/architecture.md](./docs/architecture.md) ·
 
 ```bash
 pnpm dev                    # frontend + backend
-pnpm dev:db:up | dev:db:down | dev:db:migrate | dev:db:reset | dev:db:psql
+pnpm dev:db:up | dev:db:down | dev:db:migrate | dev:db:reset | dev:db:psql   # reset: this checkout's database only
 pnpm check                  # typecheck all workspaces
 pnpm test                   # unit tests (no DB)
 pnpm test:backend:db        # API + RLS tests (needs dev:db:up)

@@ -5999,7 +5999,8 @@ ids are rejected.
   checked. Production has run every migration, so none is edited any more,
   `001` included (production's runner would refuse the changed checksum). The
   test and e2e setups rebuild their schema from scratch every run; a dev
-  database refuses an edited file, and `pnpm dev:db:reset` rebuilds it. Each checkout migrates its own dev database (`water`, or a
+  database refuses an edited file, and `pnpm dev:db:reset` rebuilds it (this checkout's
+  dev database only). Each checkout migrates its own dev database (`water`, or a
   worktree's `water_w<tag>`; [run-locally.md](./run-locally.md)), so a
   branch's migration never reaches the main checkout's before it merges
   under its final number. `pnpm check:migrations` fails a branch that edits

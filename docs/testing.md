@@ -40,6 +40,12 @@ directory, `.git/water-e2e-slots/` of the main checkout
 worktrees hold the same one, and a removed worktree's slot is taken back.
 `E2E_SLOT` still overrides it ([e2e/README.md](../e2e/README.md#several-checkouts-at-once)).
 
+All of them live in one docker Postgres volume. `pnpm dev:db:reset` drops and
+recreates only the checkout's Dev database and never a test or e2e one (those
+rebuild their schema on every run anyway); `pnpm dev:docker:wipe` deletes the
+volume, every checkout's databases with it
+([run-locally.md § Common issues](./run-locally.md#common-issues)).
+
 Until 2026-10-03 every name came from a hash of the path into 98 slots
 (`water_test_w<1–98>`, `water_w<1–98>`, `water_e2e_<1–98>`), and three
 worktrees once shared `water_test_w3`: each run dropped the others' schema

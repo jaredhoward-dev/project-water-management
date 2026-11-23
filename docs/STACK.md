@@ -174,7 +174,8 @@ pnpm dev:db:up              # Postgres 17 in docker on :5434
 pnpm dev:db:down
 pnpm dev:db:status | dev:db:logs
 pnpm dev:db:migrate         # apply backend/migrations as `water`
-pnpm dev:db:reset           # drop the volume, recreate, migrate (destroys local data)
+pnpm dev:db:reset           # drop and recreate only this checkout's dev database (water, or a worktree's water_w<tag>), then migrate; refuses any other database, a non-local URL and open connections
+pnpm dev:docker:wipe        # DELETE both docker volumes: every checkout's dev, test and e2e databases and MinIO's data, for every session on this machine (a Postgres major bump, or a volume older than dev/postgres/)
 pnpm dev:db:psql            # psql as the schema owner
 pnpm dev:authority:confirm <project-id> <email> --reference "<letter>"   # the operator confirms who acts for a project's responsible authority (the first one is the operator's; security.md § Authorization)
 pnpm dev:billing:report [--month YYYY-MM] [--json] [--show-emails]   # the operator's billing Phase 1 metrics and staff abuse report, as the schema owner (325_billing_metrics); addresses only with --show-emails, operator only (billing.md § Metrics and the abuse report)
