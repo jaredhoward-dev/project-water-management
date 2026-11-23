@@ -356,6 +356,8 @@
 					<a class="btn" href={resolve('help/guides/share-with-a-team')}>How teams work</a>
 					<a class="btn" href={resolve(`?owner=team:${team.id}&sort=status`)}>Project list</a>
 					<a class="btn" href={settingsHref} data-sveltekit-noscroll bind:this={settingsLink} onclick={openAfterClose()}>Team settings</a>
+					<!-- The team's plan and usage (issue #641): its admins only, as the API answers. -->
+					{#if isAdmin}<a class="btn" href={resolve(`teams/${team.id}/plan`)}>Plan and usage</a>{/if}
 					{#if isAdmin}<button type="button" class="btn" onclick={focusAddMember}>Add member</button>{/if}
 					{#if canAddProjects}<a class="btn btn-primary" href={resolve(`?owner=team:${team.id}&new=1`)}>New project</a>{/if}
 				</div>

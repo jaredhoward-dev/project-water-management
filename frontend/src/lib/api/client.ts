@@ -27,6 +27,8 @@ import type {
 } from '@water-management/engine';
 import type {
 	MapAreaBasis,
+	AccountPlan,
+	PlanOffer,
 	EmailCodeSent,
 	MfaChallenge,
 	MfaMethod,
@@ -749,7 +751,16 @@ export function createApi(baseUrl: string, fetchFn: FetchFn = (...a) => fetch(..
 			/** Remove a member's lost second factor at once (admin, a code from the last 10 minutes; never yourself). 204. */
 			resetMemberMfa: (id: string, userId: string) => request<void>('POST', `${t(id)}/members/${enc(userId)}/mfa-reset`),
 			/** Every team catchment you can see, with its latest figures (WP-2.14). */
-			portfolio: (id: string) => request<Portfolio>('GET', `${t(id)}/portfolio`)
+			portfolio: (id: string) => request<Portfolio>('GET', `${t(id)}/portfolio`),
+			/** The team's plan and this month's usage (team admin; 404 otherwise; issue #641). */
+			plan: (id: string) => request<AccountPlan>('GET', `${t(id)}/plan`)
+		},
+		/** Plans and usage (issue #641, Phase 1: counted, never charged or refused). */
+		billing: {
+			/** Every plan on offer (public). */
+			plans: () => request<{ plans: PlanOffer[] }>('GET', '/billing/plans').then((r) => r.plans),
+			/** Your own account's plan and this month's usage. */
+			mine: () => request<AccountPlan>('GET', '/account/plan')
 		},
 		model: {
 			get: (id: string) => request<ProjectModel>('GET', `${p(id)}/model`),

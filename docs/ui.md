@@ -3093,6 +3093,53 @@ sorts; `projects/grouping.ts` `portfolioListHref`). `GET /teams/:id/portfolio`
 stays: the teams list and the team page read their tiles and traffic lights
 from it.
 
+## Plan and usage
+
+Issue #641 Phase 1 (shadow mode): an account's plan and this month's usage,
+counted against the plan's limits while nothing is charged or refused. Two
+addresses, one body (`components/billing/PlanUsage.svelte`, its words and
+figures from `billing/plan.ts`):
+
+- **`/account/plan`**: your own account's (`GET /account/plan`), linked as
+  *Plan and usage* from the account page's Alert emails panel. A farmer-only
+  user, whose account pages sit in the farm frame (§ App shell), gets no link,
+  and the address sends them back to `/account` before anything is read: no
+  farmer page shows a plan, a price or usage. Outside the farm frame the page
+  is English, like the rest of the workspace.
+- **`/teams/:id/plan`**: a team's (`GET /teams/:id/plan`), linked as *Plan and
+  usage* from the team page's header for its admins only. Anyone else gets the
+  API's 404, shown as the team page shows a team you can't see ("This team
+  doesn't exist or you're not one of its admins", with Back to teams). The
+  breadcrumb names the team (from `GET /teams/:id`; the page works without it).
+
+The page is two cards, side by side where they fit and stacked on a phone:
+
+- **Plan**: its name, its price from the minor units (`R 899.00 a month or
+  R 8 990.00 a year`; *No charge* for Free; another currency by its code),
+  then the subscription: *Renews 1 Dec 2026*, *Trial ends …*, or in the
+  warning colour *Ends …; it won't renew*, *Payment overdue*, *Cancelled* or
+  *Expired*. No subscription says the account is on its plan (Free). While
+  `enforced` is false, a note says plans aren't charged yet and nothing is
+  refused. There is no upgrade button, checkout or billing portal in Phase 1.
+- **Usage in <month>**: one row each for catchments (active ones; archived
+  don't count), reports, issued evidence packs and assistant tokens this
+  month. A row with a limit reads "3 of 5 · 2 left" over a bar (`role="meter"`,
+  its value text the same words); past the limit it says "1 over the limit"
+  and the bar turns the warning colour, since Phase 1 counts rather than
+  refuses. A null limit reads "12 used · Unlimited" with no bar. The
+  assistant's row adds the plan's cost cap ("Capped by cost, not tokens: $1.00
+  of assistant use a month", or per seat on Team), since the assistant is
+  limited by cost, not tokens. With nothing used yet, a line says so above
+  the rows.
+
+Loading, a failed load (with Try again) and the not-found go through
+`common/LoadState.svelte`. Tests: `billing/plan.test.ts` (prices, the
+subscription line, the rows), `api/client.test.ts` (the three calls), and
+`e2e/tests/billing-plan.spec.ts` (both pages, the not-found, no way to pay, a
+360 px phone without sideways scroll, axe). The client also has `api.billing.plans()`
+(`GET /billing/plans`, every plan on offer) for the planned pricing page; this
+page doesn't read it.
+
 ## Network
 
 One page, the **map** (issue #17, option A's simplicity with nothing lost).
