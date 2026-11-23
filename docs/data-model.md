@@ -47,6 +47,7 @@ erDiagram
   billing_account |o--o{ project : "bills (323)"
   billing_account ||--o{ subscription : "plan over time"
   billing_account ||--o{ usage_counter : "monthly counts"
+  billing_account |o--o{ billing_event : "webhook events (326)"
   app_user ||--o{ project_import : "imported"
   app_user ||--o{ job : "acts as"
   project  ||--o{ data_feed : "scheduled feeds"
@@ -3863,6 +3864,45 @@ never to a farmer, contributor or viewer.
   Deleting a team does the same for the team's account, and its projects
   (moved out of the team by the key's set null) bill to their creators.
   Tested in `src/billing/billing.db.test.ts`.
+
+### Billing events (326_billing_events.sql)
+
+The billing provider's webhook (issue #641 Phase 3; the route and its
+signature check are in [billing.md](./billing.md)) writes subscriptions
+through one function, which is the **only writer of subscription status**.
+
+| Table | Holds |
+| --- | --- |
+| `billing_event` | One row per event acted on: (`provider` (`mock`, `manual`, `stripe`), `event_id`) primary key, `type`, `received_at`, `account_id` (set null when the account goes; indexed), `outcome` (`applied`, `recorded`, `conflict`, `unknown_account`). **Owner-only**: RLS on, no policy, no privilege for `water_app`; only `app_billing_apply` writes it. Indexed on `received_at` for a purge past the providers' retry windows (not built yet) |
+
+`app_billing_apply(provider, event_id, type, payload jsonb) → text`
+(SECURITY DEFINER, pinned `search_path`, granted to `water_app`) runs with
+**no user**: the route calls it inside `withoutUser`, like the job tick, and
+it raises `42501` inside a user's or an API key's transaction. The payload
+is the route's normalised one, never a raw provider object:
+`{ accountId, planCode, status, seats, periodStart, periodEnd, trialEnd,
+cancelAtPeriodEnd, externalRef }`, timestamps as ISO 8601 with an offset.
+
+- It checks the arguments and the payload first, and answers `invalid`
+  without recording anything (so the provider's retry of a corrected event
+  isn't taken for a duplicate). It never raises on a bad payload.
+- Then it inserts the `billing_event` row; a (provider, event_id) already
+  there answers `duplicate` and changes nothing.
+- `subscription.updated` (and `subscription.created`, the same) upserts the
+  subscription by (provider, `external_ref`) under a lock on the account.
+  `subscription.deleted` (needs only `accountId` and `externalRef`) sets it
+  `canceled`; a ref we don't hold, or one already ended, is `recorded`. Any
+  other type is only `recorded`, with its `accountId` if it names a known
+  one.
+- `conflict`, changing nothing: the ref belongs to another account; a live
+  status would make a second live subscription on the account under another
+  ref (the one-live index, 323); or a live status for a ref already
+  `canceled` or `expired` (a late or out-of-order update after its delete).
+- `unknown_account`: no such billing account.
+- `conflict` and `unknown_account` are recorded, so a replay is `duplicate`.
+  The payload carries no event time, so two live updates that arrive out of
+  order (say `past_due` after `active`) apply in arrival order.
+- Tested in `src/billing/apply.db.test.ts`.
 
 ### Two-step sign-in (150_mfa.sql, 206_mfa_email_code.sql)
 
