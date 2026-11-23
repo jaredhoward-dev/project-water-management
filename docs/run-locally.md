@@ -1000,7 +1000,8 @@ pnpm dev:db:status          # is Postgres up?
 pnpm dev:db:logs            # follow Postgres logs
 pnpm dev:db:psql            # psql as the owner role, on this checkout's dev database
 pnpm dev:db:down            # stop Postgres (data is kept in the docker volume)
-pnpm dev:db:reset           # DELETE all local data (every checkout's databases), recreate and migrate
+pnpm dev:db:reset           # drop and recreate this checkout's dev database only, then migrate (stop its pnpm dev first)
+pnpm dev:docker:wipe        # DELETE both docker volumes: every checkout's databases and MinIO's data (see Common issues)
 ```
 
 ## Checks and tests
@@ -1047,7 +1048,20 @@ pnpm build                  # frontend/build (static) + backend/dist/lambda.mjs
 
 **`password authentication failed for user "water_app"`**
 : The docker volume was created before `dev/postgres/00-roles.sql` existed (the
-  init scripts only run on an empty volume). Run `pnpm dev:db:reset`.
+  init scripts only run on an empty volume). Run `pnpm dev:docker:wipe`, then
+  `pnpm run setup`. That deletes every checkout's databases and MinIO's data,
+  for every session on this machine, so check no other checkout needs them
+  first. `pnpm dev:db:reset` can't help here: it recreates one database, and
+  the role is the server's.
+
+**`refusing to migrate: applied migrations are forward-only`**
+: This checkout's dev database applied a migration file that has since
+  changed or gone (an edited file, or a branch that renumbered one). Put the
+  file back if the edit was yours; otherwise `pnpm dev:db:reset` drops and
+  recreates this checkout's database alone (`water`, or a worktree's
+  `water_w<tag>`) and migrates it, leaving every other checkout's alone. It
+  prints the database it reset, and refuses while this checkout's `pnpm dev`
+  or worker is connected.
 
 **Everything returns 404 for a project that exists**
 : Working as intended. Under RLS, a project you are not a member of is
