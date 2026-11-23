@@ -28,6 +28,8 @@ import type {
 import type {
 	MapAreaBasis,
 	AccountPlan,
+	BillingInterval,
+	BillingRedirect,
 	EmailCodeSent,
 	MfaChallenge,
 	MfaMethod,
@@ -752,12 +754,20 @@ export function createApi(baseUrl: string, fetchFn: FetchFn = (...a) => fetch(..
 			/** Every team catchment you can see, with its latest figures (WP-2.14). */
 			portfolio: (id: string) => request<Portfolio>('GET', `${t(id)}/portfolio`),
 			/** The team's plan and this month's usage (team admin; 404 otherwise; issue #641). */
-			plan: (id: string) => request<AccountPlan>('GET', `${t(id)}/plan`)
+			plan: (id: string) => request<AccountPlan>('GET', `${t(id)}/plan`),
+			/** Start checkout for the Team plan (team admin; issue #641 Phase 3). */
+			checkout: (id: string, interval: BillingInterval) => request<BillingRedirect>('POST', `${t(id)}/plan/checkout`, { plan: 'team', interval }),
+			/** Open the team's billing portal (team admin). */
+			portal: (id: string) => request<BillingRedirect>('POST', `${t(id)}/plan/portal`)
 		},
 		/** Plans and usage (issue #641, Phase 1: counted, never charged or refused). */
 		billing: {
 			/** Your own account's plan and this month's usage. */
-			mine: () => request<AccountPlan>('GET', '/account/plan')
+			mine: () => request<AccountPlan>('GET', '/account/plan'),
+			/** Start checkout for Pro on your own account (Phase 3). */
+			checkout: (interval: BillingInterval) => request<BillingRedirect>('POST', '/account/plan/checkout', { plan: 'pro', interval }),
+			/** Open your own account's billing portal. */
+			portal: () => request<BillingRedirect>('POST', '/account/plan/portal')
 		},
 		model: {
 			get: (id: string) => request<ProjectModel>('GET', `${p(id)}/model`),

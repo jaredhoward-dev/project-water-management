@@ -4735,4 +4735,13 @@ export interface AccountPlan {
 	};
 	/** BILLING_ENFORCED: false in Phase 1, when limits are counted but nothing is refused. */
 	enforced: boolean;
+	/** The configured billing provider (Phase 3); Upgrade and Manage billing show only for mock and stripe. null: none configured. */
+	provider: BillingProviderName | null;
+}
+
+export type BillingProviderName = 'mock' | 'manual' | 'stripe';
+export type BillingInterval = 'month' | 'year';
+/** POST …/plan/checkout and …/plan/portal: where to send the person (the provider's page, or the mock's local one). */
+export interface BillingRedirect {
+	url: string;
 }
