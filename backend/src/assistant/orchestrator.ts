@@ -139,8 +139,13 @@ export interface TurnDeps {
 }
 
 export interface TurnOutcome {
+	/** Every input token of every call, cache reads and writes included (what the caps count). */
 	inputTokens: number;
 	outputTokens: number;
+	/** The part of inputTokens the provider reported as read from the prompt cache (priced apart: pricing.ts). */
+	cacheReadTokens: number;
+	/** The part of inputTokens the provider reported as written to the prompt cache. */
+	cacheWriteTokens: number;
 	/** How the turn ended: answered, an error event, or the client went away. */
 	end: 'answered' | TurnErrorCode | 'aborted';
 }
@@ -219,7 +224,7 @@ export async function runTurn(deps: TurnDeps, conversation: readonly ChatMessage
 	const system = deps.system ?? systemPrompt();
 	const byName = new Map(deps.tools.map((t) => [t.spec.name, t]));
 	const specs = deps.tools.map((t) => t.spec);
-	const usage = { inputTokens: 0, outputTokens: 0 };
+	const usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
 	const outcome = (end: TurnOutcome['end']): TurnOutcome => ({ ...usage, end });
 	const fail = (code: TurnErrorCode): TurnOutcome => {
 		emit({ type: 'error', code, error: TURN_ERRORS[code] });
@@ -284,8 +289,13 @@ export async function runTurn(deps: TurnDeps, conversation: readonly ChatMessage
 						calls.push(ev.call);
 					} else if (ev.type === 'usage') {
 						const input = Math.max(0, Math.round(ev.inputTokens) || 0);
+						// The cache's part of the input, never more than the input itself (reads first).
+						const cacheRead = Math.min(input, Math.max(0, Math.round(ev.cacheReadTokens ?? 0) || 0));
+						const cacheWrite = Math.min(input - cacheRead, Math.max(0, Math.round(ev.cacheWriteTokens ?? 0) || 0));
 						usage.inputTokens += input;
 						usage.outputTokens += Math.max(0, Math.round(ev.outputTokens) || 0);
+						usage.cacheReadTokens += cacheRead;
+						usage.cacheWriteTokens += cacheWrite;
 						hopReportedInput += input;
 						reported = true;
 					}

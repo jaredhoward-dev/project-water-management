@@ -320,7 +320,9 @@ export async function buildSubjectExport(userId: string, now = new Date()) {
 		// The assistant's usage counters (262): own rows only under RLS. Counts only; no chat text is ever kept.
 		const { rows: assistantUsage } = await db.query(
 			`SELECT project_id AS "projectId", to_char(month, 'YYYY-MM') AS month, input_tokens::float8 AS "inputTokens",
-				output_tokens::float8 AS "outputTokens", messages, updated_at AS "updatedAt"
+				output_tokens::float8 AS "outputTokens", cache_read_tokens::float8 AS "cacheReadTokens",
+				cache_write_tokens::float8 AS "cacheWriteTokens", cost_usd_micros::float8 AS "costUsdMicros",
+				unpriced_turns AS "unpricedTurns", messages, updated_at AS "updatedAt"
 			 FROM assistant_usage WHERE user_id = $1 ORDER BY month DESC, project_id`,
 			[userId]
 		);

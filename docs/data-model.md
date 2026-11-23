@@ -3715,7 +3715,7 @@ secret kept in `infra-secrets` (see [security.md](./security.md)).
 - Goes with the account (cascade) and is in the data-subject export
   (`preferences`).
 
-### Assistant usage (262_assistant_usage.sql)
+### Assistant usage (262_assistant_usage.sql, 324_assistant_turn_cost.sql)
 
 What the assistant costs, counted, and each running turn's reserved budget (issue #610; 264 added the reservations, issues #640 and #641; [api.md §
 Assistant](./api.md#assistant), [security.md §
@@ -3724,7 +3724,7 @@ page holds the conversation and sends it with each turn.
 
 | Table | Holds |
 | --- | --- |
-| `assistant_usage` | One row per person per project per UTC month: `project_id` (cascade), `user_id` (set null), `month` (the month's first day), `input_tokens`, `output_tokens`, `messages`, `updated_at`; unique on (`project_id`, `month`, `user_id`), which covers the project key, and indexes on `user_id` and `month` |
+| `assistant_usage` | One row per person per project per UTC month: `project_id` (cascade), `user_id` (set null), `month` (the month's first day), `input_tokens` (every input token, cache reads and writes included), `output_tokens`, `messages`, `updated_at`, and since 324 `cache_read_tokens` and `cache_write_tokens` (the part of `input_tokens` read from and written to the prompt cache), `cost_usd_micros` (the priced turns' cost in micro-USD) and `unpriced_turns` (turns not in it); unique on (`project_id`, `month`, `user_id`), which covers the project key, and indexes on `user_id` and `month` |
 | `assistant_rate` | The hourly message cap: `user_id` (primary key, cascade), `window_start`, `messages`, a fixed one-hour window as `map_compute_throttle` (186); a row goes once its hour is over, at the person's next turn or the job tick |
 | `assistant_reservation` | A running turn's reserved budget (264): `id`, `project_id` (cascade), `user_id` (set null), `month` (the UTC month it began in, which it counts against and is charged to), `reserved` (weighted tokens), `created_at`, `expires_at`; indexes on `project_id`, `user_id`, `month` and `expires_at`. Deleted when the turn is charged; converted into the usage row in full once expired. Owner-only: RLS on, no policy, no grant |
 
@@ -3764,6 +3764,21 @@ page holds the conversation and sends it with each turn.
   `total_used`; the deployment's is a sum naming no one), reservations
   counted as spent. Spend and reservations are summed in one statement
   (`assistant_month_spent`), so a charge committing alongside is seen once.
+- Each turn's cost (324, issue #641 Phase 1, shadow mode: recorded, no cap
+  reads it). The backend prices the turn (`assistant/pricing.ts`: a
+  per-model table of USD per million tokens, Bedrock's global-profile prices
+  from af-south-1, with input, output, cache reads and cache writes each at
+  their own rate; summed exactly and rounded up once to a whole micro-USD)
+  and charges it with `app_assistant_charge(project, reservation, input,
+  output, cache_read, cache_write, cost_usd_micros)`, which adds all of them
+  to the row in the same upsert; the cache tokens are the part of `input`
+  read and written (together no more than it, else `42501`), and a NULL
+  cost (a model the table hasn't) adds 1 to `unpriced_turns` instead. The
+  4-argument form stays for a backend released before 324: the same charge
+  with no cache tokens, unpriced. A reservation charged in full at its
+  expiry is unpriced too. So the month's cost is exact when
+  `unpriced_turns` is 0, and a floor otherwise. The local providers (mock,
+  Ollama) cost 0.
 - `assistant_usage` is read-only to `water_app`: one SELECT policy,
   `assistant_usage_own` (`user_id = app_current_user_id()`), so a person
   reads their own rows (the export's `assistantUsage`) and the totals come

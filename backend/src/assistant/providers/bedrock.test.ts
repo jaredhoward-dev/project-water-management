@@ -62,7 +62,7 @@ describe('bedrock provider', () => {
 		expect(events).toEqual([
 			{ type: 'text', delta: 'The gauge ' },
 			{ type: 'text', delta: 'sits below a dam.' },
-			{ type: 'usage', inputTokens: 120, outputTokens: 11 }
+			{ type: 'usage', inputTokens: 120, outputTokens: 11, cacheReadTokens: 30, cacheWriteTokens: 0 }
 		]);
 		expect(sent[0]).toEqual({
 			modelId: MODEL,
@@ -106,11 +106,11 @@ describe('bedrock provider', () => {
 		expect(['anthropic.claude-sonnet-5-5', 'global.anthropic.claude-sonnet-5-5', 'arn:aws:bedrock:af-south-1:000000000000:inference-profile/global.anthropic.claude-sonnet-5-5'].every((m) => JSON.stringify(converseInput(m, req())).includes('cachePoint'))).toBe(true);
 	});
 
-	it('counts cache reads and writes as input tokens', async () => {
+	it('counts cache reads and writes as input tokens, and reports them apart for the price', async () => {
 		const events = await collect(
 			bedrockProvider(cfg, { client: fake([ev({ metadata: { usage: { inputTokens: 20, outputTokens: 7, totalTokens: 1227, cacheReadInputTokens: 900, cacheWriteInputTokens: 300 } } })]) }).complete(req())
 		);
-		expect(events).toEqual([{ type: 'usage', inputTokens: 1220, outputTokens: 7 }]);
+		expect(events).toEqual([{ type: 'usage', inputTokens: 1220, outputTokens: 7, cacheReadTokens: 900, cacheWriteTokens: 300 }]);
 	});
 
 	it('assembles tool calls from input deltas, after the text; JSON that doesn’t parse goes to the tool as text', async () => {
@@ -138,7 +138,7 @@ describe('bedrock provider', () => {
 			{ type: 'tool_call', call: { id: 'tu_1', name: 'get_series', arguments: { node: 'Gauge X' } } },
 			{ type: 'tool_call', call: { id: 'tu_2', name: 'get_run_summary', arguments: {} } },
 			{ type: 'tool_call', call: { id: 'tu_3', name: 'get_network', arguments: '{"a":' } },
-			{ type: 'usage', inputTokens: 40, outputTokens: 25 }
+			{ type: 'usage', inputTokens: 40, outputTokens: 25, cacheReadTokens: 0, cacheWriteTokens: 0 }
 		]);
 	});
 
@@ -155,7 +155,7 @@ describe('bedrock provider', () => {
 		);
 		expect(events).toEqual([
 			{ type: 'text', delta: '\n\n(The model declined to continue this answer.)' },
-			{ type: 'usage', inputTokens: 10, outputTokens: 2 }
+			{ type: 'usage', inputTokens: 10, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0 }
 		]);
 	});
 

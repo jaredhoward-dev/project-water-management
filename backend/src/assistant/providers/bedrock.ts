@@ -17,7 +17,8 @@
 // Two of the four checkpoints a request may carry; a prefix under the
 // model's minimum (512 tokens for Sonnet 5.5) is simply not cached. The
 // usage counts cache reads and writes as input tokens, so the budget sees
-// every token the request carried.
+// every token the request carried, and reports them apart as well, so the
+// turn's cost prices them at their own rates (pricing.ts).
 import type { ContentBlock, ConverseStreamCommandInput, ConverseStreamOutput, Message } from '@aws-sdk/client-bedrock-runtime';
 import type { AssistantConfig } from '../config.js';
 import type { AssistantProvider, ProviderEvent, ProviderRequest, ToolCall, TurnMessage } from '../types.js';
@@ -143,6 +144,8 @@ export function bedrockProvider(cfg?: Pick<AssistantConfig, 'model' | 'bedrockRe
 			const done: { id: string; name: string; json: string }[] = [];
 			let input = 0;
 			let output = 0;
+			let cacheRead = 0;
+			let cacheWrite = 0;
 			let stopReason: string | undefined;
 			try {
 				const res = await client.send(new sdk.ConverseStreamCommand(converseInput(model, req)), { abortSignal: signal });
@@ -169,7 +172,9 @@ export function bedrockProvider(cfg?: Pick<AssistantConfig, 'model' | 'bedrockRe
 					} else if (ev.messageStop) stopReason = ev.messageStop.stopReason;
 					else if (ev.metadata?.usage) {
 						const u = ev.metadata.usage;
-						input = (u.inputTokens ?? 0) + (u.cacheReadInputTokens ?? 0) + (u.cacheWriteInputTokens ?? 0);
+						cacheRead = u.cacheReadInputTokens ?? 0;
+						cacheWrite = u.cacheWriteInputTokens ?? 0;
+						input = (u.inputTokens ?? 0) + cacheRead + cacheWrite;
 						output = u.outputTokens ?? 0;
 					}
 				}
@@ -190,7 +195,7 @@ export function bedrockProvider(cfg?: Pick<AssistantConfig, 'model' | 'bedrockRe
 					yield { type: 'tool_call', call };
 				}
 			}
-			yield { type: 'usage', inputTokens: input, outputTokens: output };
+			yield { type: 'usage', inputTokens: input, outputTokens: output, cacheReadTokens: cacheRead, cacheWriteTokens: cacheWrite };
 		}
 	};
 }

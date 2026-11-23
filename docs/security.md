@@ -4147,7 +4147,7 @@ PDF someone else asked for kept the person as a recipient
 | Resets of a lost second factor (205): when asked for, confirmed and ended, and how; the confirm and cancel links' hashes (SHA-256); requests counted for the daily cap | `mfa_reset`, `mfa_reset_cancel`, `mfa_reset_quota` | An ended reset 90 days (the tick, `app_mfa_reset_purge`); a link's hash until used or the reset ends; counts 24 hours | Deleted | – |
 | Adds by email, counted for the daily cap: the adder's id and the project's or team's (101) | `invite_throttle` | 24 hours from the window's first add | Lapses with its window | Lapses with its window |
 | Dam traces, counted for the hourly cap: the user's id and the project's (186) | `map_compute_throttle` | One hour from the window's first attempt | Lapses with its window | Lapses with its window |
-| The assistant's use (262): the person's tokens (input and output) and messages per project and UTC month, as counts only (never the conversation); own rows only under RLS; in "Download my data" (`assistantUsage`) | `assistant_usage` | The month it counts and the 12 after it (`ASSISTANT_USAGE_RETENTION_MONTHS`, 13), then deleted by the job tick (`app_purge_assistant`) | Kept without the name (`user_id` set null), so the month still counts what was spent, until its retention ends | Deleted |
+| The assistant's use (262; 324 added the cache tokens and the cost in micro-USD): the person's tokens (input and output) and messages per project and UTC month, as counts only (never the conversation); own rows only under RLS; in "Download my data" (`assistantUsage`) | `assistant_usage` | The month it counts and the 12 after it (`ASSISTANT_USAGE_RETENTION_MONTHS`, 13), then deleted by the job tick (`app_purge_assistant`) | Kept without the name (`user_id` set null), so the month still counts what was spent, until its retention ends | Deleted |
 | The assistant's messages per person in the current hour, for the hourly cap (262); no one reads it but the cap's own function | `assistant_rate` | Until its hour is over: the person's next message or the job tick deletes it | Deleted | – |
 | A running assistant turn's reserved budget (264): who began it, on which project, and how many weighted tokens; no one reads it but the assistant's own functions | `assistant_reservation` | While the turn runs: deleted when it is charged, or, if never charged, converted into the usage row in full once it expires (the turn's deadline + 120 s; the next turn or the job tick) | Kept without the name (`user_id` set null) until it is charged or expires | – |
 | Display preferences: the workspace sections a person hid from their sidebar (083); own row only under RLS | `user_preferences` | Until the account is deleted | Deleted | – |
@@ -4899,7 +4899,9 @@ sends project data to a model. What goes, and what keeps it bounded:
   one never settled is charged in full when it expires. The only residual
   is a provider counting more input tokens than UTF-8 bytes plus a fixed
   framing allowance, or writing past the output cap it was given
-  (architecture.md § Assistant). A message cap per
+  (architecture.md § Assistant). Each turn's cost in micro-USD, priced per
+  model with the cache apart, is recorded on its usage row too (324,
+  `assistant/pricing.ts`), but no cap reads it yet (issue #641 Phase 1). A message cap per
   person per hour across projects (`ASSISTANT_MESSAGES_PER_HOUR`, 30; 429
   with `Retry-After`). All counted in Postgres under advisory locks taken in
   one order (the deployment's, the project's, then the person's row), so
