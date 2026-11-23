@@ -859,6 +859,11 @@ alerts plug in as a further kind.
   `runMfaResets`, 205; a step of the tick, not a job kind, since a job
   belongs to a project and a reset to an account;
   [security.md § Two-step sign-in](./security.md#two-step-sign-in) → Recovery).
+  Then it queues and sends the annual renewal notices: one email per
+  subscription and period to a person on a yearly plan, 60 business days
+  before it ends (`billing/renewal.ts` `runRenewalNotices`, 329; a tick step
+  too, since a subscription belongs to an account, not a project;
+  [billing.md § Renewal notice](./billing.md#renewal-notice)).
   Each tick also purges finished jobs
   after 30 days, settled pack notices and erratum notices after 30, report rows after 8, and invites 90 days past their expiry
   (`app_purge_invites`, 048), and ended second-factor resets after 90 days (`app_mfa_reset_purge`, 205).
