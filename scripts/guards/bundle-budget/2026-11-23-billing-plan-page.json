@@ -1,4 +1,4 @@
 {
-	"addKb": 6,
-	"why": "#641 Phase 1's Plan and usage page (/account/plan, /teams/[id]/plan, the shared PlanUsage component and the billing API calls): total measured 2509 KB on origin/main b2881d466, 2515 KB on the round branch, whose other lanes add no frontend code"
+	"addKb": 7,
+	"why": "#641 Phase 1's Plan and usage page (/account/plan, /teams/[id]/plan, the shared PlanUsage component and the billing API calls): total measured 2510 KB on origin/main da2b493fb, 2517 KB on the round branch with main merged in, whose other lanes add no frontend code"
 }
