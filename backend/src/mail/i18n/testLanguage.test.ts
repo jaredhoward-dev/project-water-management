@@ -13,10 +13,13 @@ vi.mock('@water-management/engine/languages', async (importOriginal) => {
 });
 vi.mock('./catalogues.js', async (importOriginal) => {
 	const real = await importOriginal<typeof import('./catalogues.js')>();
-	return { CATALOGUES: { ...real.CATALOGUES, xx: { 'mail.verify.heading': '[xx] heading', 'mail.verify.subject': '[xx] {product}' } } };
+	const { en } = await vi.importActual<typeof import('./en.js')>('./en.js');
+	const xx: Record<string, string> = Object.fromEntries(Object.entries(en).map(([k, v]) => [k, `[xx] ${v}`]));
+	return { CATALOGUES: { ...real.CATALOGUES, xx } };
 });
 
 const { LOCALES, mailLocale, mailT } = await import('./index.js');
+const { CATALOGUES } = await import('./catalogues.js');
 const { dateText } = await import('../alerts.js');
 const { verifyEmailMail } = await import('../templates.js');
 
@@ -26,12 +29,23 @@ describe('a stand-in language added to the table and the catalogue index only', 
 		expect(mailLocale('xx')).toBe('xx');
 	});
 
-	it('is what mailT writes in, falling back to English key by key', () => {
+	it('is what mailT writes in once its email catalogue is complete', () => {
 		const tr = mailT('xx');
-		expect(tr.t('mail.verify.heading')).toBe('[xx] heading');
+		expect(tr.t('mail.verify.heading')).toBe('[xx] Confirm your email address');
 		expect(tr.lang).toBe('xx');
-		expect(tr.t('mail.verify.action')).toBe('Confirm email address');
-		expect(tr.lang).toBe('en');
+	});
+
+	it('sends English, marked en, while its email catalogue lacks a key', () => {
+		const cat = CATALOGUES.xx as Record<string, string | undefined>;
+		const kept = cat['mail.verify.action'];
+		delete cat['mail.verify.action'];
+		try {
+			const tr = mailT('xx');
+			expect(tr.lang).toBe('en');
+			expect(tr.t('mail.verify.heading')).toBe('Confirm your email address');
+		} finally {
+			cat['mail.verify.action'] = kept;
+		}
 	});
 
 	it('dates an email in its Intl locale', () => {
@@ -41,5 +55,6 @@ describe('a stand-in language added to the table and the catalogue index only', 
 	it('reaches a finished email, subject included', () => {
 		const mail = verifyEmailMail('a@example.com', 'http://localhost/verify', 'xx' as never);
 		expect(mail.subject).toMatch(/^\[xx\] /);
+		expect(mail.html).toMatch(/<html lang="xx">/);
 	});
 });

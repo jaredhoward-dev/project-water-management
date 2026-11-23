@@ -6,7 +6,7 @@
 import { dayText } from '@water-management/engine';
 import { language } from '@water-management/engine/languages';
 import { DEFAULT_TIME_ZONE } from '../projects/timeZone.js';
-import { LOCALES, mailT, mailLocale, type Locale, type MailTranslator } from './i18n/index.js';
+import { LOCALES, mailT, mailLanguage, type Locale, type MailTranslator } from './i18n/index.js';
 import type { Mail, MailKind } from './transport.js';
 
 // The farmer-facing emails (verify, reset, the farmer invite) take their
@@ -59,7 +59,7 @@ export type Body = {
 	ask?: { question: string; answers: { label: string; url: string }[] };
 };
 
-/** `tr` supplies the frame's words and, through `tr.lang`, the `<html lang>`; read after the body is built, so it knows whether anything fell back to English. */
+/** `tr` supplies the frame's words and, through `tr.lang`, the `<html lang>`: the one language every word of the email is in (mailLanguage). */
 export function render(kind: MailKind, to: string, subject: string, b: Body, tr: MailTranslator = mailT('en')): Mail {
 	const links = b.links ?? [];
 	const fallbackLine = tr.t('mail.buttonFallback');
@@ -580,7 +580,7 @@ export type MfaResetFacts =
 
 /** When the reset takes effect, as the emails say it: "3 Oct 2026" and "14:05 SAST", in South African time (the app's zone). */
 export function resetWhen(at: Date, locale?: string | null): { date: string; time: string } {
-	const intl = language(mailLocale(locale)).intl;
+	const intl = language(mailLanguage(locale)).intl;
 	const date = new Intl.DateTimeFormat(intl, { day: 'numeric', month: 'short', year: 'numeric', timeZone: DEFAULT_TIME_ZONE })
 		.formatToParts(at)
 		.map((p) => (p.type === 'day' ? String(Number(p.value)) : p.value))

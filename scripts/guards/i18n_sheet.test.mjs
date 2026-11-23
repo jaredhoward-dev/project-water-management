@@ -13,6 +13,7 @@ import {
 	IDS,
 	incompleteProblem,
 	isOffered,
+	missingMail,
 	missingSite,
 	placeholders,
 	renderIds,
@@ -180,7 +181,7 @@ test('a language with no catalogue files yet lists everything untranslated (a fi
 	}
 });
 
-// ---- Completeness: an offered language must have every site message (check:i18n fails otherwise) ----
+// ---- Completeness: an offered language must have every site message and email string (check:i18n fails otherwise) ----
 
 const XX_LANGS = (row) => ({
 	'packages/engine/src/languages.ts': `export const LANGUAGES = [
@@ -217,17 +218,50 @@ test('an offered language with an untranslated site message fails, naming the id
 	assert.match(problem, /pnpm gen:i18n:apply xx/);
 });
 
-test('an offered language whose site catalogue is complete passes, even with emails and glossary untranslated', async () => {
-	const { lang, src } = await xxCase(XX_SITE({ [messageId('Stand-in message')]: 'Plaasvervanger' }));
+const XX_MAIL = (words) => ({ 'backend/src/mail/i18n/xx.ts': `export const xx = ${JSON.stringify(words)};\n` });
+const XX_SITE_DONE = XX_SITE({ [messageId('Stand-in message')]: 'Plaasvervanger' });
+
+test('an offered language with every site message but an untranslated email string fails, naming the key, its English and the fix', async () => {
+	const { lang, src } = await xxCase(XX_SITE_DONE);
 	assert.deepEqual(src.missingSiteIds, []);
+	assert.deepEqual(src.missingMailKeys, ['mail.hello']);
+	const problem = incompleteProblem(lang, src);
+	assert.ok(problem);
+	assert.doesNotMatch(problem, /site message/);
+	assert.match(problem, /Xx .*\(xx\) is offered but 1 email string has no translation, so every email to someone who chose it is sent in English \(mailLanguage/);
+	assert.ok(problem.includes('  mail.hello  "Hello {name}"'));
+	assert.match(problem, /pnpm gen:i18n:export xx <dir>/);
+	assert.match(problem, /pnpm gen:i18n:apply xx/);
+});
+
+test('an offered language missing both names both, under one fix', async () => {
+	const { lang, src } = await xxCase({});
+	const problem = incompleteProblem(lang, src);
+	assert.match(problem, /1 site message has no translation/);
+	assert.match(problem, /1 email string has no translation/);
+	assert.equal(problem.match(/Translate them:/g).length, 1);
+});
+
+test('an offered language whose site and email catalogues are complete passes, even with the glossary untranslated', async () => {
+	const { lang, src } = await xxCase({ ...XX_SITE_DONE, ...XX_MAIL({ 'mail.hello': 'Hallo {name}' }) });
+	assert.deepEqual(src.missingSiteIds, []);
+	assert.deepEqual(src.missingMailKeys, []);
 	assert.equal(incompleteProblem(lang, src), null);
-	assert.equal(src.mail[0].rows.length, 1, 'the email string is still untranslated');
+	assert.equal(helpGroup(src.help, src.helpAf).rows.length, 3, 'the glossary entry is still untranslated');
+});
+
+test('an email key is missing until it has words; a key English no longer has is not counted', () => {
+	const en = { 'mail.a': 'A', 'mail.b': 'B' };
+	assert.deepEqual(missingMail(en, {}), ['mail.a', 'mail.b']);
+	assert.deepEqual(missingMail(en, { 'mail.a': 'Aa', 'mail.gone': 'x' }), ['mail.b']);
+	assert.deepEqual(missingMail(en, { 'mail.a': 'Aa', 'mail.b': 'Bb' }), []);
 });
 
 test('a language marked translating: true is reported but never fails for being incomplete', async () => {
 	const { lang, src } = await xxCase(XX_LANGS(`{ code: 'xx', name: 'Xx', intl: 'en-ZA', decimalMark: '.', translating: true }`));
 	assert.equal(isOffered(lang), false);
 	assert.equal(src.missingSiteIds.length, 1);
+	assert.equal(src.missingMailKeys.length, 1);
 	assert.equal(incompleteProblem(lang, src), null);
 	assert.match(report(src).text, /No words yet: 1 site strings/);
 });
@@ -239,7 +273,7 @@ test('a counted word is missing until its translation has at least the other for
 	assert.deepEqual(missingSite(messages, { [days.id]: { one: 'dag', other: 'dae' } }), []);
 });
 
-test('every offered language in the real table has every site message translated', async () => {
+test('every offered language in the real table has every site message and email string translated', async () => {
 	const common = await commonSources();
 	for (const lang of await translatedLanguages()) {
 		const src = await sources(lang.code, common);

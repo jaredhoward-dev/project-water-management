@@ -273,13 +273,12 @@ const openAction = (tr: MailTranslator, to: Recipient, projectId: string) =>
 		: { label: tr.t('mail.alert.openProject'), url: sitePage(`/projects/${projectId}`) };
 
 /**
- * The translator, and the language to write dates in: the frame's sentence
- * is asked first, so a locale whose alert words aren't translated yet
+ * The translator, and the language to write dates in: the one the words are
+ * in (mailLanguage), so a locale whose email words aren't all translated
  * writes its dates in English too, like its words.
  */
 function translator(locale: string | null): { tr: MailTranslator; lang: Locale } {
 	const tr = mailT(locale);
-	tr.t('mail.alert.model');
 	return { tr, lang: tr.lang };
 }
 

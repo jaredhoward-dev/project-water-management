@@ -3,9 +3,11 @@
 // farmer invite. `{name}` is filled in by mailT (./index.ts); the value is
 // HTML-escaped later, by the template, never here.
 //
-// Afrikaans lives in ./af.ts. A key that has no Afrikaans yet is sent in
-// English and must be on docs/i18n/af-translation-sheet.md (guarded by
-// ./catalogue.test.ts; regenerate the sheet with `pnpm gen:i18n:sheet`).
+// Afrikaans lives in ./af.ts. A key that has no Afrikaans yet must be on
+// docs/i18n/af-translation-sheet.md (guarded by ./catalogue.test.ts;
+// regenerate the sheet with `pnpm gen:i18n:sheet`), and until it has words
+// every Afrikaans email goes out in English (mailLanguage, ./index.ts), so
+// `pnpm check:i18n` fails: a new key here needs its translation run.
 // No imports: scripts/guards/i18n_sheet.mjs loads this file directly.
 
 export const en = {
