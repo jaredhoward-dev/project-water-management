@@ -17,13 +17,39 @@ import { signPayload } from './signature.js';
 export const MOCK_SESSION_TTL_SECONDS = 3600;
 
 export type MockSession =
-	| { kind: 'checkout'; accountId: string; planCode: string; planName: string; amountMinor: number; currency: string; interval: 'month' | 'year'; successUrl: string; cancelUrl: string; exp: number }
+	| {
+			kind: 'checkout';
+			accountId: string;
+			planCode: string;
+			planName: string;
+			/** The whole price: the plan plus any extra seats. */
+			amountMinor: number;
+			currency: string;
+			/** Editor seats in all, the included ones among them (a token signed before seats were sold has neither: 1 and 1). */
+			seats?: number;
+			seatsIncluded?: number;
+			/** Each extra seat's price, for the page to show. */
+			extraSeatMinor?: number;
+			interval: 'month' | 'year';
+			successUrl: string;
+			cancelUrl: string;
+			exp: number;
+	  }
 	| {
 			kind: 'portal';
 			accountId: string;
 			returnUrl: string;
 			/** The live subscription to offer to cancel, when there is one (the mock's own: external ref sub_mock_…). */
-			subscription: { planCode: string; planName?: string; status: string; periodStart: string; periodEnd: string; cancelAtPeriodEnd: boolean; seats: number } | null;
+			subscription: {
+				planCode: string;
+				planName?: string;
+				status: string;
+				periodStart: string;
+				periodEnd: string;
+				cancelAtPeriodEnd: boolean;
+				seats: number;
+				seatsIncluded?: number;
+			} | null;
 			exp: number;
 	  };
 
@@ -69,6 +95,11 @@ function addInterval(start: Date, interval: 'month' | 'year'): Date {
 
 const secs = (d: Date | string) => Math.floor(new Date(d).getTime() / 1000);
 
+/**
+ * A subscription as Stripe sends it, with its items as checkout makes them
+ * (provider/stripeApi.ts): the plan at quantity 1 and, past the included
+ * seats, a second item of the extra seats; seats_included in the metadata.
+ */
 function subscriptionObject(
 	accountId: string,
 	planCode: string,
@@ -76,16 +107,19 @@ function subscriptionObject(
 	start: number,
 	end: number,
 	cancelAtPeriodEnd: boolean,
-	seats: number
+	seats: number,
+	seatsIncluded = 1
 ): Record<string, unknown> {
+	const item = (quantity: number) => ({ object: 'subscription_item', quantity, current_period_start: start, current_period_end: end });
+	const extra = Math.max(0, seats - seatsIncluded);
 	return {
 		id: mockSubscriptionRef(accountId),
 		object: 'subscription',
 		status,
 		cancel_at_period_end: cancelAtPeriodEnd,
 		trial_end: null,
-		metadata: { billing_account_id: accountId, plan_code: planCode },
-		items: { object: 'list', data: [{ object: 'subscription_item', quantity: seats, current_period_start: start, current_period_end: end }] }
+		metadata: { billing_account_id: accountId, plan_code: planCode, seats_included: String(seatsIncluded) },
+		items: { object: 'list', data: extra > 0 ? [item(1), item(extra)] : [item(1)] }
 	};
 }
 
@@ -93,7 +127,7 @@ function subscriptionObject(
 export function paidEvents(s: Extract<MockSession, { kind: 'checkout' }>, nowMs = Date.now()): Record<string, unknown>[] {
 	const now = new Date(nowMs);
 	const created = secs(now);
-	const sub = subscriptionObject(s.accountId, s.planCode, 'active', created, secs(addInterval(now, s.interval)), false, 1);
+	const sub = subscriptionObject(s.accountId, s.planCode, 'active', created, secs(addInterval(now, s.interval)), false, s.seats ?? 1, s.seatsIncluded ?? 1);
 	return [
 		{
 			id: eventId(),
@@ -115,7 +149,7 @@ export function cancelAtPeriodEndEvent(s: Extract<MockSession, { kind: 'portal' 
 		object: 'event',
 		type: 'customer.subscription.updated',
 		created: secs(new Date(nowMs)),
-		data: { object: subscriptionObject(s.accountId, sub.planCode, sub.status, secs(sub.periodStart), secs(sub.periodEnd), true, sub.seats) }
+		data: { object: subscriptionObject(s.accountId, sub.planCode, sub.status, secs(sub.periodStart), secs(sub.periodEnd), true, sub.seats, Math.min(sub.seats, sub.seatsIncluded ?? 1)) }
 	};
 }
 

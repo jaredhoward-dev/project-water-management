@@ -1,0 +1,37 @@
+{
+	"id": "evt_synthetic_sub_team_seats_0001",
+	"object": "event",
+	"api_version": "2026-10-28.endive",
+	"created": 1796209800,
+	"livemode": false,
+	"type": "customer.subscription.created",
+	"data": {
+		"object": {
+			"id": "sub_synthetic_team_0001",
+			"object": "subscription",
+			"status": "active",
+			"cancel_at_period_end": false,
+			"trial_end": null,
+			"metadata": { "billing_account_id": "00000000-0000-4000-8000-000000000641", "plan_code": "team", "seats_included": "3" },
+			"items": {
+				"object": "list",
+				"data": [
+					{
+						"id": "si_synthetic_team_extra",
+						"quantity": 2,
+						"price": { "id": "price_synthetic_extra", "unit_amount": 49900, "recurring": { "interval": "month" } },
+						"current_period_start": 1796209600,
+						"current_period_end": 1798801600
+					},
+					{
+						"id": "si_synthetic_team_base",
+						"quantity": 1,
+						"price": { "id": "price_synthetic_base", "unit_amount": 249900, "recurring": { "interval": "month" } },
+						"current_period_start": 1796209600,
+						"current_period_end": 1798801600
+					}
+				]
+			}
+		}
+	}
+}

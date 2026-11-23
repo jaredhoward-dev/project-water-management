@@ -1,6 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import type { AccountPlan, Subscription } from '#lib/api/types.js';
-import { CONFIRM_DELAYS_MS, billingActions, checkoutNotice, fmtPrice, fmtUsdMicros, monthName, priceLine, shadowNote, subscriptionLine, upgradeLabel, usageRows } from './plan';
+import {
+	CONFIRM_DELAYS_MS,
+	MAX_CHECKOUT_SEATS,
+	billingActions,
+	checkoutNotice,
+	checkoutTotalMinor,
+	fmtPrice,
+	fmtUsdMicros,
+	monthName,
+	parseSeats,
+	priceLine,
+	seatHint,
+	seatOffer,
+	shadowNote,
+	subscriptionLine,
+	upgradeLabel,
+	usageRows
+} from './plan';
 
 const NB = ' ';
 const TS = ' ';
@@ -201,6 +218,52 @@ describe('upgradeLabel', () => {
 	it('reads unpriced without the offer or without a price for that interval', () => {
 		expect(upgradeLabel('Team', 'month', null)).toBe('Upgrade to Team, monthly');
 		expect(upgradeLabel('Pro', 'year', { ...pro, priceAnnualMinor: 0 })).toBe('Upgrade to Pro, yearly');
+	});
+});
+
+describe('Team seats at checkout', () => {
+	const team = {
+		priceMonthlyMinor: 249_900,
+		priceAnnualMinor: 2_499_000,
+		currency: 'ZAR',
+		limits: { seats_included: 3 },
+		features: { extra_seat_monthly_minor: 49_900, extra_seat_annual_minor: 499_000 }
+	};
+	const pro = { priceMonthlyMinor: 89_900, priceAnnualMinor: 899_000, currency: 'ZAR', limits: { seats_included: 1 }, features: {} };
+
+	it('seatOffer: Team sells seats past its 3 included; Pro, or an offer not loaded, sells none', () => {
+		expect(seatOffer(team)).toEqual({ included: 3, max: MAX_CHECKOUT_SEATS, extraMonthlyMinor: 49_900, extraAnnualMinor: 499_000 });
+		expect(seatOffer(pro)).toBeNull();
+		expect(seatOffer(null)).toBeNull();
+		expect(seatOffer({ ...team, features: { extra_seat_monthly_minor: 49_900 } })).toBeNull();
+	});
+
+	it('checkoutTotalMinor: the base plus each extra seat at the interval’s price', () => {
+		expect(checkoutTotalMinor(team, 'month', 3)).toBe(249_900);
+		expect(checkoutTotalMinor(team, 'month', 5)).toBe(249_900 + 2 * 49_900);
+		expect(checkoutTotalMinor(team, 'year', 4)).toBe(2_499_000 + 499_000);
+		expect(checkoutTotalMinor(team, 'month', null)).toBe(249_900);
+		expect(checkoutTotalMinor(pro, 'month', 5)).toBe(89_900);
+	});
+
+	it('parseSeats: a whole number from the included seats to the maximum, else null', () => {
+		const so = seatOffer(team)!;
+		expect(parseSeats('5', so)).toBe(5);
+		expect(parseSeats(' 3 ', so)).toBe(3);
+		expect(parseSeats(String(MAX_CHECKOUT_SEATS), so)).toBe(MAX_CHECKOUT_SEATS);
+		for (const bad of ['2', '0', '', '4.5', '-4', 'five', String(MAX_CHECKOUT_SEATS + 1), '1e1']) expect(parseSeats(bad, so), bad).toBeNull();
+	});
+
+	it('upgradeLabel prices the seats chosen, and says how many', () => {
+		expect(upgradeLabel('Team', 'month', team, 5)).toBe(`Upgrade to Team, monthly (R${NB}3${TS}497.00 a month for 5 editor seats)`);
+		expect(upgradeLabel('Team', 'year', team, 3)).toBe(`Upgrade to Team, yearly (R${NB}24${TS}990.00 a year for 3 editor seats)`);
+		expect(upgradeLabel('Pro', 'month', pro, null)).toBe(`Upgrade to Pro, monthly (R${NB}899.00 a month)`);
+	});
+
+	it('seatHint names the included seats, each extra one’s prices and the maximum', () => {
+		expect(seatHint(seatOffer(team)!, 'ZAR')).toBe(
+			`3 editor seats included; each extra one is R${NB}499.00 a month or R${NB}4${TS}990.00 a year. Up to ${MAX_CHECKOUT_SEATS}.`
+		);
 	});
 });
 

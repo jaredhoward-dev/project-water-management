@@ -63,9 +63,10 @@ test('a team’s plan is for its admins', async ({ page, owner, signIn }) => {
 	await expect(page.getByRole('navigation', { name: 'Breadcrumb' }).getByRole('link', { name: 'Plan Team' })).toBeVisible();
 	const plan = page.getByRole('region', { name: 'Plan', exact: true });
 	await expect(plan.locator('[data-plan-name]')).toHaveText('Free');
-	// A team upgrades to Team (migration 323: R 2 499.00 a month, R 24 990.00 a year), never Pro.
-	await expect(plan.getByRole('button', { name: /^Upgrade to Team, monthly \(R.2.499\.00 a month\)$/ })).toBeVisible();
-	await expect(plan.getByRole('button', { name: /^Upgrade to Team, yearly \(R.24.990\.00 a year\)$/ })).toBeVisible();
+	// A team upgrades to Team (migration 323: R 2 499.00 a month, R 24 990.00 a year, 3 editor seats included), never Pro.
+	await expect(plan.getByRole('spinbutton', { name: 'Editor seats' })).toHaveValue('3');
+	await expect(plan.getByRole('button', { name: /^Upgrade to Team, monthly \(R.2.499\.00 a month for 3 editor seats\)$/ })).toBeVisible();
+	await expect(plan.getByRole('button', { name: /^Upgrade to Team, yearly \(R.24.990\.00 a year for 3 editor seats\)$/ })).toBeVisible();
 	await expect(plan.getByRole('button', { name: /Pro/ })).toHaveCount(0);
 	await expectNoViolations(page);
 	await resizeTo(page, { width: 360, height: 780 });

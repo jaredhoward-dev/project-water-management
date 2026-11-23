@@ -23,7 +23,8 @@ import { ApiError } from '../http/errors.js';
 import { logEvent } from '../logging/logEvent.js';
 import { UUID } from '../projects/access.js';
 import { accountPlan, listPlans, myAccountId, teamAccountId } from './entitlements.js';
-import { BILLING_INTERVALS, BillingUnavailableError, billingProvider, type LiveSubscription, type ReturnUrls } from './provider.js';
+import type { PublicPlan } from './entitlements.js';
+import { BILLING_INTERVALS, BillingUnavailableError, billingProvider, MAX_CHECKOUT_SEATS, type CheckoutPlan, type LiveSubscription, type ReturnUrls } from './provider.js';
 
 /** GET /billing/plans: anyone, signed in or not. The plans are public prices, not anyone's data. */
 export const billingPublicRoutes = new Hono().get('/plans', async (c) => {
@@ -34,7 +35,39 @@ export const billingPublicRoutes = new Hono().get('/plans', async (c) => {
 /** Which plan each kind of account can buy: Pro is a person's, Team a team's (docs/billing.md § Who the plan belongs to). */
 export const PURCHASABLE: Record<'user' | 'team', string> = { user: 'pro', team: 'team' };
 
-const checkoutBody = z.object({ plan: z.string().min(1).max(32), interval: z.enum(BILLING_INTERVALS) }).strict();
+const checkoutBody = z
+	.object({ plan: z.string().min(1).max(32), interval: z.enum(BILLING_INTERVALS), seats: z.number().int().min(1).max(MAX_CHECKOUT_SEATS).optional() })
+	.strict();
+
+const minor = (v: unknown): number | null => (typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : null);
+
+/** A public plan as checkout prices it: its included seats (limits.seats_included) and extra-seat prices (features.extra_seat_*_minor). */
+export function checkoutPlanOf(p: PublicPlan): CheckoutPlan {
+	const included = p.limits.seats_included;
+	return {
+		code: p.code,
+		name: p.name,
+		priceMonthlyMinor: p.priceMonthlyMinor,
+		priceAnnualMinor: p.priceAnnualMinor,
+		currency: p.currency,
+		seatsIncluded: typeof included === 'number' && Number.isInteger(included) && included >= 1 ? included : 1,
+		extraSeatMonthlyMinor: minor(p.features.extra_seat_monthly_minor),
+		extraSeatAnnualMinor: minor(p.features.extra_seat_annual_minor)
+	};
+}
+
+/**
+ * The seats a checkout sells: the plan's included ones when the body names none; else
+ * at least those and at most MAX_CHECKOUT_SEATS, and only on a plan that prices extra
+ * seats at this interval (Team). A 400 otherwise.
+ */
+export function checkoutSeats(plan: CheckoutPlan, interval: 'month' | 'year', seats: number | undefined): number {
+	if (seats === undefined || seats === plan.seatsIncluded) return plan.seatsIncluded;
+	const extraPrice = interval === 'year' ? plan.extraSeatAnnualMinor : plan.extraSeatMonthlyMinor;
+	if (extraPrice === null) throw new ApiError(400, `the ${plan.name} plan has ${plan.seatsIncluded} seat${plan.seatsIncluded === 1 ? '' : 's'} and sells no extra ones`);
+	if (seats < plan.seatsIncluded) throw new ApiError(400, `the ${plan.name} plan includes ${plan.seatsIncluded} seats; choose at least that many`);
+	return seats;
+}
 
 const trimSlash = (u: string) => u.replace(/\/+$/, '');
 
@@ -54,7 +87,7 @@ interface AccountState {
 	customerRef: string | null;
 	plan: AccountPlanJson;
 }
-type AccountPlanJson = { plan?: { code?: string; name?: string }; subscription?: (Omit<LiveSubscription, 'planCode'> & { status: string }) | null };
+type AccountPlanJson = { plan?: { code?: string; name?: string; limits?: { seats_included?: unknown } }; subscription?: (Omit<LiveSubscription, 'planCode'> & { status: string }) | null };
 
 /** The account's kind, plan and customer, read as the caller; null when they may not (app_account_plan's own check). */
 async function accountState(db: Db, accountId: string | null): Promise<AccountState | null> {
@@ -75,9 +108,11 @@ async function checkout(c: Context<AuthEnv>, resolve: (db: Db) => Promise<string
 	if (PURCHASABLE[state.kind] !== body.plan) throw new ApiError(400, `this account can subscribe to the ${PURCHASABLE[state.kind]} plan only`);
 	if (state.plan.subscription) throw new ApiError(409, 'this account already has a subscription; change it from Manage billing');
 	const plans = await withoutUser((db) => listPlans(db));
-	const plan = plans.find((p) => p.code === body.plan);
-	if (!plan) throw new ApiError(400, 'no such plan');
-	const result = await provider.createCheckout({ id: state.id, customerRef: state.customerRef }, plan, body.interval, returnUrls(c, pagePath, true));
+	const found = plans.find((p) => p.code === body.plan);
+	if (!found) throw new ApiError(400, 'no such plan');
+	const plan = checkoutPlanOf(found);
+	const seats = checkoutSeats(plan, body.interval, body.seats);
+	const result = await provider.createCheckout({ id: state.id, customerRef: state.customerRef }, plan, body.interval, returnUrls(c, pagePath, true), seats);
 	if (result.newCustomerRef) {
 		const stored = await withUser(c.get('userId'), async (db) => {
 			const { rows } = await db.query<{ ref: string | null }>('SELECT app_billing_set_customer_ref($1, $2) AS ref', [state.id, result.newCustomerRef]);
@@ -86,10 +121,15 @@ async function checkout(c: Context<AuthEnv>, resolve: (db: Db) => Promise<string
 		// Another checkout stored a different customer first: this session's customer isn't the account's, so don't send the person there.
 		if (stored !== result.newCustomerRef) throw new ApiError(409, 'another checkout for this account started at the same time; try again');
 	}
-	logEvent('info', { event: 'billing_checkout', provider: provider.name, plan: body.plan, interval: body.interval });
+	logEvent('info', { event: 'billing_checkout', provider: provider.name, plan: body.plan, interval: body.interval, seats });
 	c.header('Cache-Control', 'no-store');
 	return c.json({ url: result.url });
 }
+
+const includedSeats = (p: AccountPlanJson): number => {
+	const n = p.plan?.limits?.seats_included;
+	return typeof n === 'number' && Number.isInteger(n) && n >= 1 ? n : 1;
+};
 
 async function portal(c: Context<AuthEnv>, resolve: (db: Db) => Promise<string | null>, pagePath: string) {
 	// Access first, so a stranger meets 404 whatever the provider.
@@ -106,7 +146,8 @@ async function portal(c: Context<AuthEnv>, resolve: (db: Db) => Promise<string |
 				periodStart: sub.periodStart,
 				periodEnd: sub.periodEnd,
 				cancelAtPeriodEnd: sub.cancelAtPeriodEnd,
-				seats: sub.seats
+				seats: sub.seats,
+				seatsIncluded: includedSeats(state.plan)
 			}
 		: null;
 	const result = await provider.createPortal({ id: state.id, customerRef: state.customerRef }, live, returnUrls(c, pagePath, false));

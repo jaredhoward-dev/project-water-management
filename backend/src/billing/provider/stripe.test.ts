@@ -78,6 +78,36 @@ describe('normaliseStripeEvent', () => {
 		expect(normaliseStripeEvent(e)).toMatchObject({ event: { payload: { periodStart: iso(1700000000), periodEnd: iso(1702592000), seats: 3 } } });
 	});
 
+	it('reads Team’s seats from both items: the included seats plus the extra-seat item, whichever order Stripe lists them in', () => {
+		expect(normaliseStripeEvent(fixture('subscription-team-seats'))).toMatchObject({
+			kind: 'event',
+			event: { type: 'subscription.updated', payload: { planCode: 'team', seats: 5, externalRef: 'sub_synthetic_team_0001', periodEnd: iso(1798801600) } }
+		});
+		const e = fixture('subscription-team-seats');
+		e.data.object.items.data.reverse();
+		expect(normaliseStripeEvent(e)).toMatchObject({ event: { payload: { seats: 5 } } });
+	});
+
+	it('Team with no extra seats (one item) is its included seats; a portal that removed the extra item reads the same', () => {
+		const e = fixture('subscription-team-seats');
+		e.data.object.items.data = [e.data.object.items.data[1]];
+		expect(normaliseStripeEvent(e)).toMatchObject({ event: { payload: { seats: 3 } } });
+		const zero = fixture('subscription-team-seats');
+		zero.data.object.items.data[0].quantity = 0;
+		expect(normaliseStripeEvent(zero)).toMatchObject({ event: { payload: { seats: 3 } } });
+	});
+
+	it('refuses a seats_included that isn’t a whole number of seats, or a fractional quantity', () => {
+		for (const bad of ['0', '-1', '2.5', 'three', 3]) {
+			const e = fixture('subscription-team-seats');
+			e.data.object.metadata.seats_included = bad;
+			expect(normaliseStripeEvent(e), String(bad)).toMatchObject({ kind: 'invalid', why: 'invalid seat quantity' });
+		}
+		const e = fixture('subscription-team-seats');
+		e.data.object.items.data[0].quantity = 1.5;
+		expect(normaliseStripeEvent(e)).toMatchObject({ kind: 'invalid', why: 'invalid seat quantity' });
+	});
+
 	it('maps Stripe’s statuses: unpaid is past_due, incomplete_expired is expired, incomplete and paused are recorded only', () => {
 		expect(normaliseStripeEvent(withSub('subscription-updated', { status: 'unpaid' }))).toMatchObject({ event: { type: 'subscription.updated', payload: { status: 'past_due' } } });
 		expect(normaliseStripeEvent(withSub('subscription-updated', { status: 'incomplete_expired' }))).toMatchObject({ event: { type: 'subscription.updated', payload: { status: 'expired' } } });

@@ -78,7 +78,7 @@
 			<PlanUsage
 				{plan}
 				whose="this team"
-				checkout={(interval) => api.teams.checkout(teamId, interval)}
+				checkout={(interval, seats) => api.teams.checkout(teamId, interval, seats)}
 				portal={() => api.teams.portal(teamId)}
 				{reload}
 				returned={page.url.searchParams.get('checkout')}

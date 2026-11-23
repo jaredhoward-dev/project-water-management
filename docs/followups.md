@@ -924,14 +924,21 @@ are #641's checklist. Open items from building it:
       refuses `stripe` without both or with a test key. What's left is the
       operator's: deployment.md § Turning on Stripe (the account, the
       restricted key, the endpoint, sops, the switch).
-- [ ] **Checkout sells one seat and no trial.** The Stripe session and the
-      mock's events carry quantity 1 and no `trial_period_days`, so Team's
-      extra seats (`extra_seat_*_minor`) and Pro's and Team's trial days
-      aren't sold yet, and the mock's subscription starts `active`. Durable
-      fix: a seats field on Team's checkout (quantity, with the extra-seat
-      price as a second line item) and the trial from `plan.trial_days`,
-      decided with #641's reverse-trial design. Trigger: Team or a trial is
-      offered to a paying customer.
+- [x] **Checkout sells one seat and no trial.** Done (round 2026-11-23,
+      #641): Team's checkout takes `seats` (3 to 50), sold as a second line
+      item at the extra-seat price, through the mock and the normaliser to
+      `subscription.seats`; checkout sells no trial, by decision (Pro's is
+      the Phase 2 reverse trial, Team's a staff grant on request;
+      billing.md § Team seats at checkout, § Trials).
+- [ ] **Team can't change its seats after checkout.** The Customer Portal
+      can change an existing item's quantity, but a Team bought at the 3
+      included seats has no extra-seat item to change, and the portal can't
+      add one (it adds only dashboard Prices, and ours are inline). Durable
+      fix: a `POST /teams/:id/plan/seats` that updates the subscription's
+      extra-seat item through Stripe's API (adding it when absent,
+      `proration_behavior` decided with the operator), and the plan page's
+      seat field kept for a live Team. Trigger: a paying Team asks for
+      another editor seat.
 
 ## DB tests share the mail outbox (2026-10-02, PR #360)
       **Decided (round 3, N):** a bounded whole-file pass (data-sources.md § ssebop-eta); the build is its own item below.

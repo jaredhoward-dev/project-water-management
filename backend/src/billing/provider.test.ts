@@ -3,7 +3,7 @@
 // provider at all (never the mock).
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
-import { billingProvider, billingProviderName, type CheckoutPlan, type ReturnUrls } from './provider.js';
+import { billingProvider, billingProviderName, checkoutPrices, type CheckoutPlan, type ReturnUrls } from './provider.js';
 import { readMockSession } from './provider/mock.js';
 import { signPayload } from './provider/signature.js';
 
@@ -65,7 +65,30 @@ describe('verifyAndNormalise', () => {
 
 describe('checkout and the portal (Phase 3)', () => {
 	const ACCOUNT = '22222222-2222-4222-8222-222222222222';
-	const PRO: CheckoutPlan = { code: 'pro', name: 'Pro', priceMonthlyMinor: 89900, priceAnnualMinor: 899000, currency: 'ZAR' };
+	const PRO: CheckoutPlan = { code: 'pro', name: 'Pro', priceMonthlyMinor: 89900, priceAnnualMinor: 899000, currency: 'ZAR', seatsIncluded: 1, extraSeatMonthlyMinor: null, extraSeatAnnualMinor: null };
+	const TEAM: CheckoutPlan = { code: 'team', name: 'Team', priceMonthlyMinor: 249900, priceAnnualMinor: 2499000, currency: 'ZAR', seatsIncluded: 3, extraSeatMonthlyMinor: 49900, extraSeatAnnualMinor: 499000 };
+
+	it('checkoutPrices: the base, plus each seat past the included ones at the interval’s extra-seat price', () => {
+		expect(checkoutPrices(TEAM, 'month', 5)).toEqual({ baseMinor: 249900, extraSeats: 2, extraSeatMinor: 49900, totalMinor: 349700 });
+		expect(checkoutPrices(TEAM, 'year', 3)).toEqual({ baseMinor: 2499000, extraSeats: 0, extraSeatMinor: 499000, totalMinor: 2499000 });
+		expect(checkoutPrices(PRO, 'month', 1)).toEqual({ baseMinor: 89900, extraSeats: 0, extraSeatMinor: 0, totalMinor: 89900 });
+	});
+
+	it('mock signs Team’s seats into its token: the whole price, the seats and the included ones', async () => {
+		const p = billingProvider({ BILLING_WEBHOOK_SECRET: SECRET }, { now: () => NOW })!;
+		const { url } = await p.createCheckout({ id: ACCOUNT, customerRef: null }, TEAM, 'month', URLS, 5);
+		expect(readMockSession(SECRET, new URL(url).searchParams.get('t'), NOW)).toMatchObject({ planCode: 'team', amountMinor: 349700, seats: 5, seatsIncluded: 3, extraSeatMinor: 49900 });
+	});
+
+	it('stripe sends Team’s extra seats as a second line item', async () => {
+		const f = vi.fn(async () => new Response(JSON.stringify({ url: 'https://checkout.stripe.com/c/pay/t' }), { status: 200 }));
+		const p = billingProvider({ BILLING_PROVIDER: 'stripe', STRIPE_SECRET_KEY: KEY }, { fetch: f as unknown as typeof fetch })!;
+		await p.createCheckout({ id: ACCOUNT, customerRef: 'cus_Old1' }, TEAM, 'month', URLS, 5);
+		const body = new URLSearchParams(String((f.mock.calls[0] as unknown as [string, RequestInit])[1].body));
+		expect([body.get('line_items[0][quantity]'), body.get('line_items[0][price_data][unit_amount]')]).toEqual(['1', '249900']);
+		expect([body.get('line_items[1][quantity]'), body.get('line_items[1][price_data][unit_amount]')]).toEqual(['2', '49900']);
+		expect(body.get('subscription_data[metadata][seats_included]')).toBe('3');
+	});
 	const URLS: ReturnUrls = { successUrl: 'http://localhost:7777/account/plan?checkout=done', cancelUrl: 'http://localhost:7777/account/plan?checkout=cancelled', apiBase: 'http://localhost:3001' };
 	const KEY = 'test-only-not-a-stripe-key';
 	const code = (p: Promise<unknown>) => p.then(() => 'resolved', (e: { code?: string; status?: number }) => `${e.status} ${e.code}`);

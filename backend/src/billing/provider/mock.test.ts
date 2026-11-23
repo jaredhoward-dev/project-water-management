@@ -68,6 +68,26 @@ describe('mock events', () => {
 		});
 	});
 
+	it('pays for Team with 5 seats: two items (the plan, 2 extra seats) that normalise to 5 seats', () => {
+		const team = { ...checkout, planCode: 'team', planName: 'Team', amountMinor: 349700, seats: 5, seatsIncluded: 3, extraSeatMinor: 49900 };
+		const sub = (paidEvents(team, NOW)[1] as { data: { object: { items: { data: { quantity: number }[] }; metadata: Record<string, string> } } }).data.object;
+		expect(sub.items.data.map((i) => i.quantity)).toEqual([1, 2]);
+		expect(sub.metadata.seats_included).toBe('3');
+		expect(normaliseStripeEvent(paidEvents(team, NOW)[1])).toMatchObject({ event: { payload: { planCode: 'team', seats: 5 } } });
+		expect(normaliseStripeEvent(paidEvents({ ...team, seats: 3 }, NOW)[1])).toMatchObject({ event: { payload: { seats: 3 } } });
+	});
+
+	it('the portal’s cancel keeps Team’s seats', () => {
+		const portal: Extract<MockSession, { kind: 'portal' }> = {
+			kind: 'portal',
+			accountId: ACCOUNT,
+			returnUrl: 'http://localhost:7777/teams/x/plan',
+			subscription: { planCode: 'team', status: 'active', periodStart: '2026-11-23T12:00:00.000Z', periodEnd: '2026-12-23T12:00:00.000Z', cancelAtPeriodEnd: false, seats: 5, seatsIncluded: 3 },
+			exp: NOW / 1000 + 3600
+		};
+		expect(normaliseStripeEvent(cancelAtPeriodEndEvent(portal, NOW))).toMatchObject({ event: { payload: { seats: 5, cancelAtPeriodEnd: true } } });
+	});
+
 	it('pays yearly: a year long', () => {
 		const created = normaliseStripeEvent(paidEvents({ ...checkout, interval: 'year' }, NOW)[1]);
 		expect(created).toMatchObject({ event: { payload: { periodEnd: '2027-11-23T12:00:00.000Z' } } });

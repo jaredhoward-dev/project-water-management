@@ -115,6 +115,28 @@ describe('the mock checkout, end to end', () => {
 		expect((await buyer.call('GET', '/account/plan')).body.subscription).toMatchObject({ status: 'active', cancelAtPeriodEnd: true });
 	});
 
+	it('Team with 5 seats: the subscription holds 5 seats, and the pooled assistant allowance is 5 × $15', async () => {
+		const seatsTeam = (await admin.call('POST', '/teams', { name: 'Checkout seats WUA' })).body.team.id as string;
+		expect((await admin.call('POST', `/teams/${seatsTeam}/plan/checkout`, { plan: 'team', interval: 'month', seats: 2 })).status).toBe(400);
+		const start = await admin.call('POST', `/teams/${seatsTeam}/plan/checkout`, { plan: 'team', interval: 'month', seats: 5 });
+		expect(start.status).toBe(200);
+		expect(await (await app.request(local(start.body.url))).text()).toContain('data-mock-seats="5"');
+		const paid = await formPost(`${local(start.body.url)}&outcome=pays`);
+		expect(paid.status).toBe(303);
+		expect(paid.headers.get('location')).toMatch(new RegExp(`/teams/${seatsTeam}/plan\\?checkout=done$`));
+		const plan = (await admin.call('GET', `/teams/${seatsTeam}/plan`)).body;
+		expect(plan.plan.code).toBe('team');
+		expect(plan.subscription).toMatchObject({ status: 'active', seats: 5 });
+		expect(plan.usage.assistantCost.limitUsdMicros).toBe(5 * 15_000_000);
+		const [row] = await asOwner('SELECT seats FROM subscription WHERE billing_account_id = $1', [plan.account.id]);
+		expect(row).toEqual({ seats: 5 });
+
+		// The portal's cancel keeps the 5 seats.
+		const portal = await admin.call('POST', `/teams/${seatsTeam}/plan/portal`);
+		expect((await formPost(`${local(portal.body.url)}&action=cancel`)).status).toBe(303);
+		expect((await admin.call('GET', `/teams/${seatsTeam}/plan`)).body.subscription).toMatchObject({ seats: 5, cancelAtPeriodEnd: true });
+	});
+
 	it('a token for one account can’t be turned to another: a changed payload is 404', async () => {
 		const start = await stranger.call('POST', '/account/plan/checkout', { plan: 'pro', interval: 'month' });
 		const t = new URL(start.body.url).searchParams.get('t')!;

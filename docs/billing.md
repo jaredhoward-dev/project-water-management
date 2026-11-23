@@ -223,7 +223,13 @@ checkout. Every payload carries the event's `created` time as `eventCreated`
 The subscription payload is `{ accountId, planCode, status, seats,
 periodStart, periodEnd, trialEnd, cancelAtPeriodEnd, externalRef,
 eventCreated? }`, with times as ISO 8601 in UTC (`…Z`); `eventCreated` is
-absent (or `null`) from the mock and `manual` providers (§ Event order). The period is read from the first
+absent (or `null`) from the mock and `manual` providers (§ Event order). `seats` is the
+metadata's `seats_included` (1 when absent) plus every item's quantity past
+the base item's 1: checkout makes the plan one item at quantity 1 and Team's
+extra seats a second item ([§ Team seats at checkout](#team-seats-at-checkout)),
+so the sum needs no telling which item is which, in whatever order Stripe
+lists them, and a one-item subscription without `seats_included` reads as its
+item's quantity, as before (`seatsOf`). The period is read from the first
 subscription item (API `2025-03-31.basil` moved it there), else from the
 subscription itself (older versions). An invoice's subscription is read from
 `parent.subscription_details` (basil), else `subscription_details`.
@@ -303,7 +309,8 @@ webhooks](./run-locally.md#billing-webhooks)). Every id in the fixtures is
 invented, and their account is a placeholder UUID that `--account` replaces.
 The fixtures are `checkout-completed`, `subscription-created` (trialing),
 `subscription-updated` (active), `subscription-past-due`,
-`subscription-deleted`, `invoice-paid` and `invoice-payment-failed`.
+`subscription-deleted`, `subscription-team-seats` (Team, 5 seats as two items),
+`invoice-paid` and `invoice-payment-failed`.
 
 ### Tests
 
@@ -422,7 +429,7 @@ Phase 3, behind the same providers (`backend/src/billing/provider.ts`). The
 plan page asks the API for a URL and sends the person there; the API never
 sees a card (Stripe Checkout keeps PCI scope at SAQ A, as #641 says).
 
-| Provider | `createCheckout(account, plan, interval)` | `createPortal(account)` |
+| Provider | `createCheckout(account, plan, interval, urls, seats)` | `createPortal(account)` |
 | --- | --- | --- |
 | `mock` | a URL to the mock's checkout page on this API | a URL to the mock's portal page on this API |
 | `manual` | `409 billing_unavailable` | `409 billing_unavailable` |
@@ -442,7 +449,10 @@ its admins) ([api.md § Billing](./api.md#billing)). Each:
 2. Refuses `manual` or no provider (`409 billing_unavailable`).
 3. Checkout only: the plan must be the account's kind (Pro for a person,
    Team for a team), and there must be no live subscription (`409`: Manage
-   billing changes the one there is, so Stripe never holds two).
+   billing changes the one there is, so Stripe never holds two). The body's
+   optional `seats` must be a whole number from the plan's included seats to
+   50, on a plan that sells extra seats (`400` otherwise;
+   [§ Team seats at checkout](#team-seats-at-checkout)).
 4. Calls the provider outside any transaction (a network call never holds a
    database transaction open). A provider failure, or `stripe` with no key,
    is `503 billing_provider_error`, never the provider's text (rule 6).
@@ -452,10 +462,67 @@ its admins) ([api.md § Billing](./api.md#billing)). Each:
    the person tries again, so they never pay into a customer the account
    doesn't keep.
 6. Answers `{ url }` with `Cache-Control: no-store`, and logs one line
-   (provider, plan, interval; never the URL, which carries a session).
+   (provider, plan, interval, seats; never the URL, which carries a session).
 
 The plan page's success and cancel URLs are `SITE_URL` plus the plan page
 with `?checkout=done` or `?checkout=cancelled`, as the emails' links are.
+
+### Team seats at checkout
+
+Team's price includes 3 editor seats, plus R499 a month (R4,990 a year) for
+each extra editor (#641 "Recommended tiers"; `plan.limits.seats_included` and
+`plan.features.extra_seat_monthly_minor` / `extra_seat_annual_minor`, 323).
+Checkout sells them:
+
+- **The body.** `seats` is the editor seats in all, at least the included
+  ones and at most **50** (`MAX_CHECKOUT_SEATS`; past that is the Agency
+  tier, a contract). Absent, it is the included seats. A plan that prices no
+  extra seats (Pro) takes only its one seat. The route reads both prices
+  from `GET /billing/plans`' row (`checkoutPlanOf`), so `plan` stays the one
+  source of prices.
+- **Stripe.** The plan as one line item at quantity 1, and, past the
+  included seats, a second line item of the extra seats at the extra-seat
+  price (inline `price_data`, product `IC-WBT Team: extra editor seat`). The
+  metadata gains `seats_included`, which the normaliser adds to the extra
+  quantity ([§ Normalised events](#normalised-events)).
+- **The mock.** Its token carries the seats, the included ones and each
+  extra seat's price; its page shows them and the whole price; its
+  subscription event has the same two items and metadata as Stripe's, so
+  `subscription.seats` comes out of the same normaliser. Its portal's cancel
+  event keeps them.
+- **Where it lands.** `subscription.seats` (326/327 store the payload's
+  `seats` as given), which 324's assistant allowance already multiplies
+  ($15 × seats, never fewer than the included 3).
+- **Changing seats later** is the portal's (Stripe's quantity on the extra
+  item), not built here: the portal can't add the second item to a
+  subscription that has none, so until then the operator changes a Team's
+  seats in Stripe's dashboard (the webhook syncs them). A follow-up item in
+  [followups.md](./followups.md) (§ Billing) tracks it.
+
+### Trials (decided 2026-11-23)
+
+**Checkout sells no trial**: no `trial_period_days` and no
+`subscription_data.trial_*`, for either plan. `plan.trial_days` (Pro 14,
+Team 30) is the length of the trials #641 grants another way:
+
+- **Pro: the reverse trial.** #641 "Free tier and abuse" → "Reverse trial:
+  yes, 14 days" (accepted by the operator, 2026-10-29): every newly verified
+  person gets Pro for 14 days automatically, no card, then Free, **once per
+  canonical email**, and it *replaces* the opt-in 30-day trial (the
+  "Recommended tiers" table strikes "30-day Pro trial, no card"). A Stripe
+  trial at checkout would be a second Pro trial for the same person, behind
+  a card, which the decision doesn't have. A card-on-file trial is
+  escalation (c), only on its trigger (> 10% of trials from clusters, or
+  trials using > 60% of the Free pool). The reverse trial is Phase 2 and not
+  built here.
+- **Team: on request.** The "Recommended tiers" table's Trial row says
+  "30-day Team trial on request": an operator decision per team, which is a
+  staff plan grant (Phase 2, the staff grant), not a checkout option a team
+  admin picks.
+
+So the checkout's subscription starts `active` and charges at once; the
+normaliser still reads `trialing` and `trial_end`, for a trial the operator
+sets in Stripe's dashboard by hand. Revisit when escalation (c) triggers.
 
 ### Stripe
 
@@ -463,8 +530,9 @@ Three form-encoded POSTs over `fetch` (`provider/stripeApi.ts`):
 `/v1/customers` (metadata `billing_account_id`, idempotency key per account),
 `/v1/checkout/sessions` (subscription mode, the stored customer,
 `client_reference_id` the account, and `metadata` plus
-`subscription_data.metadata` with `billing_account_id` and `plan_code`, which
-the webhook's normaliser reads), and `/v1/billing_portal/sessions`. Each
+`subscription_data.metadata` with `billing_account_id`, `plan_code` and
+`seats_included`, which the webhook's normaliser reads; Team's extra seats
+as a second line item, § Team seats at checkout), and `/v1/billing_portal/sessions`. Each
 pins `Stripe-Version: 2026-10-28.endive`, has a 15 s timeout, and accepts
 only an `https://…stripe.com/` URL back.
 
@@ -491,7 +559,8 @@ simulate, as #641's "Local-first" asks (`billing/mockCheckout.ts`):
 Each button is named for what it simulates (*Simulate: pays*, …):
 
 - **Pays**: `checkout.session.completed` and `customer.subscription.created`
-  (active, a month or a year from now, subscription id `sub_mock_<account>`),
+  (active, a month or a year from now, subscription id `sub_mock_<account>`,
+  with Team's extra seats as a second item),
   each signed with the dev key and posted to `POST /billing/webhook/mock`
   in-process: the real route, so `app_billing_apply` writes the
   subscription, as with Stripe. Then `303` to the plan page with
@@ -565,23 +634,30 @@ invoices, usage records), where the SDK's coverage would outweigh its size.
 ### Tests
 
 - `billing/provider/stripeApi.test.ts`: what each Stripe call sends (path,
-  headers, form body) and how answers and errors are read, with `fetch`
-  mocked.
+  headers, form body; Team's second line item and no trial) and how answers
+  and errors are read, with `fetch` mocked.
+- `billing/provider/stripe.test.ts`: Team's seats from a two-item
+  subscription (`subscription-team-seats`, in either order), one item, and a
+  bad `seats_included`.
 - `billing/provider/mock.test.ts`: the token (forged, expired, other key,
   not a webhook signature) and that the mock's events normalise to the
-  account and plan.
+  account, plan and seats.
 - `billing/provider.test.ts`: each provider's checkout and portal, and the
   coded refusals.
 - `billing/checkout.test.ts`: the routes and the mock pages with the
-  database mocked: 401, 404, the plan per account kind, 409, 503, and that
-  pays posts two signed events to the webhook.
+  database mocked: 401, 404, the plan per account kind, the seats (Team's
+  price, the range, Pro's one), 409, 503, and that pays posts two signed
+  events to the webhook.
 - `billing/checkout.db.test.ts`: who may start checkout (positive control,
   and 404 to a member, viewer, farmer and stranger), a mock checkout that
   pays ends with the subscription live through the webhook and
-  `app_billing_apply`, the portal's cancel, a forged token, and 328's
-  functions.
-- `e2e/tests/billing-checkout.spec.ts`: the plan page's buttons and the mock
-  checkout and portal in a browser.
+  `app_billing_apply`, a Team checkout of 5 seats ends with `seats = 5` (and
+  a 5 × $15 assistant allowance), the portal's cancel, a forged token, and
+  328's functions.
+- `frontend/src/lib/components/billing/plan.test.ts`: the seat field's
+  range and the buttons' price for the seats chosen.
+- `e2e/tests/billing-checkout.spec.ts`: the plan page's buttons, Team's seat
+  field, and the mock checkout and portal in a browser.
 
 ## Later phases
 

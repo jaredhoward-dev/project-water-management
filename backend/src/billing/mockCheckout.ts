@@ -9,7 +9,7 @@
 // would need a dev-only API to do the same, and would ship its code in the
 // production bundle. These pages are plain HTML forms with no script.
 //
-//   GET  /billing/mock/checkout?t=…             the plan and price, and three buttons: Simulate: pays, declines, cancels
+//   GET  /billing/mock/checkout?t=…             the plan, its seats and price, and three buttons: Simulate: pays, declines, cancels
 //   POST /billing/mock/checkout?t=…&outcome=…   pays: checkout.session.completed and customer.subscription.created,
 //                                               each signed with the dev key and posted to POST /billing/webhook/mock
 //                                               (the real route, so app_billing_apply writes the subscription), then
@@ -95,9 +95,15 @@ const tokenQs = (c: Context) => `t=${encodeURIComponent(tokenOf(c))}`;
 function checkoutPage(c: Context, s: Extract<MockSession, { kind: 'checkout' }>, declined: boolean): string {
 	const qs = tokenQs(c);
 	const per = s.interval === 'year' ? 'a year' : 'a month';
+	const seats = s.seats ?? 1;
+	const extra = seats - (s.seatsIncluded ?? 1);
+	const seatLine =
+		(s.seatsIncluded ?? 1) > 1 || extra > 0
+			? `\n<p data-mock-seats="${seats}">${seats} editor seats${extra > 0 ? `: ${s.seatsIncluded} included and ${extra} extra at ${esc(money(s.extraSeatMinor ?? 0, s.currency))} each` : ', all included'}.</p>`
+			: '';
 	return page(
 		`Subscribe to ${s.planName}`,
-		`<p data-mock-price>${esc(money(s.amountMinor, s.currency))} ${per}.</p>
+		`<p data-mock-price>${esc(money(s.amountMinor, s.currency))} ${per}.</p>${seatLine}
 ${declined ? '<p class="err" role="alert" data-mock-declined>Your card was declined (simulated). Nothing was charged; choose again.</p>' : ''}
 <p>Which outcome should the mock simulate?</p>
 <form method="post" action="?${qs}&amp;outcome=pays"><button type="submit" data-outcome="pays">Simulate: pays</button></form>

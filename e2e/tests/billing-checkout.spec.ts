@@ -7,7 +7,9 @@
 // back on Pro with Manage billing, and the mock portal cancels at the period
 // end. Then the edges: Back from the mock's page leaves the buttons usable, a
 // refused request says the API's words inline and keeps the focus, and a
-// payment the provider hasn't confirmed yet is waited for.
+// payment the provider hasn't confirmed yet is waited for. A team buys Team
+// with 5 editor seats: the seat field prices the buttons, and the
+// subscription comes back with 5 seats.
 import { API_URL } from '../support/env.ts';
 import { expectNoViolations } from '../support/a11y.ts';
 import { expect, test } from '../support/fixtures.ts';
@@ -67,6 +69,41 @@ test('upgrade through the mock checkout, then cancel from the mock portal', asyn
 	await expect(plan.locator('[data-plan-name]')).toHaveText('Pro');
 	await expect(plan.locator('[data-subscription="active"]')).toContainText('it won\'t renew');
 	await expect(plan.getByRole('button', { name: 'Manage billing' })).toBeVisible();
+});
+
+test('a team buys Team with 5 editor seats: the field prices the buttons, the mock sells them, the plan holds them', async ({ page, owner }) => {
+	void owner;
+	const res = await page.context().request.post(`${API_URL}/teams`, { data: { name: 'Seats Team' } });
+	expect(res.status()).toBe(201);
+	const { team } = (await res.json()) as { team: { id: string } };
+	await page.goto(`/teams/${team.id}/plan`);
+	const plan = page.getByRole('region', { name: 'Plan', exact: true });
+	const seats = plan.getByRole('spinbutton', { name: 'Editor seats' });
+	await expect(seats).toHaveValue('3');
+	await expect(seats).toHaveAccessibleDescription(/3 editor seats included; each extra one is R.499\.00 a month or R.4.990\.00 a year\. Up to 50\./);
+
+	// Under the included seats: said under the field, and the buttons do nothing.
+	await seats.fill('2');
+	await expect(seats).toHaveAttribute('aria-invalid', 'true');
+	await expect(plan.locator('[data-seats-error]')).toHaveText('Choose a whole number of seats from 3 to 50.');
+	await expect(plan.locator('[data-action="upgrade-month"]')).toHaveAttribute('aria-disabled', 'true');
+	await plan.locator('[data-action="upgrade-month"]').click();
+	await expect(page).toHaveURL(new RegExp(`/teams/${team.id}/plan$`));
+
+	// 5 seats: R 2 499 + 2 × R 499 = R 3 497 a month.
+	await seats.fill('5');
+	await expect(seats).not.toHaveAttribute('aria-invalid', 'true');
+	await expect(plan.getByRole('button', { name: /^Upgrade to Team, yearly \(R.34.970\.00 a year for 5 editor seats\)$/ })).toBeVisible();
+	await expectNoViolations(page);
+	await plan.getByRole('button', { name: /^Upgrade to Team, monthly \(R.3.497\.00 a month for 5 editor seats\)$/ }).click();
+	await expect(page).toHaveURL(new RegExp(`^${API_URL}/billing/mock/checkout\\?t=`));
+	await expect(page.locator('[data-mock-price]')).toHaveText('ZAR 3497.00 a month.');
+	await expect(page.locator('[data-mock-seats]')).toHaveText('5 editor seats: 3 included and 2 extra at ZAR 499.00 each.');
+	await page.getByRole('button', { name: 'Pays' }).click();
+	await expect(page).toHaveURL(new RegExp(`/teams/${team.id}/plan$`));
+	await expect(plan.locator('[data-plan-name]')).toHaveText('Team');
+	const after = await page.context().request.get(`${API_URL}/teams/${team.id}/plan`);
+	expect(((await after.json()) as { subscription: { seats: number } }).subscription.seats).toBe(5);
 });
 
 test('Back from the mock checkout leaves the Upgrade buttons usable', async ({ page, owner }) => {

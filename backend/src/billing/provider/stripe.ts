@@ -15,6 +15,8 @@
 // The account is the subscription's (or session's, or invoice's
 // subscription_details') metadata `billing_account_id`, which checkout sets;
 // the plan is its metadata `plan_code`. An event without them is `invalid`.
+// The seats are its metadata `seats_included` plus the items' extra seats
+// (seatsOf, below).
 import { PLAN_CODES, type NormalisedEvent, type SubscriptionPayload, type SubscriptionStatus } from '../provider.js';
 
 export const STRIPE_EVENT_TYPES = [
@@ -64,6 +66,37 @@ function accountOf(metadata: unknown): string | null {
 	return id && UUID.test(id) ? id.toLowerCase() : null;
 }
 
+const isCount = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= 10_000;
+
+/**
+ * The editor seats a subscription holds: the seats its plan includes (the
+ * metadata's seats_included, which checkout sets; 1 when absent) plus every
+ * item's quantity past the base item's 1. Checkout makes the plan one item at
+ * quantity 1 and Team's extra seats a second item of that many
+ * (provider/stripeApi.ts), so the sum needs no telling which item is which,
+ * and in whatever order Stripe lists them: Team with 2 extra is 3 + (1 + 2) − 1
+ * = 5. A subscription made before seats were sold (one item, no
+ * seats_included) reads as its one item's quantity, as before. Null when a
+ * quantity or seats_included isn't a count, or the result is under 1.
+ */
+export function seatsOf(metadata: unknown, items: Obj[]): number | null {
+	const raw = isObj(metadata) ? metadata.seats_included : undefined;
+	let included = 1;
+	if (raw !== undefined && raw !== null) {
+		if (typeof raw !== 'string' || !/^[1-9][0-9]{0,4}$/.test(raw)) return null;
+		included = Number(raw);
+	}
+	if (items.length === 0) return included <= 10_000 ? included : null;
+	let total = 0;
+	for (const item of items) {
+		const q = item.quantity ?? 1;
+		if (!isCount(q)) return null;
+		total += q;
+	}
+	const seats = included + total - 1;
+	return seats >= 1 && seats <= 10_000 ? seats : null;
+}
+
 /** A subscription object as the full payload, or why it can't be. */
 function subscriptionPayload(sub: Obj): SubscriptionPayload | string {
 	const accountId = accountOf(sub.metadata);
@@ -76,8 +109,8 @@ function subscriptionPayload(sub: Obj): SubscriptionPayload | string {
 	if (!status) return 'unknown subscription status';
 	const items = isObj(sub.items) && Array.isArray(sub.items.data) ? sub.items.data.filter(isObj) : [];
 	const first = items[0];
-	const seats = first?.quantity ?? 1;
-	if (typeof seats !== 'number' || !Number.isInteger(seats) || seats < 1 || seats > 10_000) return 'invalid seat quantity';
+	const seats = seatsOf(sub.metadata, items);
+	if (seats === null) return 'invalid seat quantity';
 	// The period moved from the subscription to its items in API 2025-03-31.basil; read the item's first, then the old place.
 	const periodStart = time(first?.current_period_start ?? sub.current_period_start);
 	const periodEnd = time(first?.current_period_end ?? sub.current_period_end);

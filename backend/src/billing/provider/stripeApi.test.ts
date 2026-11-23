@@ -58,6 +58,9 @@ describe('createCheckoutSession', () => {
 		planName: 'Pro',
 		currency: 'ZAR',
 		unitAmountMinor: 89900,
+		seatsIncluded: 1,
+		extraSeats: 0,
+		extraSeatMinor: 0,
 		interval: 'month' as const,
 		successUrl: 'https://site.example/account/plan?checkout=done',
 		cancelUrl: 'https://site.example/account/plan?checkout=cancelled'
@@ -78,11 +81,35 @@ describe('createCheckoutSession', () => {
 			'line_items[0][price_data][product_data][name]': 'IC-WBT Pro',
 			'metadata[billing_account_id]': ACCOUNT,
 			'metadata[plan_code]': 'pro',
+			'metadata[seats_included]': '1',
 			'subscription_data[metadata][billing_account_id]': ACCOUNT,
 			'subscription_data[metadata][plan_code]': 'pro',
+			'subscription_data[metadata][seats_included]': '1',
 			success_url: params.successUrl,
 			cancel_url: params.cancelUrl
 		});
+	});
+
+	it('sells Team’s extra seats as a second line item at the extra-seat price, and never a trial', async () => {
+		const { f, calls } = fakeFetch(200, { id: 'cs_test_2', url: 'https://checkout.stripe.com/c/pay/cs_test_2' });
+		const team = { ...params, planCode: 'team', planName: 'Team', unitAmountMinor: 2499000, seatsIncluded: 3, extraSeats: 2, extraSeatMinor: 499000, interval: 'year' as const };
+		await createCheckoutSession({ secretKey: KEY, fetch: f }, team);
+		const body = form(calls[0]!.init);
+		expect(body).toMatchObject({
+			'line_items[0][quantity]': '1',
+			'line_items[0][price_data][unit_amount]': '2499000',
+			'line_items[0][price_data][recurring][interval]': 'year',
+			'line_items[0][price_data][product_data][name]': 'IC-WBT Team',
+			'line_items[1][quantity]': '2',
+			'line_items[1][price_data][currency]': 'zar',
+			'line_items[1][price_data][unit_amount]': '499000',
+			'line_items[1][price_data][recurring][interval]': 'year',
+			'line_items[1][price_data][product_data][name]': 'IC-WBT Team: extra editor seat',
+			'metadata[seats_included]': '3',
+			'subscription_data[metadata][seats_included]': '3'
+		});
+		expect(Object.keys(body).some((k) => k.includes('trial'))).toBe(false);
+		expect(Object.keys(body).some((k) => k.startsWith('line_items[2]'))).toBe(false);
 	});
 
 	it('throws Stripe’s status, type and code, never its message, on an error answer', async () => {
