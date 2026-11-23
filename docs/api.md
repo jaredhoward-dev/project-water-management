@@ -1459,6 +1459,7 @@ email show them by the project role they give, viewer / editor / owner
 | GET | `/teams/:id/invites` | – | `{ invites: Invite[] }` | admin |
 | DELETE | `/teams/:id/invites/:inviteId` | – | `204` | admin |
 | GET | `/teams/:id/portfolio` | – | `Portfolio` (see [Portfolio](#portfolio) below) | viewer |
+| GET | `/teams/:id/plan` | – | `AccountPlan`, the team's billing account (see [Billing](#billing)); `404` to anyone but a team admin (a member, a viewer, a farmer on a team project, a stranger) | admin |
 
 - **History.** A team role is a role on every project of the team, so adding,
   re-roling and removing a member (or their leaving, or accepting a team
@@ -5913,6 +5914,40 @@ report" }` with no `details`, so nothing sent is echoed back. The body goes
 through `readJson` (the general 4 MB cap and its checks). At most 5 reports
 leave a page load, so a crash that repeats can't flood the log. What the line
 holds and where it is kept: [security.md § Client error reports](./security.md#client-error-reports).
+
+## Billing
+
+Plans and usage, Phase 1: **shadow mode** (issue #641, [billing.md](./billing.md)).
+Usage is counted and shown; nothing is refused, and no route answers `402`.
+Each answer comes from a `323_billing` definer function run as the caller.
+
+| Method | Path | Body | Response | Who |
+| --- | --- | --- | --- | --- |
+| GET | `/billing/plans` | – | `{ plans: Plan[] }`, the active plans, cheapest first | anyone, signed out included (public allowlist) |
+| GET | `/account/plan` | – | `AccountPlan` for your own account (created on first ask); `Cache-Control: no-store` | signed in |
+| GET | `/teams/:id/plan` | – | `AccountPlan` for the team's account; `404` unless you are a team admin | team admin |
+
+- `Plan = { code: 'free' \| 'pro' \| 'team', name, priceMonthlyMinor, priceAnnualMinor, currency, limits, features, trialDays }`.
+  Prices are minor units (ZAR cents). `limits` keeps the database's
+  snake_case keys (`catchments`, `editors_per_project`, `live_catchments`,
+  `reports_per_month`, `packs_included_per_month`, `seats_included`,
+  `assistant_usd_micros_per_month`, `assistant_usd_micros_per_seat_month`);
+  `null` is unlimited.
+- `AccountPlan = { account: { id, kind: 'user' \| 'team' }, plan: { code, name, priceMonthlyMinor, priceAnnualMinor, currency, limits, features }, subscription, usage, enforced }`:
+  - `subscription`: `null` (Free; always in Phase 1) or `{ status, seats, periodStart, periodEnd, trialEnd, cancelAtPeriodEnd }`.
+  - `usage = { month: 'YYYY-MM', catchments, reports, packsIssued, assistantTokens }`,
+    each `{ used, limit }` (`limit` `null` = unlimited). `catchments.used`
+    is the account's active projects; `reports` and `packsIssued` are this
+    month's counts (Africa/Johannesburg); `assistantTokens.used` is this
+    month's weighted tokens on the account's projects.
+  - `enforced`: the backend's `BILLING_ENFORCED` (default `false`). In
+    Phase 1 it is only reported.
+- **What counts.** A server PDF report counts one `reports` when it is queued
+  (`POST /projects/:id/reports`, or a schedule firing), and issuing an
+  evidence pack counts one `packsIssued` (`POST /projects/:id/packs/:packId/issue`),
+  each in the action's own transaction against the project's account. Neither
+  is ever refused for it.
+- No farmer route, share link, `/verify` or email returns plan data.
 
 ## Health
 

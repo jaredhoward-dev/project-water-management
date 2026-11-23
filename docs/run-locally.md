@@ -64,6 +64,7 @@ In a git worktree both URLs point at that worktree's own dev database,
 | `ALERTS_TOKEN_SECRET` | a dev-only string (≥ 32 chars) | Signs alert emails' unsubscribe and "Was this useful?" links (the worker). Production gets a random one from Terraform. See [Alerts](#alerts) |
 | `API_PUBLIC_URL` | `http://localhost:3001` | Where a mail client posts an alert's one-click unsubscribe (production: `SITE_URL/api`, the default) |
 | `ALERTS_ENABLED` / `ALERTS_DAILY_CAP` | `true` / `5` | The alert kill switch, and immediate alert emails per person per day |
+| `BILLING_ENFORCED` | `false` (code default) | Whether plan limits refuse anything. Phase 1 is shadow mode: usage is counted and shown, nothing is refused, and the API only reports this as `enforced` ([billing.md](./billing.md#billing_enforced)) |
 | `PUBLIC_API_URL` (frontend) | `http://localhost:3001` | `/api` in production |
 | `PUBLIC_WAF_CAPTCHA_SCRIPT_URL`, `PUBLIC_WAF_CAPTCHA_API_KEY` (frontend) | empty (no sign-in CAPTCHA: there is no WAF locally) | set by `deploy-frontend.yml` from Terraform outputs (security.md § Sign-in CAPTCHA) |
 
