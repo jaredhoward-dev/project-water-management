@@ -1,0 +1,4 @@
+{
+	"addKb": 1,
+	"why": "#641 round 4: Team's editor-seat field and its priced buttons on the plan page (PlanUsage.svelte, plan.ts): total measured 2518 KB on the round branch before, 2519 KB after; the other round-4 lanes add no frontend code"
+}
