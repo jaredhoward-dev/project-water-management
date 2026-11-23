@@ -30,7 +30,7 @@ const post = (body: string, secret = SECRET) =>
 		body
 	});
 const subscription = async () =>
-	(await asOwner('SELECT status, plan_code, provider, external_ref FROM subscription WHERE account_id = $1 ORDER BY created_at DESC LIMIT 1', [accountId]))[0] as
+	(await asOwner('SELECT status, plan_code, provider, external_ref FROM subscription WHERE billing_account_id = $1 ORDER BY created_at DESC LIMIT 1', [accountId]))[0] as
 		| { status: string; plan_code: string; provider: string; external_ref: string }
 		| undefined;
 
@@ -44,7 +44,7 @@ afterAll(() => vi.unstubAllEnvs());
 
 describe('POST /billing/webhook/mock against app_billing_apply', () => {
 	it('a signed subscription event creates the account’s subscription, and its plan shows it', async () => {
-		const res = await app.request('/billing/webhook/mock', { method: 'POST' }); // unsigned: nothing
+		const res = await app.request('/billing/webhook/mock', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }); // unsigned: nothing
 		expect(res.status).toBe(400);
 		expect(await subscription()).toBeUndefined();
 
@@ -60,7 +60,7 @@ describe('POST /billing/webhook/mock against app_billing_apply', () => {
 		expect(await (await post(body)).json()).toEqual({ received: true, result: 'applied' });
 		expect((await subscription())?.status).toBe('active');
 		// The operator moves it by hand meanwhile; a replay of the old event must not undo that.
-		await asOwner("UPDATE subscription SET status = 'past_due' WHERE account_id = $1", [accountId]);
+		await asOwner("UPDATE subscription SET status = 'past_due' WHERE billing_account_id = $1", [accountId]);
 		expect(await (await post(body)).json()).toEqual({ received: true, result: 'duplicate' });
 		expect((await subscription())?.status).toBe('past_due');
 	});
