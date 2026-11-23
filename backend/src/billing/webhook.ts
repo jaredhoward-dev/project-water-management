@@ -23,6 +23,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { withoutUser } from '../db/tx.js';
 import { logEvent } from '../logging/logEvent.js';
 import { billingProvider } from './provider.js';
+import { SIGNATURE_HEADER } from './provider/signature.js';
 
 /** Stripe's events are a few KB; 256 KiB is far above any real one and far below the app-wide 4 MB. */
 export const WEBHOOK_BODY_MAX = 256 * 1024;
@@ -42,7 +43,8 @@ export const billingWebhookRoutes = new Hono().post(
 	async (c) => {
 		const provider = billingProvider()!;
 		const raw = await c.req.text();
-		const headers: Record<string, string | undefined> = c.req.header();
+		// Only the signature header, the one credential this route reads (token-confusion.security.db.test.ts lists it).
+		const headers: Record<string, string | undefined> = { [SIGNATURE_HEADER]: c.req.header(SIGNATURE_HEADER) };
 		const verified = provider.verifyAndNormalise(raw, headers);
 		if (!verified.ok) {
 			logEvent('warn', { event: 'billing_webhook_rejected', provider: provider.name, reason: verified.reason });

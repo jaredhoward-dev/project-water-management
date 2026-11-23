@@ -395,6 +395,8 @@ describe('where the backend reads a credential (source sweep)', () => {
 		'auth/session.ts': ['getCookie(c, MFA_CHALLENGE_COOKIE)', 'getCookie(c, SESSION_COOKIE)'],
 		'ingest/auth.ts': ["c.req.header('authorization')"],
 		'alerts/routes.ts': ["c.req.query('token')"],
+		// The billing provider's webhook signature (issue #641): an HMAC over the raw body, POST /billing/webhook/:provider only.
+		'billing/webhook.ts': ['c.req.header(SIGNATURE_HEADER)'],
 		// Not a user's credential: CloudFront's shared secret on the origin (app.ts).
 		'app.ts': ["c.req.header('x-cloudfront-shared-secret')"],
 		// Not an access credential: the sign-in lockout's trusted-device mark
