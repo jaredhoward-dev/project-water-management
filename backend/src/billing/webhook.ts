@@ -12,7 +12,8 @@
 //      BYPASSRLS. It records the event once (a redelivery is `duplicate`) and is the
 //      only writer of subscription status.
 //
-// Answers, by app_billing_apply's result: applied, recorded, duplicate → 200;
+// Answers, by app_billing_apply's result: applied, recorded, duplicate, stale → 200
+// (stale: older than the event last applied to the subscription, 327, so skipped);
 // conflict, unknown_account → 200 with a warning logged (a retry wouldn't change
 // them, and the operator reads the log); invalid → 400. A type we don't act on is
 // 200 without a database call. A database error is the app's 500 (no raw text),
@@ -28,7 +29,7 @@ import { SIGNATURE_HEADER } from './provider/signature.js';
 /** Stripe's events are a few KB; 256 KiB is far above any real one and far below the app-wide 4 MB. */
 export const WEBHOOK_BODY_MAX = 256 * 1024;
 
-export const APPLY_RESULTS = ['applied', 'recorded', 'duplicate', 'conflict', 'unknown_account', 'invalid'] as const;
+export const APPLY_RESULTS = ['applied', 'recorded', 'duplicate', 'stale', 'conflict', 'unknown_account', 'invalid'] as const;
 export type ApplyResult = (typeof APPLY_RESULTS)[number];
 
 export const billingWebhookRoutes = new Hono().post(

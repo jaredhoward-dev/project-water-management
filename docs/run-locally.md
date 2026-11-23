@@ -629,7 +629,7 @@ pnpm dev:billing:replay subscription-deleted --account <id> --new-id
 ```
 
 Each prints the API's status and answer (`applied`, `recorded`, `duplicate`,
-`conflict`, `unknown_account`). Without `--account`, the fixtures' placeholder
+`stale`, `conflict`, `unknown_account`). Without `--account`, the fixtures' placeholder
 account answers `unknown_account`. The script signs only with a `dev-only-`
 key and posts only to localhost.
 
