@@ -4,20 +4,36 @@
 	// (a team's, for its admins): the plan with its price and renewal or trial
 	// date, then this month's usage as one bar per counted thing. Usage is
 	// counted and, in shadow mode (BILLING_ENFORCED off), nothing is refused.
-	// Phase 3: Upgrade (no subscription) or Manage billing (one) when the
-	// billing provider isn't manual; each asks the API for a URL and sends the
-	// person there (Stripe's page, or the mock's local one). The workspace is
-	// English; no farmer page shows any of it. The figures and words come from
-	// plan.ts.
-	import type { AccountPlan, BillingInterval, BillingRedirect } from '#lib/api/types.js';
-	import { errorText } from '#lib/i18n/apiError.js';
-	import { billingActions, checkoutNotice, fmtPrice, monthName, priceLine, subscriptionLine, usageRows } from './plan';
+	// Phase 3: Upgrade (no subscription; each priced from GET /billing/plans) or
+	// Manage billing (one) when the billing provider isn't manual; each asks the
+	// API for a URL and sends the person there (Stripe's page, or the mock's
+	// local one). The workspace is English, so a refusal shows the API's own
+	// English message (the billing codes are machine-only); no farmer page shows
+	// any of it. The figures and words come from plan.ts.
+	import { onMount, untrack } from 'svelte';
+	import { replaceState } from '$app/navigation';
+	import { page } from '$app/state';
+	import { api } from '#lib/api/index.js';
+	import type { AccountPlan, BillingInterval, BillingRedirect, PlanOffer } from '#lib/api/types.js';
+	import {
+		CONFIRM_DELAYS_MS,
+		billingActions,
+		checkoutNotice,
+		monthName,
+		priceLine,
+		shadowNote,
+		subscriptionLine,
+		upgradeLabel,
+		usageRows,
+		type ConfirmState
+	} from './plan';
 
 	let {
 		plan,
 		whose,
 		checkout,
 		portal,
+		reload,
 		returned = null
 	}: {
 		plan: AccountPlan;
@@ -26,14 +42,68 @@
 		checkout?: (interval: BillingInterval) => Promise<BillingRedirect>;
 		/** Open the billing portal; answers where to go. */
 		portal?: () => Promise<BillingRedirect>;
-		/** `?checkout=` on coming back from checkout. */
+		/** Re-read the plan in place (the parent updates `plan`), while a paid checkout waits for the provider's confirmation. */
+		reload?: () => Promise<void>;
+		/** `?checkout=` on coming back from checkout; read once, then taken off the address. */
 		returned?: string | null;
 	} = $props();
 
 	const actions = $derived(billingActions(plan));
-	const notice = $derived(checkoutNotice(returned));
+	const showUpgrade = $derived(!!(actions.upgrade && checkout));
+	const showManage = $derived(!showUpgrade && !!(actions.manage && portal));
+	const note = $derived(shadowNote(plan.enforced, showUpgrade || showManage, whose));
 	let busy = $state(false);
 	let actionError = $state<string | null>(null);
+
+	// The offer being upgraded to, for the buttons' prices; without it they read unpriced.
+	let offer = $state<PlanOffer | null>(null);
+	let offerAsked = false;
+	$effect(() => {
+		const code = actions.upgrade?.code;
+		if (!code || !showUpgrade || offerAsked) return;
+		offerAsked = true;
+		api.billing
+			.plans()
+			.then((plans) => (offer = plans.find((p) => p.code === code) ?? null))
+			.catch(() => {});
+	});
+
+	// The checkout notice lives here, not in the address: it is read once, the
+	// live region below exists before its text arrives (so it is announced),
+	// and `?checkout=` comes off the address once settled, so a reload or a
+	// bookmark doesn't thank anyone twice.
+	const firstReturned = untrack(() => returned);
+	let shown = $state<string | null>(null);
+	let confirm = $state<ConfirmState>('confirmed');
+	const notice = $derived(checkoutNotice(shown, confirm));
+
+	onMount(() => {
+		if (!firstReturned) return;
+		let live = true;
+		void (async () => {
+			shown = firstReturned;
+			if (firstReturned === 'done' && !plan.subscription && reload) {
+				confirm = 'waiting';
+				for (const ms of CONFIRM_DELAYS_MS) {
+					await new Promise((r) => setTimeout(r, ms));
+					if (!live) return;
+					try {
+						await reload();
+					} catch {
+						// A failed re-read is the same as one that hasn't caught up: try again, then say to reload.
+					}
+					if (!live) return;
+					if (plan.subscription) break;
+				}
+				confirm = plan.subscription ? 'confirmed' : 'unconfirmed';
+			}
+			if (!live || !page.url.searchParams.has('checkout')) return;
+			const url = new URL(page.url.href);
+			url.searchParams.delete('checkout');
+			await replaceState(url, page.state);
+		})();
+		return () => (live = false);
+	});
 
 	async function go(start: (() => Promise<BillingRedirect>) | undefined) {
 		if (!start || busy) return;
@@ -43,9 +113,15 @@
 			const { url } = await start();
 			window.location.assign(url);
 		} catch (e) {
-			actionError = `Couldn’t open billing: ${errorText(e)}`;
+			actionError = `Couldn’t open billing: ${e instanceof Error ? e.message : String(e)}`;
 			busy = false;
 		}
+	}
+
+	// Back from the provider's page can restore this page from the back-forward
+	// cache with `busy` still set from the press that left: free the buttons.
+	function onPageShow(e: PageTransitionEvent) {
+		if (e.persisted) busy = false;
 	}
 
 	const sub = $derived(subscriptionLine(plan.subscription));
@@ -53,8 +129,10 @@
 	const nothingUsed = $derived(rows.every((r) => r.used === 0));
 </script>
 
+<svelte:window onpageshow={onPageShow} />
+
 <div class="plan-usage" data-plan={plan.plan.code} data-enforced={plan.enforced ? 'true' : 'false'}>
-	<section class="panel plan-card" aria-labelledby="plan-h">
+	<section class="panel plan-card" aria-labelledby="plan-h" aria-busy={busy}>
 		<h2 id="plan-h">Plan</h2>
 		<p class="plan-name"><strong data-plan-name>{plan.plan.name}</strong></p>
 		<p class="muted price" data-price>{priceLine(plan.plan)}</p>
@@ -63,24 +141,28 @@
 		{:else}
 			<p class="muted sub" data-subscription="none">No subscription: {whose} is on {plan.plan.name}.</p>
 		{/if}
-		{#if !plan.enforced}
-			<p class="note" data-shadow>Plans aren’t charged yet. Usage is counted against the plan’s limits so you can see where {whose} stands, but nothing is refused.</p>
+		{#if note}
+			<p class="note" data-shadow>{note}</p>
 		{/if}
-		{#if notice}
-			<p class="note" class:done={notice.done} role="status" data-checkout-notice={notice.done ? 'done' : 'cancelled'}>{notice.text}</p>
-		{/if}
-		{#if actions.upgrade && checkout}
+		<div role="status" data-checkout-status>
+			{#if notice}
+				<p class="note" class:done={notice.done} data-checkout-notice={notice.done ? 'done' : 'cancelled'} data-confirm={notice.done ? confirm : undefined}>
+					{notice.text}
+				</p>
+			{/if}
+		</div>
+		{#if showUpgrade && actions.upgrade && checkout}
 			<div class="billing-actions" data-billing-actions>
-				<button type="button" class="btn btn-primary" disabled={busy} data-action="upgrade-month" onclick={() => go(() => checkout('month'))}
-					>Upgrade to {actions.upgrade.name}, monthly</button
+				<button type="button" class="btn btn-primary" aria-disabled={busy} data-action="upgrade-month" onclick={() => go(() => checkout('month'))}
+					>{upgradeLabel(actions.upgrade.name, 'month', offer)}</button
 				>
-				<button type="button" class="btn" disabled={busy} data-action="upgrade-year" onclick={() => go(() => checkout('year'))}
-					>Upgrade to {actions.upgrade.name}, yearly</button
+				<button type="button" class="btn" aria-disabled={busy} data-action="upgrade-year" onclick={() => go(() => checkout('year'))}
+					>{upgradeLabel(actions.upgrade.name, 'year', offer)}</button
 				>
 			</div>
-		{:else if actions.manage && portal}
+		{:else if showManage && portal}
 			<div class="billing-actions" data-billing-actions>
-				<button type="button" class="btn" disabled={busy} data-action="manage-billing" onclick={() => go(portal)}>Manage billing</button>
+				<button type="button" class="btn" aria-disabled={busy} data-action="manage-billing" onclick={() => go(portal)}>Manage billing</button>
 			</div>
 		{/if}
 		{#if actionError}<p class="err" role="alert" data-billing-error>{actionError}</p>{/if}

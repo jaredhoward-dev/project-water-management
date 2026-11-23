@@ -4687,6 +4687,11 @@ export interface Plan {
 	features: Record<string, unknown>;
 }
 
+/** GET /billing/plans: every plan on offer (public); the plan page prices its Upgrade buttons from it. */
+export interface PlanOffer extends Plan {
+	trialDays: number | null;
+}
+
 export type SubscriptionStatus = 'trialing' | 'active' | 'past_due' | 'canceled' | 'expired';
 
 export interface Subscription {

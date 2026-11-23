@@ -3122,19 +3122,38 @@ The page is two cards, side by side where they fit and stacked on a phone:
   R 8 990.00 a year`; *No charge* for Free; another currency by its code),
   then the subscription: *Renews 1 Dec 2026*, *Trial ends …*, or in the
   warning colour *Ends …; it won't renew*, *Payment overdue*, *Cancelled* or
-  *Expired*. No subscription says the account is on its plan (Free). While
-  `enforced` is false, a note says plans aren't charged yet and nothing is
-  refused. Phase 3 adds the billing buttons, shown only when the API's
-  `provider` is `mock` or `stripe` (never with `manual`, production's setting
-  until Stripe is set up): with no subscription, *Upgrade to Pro, monthly* and
-  *…, yearly* (*Team* on a team's page); with one, *Manage billing*. Each asks
-  the API for a URL (`POST …/plan/checkout` or `…/plan/portal`) and sends the
-  person there: Stripe's hosted page, or the mock's local page on the API
-  ([billing.md § Checkout and portal](./billing.md#checkout-and-portal)). A
-  refusal shows inline from its code (`errorText`). Coming back with
-  `?checkout=done` or `?checkout=cancelled` shows a status line (*the payment
-  went through*, or *Nothing was charged*). `e2e/tests/billing-checkout.spec.ts`
-  follows the mock end to end.
+  *Expired*. No subscription says the account is on its plan (Free). Phase 3
+  adds the billing buttons, shown only when the API's `provider` is `mock` or
+  `stripe` (never with `manual`, production's setting until Stripe is set
+  up): with no subscription, *Upgrade to Pro, monthly (R 899.00 a month)* and
+  *…, yearly (R 8 990.00 a year)* (*Team* on a team's page), priced from
+  `GET /billing/plans` (unpriced until it answers, or if it fails); with one,
+  *Manage billing*. While `enforced` is false, a note says nothing is refused:
+  with no buttons, that plans aren't charged yet; beside them (which can
+  charge), only that limits aren't enforced yet (`plan.ts` `shadowNote`). Each
+  button asks the API for a URL (`POST …/plan/checkout` or `…/plan/portal`)
+  and sends the person there: Stripe's hosted page, or the mock's local page
+  on the API ([billing.md § Checkout and portal](./billing.md#checkout-and-portal)).
+  While it asks, the buttons are `aria-disabled` (never `disabled`, which
+  would throw the focus to the page; ui-playbook § 4) and the card
+  `aria-busy`; a press then is ignored. A refusal shows inline as the API's
+  own English message ("Couldn't open billing: …"), as the other workspace
+  pages do: the `billing_*` codes are machine-only, so `errorText` would
+  word every 409 as a clash. Back from the provider's page frees the buttons
+  (`pageshow` with `persisted`, for a page the back-forward cache restored
+  mid-press). Coming back with `?checkout=done` or `?checkout=cancelled`
+  shows a line in a live region (`role="status"`, there before its text):
+  *Nothing was charged*, or *the payment went through*. A paid checkout is
+  confirmed by the provider's webhook, which can land after the person is
+  back: while the plan still has no subscription the line says *Waiting for
+  the payment provider to confirm…* and the page re-reads the plan in place
+  (`reload`, not the loading state) a bounded few times (`CONFIRM_DELAYS_MS`,
+  about 15 s), then says to reload in a minute if it never shows. Then
+  `?checkout=` comes off the address (SvelteKit's `replaceState`), the line
+  staying in the component, so a reload doesn't thank anyone twice.
+  `e2e/tests/billing-checkout.spec.ts` follows the mock end to end, plus
+  Back from the mock's page, a refused request (its words inline, the focus
+  kept) and a payment confirmed a read late.
 - **Usage in <month>**: one row each for catchments (every catchment billed
   to the account counts, whoever made it; there is no archived state),
   reports, issued evidence packs and the assistant's spend this month. A row
@@ -3161,8 +3180,10 @@ subscription line, the rows), `api/client.test.ts` (the two calls), and
 `e2e/tests/billing-plan.spec.ts` (both pages, the not-found for a stranger
 and for a team member who isn't an admin, a farmer-only user sent back to
 `/account`, no way to pay, a 360 px phone without sideways scroll, axe at
-both widths); `auth/redirect.test.ts` keeps `/account/plan` English. The
-frontend doesn't call `GET /billing/plans`; the planned pricing page will.
+both widths, the team's Upgrade to Team, the two priced buttons wrapping at
+360 px); `auth/redirect.test.ts` keeps `/account/plan` English. The
+frontend calls `GET /billing/plans` only for the Upgrade buttons' prices
+(the planned pricing page will too).
 
 ## Network
 

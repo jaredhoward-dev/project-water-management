@@ -42,6 +42,12 @@
 			loading = false;
 		}
 	}
+	/** Re-read the plan in place, without the loading state (which would remount the body and lose its checkout notice). */
+	async function reload() {
+		const id = teamId;
+		const p = await api.teams.plan(id);
+		if (id === teamId) plan = p;
+	}
 	$effect(() => {
 		void teamId;
 		untrack(() => {
@@ -74,6 +80,7 @@
 				whose="this team"
 				checkout={(interval) => api.teams.checkout(teamId, interval)}
 				portal={() => api.teams.portal(teamId)}
+				{reload}
 				returned={page.url.searchParams.get('checkout')}
 			/>
 		{/if}
