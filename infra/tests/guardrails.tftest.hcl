@@ -3117,6 +3117,12 @@ run "map_data" {
     error_message = "Sign-up is closed by default (SIGNUP_OPEN=false): only an invite makes an account until signup_open is set."
   }
 
+  # --- Billing provider: manual until Stripe is set up (config/production.ts refuses unset or mock; issue #641) ---
+  assert {
+    condition     = aws_lambda_function.backend.environment[0].variables["BILLING_PROVIDER"] == "manual"
+    error_message = "The API runs BILLING_PROVIDER=manual (no webhooks) until the Stripe secret exists; production refuses an unset or mock provider, so dropping it stops the API starting."
+  }
+
   # --- Delineation off by default: no DEM, no grant -----------------------------------------
   assert {
     condition     = !var.delineation_dem && aws_lambda_function.backend.environment[0].variables["DEM_URL"] == "" && length(aws_iam_role_policy.api_dem) == 0
