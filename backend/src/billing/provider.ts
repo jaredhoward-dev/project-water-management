@@ -37,7 +37,7 @@ export interface SubscriptionPayload {
 	trialEnd: string | null;
 	cancelAtPeriodEnd: boolean;
 	externalRef: string;
-	/** When the provider created the event (ISO), for ordering later; app_billing_apply ignores it for now. */
+	/** When the provider created the event (ISO): app_billing_apply skips an update older than the last one applied as `stale` (327); absent or null applies in arrival order. */
 	eventCreated?: string | null;
 }
 /** What a recorded-only event carries: whose it is, and the subscription it names when it names one. */

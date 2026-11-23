@@ -894,19 +894,25 @@ are #641's checklist. Open items from building it:
       checked. Durable fix: read the Bedrock price for the model id the
       deployment calls and update the table and its test. Trigger:
       `assistant_free_model_id` (or any setting) pointing at Haiku 5.5.
-- [ ] **Webhook events apply in arrival order.** `app_billing_apply` (326)
+- [x] **Webhook events apply in arrival order.** `app_billing_apply` (326)
       ignores the payload's `eventCreated`, and Stripe doesn't guarantee
       delivery order, so an older `customer.subscription.updated` arriving
       after a newer one overwrites the newer state. Durable fix: keep the
       applied event's time on `subscription` and skip an update older than
       it (a forward migration redefining `app_billing_apply`), with a DB test
       delivering two updates out of order. Trigger: before `BILLING_PROVIDER`
-      is set to `stripe` in production.
-- [ ] **Nothing purges `billing_event`.** Every webhook event's row stays
+      is set to `stripe` in production. Done (round-2026-11-23/r3-gates,
+      327): `subscription.last_event_at`, an older update is `stale`, an
+      equal time or none applies in arrival order, a delete is never stale
+      (billing.md § Event order; `apply.db.test.ts`).
+- [x] **Nothing purges `billing_event`.** Every webhook event's row stays
       (indexed on `received_at` for a purge). Durable fix: a job that deletes
       rows older than Stripe's redelivery window plus a margin (Stripe
       retries for up to 3 days; keep 90), and docs/security.md's retention
-      row says so. Trigger: `BILLING_PROVIDER=stripe` in production.
+      row says so. Trigger: `BILLING_PROVIDER=stripe` in production. Done
+      (round-2026-11-23/r3-gates, 327): the job tick's
+      `app_purge_billing_events` deletes rows past 90 days, refusing under 4
+      (billing.md § Retention; `apply.db.test.ts`).
 
 ## DB tests share the mail outbox (2026-10-02, PR #360)
       **Decided (round 3, N):** a bounded whole-file pass (data-sources.md § ssebop-eta); the build is its own item below.

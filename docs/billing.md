@@ -208,7 +208,7 @@ The mock signs the same way with the dev key, so the same check serves both.
 `app_billing_apply` (326) takes. The account is the metadata
 `billing_account_id` (a UUID) and the plan its `plan_code`, both set at
 checkout. Every payload carries the event's `created` time as `eventCreated`
-(ISO), which the SQL ignores for now; it is kept for ordering later.
+(ISO), which orders the events (§ Event order below).
 
 | Stripe type | Normalised type | Effect in 326 |
 | --- | --- | --- |
@@ -256,9 +256,35 @@ How each result of `app_billing_apply` is answered:
 
 | Result | Answer | Log level |
 | --- | --- | --- |
-| `applied`, `recorded`, `duplicate` | `200 { received: true, result }` | info |
+| `applied`, `recorded`, `duplicate`, `stale` | `200 { received: true, result }` | info |
 | `conflict`, `unknown_account` | `200` (a retry wouldn't change them) | warn, for the operator to read |
 | `invalid` | `400` (326 doesn't record it, so a corrected retry under the same id still applies) | warn |
+
+### Event order
+
+Stripe doesn't deliver events in the order it created them, so 327 orders
+them by `eventCreated`. Each subscription keeps the time of the newest event
+applied to it (`subscription.last_event_at`):
+
+- An update older than that time is answered `stale` and changes nothing.
+  It is recorded on `billing_event` with that outcome, so its redelivery is a
+  `duplicate`.
+- An update at the same time applies, so the later arrival wins. Stripe's
+  `created` is in whole seconds, and two real changes in one second must not
+  lose the second.
+- An update with no `eventCreated` (or `null`), as the mock and `manual`
+  providers send, applies in arrival order as before 327 and leaves the time
+  unchanged. A malformed one (not ISO 8601 with an offset) is `invalid`.
+- A delete is never stale: it is the provider's last word, and a late live
+  update after it is already a `conflict`.
+
+### Retention
+
+The job tick deletes `billing_event` rows received more than 90 days ago
+(`app_purge_billing_events`, `jobs/runner.ts`
+`BILLING_EVENT_RETENTION_DAYS`). That is far past Stripe's redelivery
+window of up to 3 days, so a redelivery always finds its row and is a
+`duplicate`. The function refuses anything under 4 days.
 
 A database error is the app's generic `500`, which Stripe retries. Each answer
 logs one line (`billing_webhook` or `billing_webhook_rejected`) with the

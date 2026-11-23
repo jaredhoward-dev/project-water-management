@@ -122,11 +122,12 @@ describe('POST /billing/webhook/:provider', () => {
 		expect(calls).toHaveLength(0);
 	});
 
-	it('answers each app_billing_apply result per the contract: 200 for applied, recorded, duplicate, conflict, unknown_account; 400 for invalid', async () => {
+	it('answers each app_billing_apply result per the contract: 200 for applied, recorded, duplicate, stale, conflict, unknown_account; 400 for invalid', async () => {
 		for (const [result, status] of [
 			['applied', 200],
 			['recorded', 200],
 			['duplicate', 200],
+			['stale', 200],
 			['conflict', 200],
 			['unknown_account', 200],
 			['invalid', 400]
@@ -141,6 +142,7 @@ describe('POST /billing/webhook/:provider', () => {
 			['applied', 'info'],
 			['recorded', 'info'],
 			['duplicate', 'info'],
+			['stale', 'info'],
 			['conflict', 'warn'],
 			['unknown_account', 'warn'],
 			['invalid', 'warn']

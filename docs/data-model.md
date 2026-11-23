@@ -3888,7 +3888,8 @@ through one function, which is the **only writer of subscription status**.
 
 | Table | Holds |
 | --- | --- |
-| `billing_event` | One row per event acted on: (`provider` (`mock`, `manual`, `stripe`), `event_id`) primary key, `type`, `received_at`, `account_id` (set null when the account goes; indexed), `outcome` (`applied`, `recorded`, `conflict`, `unknown_account`). **Owner-only**: RLS on, no policy, no privilege for `water_app`; only `app_billing_apply` writes it. Indexed on `received_at` for a purge past the providers' retry windows (not built yet) |
+| `billing_event` | One row per event acted on: (`provider` (`mock`, `manual`, `stripe`), `event_id`) primary key, `type`, `received_at`, `account_id` (set null when the account goes; indexed), `outcome` (`applied`, `recorded`, `conflict`, `unknown_account`; 327 added `stale`). **Owner-only**: RLS on, no policy, no privilege for `water_app`; only `app_billing_apply` writes it. Indexed on `received_at`, which the tick's purge reads: rows received more than 90 days ago are deleted (327 `app_purge_billing_events`, worker context only, never under 4 days, past Stripe's 3-day redelivery window) |
+| `subscription.last_event_at` (327) | The provider's time (`eventCreated`) of the newest event applied to the subscription; null before 327, for the staff grant, and while no event carried a time. Bookkeeping for ordering, not in "Download my data" |
 
 `app_billing_apply(provider, event_id, type, payload jsonb) → text`
 (SECURITY DEFINER, pinned `search_path`, granted to `water_app`) runs with
@@ -3896,7 +3897,7 @@ through one function, which is the **only writer of subscription status**.
 it raises `42501` inside a user's or an API key's transaction. The payload
 is the route's normalised one, never a raw provider object:
 `{ accountId, planCode, status, seats, periodStart, periodEnd, trialEnd,
-cancelAtPeriodEnd, externalRef }`, timestamps as ISO 8601 with an offset.
+cancelAtPeriodEnd, externalRef, eventCreated? }`, timestamps as ISO 8601 with an offset.
 
 - It checks the arguments and the payload first, and answers `invalid`
   without recording anything (so the provider's retry of a corrected event
@@ -3914,9 +3915,12 @@ cancelAtPeriodEnd, externalRef }`, timestamps as ISO 8601 with an offset.
   ref (the one-live index, 323); or a live status for a ref already
   `canceled` or `expired` (a late or out-of-order update after its delete).
 - `unknown_account`: no such billing account.
-- `conflict` and `unknown_account` are recorded, so a replay is `duplicate`.
-  The payload carries no event time, so two live updates that arrive out of
-  order (say `past_due` after `active`) apply in arrival order.
+- `stale` (327), changing nothing: an update whose `eventCreated` is older
+  than the subscription's `last_event_at`. An equal time applies (the later
+  arrival wins, since Stripe's times are whole seconds). An update with no
+  time applies in arrival order and leaves `last_event_at` as it was. A
+  delete is never stale. A malformed time is `invalid`.
+- `conflict`, `unknown_account` and `stale` are recorded, so a replay is `duplicate`.
 - Tested in `src/billing/apply.db.test.ts`.
 
 ### Two-step sign-in (150_mfa.sql, 206_mfa_email_code.sql)

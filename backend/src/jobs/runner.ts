@@ -1,5 +1,5 @@
 // One tick of the queue: purge old jobs, reports, alerts, lapsed invites, deleted
-// notes' text and the erasure log's old entries, queue the data feeds
+// notes' text, the erasure log's and the billing webhook's old entries, queue the data feeds
 // (feeds/schedule.ts), report schedules (reports/schedule.ts) and scheduled
 // alert checks (app_alert_schedule) that are due (after bringing the CHIRPS
 // cell cache up to our copy's revisions, handlers/mirror-tick.ts, so the
@@ -169,6 +169,12 @@ export const ERASURE_LOG_RETENTION_DAYS = 40;
  * reservation left unsettled past its expiry is charged to its usage row in full (264_assistant_reservation).
  */
 export const ASSISTANT_USAGE_RETENTION_MONTHS = 13;
+/**
+ * A billing webhook event's row (326 billing_event) is kept this long, then deleted (327 app_purge_billing_events):
+ * far past Stripe's 3-day redelivery window, so a redelivery is always a duplicate, and long enough for the operator
+ * to read what an event did. The function refuses under 4 days.
+ */
+export const BILLING_EVENT_RETENTION_DAYS = 90;
 
 /** Queue a job_dead check for one project at once (app_alert_schedule); a failure is logged, never thrown. */
 async function scheduleAlertCheck(projectId: string): Promise<void> {
@@ -236,6 +242,8 @@ export interface TickResult {
 	erasuresPurged: number;
 	/** The assistant's rate rows past their hour and usage rows past ASSISTANT_USAGE_RETENTION_MONTHS deleted (262_assistant_usage), and expired reservations charged in full (264). */
 	assistantPurged: number;
+	/** Billing webhook events received more than BILLING_EVENT_RETENTION_DAYS ago, deleted (327). */
+	billingEventsPurged: number;
 	claimed: number;
 	done: number;
 	failed: number;
@@ -311,6 +319,7 @@ export async function runTick(o: TickOptions = {}): Promise<TickResult> {
 		notesPurged: 0,
 		erasuresPurged: 0,
 		assistantPurged: 0,
+		billingEventsPurged: 0,
 		claimed: 0,
 		done: 0,
 		failed: 0,
@@ -337,6 +346,9 @@ export async function runTick(o: TickOptions = {}): Promise<TickResult> {
 	);
 	result.assistantPurged = await withoutUser(
 		async (db) => (await db.query<{ n: number }>('SELECT app_purge_assistant($1) AS n', [ASSISTANT_USAGE_RETENTION_MONTHS])).rows[0]?.n ?? 0
+	);
+	result.billingEventsPurged = await withoutUser(
+		async (db) => (await db.query<{ n: number }>('SELECT app_purge_billing_events(make_interval(days => $1)) AS n', [BILLING_EVENT_RETENTION_DAYS])).rows[0]?.n ?? 0
 	);
 	const noticesPurged = await purgePackNotices();
 	const erratumPurged = await purgeErratumNotices();
