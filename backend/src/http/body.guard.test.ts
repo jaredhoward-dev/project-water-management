@@ -16,7 +16,7 @@ const SRC = fileURLToPath(new URL('..', import.meta.url));
  * must do readJson's checks itself or never hand the text to Postgres.
  */
 const ALLOWED: Record<string, string> = {
-	'http/body.ts': 'readJson itself: the one place a JSON body is read'
+	'http/body.ts': 'readJson itself: the one place a JSON body is read',
 	// Issue #641: the signature is an HMAC over the exact bytes received, so the text must be read raw. It is parsed only
 	// after the signature checks, under bodyLimit, and only the provider's normalised fields reach app_billing_apply.
 	'billing/webhook.ts': 'the billing webhook: its signature is over the raw body, which is parsed only once verified'
