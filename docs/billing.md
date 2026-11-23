@@ -476,9 +476,10 @@ plan switching there waits for Prices made in the dashboard (the portal
 still handles card updates, invoices and cancellation).
 
 `STRIPE_SECRET_KEY` is read from the environment only. The production check
-refuses `stripe` without a live key (`sk_live_…` or `rk_live_…`); getting it
-into the API Lambda is an open item in [followups.md](./followups.md)
-(§ Billing). Locally the key is never set: the mock needs none, and the unit
+refuses `stripe` without a live key (`sk_live_…` or `rk_live_…`). In
+production it comes from the API's runtime secret, beside
+`BILLING_WEBHOOK_SECRET`, once Terraform's `billing_provider` is `stripe`
+([deployment.md § Turning on Stripe](./deployment.md#turning-on-stripe)). Locally the key is never set: the mock needs none, and the unit
 tests mock the HTTP layer (`stripeApi.test.ts`, `provider.test.ts`); nothing
 in the repo calls Stripe for real.
 

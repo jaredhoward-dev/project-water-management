@@ -4668,12 +4668,15 @@ key there would let any read-only principal forge any user's session.
   Terraform also refuses a placeholder `auth_jwt_secret` at plan time
   (`infra/lambda.tf` precondition, `rejects_dev_placeholder_jwt_secret`).
   Billing (issue #641): the API refuses a `BILLING_PROVIDER` that is unset,
-  `mock` or unknown (only `manual` or `stripe`; Terraform sets `manual`,
-  pinned by `tests/guardrails.tftest.hcl`), and with `stripe` a
+  `mock` or unknown (only `manual` or `stripe`; Terraform's
+  `billing_provider` defaults to `manual` and refuses anything else at plan
+  time, `tests/guardrails.tftest.hcl`), and with `stripe` a
   `BILLING_WEBHOOK_SECRET` shorter than 32 characters or a `dev-only-`
   placeholder, or a `STRIPE_SECRET_KEY` that isn't a live key (`sk_live_…`
   or `rk_live_…`: a test-mode key in production would take no real
-  payments). The committed dev key is a `dev-only-` value `check:env` pins
+  payments). Terraform refuses the same at plan time, and writes both into
+  the API's runtime secret only with `stripe` (never its environment;
+  deployment.md § Turning on Stripe). The committed dev key is a `dev-only-` value `check:env` pins
   (`scripts/guards/check_env_isolation.mjs`), and `pnpm dev:billing:replay`
   signs only with such a key, only to localhost.
 - **WAF:** five per-IP rate limits on CloudFront: a tight 100-requests-per-5-minutes

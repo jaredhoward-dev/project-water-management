@@ -268,7 +268,8 @@ Keys this app needs:
 | `alerts_token_secret` | `ALERTS_TOKEN_SECRET` in the worker's runtime secret: signs the one-click unsubscribe links and the "Was this useful?" links in alert emails (32+ alphanumeric characters, `openssl rand -hex 32`). Rotating it breaks the unsubscribe link in every alert already sent, and the feedback links of the last 30 days |
 | `app_encryption_key` | `APP_ENCRYPTION_KEY` in the API's runtime secret: seals two-step sign-in's TOTP secrets at rest (32+ alphanumeric characters, `openssl rand -hex 32`). Rotating it voids every authenticator ([§ Runbooks](#runbooks) 15) |
 | `feed_credential_private_key` | Optional, only with `station_api_feeds = true`: `FEED_CREDENTIAL_PRIVATE_KEY` in the fetcher's runtime secret, which opens the keys owners save for station API feeds (43 base64url characters from `pnpm gen:feed-credential-key`, whose public half goes in `prod.tfvars.sops` as `feed_credential_public_key`). Rotating it voids every saved station key ([§ Station API feeds](#station-api-feeds)) |
-| `billing_webhook_secret` | **Not set up yet (operator step, issue #641 Phase 3).** `BILLING_WEBHOOK_SECRET` in the API's runtime secret: Stripe's webhook signing secret (`whsec_…`) for `POST /billing/webhook/stripe`, needed only when the API runs `BILLING_PROVIDER=stripe` (Terraform sets `manual` today, which takes no webhooks). When the account exists, the operator pastes it here and in the Stripe dashboard registers the endpoint; the Terraform that moves it into the runtime secret and switches the provider is a later change ([billing.md § Webhooks and providers](./billing.md#webhooks-and-providers)) |
+| `stripe_secret_key` | Optional, only with `billing_provider = "stripe"` (issue #641): `STRIPE_SECRET_KEY` in the API's runtime secret, Stripe's API key for checkout and the Customer Portal (`billing/provider/stripeApi.ts`). A **live restricted** key (`rk_live_…`) with the permissions in [§ Turning on Stripe](#turning-on-stripe); plan refuses a test-mode (`sk_test_…`/`rk_test_…`) or publishable key. Left out of the runtime secret under `manual` |
+| `billing_webhook_secret` | Optional, only with `billing_provider = "stripe"` (issue #641): `BILLING_WEBHOOK_SECRET` in the API's runtime secret, the signing secret (`whsec_…`) of Stripe's webhook endpoint for `POST /billing/webhook/stripe` (32+ characters, never the committed `dev-only-` value). Left out of the runtime secret under `manual`, which takes no webhooks ([§ Turning on Stripe](#turning-on-stripe); [billing.md § Webhooks and providers](./billing.md#webhooks-and-providers)) |
 | `cloudfront_private_key` | `CLOUDFRONT_PRIVATE_KEY` in the API's runtime secret: signs report download links (CloudFront signed URLs). An RSA 2048 private key, PEM, as a YAML block scalar; its public half goes in `prod.tfvars.sops` (`report_download_public_keys`, `report_download_signing_key`). Generating and rotating it: [§ The report-download signing key](#the-report-download-signing-key) |
 
 The key list is `infra/prod.sops.yaml.example`. There is no `db_owner_password`
@@ -3277,6 +3278,79 @@ The operator does every step; nothing here is for an agent to run.
   (`aws secretsmanager restore-secret --secret-id water-management/runtime/fetcher --profile water-management`)
   and import it (`infra/scripts/tf.sh import 'aws_secretsmanager_secret.runtime["fetcher"]' <its ARN>`)
   before the apply.
+
+## Billing
+
+The API's billing provider is Terraform's `billing_provider`: `manual` (the
+default) takes no webhooks and needs no Stripe secret; `stripe` sells plans
+through Stripe Checkout and the Customer Portal ([billing.md](./billing.md)).
+With `stripe`, `stripe_secret_key` and `billing_webhook_secret` go from
+`prod.sops.yaml` into the API's runtime secret (`infra/secrets.tf`), never its
+environment. Under `manual` Terraform leaves both out of the secret, even when
+they are in sops, since the API refuses a key it doesn't expect
+(`config/runtimeSecrets.ts`). Plan refuses `stripe` without both, with a
+test-mode key or with a webhook secret under 32 characters, and refuses `mock`
+outright (`infra/tests/guardrails.tftest.hcl`).
+
+### Turning on Stripe
+
+The operator does every step; nothing here is for an agent to run, and no
+key goes into a chat, an issue or a CI log.
+
+1. **Open the Stripe account** on the estate's owner identity
+   (`~/github/project-mgmt/docs/vendor-accounts.md` and its Runbook H; add the
+   registry row), and finish its activation (business details, payout bank
+   account) so live mode is available.
+2. **Make a restricted key** in live mode: Developers → API keys → Create
+   restricted key, named `ic-wbt-api`. Give it exactly what the API calls
+   (billing.md § Stripe): **Customers: Write**, **Checkout Sessions: Write**
+   and **Customer portal: Write**; everything else **None**. Stripe shows the
+   `rk_live_…` value once: go straight to step 4 with it.
+3. **Make the webhook endpoint** in live mode: Developers → Webhooks → Add
+   endpoint, URL `https://<site domain>/api/billing/webhook/stripe` (CloudFront
+   sends `/api/*` to the API), API version `2026-10-28.endive` (the one the
+   API pins), and exactly these six events:
+   `customer.subscription.created`, `customer.subscription.updated`,
+   `customer.subscription.deleted`, `checkout.session.completed`,
+   `invoice.paid`, `invoice.payment_failed`. Reveal its signing secret
+   (`whsec_…`). Until step 5's apply the API answers this endpoint `404`
+   (`manual`), and Stripe retries a failed delivery for up to three days, so
+   do steps 4–5 the same day.
+4. **Put both in sops:**
+   `cd ~/github/infra-secrets && AWS_PROFILE=water-management sops water-management/prod.sops.yaml`,
+   adding `stripe_secret_key: "<rk_live_…>"` and
+   `billing_webhook_secret: "<whsec_…>"` (`infra/prod.sops.yaml.example`).
+   `tf.sh` passes each as an ephemeral variable when present; neither reaches
+   state or a saved plan.
+5. **Switch the provider, plan, read it, then apply** with your own
+   go-ahead. Add `billing_provider = "stripe"` to `prod.tfvars.sops`, then
+   `cd infra && AWS_PROFILE=water-management ./scripts/tf.sh plan -var-file=../../infra-secrets/water-management/prod.tfvars.sops -out=<plan>`
+   and `AWS_PROFILE=water-management ./scripts/tf.sh apply <plan>`. Expect:
+   `BILLING_PROVIDER` going from `manual` to `stripe` on the backend function,
+   and every runtime secret version rewritten (the sops edit moved
+   `runtime_secret_version`, so every Lambda cold-starts). Nothing else.
+   A plan that fails on `var.billing_provider` names the missing or
+   malformed key.
+6. **Check it.** First in test mode, which production can't take (it
+   refuses a test key, and a test-mode endpoint's events are signed with a
+   different secret), so on your own machine with the
+   [Stripe CLI](https://docs.stripe.com/stripe-cli): in
+   `backend/.env.development.local` set `BILLING_PROVIDER=stripe`, a test-mode
+   `STRIPE_SECRET_KEY=sk_test_…` and the `whsec_…` that
+   `stripe listen --forward-to http://localhost:3001/billing/webhook/stripe`
+   prints, then run `pnpm dev` and buy a plan from the plan page with Stripe's
+   test card `4242 4242 4242 4242`. The `stripe listen` window shows each of
+   the events answered `200`, and the account's plan page shows the
+   subscription. (`stripe trigger` events carry no `billing_account_id`, so
+   the API rightly refuses them; use a real test checkout.) Then in
+   production, after the apply: the API's log group shows no
+   `refusing to start the api Lambda`, and the first live event appears in
+   the endpoint's delivery log in Stripe's dashboard answered `200`, with a
+   `billing_webhook` line in the API's log. Remove the local keys afterwards.
+
+To turn it off: `billing_provider = "manual"` and apply. The webhook route
+answers `404` again and checkout falls back to recording by hand; disable the
+endpoint in Stripe's dashboard and remove both sops keys.
 
 ## The cutover
 

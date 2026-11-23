@@ -423,6 +423,7 @@ The tradeoffs table and the AWS sources are in
 | `AUTH_JWT_SECRET` | sops `auth_jwt_secret` → the API's and worker's runtime secrets (the worker's re-run job stamps the runs it stores) | **No.** Ephemeral variable → write-only value |
 | Alert unsubscribe-token secret | sops `alerts_token_secret` → the worker's runtime secret | **No.** Ephemeral variable → write-only value |
 | TOTP sealing key (two-step sign-in) | sops `app_encryption_key` → the API's runtime secret | **No.** Ephemeral variable → write-only value |
+| Stripe API key and webhook signing secret (issue #641) | sops `stripe_secret_key`, `billing_webhook_secret` → the API's runtime secret, only while `billing_provider = "stripe"` (left out of it under `manual`, the default; plan refuses `stripe` without both or with a test key; docs/deployment.md § Turning on Stripe) | **No.** Ephemeral variable → write-only value |
 | CloudFront shared secret | `random_password` → the API's runtime secret (write-only), and CloudFront's origin header | **Yes**, in `random_password.cloudfront_shared_secret` and the distribution: `custom_header` isn't a write-only argument |
 
 **No secret sits in a Lambda's environment** (issue #126). Environment
@@ -439,7 +440,9 @@ only what it uses: the worker never holds the CloudFront secret, the API never
 holds the unsubscribe key, migrate holds only the password it sets. The
 renderer holds no secret, and the fetcher none unless `station_api_feeds` is
 on: then its own secret holds the X25519 key that opens station API feeds'
-saved keys (issue #784; docs/deployment.md § Station API feeds). The residual copy outside Secrets Manager is the
+saved keys (issue #784; docs/deployment.md § Station API feeds). The API's
+secret holds the Stripe pair only while `billing_provider` is `stripe`
+(`local.runtime_secret_keys_off`). The residual copy outside Secrets Manager is the
 CloudFront secret in the distribution's origin header, readable with
 `cloudfront:GetDistributionConfig`; it only lets a caller past the WAF to the
 Function URL, where the app's own auth still applies.
