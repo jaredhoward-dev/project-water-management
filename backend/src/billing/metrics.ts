@@ -1,0 +1,343 @@
+// The Phase 1 metrics and the staff abuse report (issue #641, "Phase 1 metrics
+// and thresholds", "Free tier and abuse"; docs/billing.md § Metrics and the
+// abuse report). Pure maths over the rows 325_billing_metrics's owner-only
+// functions return; backend/scripts/billing-report.ts gathers and prints.
+//
+// The output holds counts and aggregates, account and person ids only where a
+// signal needs a follow-up, and email domains only for a domain cluster.
+// Addresses appear only when the caller asks (`showEmails`).
+
+export interface AccountRow {
+	accountId: string;
+	kind: 'user' | 'team';
+	planCode: string;
+	startedAt: Date;
+	catchments: number;
+	runs: number;
+	reports: number;
+	assistantUsdMicros: number;
+	unpricedTurns: number;
+	lastSpendAt: Date | null;
+}
+
+export interface PersonRow {
+	userId: string;
+	email: string;
+	createdAt: Date;
+	verified: boolean;
+	firstRunAt: Date | null;
+	inMonth: boolean;
+	/** The sign-up's day in Africa/Johannesburg, YYYY-MM-DD. */
+	signupDay: string;
+}
+
+/** A plan's limits as 323 stores them (snake_case; null is unlimited). */
+export type PlanLimits = Record<string, number | null>;
+
+const DAY_MS = 86_400_000;
+/** Near a limit: at least this share of it (the 80% soft warning of "Enforcement design"). */
+export const NEAR_SHARE = 0.8;
+/** "5+ new accounts a week in one address or canonical cluster" (escalation a). */
+export const CLUSTER_WEEK = 5;
+/** Accounts younger than this count as new for the Free spend share. */
+export const NEW_ACCOUNT_DAYS = 7;
+/** Activation window: a run within this many days of signing up. */
+export const ACTIVATION_DAYS = 7;
+
+/** Mail providers whose clusters are expected at scale; flagged, not hidden. */
+const COMMON_PROVIDERS = new Set(['gmail.com', 'googlemail.com', 'outlook.com', 'hotmail.com', 'live.com', 'yahoo.com', 'icloud.com', 'proton.me', 'protonmail.com']);
+
+/**
+ * The address one allowance is keyed to: lower-cased, a `+tag` removed, and
+ * for Gmail the dots too (googlemail.com is gmail.com). Issue #641, "One
+ * allowance per person".
+ */
+export function canonicalEmail(email: string): string {
+	const lower = email.trim().toLowerCase();
+	const at = lower.lastIndexOf('@');
+	if (at < 1) return lower;
+	let local = lower.slice(0, at);
+	let domain = lower.slice(at + 1);
+	const plus = local.indexOf('+');
+	if (plus > 0) local = local.slice(0, plus);
+	if (domain === 'googlemail.com') domain = 'gmail.com';
+	if (domain === 'gmail.com') local = local.replaceAll('.', '');
+	return `${local}@${domain}`;
+}
+
+export const emailDomain = (email: string): string => canonicalEmail(email).split('@')[1] ?? '';
+
+/** The nearest-rank percentile (p in 0–1) of the values; null for none. */
+export function percentile(values: number[], p: number): number | null {
+	if (values.length === 0) return null;
+	const sorted = [...values].sort((a, b) => a - b);
+	const rank = Math.max(1, Math.ceil(p * sorted.length));
+	return sorted[rank - 1]!;
+}
+
+export const share = (part: number, whole: number): number | null => (whole === 0 ? null : part / whole);
+
+/** Active in the month: a run, a server report or assistant use on any of its projects. */
+export const isActive = (a: AccountRow): boolean => a.runs > 0 || a.reports > 0 || a.assistantUsdMicros > 0 || a.unpricedTurns > 0;
+
+export interface Activation {
+	/** Verified sign-ups in the month at least 7 days old now. */
+	cohort: number;
+	activated: number;
+	share: number | null;
+	/** Verified sign-ups in the month under 7 days old: their window is still open, so they're left out. */
+	pending: number;
+	unverified: number;
+}
+
+/** Verified sign-ups of the month with a model run within 7 days of signing up. */
+export function activation(people: PersonRow[], now: Date): Activation {
+	const month = people.filter((p) => p.inMonth);
+	const verified = month.filter((p) => p.verified);
+	const done = verified.filter((p) => now.getTime() - p.createdAt.getTime() >= ACTIVATION_DAYS * DAY_MS);
+	const activated = done.filter((p) => p.firstRunAt !== null && p.firstRunAt.getTime() - p.createdAt.getTime() <= ACTIVATION_DAYS * DAY_MS).length;
+	return { cohort: done.length, activated, share: share(activated, done.length), pending: verified.length - done.length, unverified: month.length - verified.length };
+}
+
+export interface LimitShare {
+	limit: 'reports_per_month' | 'assistant_usd_micros_per_month' | 'catchments';
+	/** The Free plan's limit; null: Free has none, so nothing is near it. */
+	value: number | null;
+	near: number;
+	at: number;
+	nearShare: number | null;
+	atShare: number | null;
+}
+
+const used = (a: AccountRow, limit: LimitShare['limit']): number =>
+	limit === 'reports_per_month' ? a.reports : limit === 'catchments' ? a.catchments : a.assistantUsdMicros;
+
+/** Of the month's active Free accounts, how many are near (≥ 80%, below 100%) or at (≥ 100%) each Free limit. */
+export function freeLimitShares(accounts: AccountRow[], freeLimits: PlanLimits): { active: number; limits: LimitShare[] } {
+	const active = accounts.filter((a) => a.planCode === 'free' && isActive(a));
+	const limits = (['reports_per_month', 'assistant_usd_micros_per_month', 'catchments'] as const).map((limit): LimitShare => {
+		const value = freeLimits[limit] ?? null;
+		if (value === null || value <= 0) return { limit, value: null, near: 0, at: 0, nearShare: null, atShare: null };
+		const at = active.filter((a) => used(a, limit) >= value).length;
+		const near = active.filter((a) => used(a, limit) >= NEAR_SHARE * value && used(a, limit) < value).length;
+		return { limit, value, near, at, nearShare: share(near, active.length), atShare: share(at, active.length) };
+	});
+	return { active: active.length, limits };
+}
+
+export interface SpendByPlan {
+	plan: string;
+	/** Accounts with any assistant spend in the month. */
+	spenders: number;
+	p50UsdMicros: number | null;
+	p90UsdMicros: number | null;
+	totalUsdMicros: number;
+	/** Turns with no price: the totals are a floor when this isn't 0. */
+	unpricedTurns: number;
+}
+
+/** Assistant spend per account in the month, p50 and p90 over the accounts that spent, per plan. */
+export function spendByPlan(accounts: AccountRow[]): SpendByPlan[] {
+	const plans = [...new Set(accounts.map((a) => a.planCode))].sort();
+	return plans.map((plan) => {
+		const rows = accounts.filter((a) => a.planCode === plan && (a.assistantUsdMicros > 0 || a.unpricedTurns > 0));
+		const spend = rows.map((a) => a.assistantUsdMicros);
+		return {
+			plan,
+			spenders: rows.length,
+			p50UsdMicros: percentile(spend, 0.5),
+			p90UsdMicros: percentile(spend, 0.9),
+			totalUsdMicros: spend.reduce((s, v) => s + v, 0),
+			unpricedTurns: rows.reduce((s, a) => s + a.unpricedTurns, 0)
+		};
+	});
+}
+
+/**
+ * The share of the month's Free assistant spend by accounts younger than 7
+ * days. assistant_usage keeps one row per person, project and month, so the
+ * day of each turn isn't known: an account counts as new when its latest
+ * spend of the month came less than 7 days after it started. That makes the
+ * share an upper bound.
+ */
+export function newAccountFreeSpend(accounts: AccountRow[]): { totalUsdMicros: number; newUsdMicros: number; share: number | null } {
+	const free = accounts.filter((a) => a.planCode === 'free' && a.assistantUsdMicros > 0);
+	const isNew = (a: AccountRow) => a.lastSpendAt !== null && a.lastSpendAt.getTime() - a.startedAt.getTime() < NEW_ACCOUNT_DAYS * DAY_MS;
+	const total = free.reduce((s, a) => s + a.assistantUsdMicros, 0);
+	const fresh = free.filter(isNew).reduce((s, a) => s + a.assistantUsdMicros, 0);
+	return { totalUsdMicros: total, newUsdMicros: fresh, share: share(fresh, total) };
+}
+
+/** The heaviest Free spenders of the month, by assistant spend (ids for a follow-up). */
+export function heaviestFree(accounts: AccountRow[], n = 5): { accountId: string; usdMicros: number }[] {
+	return accounts
+		.filter((a) => a.planCode === 'free' && a.assistantUsdMicros > 0)
+		.sort((a, b) => b.assistantUsdMicros - a.assistantUsdMicros || a.accountId.localeCompare(b.accountId))
+		.slice(0, n)
+		.map((a) => ({ accountId: a.accountId, usdMicros: a.assistantUsdMicros }));
+}
+
+const addDays = (day: string, n: number): string => new Date(Date.parse(`${day}T00:00:00Z`) + n * DAY_MS).toISOString().slice(0, 10);
+
+/** The most sign-ups in any 7 consecutive days among these days (YYYY-MM-DD), and the window's first day. */
+export function busiestWeek(days: string[]): { count: number; from: string | null } {
+	const sorted = [...days].sort();
+	let best = { count: 0, from: null as string | null };
+	for (let i = 0, j = 0; i < sorted.length; i++) {
+		const end = addDays(sorted[i]!, -6);
+		while (sorted[j]! < end) j++;
+		if (i - j + 1 > best.count) best = { count: i - j + 1, from: sorted[j]! };
+	}
+	return best;
+}
+
+export interface DomainCluster {
+	domain: string;
+	signups: number;
+	busiestWeek: number;
+	weekFrom: string | null;
+	commonProvider: boolean;
+}
+
+export interface CanonicalCluster {
+	/** Printed only with --show-emails. */
+	canonical: string;
+	userIds: string[];
+	inMonth: number;
+	emails: string[];
+}
+
+export interface AbuseReport {
+	signupsPerDay: { day: string; signups: number }[];
+	/** Domains with 5+ sign-ups in some 7 days of the month (escalation a's trigger). */
+	domainClusters: DomainCluster[];
+	/** Canonical addresses with more than one account, ever; at least one signed up this month. */
+	canonicalClusters: CanonicalCluster[];
+}
+
+export function abuseReport(people: PersonRow[]): AbuseReport {
+	const month = people.filter((p) => p.inMonth);
+	const perDay = new Map<string, number>();
+	for (const p of month) perDay.set(p.signupDay, (perDay.get(p.signupDay) ?? 0) + 1);
+	const signupsPerDay = [...perDay].sort(([a], [b]) => a.localeCompare(b)).map(([day, signups]) => ({ day, signups }));
+
+	const byDomain = new Map<string, string[]>();
+	for (const p of month) {
+		const d = emailDomain(p.email);
+		byDomain.set(d, [...(byDomain.get(d) ?? []), p.signupDay]);
+	}
+	const domainClusters = [...byDomain]
+		.map(([domain, days]): DomainCluster => {
+			const week = busiestWeek(days);
+			return { domain, signups: days.length, busiestWeek: week.count, weekFrom: week.from, commonProvider: COMMON_PROVIDERS.has(domain) };
+		})
+		.filter((c) => c.busiestWeek >= CLUSTER_WEEK)
+		.sort((a, b) => b.busiestWeek - a.busiestWeek || a.domain.localeCompare(b.domain));
+
+	const byCanonical = new Map<string, PersonRow[]>();
+	for (const p of people) {
+		const c = canonicalEmail(p.email);
+		byCanonical.set(c, [...(byCanonical.get(c) ?? []), p]);
+	}
+	const canonicalClusters = [...byCanonical]
+		.filter(([, ps]) => ps.length > 1 && ps.some((p) => p.inMonth))
+		.map(([canonical, ps]) => {
+			const sorted = [...ps].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+			return { canonical, userIds: sorted.map((p) => p.userId), inMonth: ps.filter((p) => p.inMonth).length, emails: sorted.map((p) => p.email) };
+		})
+		.sort((a, b) => b.userIds.length - a.userIds.length || a.canonical.localeCompare(b.canonical));
+
+	return { signupsPerDay, domainClusters, canonicalClusters };
+}
+
+/** The issue's metrics this data can't answer yet, and what each would need. Printed so nobody reads a gap as a zero. */
+export const NOT_YET_MEASURABLE: { metric: string; needs: string }[] = [
+	{ metric: 'Upgrade at the limit (checkout or trial within 7 days of a limit message)', needs: 'no checkout, trial or limit-message events are recorded (Phase 3)' },
+	{ metric: 'Churn after the limit (inactive 30 days after hitting one)', needs: 'no record of when an account hit a limit' },
+	{ metric: 'Reverse trial → paid within 30 days', needs: 'no trials exist yet' },
+	{ metric: 'Share of active Free accounts at the assistant daily cap', needs: 'assistant_usage is monthly; there is no daily cap or daily record yet' },
+	{ metric: 'Share of active Free accounts at the live-catchment limit', needs: 'no catchment is marked live yet' },
+	{ metric: 'Free pool burn by day of month', needs: 'assistant_usage is monthly; there is no pool or daily record yet' },
+	{ metric: 'Paid AI: share of seats reaching $15', needs: 'spend is per project and person, not per paid seat; no one is on a paid plan in Phase 1' },
+	{ metric: 'Disposable-domain rejections', needs: 'no blocklist yet' },
+	{ metric: 'Sign-up throttle hits per address', needs: 'signup_throttle keeps only a hashed bucket for its hour (079)' },
+	{ metric: 'Suspensions', needs: 'no suspend action yet' }
+];
+
+export interface Report {
+	month: string;
+	generatedAt: string;
+	accounts: number;
+	activation: Activation;
+	freeLimits: ReturnType<typeof freeLimitShares>;
+	assistantSpend: SpendByPlan[];
+	newAccountFreeSpend: ReturnType<typeof newAccountFreeSpend>;
+	heaviestFree: ReturnType<typeof heaviestFree>;
+	abuse: AbuseReport;
+	notYetMeasurable: typeof NOT_YET_MEASURABLE;
+}
+
+export function buildReport(month: string, now: Date, accounts: AccountRow[], people: PersonRow[], freeLimits: PlanLimits): Report {
+	return {
+		month,
+		generatedAt: now.toISOString(),
+		accounts: accounts.length,
+		activation: activation(people, now),
+		freeLimits: freeLimitShares(accounts, freeLimits),
+		assistantSpend: spendByPlan(accounts),
+		newAccountFreeSpend: newAccountFreeSpend(accounts),
+		heaviestFree: heaviestFree(accounts),
+		abuse: abuseReport(people),
+		notYetMeasurable: NOT_YET_MEASURABLE
+	};
+}
+
+/** The report without addresses: what prints unless the operator asks for --show-emails. */
+export function redact(report: Report): Report {
+	return {
+		...report,
+		abuse: { ...report.abuse, canonicalClusters: report.abuse.canonicalClusters.map((c) => ({ ...c, canonical: '(hidden)', emails: [] })) }
+	};
+}
+
+const pct = (v: number | null) => (v === null ? 'n/a' : `${(v * 100).toFixed(1)}%`);
+const usd = (micros: number | null) => (micros === null ? 'n/a' : `$${(micros / 1_000_000).toFixed(2)}`);
+
+/** The report as text for the operator's terminal. */
+export function formatReport(r: Report, showEmails: boolean): string {
+	const out: string[] = [];
+	out.push(`Billing metrics for ${r.month} (generated ${r.generatedAt}; ${r.accounts} billing accounts; plans as they are today)`, '');
+	const a = r.activation;
+	out.push('Activation (verified sign-ups with a run within 7 days)');
+	out.push(`  ${a.activated} of ${a.cohort} = ${pct(a.share)}  (threshold: < 30% → fix onboarding first)`);
+	out.push(`  ${a.pending} verified sign-ups under 7 days old left out; ${a.unverified} unverified`, '');
+	out.push(`Active Free accounts near (≥ 80%) / at each Free limit (${r.freeLimits.active} active: a run, report or assistant use this month)`);
+	for (const l of r.freeLimits.limits) {
+		const value = l.value === null ? 'no limit on Free' : l.limit === 'assistant_usd_micros_per_month' ? usd(l.value) : String(l.value);
+		out.push(`  ${l.limit.padEnd(32)} ${value.padEnd(18)} near ${l.near} (${pct(l.nearShare)})  at ${l.at} (${pct(l.atShare)})`);
+	}
+	out.push('  thresholds: > 15% at reports → 10 a month; < 3% at the monthly assistant cap → room to raise', '');
+	out.push('Assistant spend per account (accounts that spent; UTC month)');
+	for (const s of r.assistantSpend)
+		out.push(`  ${s.plan.padEnd(6)} ${String(s.spenders).padStart(5)} accounts  p50 ${usd(s.p50UsdMicros)}  p90 ${usd(s.p90UsdMicros)}  total ${usd(s.totalUsdMicros)}${s.unpricedTurns ? `  (${s.unpricedTurns} unpriced turns: a floor)` : ''}`);
+	const n = r.newAccountFreeSpend;
+	out.push('', `Free assistant spend by accounts under 7 days old: ${usd(n.newUsdMicros)} of ${usd(n.totalUsdMicros)} = ${pct(n.share)} (an upper bound; > 50% → escalation b)`, '');
+	out.push('Heaviest Free accounts (assistant spend)');
+	if (r.heaviestFree.length === 0) out.push('  none');
+	for (const h of r.heaviestFree) out.push(`  ${h.accountId}  ${usd(h.usdMicros)}`);
+	out.push('', 'Abuse signals');
+	const days = r.abuse.signupsPerDay;
+	const top = [...days].sort((x, y) => y.signups - x.signups).slice(0, 3);
+	out.push(`  sign-ups this month: ${days.reduce((s, d) => s + d.signups, 0)} on ${days.length} days; busiest: ${top.map((d) => `${d.day} (${d.signups})`).join(', ') || 'none'}`);
+	out.push(`  email domains with ${CLUSTER_WEEK}+ sign-ups in 7 days: ${r.abuse.domainClusters.length === 0 ? 'none' : ''}`);
+	for (const c of r.abuse.domainClusters)
+		out.push(`    ${c.domain}  ${c.busiestWeek} in the 7 days from ${c.weekFrom} (${c.signups} this month)${c.commonProvider ? '  common provider' : ''}`);
+	out.push(`  canonical addresses with more than one account: ${r.abuse.canonicalClusters.length === 0 ? 'none' : ''}`);
+	for (const c of r.abuse.canonicalClusters) {
+		out.push(`    ${c.userIds.length} accounts (${c.inMonth} this month)${showEmails ? `  ${c.canonical}: ${c.emails.join(', ')}` : ''}`);
+		out.push(`      users ${c.userIds.join(', ')}`);
+	}
+	out.push('', 'Not yet measurable');
+	for (const m of r.notYetMeasurable) out.push(`  ${m.metric}: ${m.needs}`);
+	return out.join('\n');
+}
