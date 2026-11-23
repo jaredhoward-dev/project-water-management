@@ -66,10 +66,21 @@ function deps(provider: AssistantProvider, tools: AssistantTool[] = [], over: Pa
 const ask = [{ role: 'user' as const, content: 'Why?' }];
 
 describe('runTurn', () => {
+	it('sums the cache tokens each hop reports, as the part of its input they are (never more than it)', async () => {
+		const p = scripted((hop) =>
+			hop === 0
+				? [call('t'), { type: 'usage', inputTokens: 100, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 80 }]
+				: [{ type: 'text', delta: 'Done.' }, { type: 'usage', inputTokens: 120, outputTokens: 4, cacheReadTokens: 90, cacheWriteTokens: 500 }]
+		);
+		const { d } = deps(p, [tool('t', () => ({ ok: true, data: {} }))]);
+		// Hop 2's write is cut to what its input has left after its reads (120 − 90).
+		expect(await runTurn(d, ask)).toEqual({ inputTokens: 220, outputTokens: 9, cacheReadTokens: 90, cacheWriteTokens: 110, end: 'answered' });
+	});
+
 	it('answers in text: deltas streamed, usage summed, no error', async () => {
 		const p = scripted(() => [{ type: 'text', delta: 'Because ' }, { type: 'text', delta: 'rain.' }, usage(12, 3)]);
 		const { d, events } = deps(p);
-		expect(await runTurn(d, ask)).toEqual({ inputTokens: 12, outputTokens: 3, end: 'answered' });
+		expect(await runTurn(d, ask)).toEqual({ inputTokens: 12, outputTokens: 3, cacheReadTokens: 0, cacheWriteTokens: 0, end: 'answered' });
 		expect(events).toEqual([
 			{ type: 'text', delta: 'Because ' },
 			{ type: 'text', delta: 'rain.' }
@@ -114,7 +125,7 @@ describe('runTurn', () => {
 		const p = scripted((hop) => (hop === 0 ? [call('get_network', { a: 1 }), usage()] : [{ type: 'text', delta: 'done' }, usage()]));
 		const { d, events, seenArgs } = deps(p, [tool('get_network', () => ({ ok: true, data: { nodes: [] } }))]);
 		const out = await runTurn(d, ask);
-		expect(out).toEqual({ inputTokens: 20, outputTokens: 10, end: 'answered' });
+		expect(out).toEqual({ inputTokens: 20, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0, end: 'answered' });
 		expect(seenArgs).toEqual([{ a: 1 }]);
 		expect(events.slice(0, 2)).toEqual([
 			{ type: 'tool', name: 'get_network', label: 'Running get_network', status: 'start' },
@@ -130,7 +141,7 @@ describe('runTurn', () => {
 		const p = scripted((hop) => [call('t', {}, `c${hop}`), usage(1, 1)]);
 		const { d, events } = deps(p, [tool('t', () => (runs++, { ok: true, data: 1 }))], { cfg: cfg({ maxHops: 3 }) });
 		const out = await runTurn(d, ask);
-		expect(out).toEqual({ inputTokens: 3, outputTokens: 3, end: 'assistant_hop_limit' });
+		expect(out).toEqual({ inputTokens: 3, outputTokens: 3, cacheReadTokens: 0, cacheWriteTokens: 0, end: 'assistant_hop_limit' });
 		expect(p.requests).toHaveLength(3);
 		expect(runs).toBe(2);
 		expect(events.at(-1)).toEqual({ type: 'error', code: 'assistant_hop_limit', error: TURN_ERRORS.assistant_hop_limit });
@@ -165,7 +176,7 @@ describe('runTurn', () => {
 		const maxTurnTokens = firstHopInput('SYSTEM', tools.map((t) => t.spec), ask) + 5 * 256 + 1000;
 		const { d, events } = deps(p, tools, { cfg: cfg({ maxTurnTokens, maxOutputTokens: 256, maxToolResultChars: 10_000 }) });
 		const out = await runTurn(d, ask);
-		expect(out).toEqual({ inputTokens: 500, outputTokens: 100, end: 'assistant_turn_limit' });
+		expect(out).toEqual({ inputTokens: 500, outputTokens: 100, cacheReadTokens: 0, cacheWriteTokens: 0, end: 'assistant_turn_limit' });
 		expect(weightedTokens(out.inputTokens, out.outputTokens)).toBe(1000);
 		expect(p.requests).toHaveLength(1);
 		expect(events.at(-1)).toEqual({ type: 'error', code: 'assistant_turn_limit', error: TURN_ERRORS.assistant_turn_limit });
@@ -177,7 +188,7 @@ describe('runTurn', () => {
 		expect(floor).toBe(firstHopInput('SYSTEM', [], ask) + 5 * 512);
 		// One token short of the first hop's input + MIN_HOP_OUTPUT_TOKENS (256) output: nothing is called, nothing spent.
 		const short = deps(p, [], { cfg: cfg({ maxOutputTokens: 512 }), budget: firstHopInput('SYSTEM', [], ask) + 5 * MIN_HOP_OUTPUT_TOKENS - 1 });
-		expect(await runTurn(short.d, ask)).toEqual({ inputTokens: 0, outputTokens: 0, end: 'assistant_turn_limit' });
+		expect(await runTurn(short.d, ask)).toEqual({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, end: 'assistant_turn_limit' });
 		expect(p.requests).toHaveLength(0);
 		expect(short.events).toEqual([{ type: 'error', code: 'assistant_turn_limit', error: TURN_ERRORS.assistant_turn_limit }]);
 		// Positive control: exactly that much runs the hop, its output cut to the 256 the budget leaves.
@@ -241,7 +252,7 @@ describe('runTurn', () => {
 	it('lets a turn under maxTurnTokens run every hop it needs', async () => {
 		const p = scripted((hop) => (hop < 2 ? [call('t', {}, `c${hop}`), usage(500, 100)] : [{ type: 'text', delta: 'ok' }, usage(500, 100)]));
 		const { d } = deps(p, [tool('t', () => ({ ok: true, data: 1 }))], { cfg: cfg({ maxTurnTokens: 10_000 }) });
-		expect(await runTurn(d, ask)).toEqual({ inputTokens: 1500, outputTokens: 300, end: 'answered' });
+		expect(await runTurn(d, ask)).toEqual({ inputTokens: 1500, outputTokens: 300, cacheReadTokens: 0, cacheWriteTokens: 0, end: 'answered' });
 	});
 
 	it('answers a malformed call (arguments that are not JSON, or not an object) with a tool error the model sees; the tool never runs', async () => {
@@ -370,7 +381,7 @@ describe('runTurn', () => {
 		});
 		const out = await runTurn(d, ask);
 		expect(toolSignal?.aborted).toBe(true);
-		expect(out).toEqual({ inputTokens: 30, outputTokens: 4, end: 'assistant_timeout' });
+		expect(out).toEqual({ inputTokens: 30, outputTokens: 4, cacheReadTokens: 0, cacheWriteTokens: 0, end: 'assistant_timeout' });
 		expect(p.requests).toHaveLength(1);
 		expect(events.at(-1)).toEqual({ type: 'error', code: 'assistant_timeout', error: TURN_ERRORS.assistant_timeout });
 		expect(events.filter((e) => e.type === 'error')).toHaveLength(1);
@@ -387,7 +398,7 @@ describe('runTurn', () => {
 					gone.abort();
 				})
 		});
-		expect(await runTurn(d, ask)).toEqual({ inputTokens: 9, outputTokens: 3, end: 'aborted' });
+		expect(await runTurn(d, ask)).toEqual({ inputTokens: 9, outputTokens: 3, cacheReadTokens: 0, cacheWriteTokens: 0, end: 'aborted' });
 		expect(events.some((e) => e.type === 'error')).toBe(false);
 		expect(p.requests).toHaveLength(1);
 	});
@@ -399,7 +410,7 @@ describe('runTurn', () => {
 			return [call('t'), usage(7, 2)];
 		});
 		const { d, events } = deps(p, [tool('t', () => ({ ok: true, data: 1 }))], { signal: gone.signal });
-		expect(await runTurn(d, ask)).toEqual({ inputTokens: 7, outputTokens: 2, end: 'aborted' });
+		expect(await runTurn(d, ask)).toEqual({ inputTokens: 7, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0, end: 'aborted' });
 		expect(events.some((e) => e.type === 'error')).toBe(false);
 		expect(p.requests).toHaveLength(1);
 	});
@@ -409,7 +420,7 @@ describe('runTurn', () => {
 		const { d } = deps(p);
 		const out = await runTurn(d, [{ role: 'user', content: 'y'.repeat(94) }]);
 		// HOP_FRAMING_TOKENS + 6 system bytes + 2 ("[]", no tools) + MESSAGE_FRAMING_TOKENS + 94 message bytes in; 40 bytes out.
-		expect(out).toEqual({ inputTokens: HOP_FRAMING_TOKENS + 6 + 2 + MESSAGE_FRAMING_TOKENS + 94, outputTokens: 40, end: 'answered' });
+		expect(out).toEqual({ inputTokens: HOP_FRAMING_TOKENS + 6 + 2 + MESSAGE_FRAMING_TOKENS + 94, outputTokens: 40, cacheReadTokens: 0, cacheWriteTokens: 0, end: 'answered' });
 	});
 
 	it('estimates input by UTF-8 bytes, so text of many bytes a character is never undercounted', () => {

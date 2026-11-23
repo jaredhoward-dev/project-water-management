@@ -9,7 +9,9 @@
 // (264_assistant_reservation: what no cap is passed by, however many turns
 // run at once). It is charged its tokens after it ends, whatever the
 // outcome, which settles the reservation; one never settled (the Lambda
-// died) is charged in full once it expires.
+// died) is charged in full once it expires. The charge also records the
+// turn's cost in micro-USD (pricing.ts, 324_assistant_turn_cost), which no
+// cap reads yet (issue #641 Phase 1, shadow mode).
 import type { Context } from 'hono';
 import { withUser, type Db } from '../db/tx.js';
 import { ApiError } from '../http/errors.js';
@@ -129,8 +131,18 @@ export async function beginTurn(
 	return { used: monthUsed(r), reservationId: r.reservation_id!, budget: Number(r.budget) };
 }
 
+/** What a charge records beside the tokens: the cache's part of the input, and the cost (pricing.ts; null: unpriced). */
+export interface TurnCost {
+	cacheReadTokens: number;
+	cacheWriteTokens: number;
+	costUsdMicros: number | null;
+}
+
+/** A charge with no cache tokens and no price, counted in unpriced_turns (324). */
+export const UNPRICED: TurnCost = { cacheReadTokens: 0, cacheWriteTokens: 0, costUsdMicros: null };
+
 /**
- * Charge a finished turn's tokens to the caller's row and settle its
+ * Charge a finished turn's tokens and cost to the caller's row and settle its
  * reservation (null: a charge with no reservation, this month). Returns this
  * month's tokens after it, or null if the charge failed (logged as
  * `assistant_charge_failed`, not thrown: the answer is already sent; the
@@ -142,15 +154,24 @@ export async function chargeTurn(
 	projectId: string,
 	reservationId: string | null,
 	inputTokens: number,
-	outputTokens: number
+	outputTokens: number,
+	cost: TurnCost = UNPRICED
 ): Promise<MonthUsed | null> {
+	const count = (n: number) => Math.max(0, Math.round(n) || 0);
+	const input = count(inputTokens);
+	// The cache's part never more than the input (the function refuses it), reads first.
+	const cacheRead = Math.min(input, count(cost.cacheReadTokens));
+	const cacheWrite = Math.min(input - cacheRead, count(cost.cacheWriteTokens));
 	try {
 		return await withUser(userId, async (db) => {
-			const { rows } = await db.query<UsedRow>('SELECT project_used, user_used, total_used FROM app_assistant_charge($1, $2, $3, $4)', [
+			const { rows } = await db.query<UsedRow>('SELECT project_used, user_used, total_used FROM app_assistant_charge($1, $2, $3, $4, $5, $6, $7)', [
 				projectId,
 				reservationId,
-				Math.max(0, Math.round(inputTokens)),
-				Math.max(0, Math.round(outputTokens))
+				input,
+				count(outputTokens),
+				cacheRead,
+				cacheWrite,
+				cost.costUsdMicros === null ? null : count(cost.costUsdMicros)
 			]);
 			return monthUsed(rows[0]);
 		});

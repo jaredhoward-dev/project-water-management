@@ -3266,6 +3266,22 @@ sequenceDiagram
   reservation never passes a cap, however many turns run at once; turns
   aren't limited to one a person, since the second's budget is only what the
   first left.
+- **Each turn's cost, recorded** (`pricing.ts`, 324_assistant_turn_cost;
+  issue #641 Phase 1, shadow mode): the providers report the cache reads and
+  writes inside each call's input (Bedrock's `cacheReadInputTokens` and
+  `cacheWriteInputTokens`, the Anthropic API's `cache_read_input_tokens` and
+  `cache_creation_input_tokens`, every fallback attempt summed), and the
+  charge records the turn's cost in micro-USD from a per-model price table:
+  uncached input, output, cache reads and cache writes each at their own
+  rate per million tokens, summed exactly and rounded up once a turn. The
+  prices are Bedrock's for the global profile from af-south-1 (AWS Price
+  List, 2026-10-12): Sonnet 5.5, Sonnet 4.6, Haiku 4.5 and Haiku 5.5, a
+  cache write at 1.25 × input (a 5-minute write, the only kind asked for).
+  A model not in the table is recorded as an unpriced turn, never guessed;
+  add its price before `assistant_model_id` names it (a unit test fails if
+  Terraform's default has none). The `assistant_turn` log line carries the
+  cache tokens and `costUsdMicros` too. The caps still count weighted tokens:
+  nothing reads the cost yet.
 - **The turn keeps to its budget** (`orchestrator.ts`): before every hop, the
   first included, the tokens so far, that hop's input at most and its output
   at most (×5) must fit the reserved budget. The hop's output cap

@@ -68,6 +68,13 @@ const usageRows = (pid = projectId) =>
 		`SELECT user_id, input_tokens::int AS input, output_tokens::int AS output, messages FROM assistant_usage WHERE project_id = $1 ORDER BY user_id`,
 		[pid]
 	) as Promise<{ user_id: string | null; input: number; output: number; messages: number }[]>;
+/** The cost columns of a project's usage rows (324). */
+const costRows = (pid = projectId) =>
+	asOwner(
+		`SELECT user_id, cache_read_tokens::int AS cache_read, cache_write_tokens::int AS cache_write, cost_usd_micros::int AS cost, unpriced_turns AS unpriced
+		 FROM assistant_usage WHERE project_id = $1 ORDER BY user_id`,
+		[pid]
+	) as Promise<{ user_id: string | null; cache_read: number; cache_write: number; cost: number; unpriced: number }[]>;
 /** This month's weighted tokens across every project, spent and reserved (other files' rows included): the deployment's cap is set from it. */
 const monthTotal = async () =>
 	Number(
@@ -239,7 +246,18 @@ describe('the assistant, on (mock)', () => {
 		expect(await reservations()).toEqual([]);
 		// One line for the turn's spend, counts only: the hourly spend alarm sums weightedTokens (infra/alarms.tf).
 		const turn = logs.mock.calls.map((c) => (typeof c[0] === 'string' ? JSON.parse(c[0]) : c[0])).find((l) => l.event === 'assistant_turn');
-		expect(turn).toEqual({ event: 'assistant_turn', inputTokens: rows[0]!.input, outputTokens: rows[0]!.output, weightedTokens: usage.tokensUsed, end: 'answered' });
+		expect(turn).toEqual({
+			event: 'assistant_turn',
+			inputTokens: rows[0]!.input,
+			outputTokens: rows[0]!.output,
+			cacheReadTokens: 0,
+			cacheWriteTokens: 0,
+			weightedTokens: usage.tokensUsed,
+			// The mock provider costs nothing: priced, at 0 (324).
+			costUsdMicros: 0,
+			end: 'answered'
+		});
+		expect(await costRows()).toEqual([{ user_id: viewer.id, cache_read: 0, cache_write: 0, cost: 0, unpriced: 0 }]);
 	});
 
 	it('runs each tool in a read-only transaction as the caller, with the conversation’s run', async () => {
@@ -631,6 +649,73 @@ describe('the route reserves the turn’s budget', () => {
 	});
 });
 
+describe('each turn’s cost (324_assistant_turn_cost)', () => {
+	it('records a hosted turn’s cost in micro-USD on its row, the cache priced apart (pricing.ts)', async () => {
+		vi.stubEnv('ASSISTANT_PROVIDER', 'mock');
+		vi.stubEnv('ASSISTANT_MODEL', 'global.anthropic.claude-sonnet-5-5');
+		// A Bedrock-shaped provider: 9,000 input of which 6,000 read from the cache and 2,000 written, 100 output.
+		const hosted: AssistantProvider = {
+			name: 'bedrock',
+			async *complete(): AsyncIterable<ProviderEvent> {
+				yield { type: 'text', delta: 'Rain.' };
+				yield { type: 'usage', inputTokens: 9_000, outputTokens: 100, cacheReadTokens: 6_000, cacheWriteTokens: 2_000 };
+			}
+		};
+		setProviderFactory(() => hosted);
+		await events(await post(viewer, ask()));
+		// Sonnet 5.5: 1,000 × $2 + 6,000 × $0.10 + 2,000 × $2.50 + 100 × $10 a million = 2,000 + 600 + 5,000 + 1,000 micro-USD.
+		expect(await costRows()).toEqual([{ user_id: viewer.id, cache_read: 6_000, cache_write: 2_000, cost: 8_600, unpriced: 0 }]);
+		// The caps still count every input token, the cache's included (shadow mode: nothing changes there).
+		expect(await usageRows()).toEqual([{ user_id: viewer.id, input: 9_000, output: 100, messages: 1 }]);
+		// A model the table hasn't: counted, not priced.
+		vi.stubEnv('ASSISTANT_MODEL', 'global.anthropic.claude-unpriced-9');
+		await events(await post(viewer, ask()));
+		expect(await costRows()).toEqual([{ user_id: viewer.id, cache_read: 12_000, cache_write: 4_000, cost: 8_600, unpriced: 1 }]);
+	});
+
+	it('sums each charge’s cost and cache tokens on the person’s month row, and counts the unpriced apart', async () => {
+		await chargeTurn(viewer.id, projectId, null, 100, 10, { cacheReadTokens: 60, cacheWriteTokens: 20, costUsdMicros: 250 });
+		await chargeTurn(viewer.id, projectId, null, 50, 5, { cacheReadTokens: 0, cacheWriteTokens: 50, costUsdMicros: 100 });
+		await chargeTurn(viewer.id, projectId, null, 10, 1, { cacheReadTokens: 5, cacheWriteTokens: 0, costUsdMicros: null });
+		// The 4-argument form a backend released before 324 calls: charged, unpriced.
+		await charge(viewer, projectId, null, 7, 3);
+		expect(await costRows()).toEqual([{ user_id: viewer.id, cache_read: 65, cache_write: 70, cost: 350, unpriced: 2 }]);
+		expect(await usageRows()).toEqual([{ user_id: viewer.id, input: 167, output: 19, messages: 0 }]);
+		// Positive control for RLS: the person reads their own cost; another member reads none of it.
+		const own = await withUser(viewer.id, (db) => db.query('SELECT cost_usd_micros::int AS c FROM assistant_usage WHERE project_id = $1', [projectId]));
+		expect(own.rows).toEqual([{ c: 350 }]);
+		const theirs = await withUser(editor.id, (db) => db.query('SELECT cost_usd_micros FROM assistant_usage WHERE project_id = $1', [projectId]));
+		expect(theirs.rows).toEqual([]);
+	});
+
+	it('settles a reservation with its cost, and counts one charged in full on expiry as unpriced', async () => {
+		const turn = await begin(viewer, projectId);
+		await withUser(viewer.id, (db) => db.query('SELECT * FROM app_assistant_charge($1, $2, 900, 10, 600, 0, 280)', [projectId, turn.reservationId]));
+		expect(await reservations()).toEqual([]);
+		expect(await costRows()).toEqual([{ user_id: viewer.id, cache_read: 600, cache_write: 0, cost: 280, unpriced: 0 }]);
+		const dead = await begin(viewer, projectId, { max: 20_000 });
+		await asOwner(`UPDATE assistant_reservation SET created_at = now() - interval '10 minutes', expires_at = now() - interval '1 second' WHERE id = $1`, [dead.reservationId]);
+		await runTick({ feeds: false, reports: false, alerts: false, maxJobs: 0 });
+		expect(await costRows()).toEqual([{ user_id: viewer.id, cache_read: 600, cache_write: 0, cost: 280, unpriced: 1 }]);
+	});
+
+	it('refuses cache tokens past the input, a negative count or a negative cost (positive control: at the input, it charges)', async () => {
+		const run = (args: (number | null)[]) =>
+			withUser(viewer.id, (db) => db.query('SELECT * FROM app_assistant_charge($1, NULL, $2, $3, $4, $5, $6)', [projectId, ...args]));
+		for (const bad of [
+			[10, 1, 8, 3, 0],
+			[10, 1, -1, 0, 0],
+			[10, 1, 0, -1, 0],
+			[10, 1, 0, 0, -1],
+			[10, 1, null, 0, 0]
+		])
+			await expect(run(bad), JSON.stringify(bad)).rejects.toMatchObject({ code: '42501' });
+		expect(await costRows()).toEqual([]);
+		await run([10, 1, 7, 3, 5]);
+		expect(await costRows()).toEqual([{ user_id: viewer.id, cache_read: 7, cache_write: 3, cost: 5, unpriced: 0 }]);
+	});
+});
+
 describe('the usage tables under RLS', () => {
 	it('lets a person read their own usage rows only (positive control: they do), and write neither table directly', async () => {
 		await chargeTurn(viewer.id, projectId, null, 3, 4);
@@ -673,7 +758,18 @@ describe('Download my data', () => {
 		const r = await viewer.call('GET', '/auth/me/export');
 		expect(r.status).toBe(200);
 		expect(r.body.assistantUsage).toEqual([
-			{ projectId, month: new Date().toISOString().slice(0, 7), inputTokens: 7, outputTokens: 8, messages: 0, updatedAt: expect.any(String) }
+			{
+				projectId,
+				month: new Date().toISOString().slice(0, 7),
+				inputTokens: 7,
+				outputTokens: 8,
+				cacheReadTokens: 0,
+				cacheWriteTokens: 0,
+				costUsdMicros: 0,
+				unpricedTurns: 1,
+				messages: 0,
+				updatedAt: expect.any(String)
+			}
 		]);
 	});
 });
