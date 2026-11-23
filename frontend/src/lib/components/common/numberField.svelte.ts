@@ -17,6 +17,8 @@ export interface NumberBounds {
 	max?: number;
 	/** A blank field means "none" (null). */
 	nullable?: boolean;
+	/** Only whole numbers, typed as digits (spaces allowed): "4.5", "4,5", "1,500" and "1e1" are refused. */
+	whole?: boolean;
 }
 
 /**
@@ -36,6 +38,7 @@ export type FieldRead = { ok: true; value: number | null } | { ok: false };
 
 export function readField(text: string, bounds: NumberBounds): FieldRead {
 	if (text.trim() === '') return bounds.nullable ? { ok: true, value: null } : { ok: false };
+	if (bounds.whole && !/^-?\d+$/.test(text.replace(/\s/g, ''))) return { ok: false };
 	const n = readNumber(text);
 	if (n === null) return { ok: false };
 	if (bounds.min !== undefined && n < bounds.min) return { ok: false };
@@ -48,17 +51,20 @@ const num = (n: number) => fmtNum(n, 9, true);
 /**
  * How to fix an invalid field, from its bounds: "Enter a number from 0 to
  * 99.9", "Enter 0 or more", "Enter 100 or less", "Enter a number", each
- * followed by ", or leave it blank for none" on a nullable field.
+ * followed by ", or leave it blank for none" on a nullable field; a `whole`
+ * field with both bounds or none asks for "a whole number" ("Enter a whole
+ * number from 3 to 50").
  */
-export function numberFieldMessage({ min, max, nullable }: NumberBounds): string {
+export function numberFieldMessage({ min, max, nullable, whole }: NumberBounds): string {
+	const a = whole ? 'a whole number' : 'a number';
 	const base =
 		min !== undefined && max !== undefined
-			? `Enter a number from ${num(min)} to ${num(max)}`
+			? `Enter ${a} from ${num(min)} to ${num(max)}`
 			: min !== undefined
 				? `Enter ${num(min)} or more`
 				: max !== undefined
 					? `Enter ${num(max)} or less`
-					: 'Enter a number';
+					: `Enter ${a}`;
 	return nullable ? `${base}, or leave it blank for none` : base;
 }
 

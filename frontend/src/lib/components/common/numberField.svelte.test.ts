@@ -39,6 +39,16 @@ describe('readField', () => {
 		expect(readField('  ', { nullable: true })).toEqual({ ok: true, value: null });
 		expect(readField('', {})).toEqual({ ok: false });
 	});
+	it('a whole field takes digits only: no decimals, decimal comma or exponent', () => {
+		const b = { min: 3, max: 50, whole: true };
+		expect(readField('5', b)).toEqual({ ok: true, value: 5 });
+		expect(readField(' 50 ', b)).toEqual({ ok: true, value: 50 });
+		expect(readField('1 500', { whole: true })).toEqual({ ok: true, value: 1500 });
+		expect(readField('-4', { whole: true })).toEqual({ ok: true, value: -4 });
+		for (const bad of ['1e1', '4.5', '4,5', '1,500', '5.0', '0x5', 'five', '', '2', '51']) expect(readField(bad, b), bad).toEqual({ ok: false });
+		// Without `whole`, the same text reads as a number.
+		expect(readField('1e1', { min: 3, max: 50 })).toEqual({ ok: true, value: 10 });
+	});
 });
 
 describe('numberFieldMessage', () => {
@@ -49,6 +59,9 @@ describe('numberFieldMessage', () => {
 		expect(numberFieldMessage({})).toBe('Enter a number');
 		expect(numberFieldMessage({ nullable: true })).toBe('Enter a number, or leave it blank for none');
 		expect(numberFieldMessage({ min: 1800, max: 2200, nullable: true })).toBe('Enter a number from 1 800 to 2 200, or leave it blank for none');
+		expect(numberFieldMessage({ min: 3, max: 50, whole: true })).toBe('Enter a whole number from 3 to 50');
+		expect(numberFieldMessage({ min: 1, whole: true })).toBe('Enter 1 or more');
+		expect(numberFieldMessage({ whole: true })).toBe('Enter a whole number');
 	});
 });
 
