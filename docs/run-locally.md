@@ -617,7 +617,16 @@ the worker the pack's PDF stays "rendering"; `pnpm dev:jobs:tick` prints it.
 The billing webhook runs locally with the mock provider (`BILLING_PROVIDER=mock`,
 the default) and the dev-only key committed in `backend/.env.development`. No
 Stripe account is needed ([billing.md § Webhooks and providers](./billing.md#webhooks-and-providers)).
-With `pnpm dev` running, find a billing account (`pnpm dev:db:psql`, then
+
+The quickest way through is the page: with `pnpm dev` running, open
+*Plan and usage* (`/account/plan`), press *Upgrade to Pro, monthly*, and the
+mock's checkout page (on the API, `:3001`) asks which outcome to simulate:
+*Pays* writes the subscription through the webhook and brings you back on
+Pro, *Declines* stays, *Cancels* comes back with nothing changed. *Manage
+billing* then opens the mock portal, which can cancel at the period end
+([billing.md § Checkout and portal](./billing.md#checkout-and-portal)).
+
+To replay single events instead, with `pnpm dev` running, find a billing account (`pnpm dev:db:psql`, then
 `SELECT id FROM billing_account;`; a person's is made on their first
 `GET /account/plan`), then:
 

@@ -79,6 +79,7 @@ import { outlookRoutes } from './outlooks/routes.js';
 import { teamRoutes } from './teams/routes.js';
 import { accountPlanRoutes, billingPublicRoutes, teamPlanRoutes } from './billing/routes.js';
 import { billingWebhookRoutes } from './billing/webhook.js';
+import { mockCheckoutRoutes } from './billing/mockCheckout.js';
 import { teamMfaResetRoutes } from './teams/mfa-reset-routes.js';
 import { yieldRoutes } from './yield/routes.js';
 import { futureYieldRoutes } from './future/routes.js';
@@ -160,8 +161,12 @@ export function createApp() {
 	// client calls as a form post from its own servers (RFC 8058 one-click,
 	// no Origin). It reads no session and turns off only the subscription its
 	// token names, so a cross-site post gains nothing the token didn't give.
+	// The mock billing pages' two form posts are exempt too (billing/mockCheckout.ts): they post from the API's own
+	// origin, which isn't a site origin, read no session, act only for the account their signed token names, and
+	// answer 404 unless BILLING_PROVIDER=mock, which production refuses.
 	const csrfCheck = csrf({ origin: allowedOrigins });
-	app.use('*', (c, next) => (c.req.method === 'POST' && c.req.path === '/alerts/unsubscribe' ? next() : csrfCheck(c, next)));
+	const csrfExempt = new Set(['/alerts/unsubscribe', '/billing/mock/checkout', '/billing/mock/portal']);
+	app.use('*', (c, next) => (c.req.method === 'POST' && csrfExempt.has(c.req.path) ? next() : csrfCheck(c, next)));
 	// Largest legitimate body is a time-series upload (60k values ≈ 1 MB JSON).
 	// POST /projects/import carries a whole project and sets its own cap (the
 	// export cap, IMPORT_MAX_BYTES) on the route; only that exact path skips this one.
@@ -283,6 +288,8 @@ export function createApp() {
 	app.route('/billing', billingPublicRoutes);
 	// The billing provider's webhook (Phase 3): no session, the signature over the raw body is the credential (billing/webhook.ts).
 	app.route('/billing', billingWebhookRoutes);
+	// The mock provider's checkout and portal pages (Phase 3): 404 unless BILLING_PROVIDER=mock, which production refuses; a signed token is the credential.
+	app.route('/billing', mockCheckoutRoutes);
 	const account = new Hono<AuthEnv>();
 	account.use('*', requireUser);
 	account.route('/', accountPlanRoutes);

@@ -2,15 +2,51 @@
 	// The Plan and usage page's body (issue #641 Phase 1, docs/ui.md § Plan and
 	// usage), shared by /account/plan (your own account) and /teams/[id]/plan
 	// (a team's, for its admins): the plan with its price and renewal or trial
-	// date, then this month's usage as one bar per counted thing. Phase 1 is
-	// shadow mode: usage is counted and nothing is charged or refused, so the
-	// page offers no upgrade or checkout, only a line saying so. The workspace
-	// is English; no farmer page shows any of it. The figures and words come
-	// from plan.ts.
-	import type { AccountPlan } from '#lib/api/types.js';
-	import { monthName, priceLine, subscriptionLine, usageRows } from './plan';
+	// date, then this month's usage as one bar per counted thing. Usage is
+	// counted and, in shadow mode (BILLING_ENFORCED off), nothing is refused.
+	// Phase 3: Upgrade (no subscription) or Manage billing (one) when the
+	// billing provider isn't manual; each asks the API for a URL and sends the
+	// person there (Stripe's page, or the mock's local one). The workspace is
+	// English; no farmer page shows any of it. The figures and words come from
+	// plan.ts.
+	import type { AccountPlan, BillingInterval, BillingRedirect } from '#lib/api/types.js';
+	import { errorText } from '#lib/i18n/apiError.js';
+	import { billingActions, checkoutNotice, fmtPrice, monthName, priceLine, subscriptionLine, usageRows } from './plan';
 
-	let { plan, whose }: { plan: AccountPlan; whose: 'your account' | 'this team' } = $props();
+	let {
+		plan,
+		whose,
+		checkout,
+		portal,
+		returned = null
+	}: {
+		plan: AccountPlan;
+		whose: 'your account' | 'this team';
+		/** Start checkout; answers where to go. */
+		checkout?: (interval: BillingInterval) => Promise<BillingRedirect>;
+		/** Open the billing portal; answers where to go. */
+		portal?: () => Promise<BillingRedirect>;
+		/** `?checkout=` on coming back from checkout. */
+		returned?: string | null;
+	} = $props();
+
+	const actions = $derived(billingActions(plan));
+	const notice = $derived(checkoutNotice(returned));
+	let busy = $state(false);
+	let actionError = $state<string | null>(null);
+
+	async function go(start: (() => Promise<BillingRedirect>) | undefined) {
+		if (!start || busy) return;
+		busy = true;
+		actionError = null;
+		try {
+			const { url } = await start();
+			window.location.assign(url);
+		} catch (e) {
+			actionError = `Couldn’t open billing: ${errorText(e)}`;
+			busy = false;
+		}
+	}
 
 	const sub = $derived(subscriptionLine(plan.subscription));
 	const rows = $derived(usageRows(plan));
@@ -30,6 +66,24 @@
 		{#if !plan.enforced}
 			<p class="note" data-shadow>Plans aren’t charged yet. Usage is counted against the plan’s limits so you can see where {whose} stands, but nothing is refused.</p>
 		{/if}
+		{#if notice}
+			<p class="note" class:done={notice.done} role="status" data-checkout-notice={notice.done ? 'done' : 'cancelled'}>{notice.text}</p>
+		{/if}
+		{#if actions.upgrade && checkout}
+			<div class="billing-actions" data-billing-actions>
+				<button type="button" class="btn btn-primary" disabled={busy} data-action="upgrade-month" onclick={() => go(() => checkout('month'))}
+					>Upgrade to {actions.upgrade.name}, monthly</button
+				>
+				<button type="button" class="btn" disabled={busy} data-action="upgrade-year" onclick={() => go(() => checkout('year'))}
+					>Upgrade to {actions.upgrade.name}, yearly</button
+				>
+			</div>
+		{:else if actions.manage && portal}
+			<div class="billing-actions" data-billing-actions>
+				<button type="button" class="btn" disabled={busy} data-action="manage-billing" onclick={() => go(portal)}>Manage billing</button>
+			</div>
+		{/if}
+		{#if actionError}<p class="err" role="alert" data-billing-error>{actionError}</p>{/if}
 	</section>
 
 	<section class="panel usage-card" aria-labelledby="usage-h">
@@ -103,6 +157,19 @@
 		border-radius: 6px;
 		background: var(--accent-soft);
 		font-size: var(--font-sm);
+	}
+	.note.done {
+		background: var(--surface-sunken);
+	}
+	.billing-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+		margin-top: 0.85rem;
+	}
+	.err {
+		margin: 0.5rem 0 0;
+		color: var(--danger);
 	}
 	.empty {
 		margin: 0 0 0.6rem;

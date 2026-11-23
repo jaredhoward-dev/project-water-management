@@ -22,7 +22,7 @@ import { FARMER_NOTICE_VERSION, LEGAL_VERSION } from '@water-management/engine/l
 import { runEnsemble, type ModelInput, type ResolvedEnsembleOptions } from '@water-management/engine';
 import pg from 'pg';
 import { replaceEvaporationDataset } from '../geo/evaporationGrid.js';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { anon, app, asOwner, confirmAsOperator, lastMailTo, signUp, tokenIn } from '../__tests__/helpers.js';
 import { loadSyntheticEvaporation } from '../../scripts/import-evaporation.js';
 import { loadSyntheticEvaporationStations } from '../../scripts/import-evaporation-stations.js';
@@ -36,6 +36,8 @@ import { loadSyntheticRivers } from '../../scripts/import-rivers.js';
 import { buildLadder, clearLadderJobs, plantDelineationProposal, plantQuestion, plantStartProposal, SAMPLE, splitHalves, type LadderCtx, type User } from '../__tests__/routeSamples.js';
 import { feedbackToken, newNonce, newSubscriptionSecret, unsubscribeToken } from '../alerts/tokens.js';
 import { hashToken } from '../auth/tokens.js';
+import { signMockSession } from '../billing/provider/mock.js';
+import { signPayload } from '../billing/provider/signature.js';
 import { withUser } from '../db/tx.js';
 import { enqueueJob } from '../jobs/queue.js';
 import { issueRenderToken } from '../reports/tokens.js';
@@ -222,6 +224,23 @@ async function noBoundary(route: string): Promise<Req> {
 	return SAMPLE[route]!(ctx) as Req;
 }
 
+const MOCK_BILLING_SECRET = 'test-only-billing-secret-0000000000000000';
+// The mock billing provider with its dev key for the whole sweep (checkout and the portal answer 503 without one); afterAll unstubs.
+vi.stubEnv('BILLING_PROVIDER', 'mock');
+vi.stubEnv('BILLING_WEBHOOK_SECRET', MOCK_BILLING_SECRET);
+/** A mock checkout or portal token for the owner's own billing account (billing/provider/mock.ts). */
+async function mockToken(kind: 'checkout' | 'portal'): Promise<string> {
+	const accountId = (await ok(ctx.owner.call('GET', '/account/plan'))).account.id as string;
+	const exp = Math.floor(Date.now() / 1000) + 600;
+	const back = 'http://localhost:7777/account/plan';
+	return signMockSession(
+		MOCK_BILLING_SECRET,
+		kind === 'checkout'
+			? { kind, accountId, planCode: 'pro', planName: 'Pro', amountMinor: 89900, currency: 'ZAR', interval: 'month', successUrl: back, cancelUrl: back, exp }
+			: { kind, accountId, returnUrl: back, subscription: null, exp }
+	);
+}
+
 const RECIPE: Record<string, () => Promise<Req> | Req> = {
 	'POST /projects/:id/map/subcatchments': () => noBoundary('POST /projects/:id/map/subcatchments'),
 	'POST /projects/:id/map/subcatchments/save': () => noBoundary('POST /projects/:id/map/subcatchments/save'),
@@ -391,6 +410,27 @@ const RECIPE: Record<string, () => Promise<Req> | Req> = {
 	'POST /teams': () => ({ body: { name: `Mass team ${crypto.randomUUID().slice(0, 8)}` } }),
 	'PATCH /teams/:id': () => ({ params: { id: ctx.teamId }, body: { name: 'Mass team renamed' } }),
 	'POST /teams/:id/members': async () => ({ params: { id: ctx.teamId }, body: { email: (await freshUser('Mteam')).email, role: 'viewer' } }),
+	// Checkout and the portal (issue #641 Phase 3), under the mock provider: each answers a URL. The team's account is
+	// made first (GET …/plan), so the sweep sees what the POST itself writes.
+	'POST /account/plan/checkout': () => ({ body: { plan: 'pro', interval: 'month' } }),
+	'POST /teams/:id/plan/checkout': async () => {
+		await ok(ctx.owner.call('GET', `/teams/${ctx.teamId}/plan`));
+		return { params: { id: ctx.teamId }, body: { plan: 'team', interval: 'month' } };
+	},
+	'POST /teams/:id/plan/portal': async () => {
+		await ok(ctx.owner.call('GET', `/teams/${ctx.teamId}/plan`));
+		return { params: { id: ctx.teamId } };
+	},
+	// The mock's pages: a token for the owner's account (signed with the dev key the sweep stubs), and a choice that
+	// writes nothing (cancels; the portal's cancel with no subscription). Their bodies are never read.
+	'POST /billing/mock/checkout': async () => ({ query: { t: await mockToken('checkout'), outcome: 'cancels' } }),
+	'POST /billing/mock/portal': async () => ({ query: { t: await mockToken('portal'), action: 'cancel' } }),
+	// The webhook (round 2; it had no recipe, so the sweep met its 404): a signed event of a type it ignores, so the
+	// legitimate body answers 200 and writes nothing; any extra field breaks the signature over the raw body (400).
+	'POST /billing/webhook/:provider': () => {
+		const body = { id: `evt_mass_${crypto.randomUUID().replace(/-/g, '')}`, object: 'event', type: 'customer.created', created: 1, data: { object: {} } };
+		return { params: { provider: 'mock' }, body, headers: { 'stripe-signature': signPayload(MOCK_BILLING_SECRET, JSON.stringify(body), Date.now() / 1000) } };
+	},
 	'PATCH /teams/:id/members/:userId': () => ({ params: { id: ctx.teamId, userId: ctx.viewer.id }, body: { role: 'member' } }),
 	// A run with the observed record in its inputs (the SAMPLE of PUT …/series replaces it with two days).
 	// One queued run of the rules per user (calibration/schema.ts AUTO_CALIBRATION_JOBS_PER_USER): clear the last one's job first.
@@ -613,7 +653,19 @@ const NO_WRITE = new Map<string, string>([
 	['POST /auth/login', 'the session is a signed cookie; a correct password leaves the lockout table as it was'],
 	['POST /auth/invite-info', 'reads what an invite is for, so the sign-up page can name it'],
 	['POST /auth/resend-confirmation', 'an address with no account (the sweep’s): the same 202, and nothing to mail'],
-	['POST /me/alerts/resume', 'the owner’s alert emails are not paused, so there is nothing to resume']
+	['POST /me/alerts/resume', 'the owner’s alert emails are not paused, so there is nothing to resume'],
+	// Issue #641 Phase 3: the portal answers a URL to the provider's page and writes nothing (its body is never read).
+	['POST /account/plan/portal', 'answers a URL to the billing portal (the mock’s page); nothing is written until the person acts there'],
+	['POST /teams/:id/plan/portal', 'the same for the team’s account, which its recipe made first']
+]);
+
+/**
+ * Routes that answer a redirect by design, and why (checked: exactly these answer 303 to both hostile bodies). The
+ * mock billing pages are form posts from a browser, which come back to the plan page as Stripe's pages do.
+ */
+const REDIRECTS = new Map<string, string>([
+	['POST /billing/mock/checkout', 'the mock checkout page’s form post (cancels here: nothing sent), then 303 to the plan page; the body is never read'],
+	['POST /billing/mock/portal', 'the mock portal page’s form post (cancel, with no subscription: nothing sent), then 303 back; the body is never read']
 ]);
 
 /** Routes the owner's sample can't reach past a business rule, and why (their body never gets that far). */
@@ -805,6 +857,7 @@ beforeAll(async () => {
 }, 300_000);
 
 afterAll(async () => {
+	vi.unstubAllEnvs();
 	// The ladder's yield job and what the sweep's POSTs queued (the rules' run …/auto-calibrations queues among them).
 	await clearLadderJobs(ctx);
 	// The invented A-pan grid the unit-apan recipe loaded: no other file should find an A-pan grid it didn't load.
@@ -821,7 +874,7 @@ describe('the mass-assignment sweep', () => {
 	});
 
 	it('lists no route that no longer exists', () => {
-		for (const r of [...Object.keys(RECIPE), ...NO_WRITE.keys(), ...NOT_REACHED.keys()]) expect(routes, r).toContain(r);
+		for (const r of [...Object.keys(RECIPE), ...NO_WRITE.keys(), ...NOT_REACHED.keys(), ...REDIRECTS.keys()]) expect(routes, r).toContain(r);
 	});
 
 	it('stores no hostile extra field, at the top level or nested', () => {
@@ -836,7 +889,7 @@ describe('the mass-assignment sweep', () => {
 
 	it('answers each hostile body with success or a 400, never an error', () => {
 		const bad = [...outcomes.values()]
-			.filter((o) => !NOT_REACHED.has(o.route) && o.hostile.some((s) => s >= 300 && s !== 400))
+			.filter((o) => !NOT_REACHED.has(o.route) && !REDIRECTS.has(o.route) && o.hostile.some((s) => s >= 300 && s !== 400))
 			.map((o) => `${o.route} → ${o.hostile.join('/')} ${o.text}`);
 		expect(bad).toEqual([]);
 	});
@@ -851,6 +904,10 @@ describe('the mass-assignment sweep', () => {
 	it('positive control: a route that accepted the extras wrote rows, unless listed as writing none', () => {
 		const silent = [...outcomes.values()].filter((o) => o.hostile.some((s) => s < 300) && o.rows === 0).map((o) => o.route);
 		expect(silent.sort().join('\n')).toBe([...NO_WRITE.keys()].sort().join('\n'));
+	});
+
+	it('lists as redirecting only routes that answer 303 to both bodies', () => {
+		for (const r of REDIRECTS.keys()) expect(outcomes.get(r)!.hostile, r).toEqual([303, 303]);
 	});
 
 	it('lists as not reached only routes that are refused past validation', () => {

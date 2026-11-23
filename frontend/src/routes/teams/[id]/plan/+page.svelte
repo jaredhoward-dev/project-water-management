@@ -69,7 +69,13 @@
 				<h1>Plan and usage</h1>
 				<p class="muted">The team’s plan, and what its projects have used this month.</p>
 			</header>
-			<PlanUsage {plan} whose="this team" />
+			<PlanUsage
+				{plan}
+				whose="this team"
+				checkout={(interval) => api.teams.checkout(teamId, interval)}
+				portal={() => api.teams.portal(teamId)}
+				returned={page.url.searchParams.get('checkout')}
+			/>
 		{/if}
 	</LoadState>
 </main>

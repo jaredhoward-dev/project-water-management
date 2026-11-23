@@ -133,3 +133,22 @@ export function usageRows(p: AccountPlan): UsageRow[] {
 		})
 	];
 }
+
+/**
+ * What the page offers for billing (Phase 3, docs/ui.md § Plan and usage):
+ * nothing when the provider is `manual` or none (the operator changes plans by
+ * hand); else Upgrade while there is no live subscription (Pro for a person,
+ * Team for a team), and Manage billing once there is one.
+ */
+export function billingActions(p: AccountPlan): { upgrade: { code: 'pro' | 'team'; name: string } | null; manage: boolean } {
+	if (p.provider !== 'mock' && p.provider !== 'stripe') return { upgrade: null, manage: false };
+	if (p.subscription) return { upgrade: null, manage: true };
+	return { upgrade: p.account.kind === 'team' ? { code: 'team', name: 'Team' } : { code: 'pro', name: 'Pro' }, manage: false };
+}
+
+/** The line shown on coming back from checkout (`?checkout=done` or `cancelled`), or null. */
+export function checkoutNotice(q: string | null): { text: string; done: boolean } | null {
+	if (q === 'done') return { text: 'Thank you: the payment went through. If the plan below hasn’t changed yet, reload the page in a minute.', done: true };
+	if (q === 'cancelled') return { text: 'Checkout was cancelled. Nothing was charged.', done: false };
+	return null;
+}

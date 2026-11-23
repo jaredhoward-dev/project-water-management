@@ -438,6 +438,19 @@ export const SETTINGS: Record<string, Setting> = {
 		why: 'The billing webhook signing secret (Stripe’s whsec_…), from the API’s runtime secret once the provider is stripe; manual takes no webhooks and needs none.',
 		checks: { api: (v, env) => (env?.BILLING_PROVIDER?.trim() === 'stripe' ? secret(32)(v) : null) }
 	},
+	STRIPE_SECRET_KEY: {
+		why: 'Stripe’s secret (or restricted) API key, for checkout and the Customer Portal (billing/provider/stripeApi.ts), from the API’s runtime secret once the provider is stripe; manual calls no API.',
+		checks: {
+			api: (v, env) =>
+				env?.BILLING_PROVIDER?.trim() !== 'stripe'
+					? null
+					: !set(v)
+						? 'is not set'
+						: /^(sk|rk)_live_[A-Za-z0-9]{16,}$/.test(v.trim())
+							? null
+							: 'must be a live Stripe key (sk_live_… or rk_live_…) in production'
+		}
+	},
 	BILLING_ENFORCED: {
 		why: 'Whether plan limits refuse anything. Phase 1 is shadow mode: the code default (false) counts and shows usage and refuses nothing, and the API only reports the value.'
 	},

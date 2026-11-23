@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AccountPlan, Subscription } from '#lib/api/types.js';
-import { fmtPrice, fmtUsdMicros, monthName, priceLine, subscriptionLine, usageRows } from './plan';
+import { billingActions, checkoutNotice, fmtPrice, fmtUsdMicros, monthName, priceLine, subscriptionLine, usageRows } from './plan';
 
 const NB = ' ';
 const TS = ' ';
@@ -27,6 +27,7 @@ function plan(over: Partial<AccountPlan> = {}): AccountPlan {
 			assistantCost: { usedUsdMicros: 420_000, limitUsdMicros: 1_000_000, unpricedTurns: 0 }
 		},
 		enforced: false,
+		provider: 'mock',
 		...over
 	};
 }
@@ -155,5 +156,28 @@ describe('usageRows', () => {
 	});
 	it('fmtUsdMicros reads millionths of a dollar', () => {
 		expect(fmtUsdMicros(1_500_000)).toBe('$1.50');
+	});
+});
+
+describe('billingActions (Phase 3)', () => {
+	it('offers nothing with the manual provider or none', () => {
+		expect(billingActions(plan({ provider: 'manual' }))).toEqual({ upgrade: null, manage: false });
+		expect(billingActions(plan({ provider: null }))).toEqual({ upgrade: null, manage: false });
+	});
+	it('offers Pro to a person and Team to a team while there is no subscription', () => {
+		expect(billingActions(plan())).toEqual({ upgrade: { code: 'pro', name: 'Pro' }, manage: false });
+		expect(billingActions(plan({ provider: 'stripe', account: { id: 't', kind: 'team' } }))).toEqual({ upgrade: { code: 'team', name: 'Team' }, manage: false });
+	});
+	it('offers Manage billing, not Upgrade, once there is a subscription', () => {
+		expect(billingActions(plan({ subscription: sub({}) }))).toEqual({ upgrade: null, manage: true });
+	});
+});
+
+describe('checkoutNotice', () => {
+	it('words the two ways back from checkout, and nothing else', () => {
+		expect(checkoutNotice('done')).toMatchObject({ done: true });
+		expect(checkoutNotice('cancelled')).toEqual({ text: 'Checkout was cancelled. Nothing was charged.', done: false });
+		expect(checkoutNotice(null)).toBeNull();
+		expect(checkoutNotice('<script>')).toBeNull();
 	});
 });

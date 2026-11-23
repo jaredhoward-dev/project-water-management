@@ -2,8 +2,8 @@
 // account's plan from the account page, a team's for its admins from the team
 // page, and the not-found a non-admin gets (a stranger, and a team member who
 // isn't an admin); a farmer-only user is sent back to their account page.
-// Shadow mode: usage is counted, nothing is charged, so the page offers no
-// upgrade or checkout.
+// Shadow mode: usage is counted, nothing is refused. Checkout and the portal
+// behind the mock provider are billing-checkout.spec.ts.
 import { acceptInvites, seedRunnableProject } from '../support/api.ts';
 import { API_URL } from '../support/env.ts';
 import { expectNoViolations } from '../support/a11y.ts';
@@ -35,9 +35,10 @@ test('your plan and usage, from the account page', async ({ page, owner }) => {
 	await expect(usage.getByRole('meter', { name: /^Assistant use in / })).toBeVisible();
 	await expect(usage.locator('[data-usage="assistantCost"]')).toContainText('UTC month');
 
-	// No way to pay in Phase 1.
-	await expect(page.getByRole('button', { name: /upgrade|checkout|subscribe/i })).toHaveCount(0);
-	await expect(page.getByRole('link', { name: /upgrade|checkout|subscribe/i })).toHaveCount(0);
+	// Phase 3: the e2e API runs the mock provider (the code default), so Free offers Upgrade to Pro and nothing to
+	// manage yet (billing-checkout.spec.ts follows the buttons; with BILLING_PROVIDER=manual there are none).
+	await expect(plan.getByRole('button', { name: 'Upgrade to Pro, monthly' })).toBeVisible();
+	await expect(plan.getByRole('button', { name: 'Manage billing' })).toHaveCount(0);
 	await expectNoViolations(page);
 
 	await resizeTo(page, { width: 360, height: 780 });

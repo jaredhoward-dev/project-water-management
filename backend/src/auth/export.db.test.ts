@@ -194,7 +194,7 @@ describe('GET /auth/me/export', () => {
 		try {
 			const { doc, text } = await download(owner);
 			expect(doc.billing).toEqual({
-				account: { id: acct.id, kind: 'user', projectsCreated: expect.any(Number), createdAt: expect.any(String) },
+				account: { id: acct.id, kind: 'user', projectsCreated: expect.any(Number), externalCustomerRef: null, createdAt: expect.any(String) },
 				subscriptions: [expect.objectContaining({ planCode: 'pro', status: 'canceled', provider: 'manual', externalRef: 'export-test-ref', seats: 1 })],
 				usageCounters: expect.arrayContaining([{ kind: 'reports', month: '2026-10', qty: 4 }]),
 				renewalNotices: [{ periodEnd: '2027-03-01T10:00:00.000Z', status: 'sent', sentAt: expect.any(String), createdAt: expect.any(String) }]

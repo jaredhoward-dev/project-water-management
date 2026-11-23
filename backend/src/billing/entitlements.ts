@@ -5,6 +5,7 @@
 // the account's person or an admin of its team, and app_entitlements to
 // anyone below editor on the project, so a farmer or viewer never sees it.
 import type { Db } from '../db/tx.js';
+import { billingProviderName, type BillingProviderName } from './provider.js';
 
 /**
  * BILLING_ENFORCED: whether plan limits refuse anything. Phase 1 only reports
@@ -96,15 +97,18 @@ export async function listPlans(db: Db): Promise<PublicPlan[]> {
 		.sort((a, b) => a.priceMonthlyMinor - b.priceMonthlyMinor || a.code.localeCompare(b.code));
 }
 
-/** app_account_plan's answer (camelCase jsonb, passed through) plus whether limits are enforced. */
-export type AccountPlan = Record<string, unknown> & { enforced: boolean };
+/**
+ * app_account_plan's answer (camelCase jsonb, passed through) plus whether limits are enforced and which billing
+ * provider is configured (Phase 3: the page shows Upgrade and Manage billing only when it isn't manual or none).
+ */
+export type AccountPlan = Record<string, unknown> & { enforced: boolean; provider: BillingProviderName | null };
 
 /** The account's plan and this month's usage, or null when the caller may not read it. */
 export async function accountPlan(db: Db, accountId: string | null, env: NodeJS.ProcessEnv = process.env): Promise<AccountPlan | null> {
 	if (!accountId) return null;
 	const { rows } = await db.query<{ plan: Record<string, unknown> | null }>('SELECT app_account_plan($1) AS plan', [accountId]);
 	const plan = rows[0]?.plan;
-	return plan ? { ...plan, enforced: billingEnforced(env) } : null;
+	return plan ? { ...plan, enforced: billingEnforced(env), provider: billingProviderName(env) } : null;
 }
 
 /** The signed-in person's own billing account (created on first ask). */

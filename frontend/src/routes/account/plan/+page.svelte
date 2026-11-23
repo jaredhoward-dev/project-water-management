@@ -10,6 +10,7 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
+	import { page } from '$app/state';
 	import { api, type AccountPlan } from '#lib/api/index.js';
 	import { farmFrameReader } from '#lib/auth/frame.js';
 	import { errorText } from '#lib/i18n/apiError.js';
@@ -53,7 +54,13 @@
 	</SectionHeader>
 	{#if !inFarmFrame()}
 		<LoadState {loading} error={loadError} retry={load}>
-			{#if plan}<PlanUsage {plan} whose="your account" />{/if}
+			{#if plan}<PlanUsage
+					{plan}
+					whose="your account"
+					checkout={(interval) => api.billing.checkout(interval)}
+					portal={() => api.billing.portal()}
+					returned={page.url.searchParams.get('checkout')}
+				/>{/if}
 		</LoadState>
 	{/if}
 </main>

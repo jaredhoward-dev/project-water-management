@@ -333,7 +333,7 @@ export async function buildSubjectExport(userId: string, now = new Date()) {
 		// Their own billing account (323_billing; kind 'user', never a team's), its subscriptions and its monthly counters: own rows under RLS.
 		// null when they never needed one.
 		const { rows: billingAccount } = await db.query<{ id: string }>(
-			`SELECT id, kind, projects_created AS "projectsCreated", created_at AS "createdAt" FROM billing_account WHERE user_id = $1`,
+			`SELECT id, kind, projects_created AS "projectsCreated", external_customer_ref AS "externalCustomerRef", created_at AS "createdAt" FROM billing_account WHERE user_id = $1`,
 			[userId]
 		);
 		const billingId = billingAccount[0]?.id ?? null;
