@@ -430,6 +430,14 @@ export const SETTINGS: Record<string, Setting> = {
 	},
 
 	// --- Billing (issue #641, docs/billing.md) -----------------------------------------------
+	BILLING_PROVIDER: {
+		why: 'Which billing provider the webhook route serves (billing/provider.ts). The code default is the mock, whose events anyone holding the committed dev key can sign, so the API must be told manual or stripe. The assistant Lambda serves no billing route (assistantOnly).',
+		checks: { api: oneOf('manual', 'stripe') }
+	},
+	BILLING_WEBHOOK_SECRET: {
+		why: 'The billing webhook signing secret (Stripe’s whsec_…), from the API’s runtime secret once the provider is stripe; manual takes no webhooks and needs none.',
+		checks: { api: (v, env) => (env?.BILLING_PROVIDER?.trim() === 'stripe' ? secret(32)(v) : null) }
+	},
 	BILLING_ENFORCED: {
 		why: 'Whether plan limits refuse anything. Phase 1 is shadow mode: the code default (false) counts and shows usage and refuses nothing, and the API only reports the value.'
 	},

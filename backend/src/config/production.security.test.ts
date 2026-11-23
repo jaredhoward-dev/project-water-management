@@ -80,6 +80,7 @@ const PROD: Record<Role, Record<string, string>> = {
 		NODE_EXTRA_CA_CERTS: CA,
 		DB_POOL_MAX: '2',
 		SIGNUP_OPEN: 'false',
+		BILLING_PROVIDER: 'manual',
 		MAIL_TRANSPORT: 'ses',
 		MAIL_FROM: 'IC-WBT <no-reply@water.example.org>',
 		SITE_URL: SITE,
@@ -528,6 +529,10 @@ describe('each Lambda refuses a missing or local-default setting', () => {
 			['worker', 'PASSWORD_HASH_FAST', '1'],
 			['api', 'SIGNUP_THROTTLE', 'off'],
 			['api', 'SIGNUP_OPEN', 'yes'],
+			// The billing webhook (issue #641 Phase 3): the code default is the mock, whose dev key is committed.
+			['api', 'BILLING_PROVIDER', undefined],
+			['api', 'BILLING_PROVIDER', 'mock'],
+			['api', 'BILLING_PROVIDER', 'stripe_billing'],
 			['api', 'DB_POOL_MAX', 'two'],
 			['api', 'DB_POOL_MAX', '0'],
 			['api', 'DB_POOL_MAX', '1.5'],
@@ -769,6 +774,15 @@ describe('each Lambda refuses a missing or local-default setting', () => {
 		for (const role of ['api', 'worker'] as const)
 			for (const v of [undefined, '', 's3://water-tiles/tiles/terrain.pmtiles']) expect(problemNames(role, prod(role, { DEM_URL: v })), `${role} ${String(v)}`).not.toContain('DEM_URL');
 		for (const v of [undefined, '', 's3://water-tiles/tiles/water.pmtiles']) expect(problemNames('api', prod('api', { WATER_URL: v })), String(v)).not.toContain('WATER_URL');
+	});
+
+	it('takes manual or stripe for the billing provider, and needs the webhook secret only with stripe (positive control for the BILLING_PROVIDER refusals)', () => {
+		expect(problemNames('api', prod('api', { BILLING_PROVIDER: 'manual', BILLING_WEBHOOK_SECRET: undefined }))).not.toContain('BILLING_WEBHOOK_SECRET');
+		expect(problemNames('api', prod('api', { BILLING_PROVIDER: 'stripe', BILLING_WEBHOOK_SECRET: 'w'.repeat(38) }))).not.toContain('BILLING_PROVIDER');
+		expect(problemNames('api', prod('api', { BILLING_PROVIDER: 'stripe', BILLING_WEBHOOK_SECRET: 'w'.repeat(38) }))).not.toContain('BILLING_WEBHOOK_SECRET');
+		// stripe without a real secret: unset, short, or the committed dev key.
+		for (const v of [undefined, 'short', 'dev-only-billing-webhook-secret-00000000000'])
+			expect(problemNames('api', prod('api', { BILLING_PROVIDER: 'stripe', BILLING_WEBHOOK_SECRET: v })), String(v)).toContain('BILLING_WEBHOOK_SECRET');
 	});
 
 	it('takes a contact address on a real domain for the fetcher, and needs none elsewhere (positive control for the FEEDS_CONTACT refusals)', () => {
