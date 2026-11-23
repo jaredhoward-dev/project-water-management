@@ -101,6 +101,57 @@ nothing in the code refuses on it yet. Set it in
 `backend/.env.development.local` to see the enforced wording locally
 ([run-locally.md](./run-locally.md#one-time-setup)).
 
+## Metrics and the abuse report
+
+The [issue's](https://github.com/jaredhoward-dev/project-water-management/issues/641)
+"Phase 1 metrics and thresholds" and the staff report of "Free tier and
+abuse". The app has no staff role, so this is an **operator script run as
+the schema owner**, like `pnpm dev:authority:confirm`:
+
+```bash
+pnpm dev:billing:report                     # this SAST month, as text
+pnpm dev:billing:report --month 2026-10 --json
+pnpm dev:billing:report --show-emails       # operator only: prints the addresses of canonical clusters
+```
+
+It reads two owner-only functions (`325_billing_metrics.sql`; never granted
+to `water_app`, [data-model.md](./data-model.md)) on this checkout's
+database (`MIGRATION_DATABASE_URL`); in production the operator runs it with
+the schema owner's connection. The maths is `backend/src/billing/metrics.ts`
+(unit tests beside it), the script `backend/scripts/billing-report.ts`.
+
+**What it prints.** Counts and aggregates; account or person ids only where a
+signal needs a follow-up (the heaviest Free accounts, canonical clusters);
+email domains only for a domain cluster. **No address** unless
+`--show-emails` is given. That flag is for the operator's own terminal: its
+output never goes into an issue, a PR, a chat or an agent's transcript.
+
+| Metric | How it is worked out | Threshold (the issue's) |
+| --- | --- | --- |
+| Activation | Verified sign-ups of the month (SAST) with a model run within 7 days of signing up. Sign-ups under 7 days old are left out and counted as pending | < 30% → fix onboarding first |
+| Active Free accounts near / at each limit | Active = a run, a server report or assistant use this month on the account's projects. Near ≥ 80% of the limit, at ≥ 100%, for reports (5), the assistant's dollars ($1) and catchments (Free has no limit, so none) | > 15% at reports → 10 a month; < 3% at the monthly assistant cap → room to raise |
+| Assistant spend per account | p50 and p90 (nearest rank) per plan over the accounts that spent this month, with the total and any unpriced turns (then a floor) | Paid: > 20% at $15 → top-up packs sooner |
+| Free spend by accounts under 7 days old | Its share of the month's Free assistant spend. `assistant_usage` is monthly, so an account counts as new when its latest spend of the month came under 7 days after it started: **an upper bound** | > 50% → escalation (b) |
+| Heaviest Free accounts | The five with the most assistant spend, by account id | |
+| Sign-ups per day | Per SAST day of the month; the three busiest printed | |
+| Domain clusters | Email domains with 5 or more sign-ups in some 7 days of the month; common providers are marked, not hidden | Escalation (a) |
+| Canonical clusters | Canonical addresses (lower-cased, `+tag` dropped, Gmail's dots dropped, googlemail.com as gmail.com) with more than one account, ever, where one signed up this month; the user ids | Escalation (a) |
+
+The plan is each account's plan **today**; in Phase 1 that is Free for
+everyone. Runs, reports and sign-ups use the SAST month; the assistant's
+spend keeps `assistant_usage`'s UTC month, as `app_account_plan` does.
+
+**Not yet measurable**, printed as such so a gap is never read as a zero
+(the app doesn't record what each needs): upgrade at the limit (no checkout,
+trial or limit-message events), churn after the limit (no record of hitting
+one), reverse trial to paid (no trials), the share at the assistant's daily
+cap and the Free pool's burn by day (`assistant_usage` is monthly; no daily
+cap or pool yet), the share at the live-catchment limit (nothing is marked
+live), paid seats reaching $15 (spend isn't kept per paid seat), disposable
+rejections (no blocklist yet), sign-up throttle hits per address
+(`signup_throttle` keeps only an hour's hashed buckets) and suspensions (no
+suspend action yet).
+
 ## API
 
 [api.md § Billing](./api.md#billing): `GET /billing/plans` (public),

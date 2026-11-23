@@ -3864,6 +3864,21 @@ never to a farmer, contributor or viewer.
   Deleting a team does the same for the team's account, and its projects
   (moved out of the team by the key's set null) bill to their creators.
   Tested in `src/billing/billing.db.test.ts`.
+- Metrics (325_billing_metrics): two **owner-only** functions for the
+  operator's report (`pnpm dev:billing:report`, [billing.md § Metrics and
+  the abuse report](./billing.md#metrics-and-the-abuse-report)). Caller's
+  rights (not SECURITY DEFINER), EXECUTE revoked from PUBLIC and
+  `water_app` (a call as `water_app` is `42501`), pinned `search_path`:
+  - `billing_metrics_accounts(month) → TABLE`: per billing account, its
+    plan today, when its person or team started, its catchments today, and
+    the month's runs (`model_run.created_at` in the SAST month), reports
+    (`usage_counter`) and assistant cost, unpriced turns and latest spend
+    (`assistant_usage`, its UTC month).
+  - `billing_metrics_people(month) → TABLE`: per person, the address,
+    sign-up, verified or not, first run, and whether the sign-up's SAST
+    month is `month` and its SAST day.
+  The month's edges are Africa/Johannesburg's whatever the session's time
+  zone (`src/billing/metrics.db.test.ts`).
 
 ### Billing events (326_billing_events.sql)
 

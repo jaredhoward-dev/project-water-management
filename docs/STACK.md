@@ -177,6 +177,7 @@ pnpm dev:db:migrate         # apply backend/migrations as `water`
 pnpm dev:db:reset           # drop the volume, recreate, migrate (destroys local data)
 pnpm dev:db:psql            # psql as the schema owner
 pnpm dev:authority:confirm <project-id> <email> --reference "<letter>"   # the operator confirms who acts for a project's responsible authority (the first one is the operator's; security.md § Authorization)
+pnpm dev:billing:report [--month YYYY-MM] [--json] [--show-emails]   # the operator's billing Phase 1 metrics and staff abuse report, as the schema owner (325_billing_metrics); addresses only with --show-emails, operator only (billing.md § Metrics and the abuse report)
 pnpm dev:mail:up            # Mailpit: local inbox for all app email (UI :8026)
 pnpm dev:mail:down | dev:mail:status | dev:mail:logs | dev:mail:open
 pnpm dev:mail:bounce <email> [--complaint | --transient]   # stand in for an SES bounce: pauses that account's alert emails (run-locally.md § Alerts)
