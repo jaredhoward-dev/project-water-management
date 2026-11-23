@@ -11,7 +11,7 @@ import { newToken } from '../auth/tokens.js';
 import { withUser } from '../db/tx.js';
 import { reportRenderHandler } from '../jobs/handlers/report-render.js';
 import { acceptRenderResult, SCHEDULE_NO_ACCESS, SCHEDULE_NO_RUNS, scheduleDueReports } from './schedule.js';
-import { finishReport, loadReport, REPORTS_PER_HOUR } from './store.js';
+import { createReport, finishReport, loadReport, REPORTS_PER_HOUR } from './store.js';
 import { cannedPolicy } from './cloudfrontSign.js';
 import { issueRenderToken } from './tokens.js';
 
@@ -806,5 +806,47 @@ describe('report schedules', () => {
 		expect(rows.every((x) => x.claimed)).toBe(true);
 		expect(await asOwner('SELECT id FROM report WHERE project_id = ANY($1)', [[empty, projectId]])).toEqual([]);
 		await asOwner('DELETE FROM report_schedule WHERE id = ANY($1)', [[s1.id, s2.id]]);
+	});
+});
+
+describe('billing usage (323_billing, issue #641 Phase 1: counted, never refused)', () => {
+	/** This SAST month's `reports` count on the project's billing account. */
+	const reportsCounted = async (projectId: string) =>
+		Number(
+			(
+				await asOwner(
+					`SELECT coalesce(sum(u.qty), 0)::int AS n FROM usage_counter u JOIN project p ON p.billing_account_id = u.billing_account_id
+					 WHERE p.id = $1 AND u.kind = 'reports' AND u.month = app_billing_month()`,
+					[projectId]
+				)
+			)[0]!.n
+		);
+
+	it('counts one report per PDF queued, on demand or by a schedule, and nothing for a deduplicated scheduled fire', async () => {
+		const owner = await signUp('UsageOwner');
+		const { projectId, runId } = await withRun(owner);
+		const before = await reportsCounted(projectId);
+		expect((await owner.call('POST', `/projects/${projectId}/reports`, {})).status).toBe(202);
+		expect(await reportsCounted(projectId)).toBe(before + 1);
+
+		// A scheduled period's fire, then the same period's again (its dedupe key): the second returns the first job and counts nothing.
+		const dedupeKey = `report_schedule:usage-test:${crypto.randomUUID()}`;
+		const first = await withUser(owner.id, (db) => createReport(db, { projectId, runId, emailTo: [], dedupeKey }));
+		expect(first.created).toBe(true);
+		expect(await reportsCounted(projectId)).toBe(before + 2);
+		const again = await withUser(owner.id, (db) => createReport(db, { projectId, runId, emailTo: [], dedupeKey }));
+		expect(again).toEqual({ jobId: first.jobId, created: false });
+		expect(await reportsCounted(projectId)).toBe(before + 2);
+		expect(await asOwner('SELECT id FROM report WHERE project_id = $1', [projectId])).toHaveLength(2);
+
+		// A queue that rolls back takes its count with it.
+		await expect(
+			withUser(owner.id, async (db) => {
+				await createReport(db, { projectId, runId, emailTo: [] });
+				throw new Error('rolled back');
+			})
+		).rejects.toThrow('rolled back');
+		expect(await reportsCounted(projectId)).toBe(before + 2);
+		await asOwner('DELETE FROM job WHERE project_id = $1', [projectId]);
 	});
 });
