@@ -246,6 +246,8 @@ export interface TickResult {
 	assistantPurged: number;
 	/** Billing webhook events received more than BILLING_EVENT_RETENTION_DAYS ago, deleted (327). */
 	billingEventsPurged: number;
+	/** Staff grants past their end moved to expired, the account back to Free (330_staff_grant). */
+	staffGrantsExpired: number;
 	claimed: number;
 	done: number;
 	failed: number;
@@ -324,6 +326,7 @@ export async function runTick(o: TickOptions = {}): Promise<TickResult> {
 		erasuresPurged: 0,
 		assistantPurged: 0,
 		billingEventsPurged: 0,
+		staffGrantsExpired: 0,
 		claimed: 0,
 		done: 0,
 		failed: 0,
@@ -355,6 +358,8 @@ export async function runTick(o: TickOptions = {}): Promise<TickResult> {
 	result.billingEventsPurged = await withoutUser(
 		async (db) => (await db.query<{ n: number }>('SELECT app_purge_billing_events(make_interval(days => $1)) AS n', [BILLING_EVENT_RETENTION_DAYS])).rows[0]?.n ?? 0
 	);
+	// A staff grant past its end: expired (never deleted), the account back to Free.
+	result.staffGrantsExpired = await withoutUser(async (db) => (await db.query<{ n: number }>('SELECT app_staff_grant_expire() AS n')).rows[0]?.n ?? 0);
 	const noticesPurged = await purgePackNotices();
 	const erratumPurged = await purgeErratumNotices();
 	if (o.feeds !== false) {
