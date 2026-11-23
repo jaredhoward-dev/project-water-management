@@ -106,10 +106,15 @@ personal information under POPIA (see [plan.md questions](./plan.md#questions-fo
   second-factor reset's confirm and cancel tokens, 205, each in its own
   table: `mfa_reset.confirm_hash`, `mfa_reset_cancel`), so each is
   looked up only in its own table and, for email tokens, for its own purpose.
-  The backend reads a credential in exactly three places: the `wm_session`
+  The backend reads a credential in exactly four places: the `wm_session`
   cookie (`auth/session.ts`), `Authorization: Bearer` on `/ingest/*` only
-  (`ingest/auth.ts`), and `?token=` on the one-click unsubscribe; every other
-  token travels in its public route's JSON body. No route takes a token from a
+  (`ingest/auth.ts`), `?token=` on the one-click unsubscribe, and the billing
+  provider's `Stripe-Signature` on `POST /billing/webhook/:provider` only
+  (`billing/provider/signature.ts`: an HMAC-SHA256 over `t.` + the raw body
+  under `BILLING_WEBHOOK_SECRET`, compared in constant time, 300 s either way,
+  a 256 KiB body cap; 404 unless the path names the configured provider, and
+  `app_billing_apply` runs with no user, docs/billing.md § Webhooks and
+  providers); every other token travels in its public route's JSON body. No route takes a token from a
   path parameter. An unsubscribe token turns off only its own subscription,
   whose person, project, kind and farm can never change (trigger
   `alert_subscription_stamp`). `auth/token-confusion.security.db.test.ts`
@@ -4644,6 +4649,13 @@ key there would let any read-only principal forge any user's session.
   each entry point's bundle with a production-shaped env (the positive control).
   Terraform also refuses a placeholder `auth_jwt_secret` at plan time
   (`infra/lambda.tf` precondition, `rejects_dev_placeholder_jwt_secret`).
+  Billing (issue #641): the API refuses a `BILLING_PROVIDER` that is unset,
+  `mock` or unknown (only `manual` or `stripe`; Terraform sets `manual`,
+  pinned by `tests/guardrails.tftest.hcl`), and with `stripe` a
+  `BILLING_WEBHOOK_SECRET` shorter than 32 characters or a `dev-only-`
+  placeholder. The committed dev key is a `dev-only-` value `check:env` pins
+  (`scripts/guards/check_env_isolation.mjs`), and `pnpm dev:billing:replay`
+  signs only with such a key, only to localhost.
 - **WAF:** five per-IP rate limits on CloudFront: a tight 100-requests-per-5-minutes
   limit scoped to `/api/auth/*`, the elevation-model routes
   (`waf_dem_rate_limit_per_ip`, default 300, scoped by a regex to

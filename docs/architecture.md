@@ -593,7 +593,11 @@ lazy chunk, where gzip already folds them).
    take a per-project API key instead (`requireApiKey`, `ingest/auth.ts`):
    the key is checked in constant time and rate-limited per key, and the work
    runs in `withApiKey`, which sets `app.current_api_key_id` and no user
-   ([security.md § API keys](./security.md#api-keys)).
+   ([security.md § API keys](./security.md#api-keys)). The billing
+   provider's webhook (`POST /billing/webhook/:provider`, issue #641) has no
+   session either: its credential is a signature over the raw body, and it
+   applies the event through `app_billing_apply` in `withoutUser`
+   ([billing.md § Webhooks and providers](./billing.md#webhooks-and-providers)).
 4. Project routes open **one transaction** on a pooled `pg` connection as
    `water_app` and run `set_config('app.current_user_id', userId, true)`. Every
    query inside it is filtered by RLS ([data-model.md § Access control](./data-model.md#access-control)).

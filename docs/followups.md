@@ -894,6 +894,19 @@ are #641's checklist. Open items from building it:
       checked. Durable fix: read the Bedrock price for the model id the
       deployment calls and update the table and its test. Trigger:
       `assistant_free_model_id` (or any setting) pointing at Haiku 5.5.
+- [ ] **Webhook events apply in arrival order.** `app_billing_apply` (326)
+      ignores the payload's `eventCreated`, and Stripe doesn't guarantee
+      delivery order, so an older `customer.subscription.updated` arriving
+      after a newer one overwrites the newer state. Durable fix: keep the
+      applied event's time on `subscription` and skip an update older than
+      it (a forward migration redefining `app_billing_apply`), with a DB test
+      delivering two updates out of order. Trigger: before `BILLING_PROVIDER`
+      is set to `stripe` in production.
+- [ ] **Nothing purges `billing_event`.** Every webhook event's row stays
+      (indexed on `received_at` for a purge). Durable fix: a job that deletes
+      rows older than Stripe's redelivery window plus a margin (Stripe
+      retries for up to 3 days; keep 90), and docs/security.md's retention
+      row says so. Trigger: `BILLING_PROVIDER=stripe` in production.
 
 ## DB tests share the mail outbox (2026-10-02, PR #360)
       **Decided (round 3, N):** a bounded whole-file pass (data-sources.md § ssebop-eta); the build is its own item below.
