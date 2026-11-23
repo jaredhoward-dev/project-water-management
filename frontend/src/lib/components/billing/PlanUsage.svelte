@@ -7,7 +7,8 @@
 	// Phase 3: Upgrade (no subscription; each priced from GET /billing/plans) or
 	// Manage billing (one) when the billing provider isn't manual; each asks the
 	// API for a URL and sends the person there (Stripe's page, or the mock's
-	// local one). The workspace is English, so a refusal shows the API's own
+	// local one). Team's Upgrade has a seat field (editor seats, from the
+	// included ones up), and its buttons price the seats chosen. The workspace is English, so a refusal shows the API's own
 	// English message (the billing codes are machine-only); no farmer page shows
 	// any of it. The figures and words come from plan.ts.
 	import { onMount, untrack } from 'svelte';
@@ -20,7 +21,10 @@
 		billingActions,
 		checkoutNotice,
 		monthName,
+		parseSeats,
 		priceLine,
+		seatHint,
+		seatOffer,
 		shadowNote,
 		subscriptionLine,
 		upgradeLabel,
@@ -38,8 +42,8 @@
 	}: {
 		plan: AccountPlan;
 		whose: 'your account' | 'this team';
-		/** Start checkout; answers where to go. */
-		checkout?: (interval: BillingInterval) => Promise<BillingRedirect>;
+		/** Start checkout, with the editor seats chosen when the plan sells extra ones (Team); answers where to go. */
+		checkout?: (interval: BillingInterval, seats?: number) => Promise<BillingRedirect>;
 		/** Open the billing portal; answers where to go. */
 		portal?: () => Promise<BillingRedirect>;
 		/** Re-read the plan in place (the parent updates `plan`), while a paid checkout waits for the provider's confirmation. */
@@ -67,6 +71,24 @@
 			.then((plans) => (offer = plans.find((p) => p.code === code) ?? null))
 			.catch(() => {});
 	});
+
+	// Team's seats: the field's text, the count it reads as (null when out of range), and what the buttons price.
+	const seats = $derived(seatOffer(offer));
+	let seatsText = $state('');
+	$effect(() => {
+		if (seats && seatsText === '') seatsText = String(seats.included);
+	});
+	const seatCount = $derived(seats ? parseSeats(seatsText, seats) : null);
+	const seatsInvalid = $derived(!!seats && seatCount === null);
+
+	function upgrade(interval: BillingInterval) {
+		if (!checkout) return;
+		if (seats) {
+			if (seatCount === null) return;
+			const n = seatCount;
+			void go(() => checkout(interval, n));
+		} else void go(() => checkout(interval));
+	}
 
 	// The checkout notice lives here, not in the address: it is read once, the
 	// live region below exists before its text arrives (so it is announced),
@@ -152,12 +174,38 @@
 			{/if}
 		</div>
 		{#if showUpgrade && actions.upgrade && checkout}
+			{#if seats}
+				<div class="seats" data-seats>
+					<label for="checkout-seats">Editor seats</label>
+					<input
+						id="checkout-seats"
+						class="input"
+						type="number"
+						inputmode="numeric"
+						min={seats.included}
+						max={seats.max}
+						step="1"
+						bind:value={() => seatsText, (v) => (seatsText = v === null || v === undefined ? '' : String(v))}
+						aria-describedby={seatsInvalid ? 'checkout-seats-hint checkout-seats-error' : 'checkout-seats-hint'}
+						aria-invalid={seatsInvalid ? 'true' : undefined}
+						data-seats-input
+					/>
+					<p class="muted seats-hint" id="checkout-seats-hint">{seatHint(seats, offer?.currency ?? 'ZAR')}</p>
+					{#if seatsInvalid}
+						<p class="err" id="checkout-seats-error" data-seats-error>Choose a whole number of seats from {seats.included} to {seats.max}.</p>
+					{/if}
+				</div>
+			{/if}
 			<div class="billing-actions" data-billing-actions>
-				<button type="button" class="btn btn-primary" aria-disabled={busy} data-action="upgrade-month" onclick={() => go(() => checkout('month'))}
-					>{upgradeLabel(actions.upgrade.name, 'month', offer)}</button
+				<button
+					type="button"
+					class="btn btn-primary"
+					aria-disabled={busy || seatsInvalid}
+					data-action="upgrade-month"
+					onclick={() => upgrade('month')}>{upgradeLabel(actions.upgrade.name, 'month', offer, seatCount)}</button
 				>
-				<button type="button" class="btn" aria-disabled={busy} data-action="upgrade-year" onclick={() => go(() => checkout('year'))}
-					>{upgradeLabel(actions.upgrade.name, 'year', offer)}</button
+				<button type="button" class="btn" aria-disabled={busy || seatsInvalid} data-action="upgrade-year" onclick={() => upgrade('year')}
+					>{upgradeLabel(actions.upgrade.name, 'year', offer, seatCount)}</button
 				>
 			</div>
 		{:else if showManage && portal}
@@ -248,6 +296,22 @@
 		flex-wrap: wrap;
 		gap: 0.5rem;
 		margin-top: 0.85rem;
+	}
+	.seats {
+		margin-top: 0.85rem;
+		display: grid;
+		gap: 0.25rem;
+	}
+	.seats label {
+		font-weight: 600;
+	}
+	.seats input {
+		width: 6rem;
+		font-variant-numeric: tabular-nums;
+	}
+	.seats-hint {
+		margin: 0;
+		font-size: var(--font-sm);
 	}
 	.err {
 		margin: 0.5rem 0 0;

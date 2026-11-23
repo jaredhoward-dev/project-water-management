@@ -146,17 +146,69 @@ export function billingActions(p: AccountPlan): { upgrade: { code: 'pro' | 'team
 	return { upgrade: p.account.kind === 'team' ? { code: 'team', name: 'Team' } : { code: 'pro', name: 'Pro' }, manage: false };
 }
 
+/** The most editor seats one checkout sells; the API holds the same ceiling (billing/provider.ts MAX_CHECKOUT_SEATS) and refuses past it. */
+export const MAX_CHECKOUT_SEATS = 50;
+
+type Offer = Pick<Plan, 'priceMonthlyMinor' | 'priceAnnualMinor' | 'currency'> & Partial<Pick<Plan, 'limits' | 'features'>>;
+
+/** What a plan sells in editor seats: the included ones and each extra one's price; null when it sells no extra seats (Pro). */
+export interface SeatOffer {
+	included: number;
+	max: number;
+	extraMonthlyMinor: number;
+	extraAnnualMinor: number;
+}
+
+const minorOf = (v: unknown): number | null => (typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : null);
+
+/** The offer's seats (Team: 3 included, R 499.00 a month for each extra), or null when it sells no extra seats at both intervals. */
+export function seatOffer(offer: Offer | null): SeatOffer | null {
+	if (!offer) return null;
+	const month = minorOf(offer.features?.extra_seat_monthly_minor);
+	const year = minorOf(offer.features?.extra_seat_annual_minor);
+	if (month === null || year === null) return null;
+	const n = offer.limits?.seats_included;
+	const included = typeof n === 'number' && Number.isInteger(n) && n >= 1 ? n : 1;
+	return { included, max: Math.max(included, MAX_CHECKOUT_SEATS), extraMonthlyMinor: month, extraAnnualMinor: year };
+}
+
+/** The seat field's text as a seat count the API takes (a whole number from the included seats to the maximum), or null. */
+export function parseSeats(text: string, seats: SeatOffer): number | null {
+	const t = text.trim();
+	if (!/^[0-9]{1,4}$/.test(t)) return null;
+	const n = Number(t);
+	return n >= seats.included && n <= seats.max ? n : null;
+}
+
+/** What `seats` editor seats cost at `interval`: the plan's price plus each seat past the included ones. */
+export function checkoutTotalMinor(offer: Offer, interval: BillingInterval, seats: number | null = null): number {
+	const base = interval === 'month' ? offer.priceMonthlyMinor : offer.priceAnnualMinor;
+	const so = seatOffer(offer);
+	if (!so || seats === null) return base;
+	const extra = Math.max(0, seats - so.included);
+	return base + extra * (interval === 'month' ? so.extraMonthlyMinor : so.extraAnnualMinor);
+}
+
+/** The line under the seat field: "3 editor seats included; each extra one is R 499.00 a month or R 4 990.00 a year." */
+export function seatHint(seats: SeatOffer, currency: string): string {
+	return `${fmtNum(seats.included)} editor seats included; each extra one is ${fmtPrice(seats.extraMonthlyMinor, currency)} a month or ${fmtPrice(seats.extraAnnualMinor, currency)} a year. Up to ${fmtNum(seats.max)}.`;
+}
+
 /**
  * One Upgrade button's words, with the price when the plans are known
- * (`GET /billing/plans`): "Upgrade to Pro, monthly (R 899.00 a month)". Without
- * the offer (still loading, or the call failed) the button reads without it.
+ * (`GET /billing/plans`): "Upgrade to Pro, monthly (R 899.00 a month)". With a
+ * seat count (Team), the price is for those seats and says so: "Upgrade to
+ * Team, monthly (R 3 497.00 a month for 5 editor seats)". Without the offer
+ * (still loading, or the call failed) the button reads without it.
  */
-export function upgradeLabel(name: string, interval: BillingInterval, offer: Pick<Plan, 'priceMonthlyMinor' | 'priceAnnualMinor' | 'currency'> | null): string {
+export function upgradeLabel(name: string, interval: BillingInterval, offer: Offer | null, seats: number | null = null): string {
 	const base = `Upgrade to ${name}, ${interval === 'month' ? 'monthly' : 'yearly'}`;
 	if (!offer) return base;
-	const minor = interval === 'month' ? offer.priceMonthlyMinor : offer.priceAnnualMinor;
+	const minor = checkoutTotalMinor(offer, interval, seats);
 	if (!(minor > 0)) return base;
-	return `${base} (${fmtPrice(minor, offer.currency)} ${interval === 'month' ? 'a month' : 'a year'})`;
+	const per = interval === 'month' ? 'a month' : 'a year';
+	const forSeats = seats !== null && seatOffer(offer) ? ` for ${fmtNum(seats)} editor seat${seats === 1 ? '' : 's'}` : '';
+	return `${base} (${fmtPrice(minor, offer.currency)} ${per}${forSeats})`;
 }
 
 /**

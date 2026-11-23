@@ -756,8 +756,9 @@ export function createApi(baseUrl: string, fetchFn: FetchFn = (...a) => fetch(..
 			portfolio: (id: string) => request<Portfolio>('GET', `${t(id)}/portfolio`),
 			/** The team's plan and this month's usage (team admin; 404 otherwise; issue #641). */
 			plan: (id: string) => request<AccountPlan>('GET', `${t(id)}/plan`),
-			/** Start checkout for the Team plan (team admin; issue #641 Phase 3). */
-			checkout: (id: string, interval: BillingInterval) => request<BillingRedirect>('POST', `${t(id)}/plan/checkout`, { plan: 'team', interval }),
+			/** Start checkout for the Team plan (team admin; issue #641 Phase 3), with `seats` editor seats in all (omitted: the included ones). */
+			checkout: (id: string, interval: BillingInterval, seats?: number) =>
+				request<BillingRedirect>('POST', `${t(id)}/plan/checkout`, seats === undefined ? { plan: 'team', interval } : { plan: 'team', interval, seats }),
 			/** Open the team's billing portal (team admin). */
 			portal: (id: string) => request<BillingRedirect>('POST', `${t(id)}/plan/portal`)
 		},
