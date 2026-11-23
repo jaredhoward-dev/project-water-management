@@ -679,9 +679,9 @@ export type RenewalNoticeFacts = {
 	currency: string;
 };
 
-/** A price in the recipient's language: "R 8 990,00" (en-ZA's grouping and decimal comma). */
+/** A price in the language the email is written in (mailLanguage: the recipient's when its catalogue is complete, else English): "R 8 990,00" (en-ZA's grouping and decimal comma). */
 export function moneyText(minor: number, currency: string, locale?: string | null): string {
-	return new Intl.NumberFormat(language(mailLocale(locale)).intl, { style: 'currency', currency }).format(minor / 100);
+	return new Intl.NumberFormat(language(mailLanguage(locale)).intl, { style: 'currency', currency }).format(minor / 100);
 }
 
 /**
