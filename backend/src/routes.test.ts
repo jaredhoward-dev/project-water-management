@@ -55,6 +55,10 @@ const PUBLIC = new Set([
 	// already does plus, while the pack is issued, a redacted projection of its
 	// own frozen report (share/pack-share.db.test.ts).
 	'POST /share/pack',
+	// The billing provider's webhook (issue #641 Phase 3): the signature over the
+	// raw body (Stripe's t=…,v1=… scheme) is the credential; 404 unless the path
+	// names the configured provider (billing/webhook.test.ts, webhook.db.test.ts).
+	'POST /billing/webhook/:provider',
 	// One-click unsubscribe from alert emails (WP-2.13): the token is the
 	// credential, and it can only turn off the one subscription it names,
 	// through app_alert_unsubscribe (alerts/alerts.db.test.ts). The only
@@ -424,6 +428,8 @@ describe('route auth inventory', () => {
 	it('inventories the billing routes: the plan list public, the account and team plans auth-gated', () => {
 		expect(routes).toContain('GET /billing/plans');
 		expect(PUBLIC.has('GET /billing/plans')).toBe(true);
+		expect(routes).toContain('POST /billing/webhook/:provider');
+		expect(PUBLIC.has('POST /billing/webhook/:provider')).toBe(true);
 		for (const r of ['GET /account/plan', 'GET /teams/:id/plan']) {
 			expect(routes).toContain(r);
 			expect(PUBLIC.has(r)).toBe(false);
