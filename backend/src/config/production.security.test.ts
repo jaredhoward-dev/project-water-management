@@ -63,7 +63,16 @@ const SIGNING = pemPair();
 // The station API feeds' sealing pair (issue #784), generated per run as the operator does (pnpm gen:feed-credential-key).
 const FEED_KEYS = generateFeedCredentialKeys();
 const PROD_SECRETS: Record<Role, Record<string, string>> = {
-	api: { DATABASE_URL: DB_URL, AUTH_JWT_SECRET: 'f'.repeat(64), CLOUDFRONT_SHARED_SECRET: 'c'.repeat(48), CLOUDFRONT_PRIVATE_KEY: SIGNING.privateKey, APP_ENCRYPTION_KEY: 'e'.repeat(64) },
+	// The Stripe pair because PROD.api runs BILLING_PROVIDER=stripe, the stricter side (Terraform writes them only then, infra/secrets.tf).
+	api: {
+		DATABASE_URL: DB_URL,
+		AUTH_JWT_SECRET: 'f'.repeat(64),
+		CLOUDFRONT_SHARED_SECRET: 'c'.repeat(48),
+		CLOUDFRONT_PRIVATE_KEY: SIGNING.privateKey,
+		APP_ENCRYPTION_KEY: 'e'.repeat(64),
+		STRIPE_SECRET_KEY: `rk_live_${'a'.repeat(24)}`,
+		BILLING_WEBHOOK_SECRET: `whsec_${'w'.repeat(32)}`
+	},
 	worker: { DATABASE_URL: `${DB_URL}&application_name=worker`, AUTH_JWT_SECRET: 'f'.repeat(64), ALERTS_TOKEN_SECRET: 'a'.repeat(48) },
 	fetcher: { FEED_CREDENTIAL_PRIVATE_KEY: FEED_KEYS.privateKey },
 	renderer: {},
@@ -80,7 +89,8 @@ const PROD: Record<Role, Record<string, string>> = {
 		NODE_EXTRA_CA_CERTS: CA,
 		DB_POOL_MAX: '2',
 		SIGNUP_OPEN: 'false',
-		BILLING_PROVIDER: 'manual',
+		// Stripe (the stricter side; Terraform's default is manual, var.billing_provider): the API then needs both Stripe secrets.
+		BILLING_PROVIDER: 'stripe',
 		MAIL_TRANSPORT: 'ses',
 		MAIL_FROM: 'IC-WBT <no-reply@water.example.org>',
 		SITE_URL: SITE,
@@ -866,6 +876,16 @@ describe('each entry point runs the check at init', () => {
 		);
 		expect(err?.message).toMatch(/CLOUDFRONT_PRIVATE_KEY is not the private half of CLOUDFRONT_PUBLIC_KEY/);
 		expect(err?.message).not.toContain('PRIVATE KEY-----');
+	}, 30_000);
+
+	it('api: with BILLING_PROVIDER=manual (Terraform’s default) it loads from a secret without the Stripe pair, and refuses one that holds it', async () => {
+		const { STRIPE_SECRET_KEY: _k, BILLING_WEBHOOK_SECRET: _w, ...manual } = PROD_SECRETS.api;
+		stubProcessEnv({ ...PROD.api, BILLING_PROVIDER: 'manual', AWS_LAMBDA_FUNCTION_NAME: 'water-management-api' });
+		stubSecretsManager('api', manual);
+		await expect(load.api()).resolves.toHaveProperty('handler');
+		stubProcessEnv({ ...PROD.api, BILLING_PROVIDER: 'manual', AWS_LAMBDA_FUNCTION_NAME: 'water-management-api' });
+		stubSecretsManager('api', PROD_SECRETS.api);
+		await expect(load.api()).rejects.toThrow(/must not have: STRIPE_SECRET_KEY, BILLING_WEBHOOK_SECRET/);
 	}, 30_000);
 
 	it.each(ROLES.filter((r) => RUNTIME_SECRETS[r].length))('%s: refuses to load when its secret lacks a key, naming the key', async (role) => {

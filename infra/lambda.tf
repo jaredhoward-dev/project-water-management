@@ -177,9 +177,10 @@ resource "aws_lambda_function" "backend" {
 
       # The billing provider the webhook route serves (backend/src/billing/provider.ts,
       # docs/billing.md § Webhooks and providers). The code default is the mock,
-      # which the backend's production check refuses; manual takes no webhooks
-      # until the operator moves to stripe with its signing secret (deployment.md).
-      BILLING_PROVIDER = "manual"
+      # which the backend's production check refuses; manual (var.billing_provider's
+      # default) takes no webhooks. stripe puts the Stripe pair in the runtime
+      # secret (secrets.tf), never here (deployment.md § Turning on Stripe).
+      BILLING_PROVIDER = var.billing_provider
 
       # Email (ses.tf, docs/deployment.md § Email). MAIL_TRANSPORT must be set:
       # the default `log` sends nothing.

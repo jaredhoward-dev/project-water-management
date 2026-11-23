@@ -31,8 +31,18 @@ export const RUNTIME_SECRETS: Record<Role, readonly string[]> = {
 	// The session key, the RLS-bound connection (its water_app password), the
 	// header CloudFront stamps on every /api request, and the key that signs
 	// report downloads (CloudFront signed URLs, reports/storage.ts), and the
-	// key that seals two-step sign-in's TOTP secrets (auth/secretBox.ts).
-	api: ['AUTH_JWT_SECRET', 'DATABASE_URL', 'CLOUDFRONT_SHARED_SECRET', 'CLOUDFRONT_PRIVATE_KEY', 'APP_ENCRYPTION_KEY'],
+	// key that seals two-step sign-in's TOTP secrets (auth/secretBox.ts). And,
+	// only once billing moves to Stripe (runtimeSecretKeys below; issue #641),
+	// Stripe's API key and the webhook signing secret (billing/provider/).
+	api: [
+		'AUTH_JWT_SECRET',
+		'DATABASE_URL',
+		'CLOUDFRONT_SHARED_SECRET',
+		'CLOUDFRONT_PRIVATE_KEY',
+		'APP_ENCRYPTION_KEY',
+		'STRIPE_SECRET_KEY',
+		'BILLING_WEBHOOK_SECRET'
+	],
 	// The run-stamp key (the session secret, runs/stamp.ts), the connection,
 	// and the key that signs unsubscribe links (only the worker signs).
 	worker: ['AUTH_JWT_SECRET', 'DATABASE_URL', 'ALERTS_TOKEN_SECRET'],
@@ -58,10 +68,15 @@ export const RUNTIME_SECRETS: Record<Role, readonly string[]> = {
  * Keys a role's secret holds only under a switch: the fetcher's private key
  * only with STATION_API_FEEDS=on (Terraform var.station_api_feeds), so a
  * deployment without station API feeds has no fetcher secret to create, read
- * or rotate, and its fetcher reads nothing at cold start.
+ * or rotate, and its fetcher reads nothing at cold start. The API's two Stripe
+ * secrets only with BILLING_PROVIDER=stripe (Terraform var.billing_provider,
+ * which leaves them out of the secret under manual; infra/secrets.tf).
  */
+const stripe = (env: Env) => env.BILLING_PROVIDER?.trim() === 'stripe';
 const ONLY_WHEN: Record<string, (env: Env) => boolean> = {
-	FEED_CREDENTIAL_PRIVATE_KEY: (env) => env.STATION_API_FEEDS?.trim() === 'on'
+	FEED_CREDENTIAL_PRIVATE_KEY: (env) => env.STATION_API_FEEDS?.trim() === 'on',
+	STRIPE_SECRET_KEY: stripe,
+	BILLING_WEBHOOK_SECRET: stripe
 };
 
 /** The keys `role`'s secret holds in `env`: RUNTIME_SECRETS[role], less any whose switch is off. */

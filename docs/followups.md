@@ -913,14 +913,17 @@ are #641's checklist. Open items from building it:
       (round-2026-11-23/r3-gates, 327): the job tick's
       `app_purge_billing_events` deletes rows past 90 days, refusing under 4
       (billing.md § Retention; `apply.db.test.ts`).
-- [ ] **STRIPE_SECRET_KEY has no way into the API Lambda yet.** Checkout and
+- [x] **STRIPE_SECRET_KEY has no way into the API Lambda yet.** Checkout and
       the portal read it (billing/provider.ts), and the production check
       refuses `stripe` without a live key, but neither infra-secrets nor
-      Terraform carries it. Durable fix: an operator-pasted `stripe_secret_key`
-      (a restricted `rk_live_…` key with Checkout Sessions, Customers and
-      Customer Portal write only) in the API's runtime secret, beside
-      `billing_webhook_secret` (deployment.md), and the Terraform that moves
-      both in when the provider switches. Trigger: the Stripe account exists.
+      Terraform carried it. Done (round-2026-11-23/r4-secrets): Terraform's
+      `billing_provider` (default `manual`) replaces the hard-coded value,
+      and with `stripe` the sops keys `stripe_secret_key` and
+      `billing_webhook_secret` go into the API's runtime secret (left out
+      under `manual`; the backend reads them only with `stripe`). Plan
+      refuses `stripe` without both or with a test key. What's left is the
+      operator's: deployment.md § Turning on Stripe (the account, the
+      restricted key, the endpoint, sops, the switch).
 - [ ] **Checkout sells one seat and no trial.** The Stripe session and the
       mock's events carry quantity 1 and no `trial_period_days`, so Team's
       extra seats (`extra_seat_*_minor`) and Pro's and Team's trial days

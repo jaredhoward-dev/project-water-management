@@ -85,6 +85,12 @@ feeds_contact = "you@example.com"
 # station_api_feeds          = true
 # feed_credential_public_key = "<43 characters from gen:feed-credential-key>"
 
+# Billing provider (issue #641; docs/deployment.md § Turning on Stripe). manual
+# (the default) takes no webhooks and needs no Stripe secrets. stripe needs a
+# live stripe_secret_key and billing_webhook_secret in prod.sops.yaml; plan
+# refuses stripe without both, or with a test-mode key.
+# billing_provider = "stripe"
+
 # Lambda concurrency caps. A new account's concurrency quota is 10 and AWS
 # keeps 10 unreserved, so ANY reservation fails until the quota is raised:
 # raise it BEFORE the first apply to at least the sum of these + 10 (48 at the
