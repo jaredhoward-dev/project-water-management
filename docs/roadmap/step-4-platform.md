@@ -376,17 +376,28 @@ run in parallel after WP-4.1.
 
 - **Goal.** Each org has one live subscription to a plan. Limits and features
   are enforced where they can't be raced.
-- **Value metric.** **Catchments (projects) per org** first, editor seats
-  second. **Viewers, guests and Step 2 farmers are always free and
+- **Built ahead of Step 4 (issue #641).** Pricing doesn't wait for track A.
+  #641 Phase 1 (in progress) bills to a **`billing_account`** that is either
+  a person or a team, which is exactly WP-4.1's mapping (team → org,
+  team-less project → personal org). In this WP, `billing_account` becomes
+  `organisation` 1:1 (rename or FK, expand/contract), and #641's tables
+  become this WP's tables. Nothing is thrown away. The design and current
+  state are in [billing.md](../billing.md).
+- **Value metric.** Running catchments **live** (feeds, automatic runs,
+  alerts, published farm views), the AI assistant, server reports and issued
+  evidence packs; editor seats on Team. **Core modelling is never limited**,
+  not even on Free. **Viewers, guests and Step 2 farmers are always free and
   unlimited**, so a WUA never pays per farmer. Ensemble compute is metered.
-- **Illustrative plan shape** (prices are D2; the client sets them):
+- **Plans** (D2, decided in #641; prices in ZAR, what the customer pays):
 
-  | Plan | Catchments | Editor seats | Features |
-  | --- | --- | --- | --- |
-  | Trial (30 days, no card) | 2 | 3 | Everything except API, SSO, ensembles > 50 members |
-  | Practitioner | 3 | 2 | Scenarios, reports, stakeholder views |
-  | Team | 15 | 10 | + API (read), ensembles, templates |
-  | Agency | 50+ (contract) | 25+ | + SSO/SCIM, API write, webhooks, region choice, SLA |
+  | Plan | Price | Catchments | Editor seats | Features |
+  | --- | --- | --- | --- | --- |
+  | Free | R0 | unlimited, non-commercial use; 1 live | 2 per catchment | All modelling; AI ≈ $1 a month; 5 server reports a month; packs paid per issue |
+  | Pro (one hydrologist) | R899/month, R8,990/year | 15 | 5 per catchment | Every catchment live; AI $15 a seat; unlimited reports |
+  | Team (WUA, consultancy) | R2,499/month incl. 3 editors, +R499 each | 50 | seats on the plan | As Pro, pooled per seat |
+  | Agency (Step 4) | from R7,500, contract | contract | seats | + SSO/SCIM, `/v1` API, webhooks, region choice, SLA |
+
+  A 14-day reverse trial of Pro replaces the old 30-day no-card trial.
 
 - **Changes**
   - *backend:* `backend/src/billing/entitlements.ts` has
@@ -395,36 +406,55 @@ run in parallel after WP-4.1.
     `project` that takes an advisory lock per org, so two parallel creates
     can't both pass. Seats are enforced on member add and invite accept.
     Over-limit returns `402 { error: 'plan_limit', limit, used }`.
-  - A trial that ends becomes read-only (`subscription.status = 'expired'`
-    → `app_org_access` allows viewer-level only). **Data is never deleted
-    because a trial ended.** Deletion follows WP-4.8 retention.
+  - A trial that ends, or a lapsed plan, drops to Free limits (#641):
+    catchments over a limit become read-only (`project.plan_paused_at`; read,
+    export and verify still work), automatic runs and alerts stop after a
+    14-day grace, and published farm views stay up. **Data is never deleted
+    because a trial or plan ended.** Deletion follows WP-4.8 retention.
   - *frontend:* a plan and usage page, and upgrade prompts at the limit.
-- **Data model.** `plan(code PK, name, currency, price_monthly_minor,
-  price_annual_minor, limits jsonb, features jsonb, trial_days, active)`:
-  global, SELECT for all, written only by migrations or staff functions.
-  `subscription(id, organisation_id, plan_code, status ('trialing','active',
-  'past_due','expired','canceled'), seats, period_start, period_end,
-  trial_end, external_ref)`, with a partial unique index "one live per org"
-  (feohledger's `uq_subscription_one_live_per_org`).
-  `usage_event(organisation_id, kind, qty, at)` for runs, job-seconds,
-  API calls and storage bytes; monthly rollups in `usage_month`. RLS: org
-  admins and `billing` read. Writes go only through `SECURITY DEFINER`
-  functions.
-- **API.** `GET /orgs/:id/subscription`, `GET /plans`,
-  `POST /orgs/:id/subscription/change` (staff or provider-driven in v1).
+- **Data model.** #641 Phase 1's tables, carried over:
+  - `plan(code PK, name, price_monthly_minor, price_annual_minor, currency
+    'ZAR', limits jsonb, features jsonb, trial_days, active)`: global,
+    SELECT for all, written only by migrations. `limits` keys are a closed,
+    CHECK-validated set, since SQL reads them.
+  - `billing_account(id, kind ('user','team'), user_id, team_id,
+    created_at)`, exactly one of the two set, and `project.billing_account_id`.
+    Here it becomes `organisation` 1:1, and `project.billing_account_id`
+    folds into `project.organisation_id`.
+  - `subscription(id, billing_account_id, plan_code, status ('trialing',
+    'active','past_due','canceled','expired'), seats, period_start,
+    period_end, trial_end, cancel_at_period_end, provider, external_ref,
+    created_at)`, with a partial unique index "one live per account"
+    (feohledger's `uq_subscription_one_live_per_org`). No live subscription
+    means Free.
+  - `usage_counter(billing_account_id, kind, month, qty)` for monthly
+    counts (reports, issued packs, assistant tokens); the assistant's total
+    is summed from `assistant_usage`, not copied.
+  - Added in this WP: `usage_event(organisation_id, kind, qty, at)` for
+    job-seconds, API calls and storage bytes (WP-4.13's cost controls).
+  - RLS: the billing owner, team (later org) admins and the `billing` role
+    read. Writes go only through `SECURITY DEFINER` functions with a pinned
+    `search_path`.
+- **API.** #641 Phase 1 ships `GET /billing/plans`, `GET /account/plan` and
+  `GET /teams/:id/plan`; this WP adds `GET /orgs/:id/subscription`. Plan
+  changes come from the provider's webhook or the staff grant
+  (`app_staff_grant_plan`), never from a client call.
 - **UI.** Usage bars (catchments 12/15). A trial banner with days left. States
   for past-due and expired. The billing role sees only this page.
-- **Local-first.** No provider needed: `BILLING_PROVIDER=manual` is the code
-  default.
+- **Local-first.** No provider needed: `BILLING_PROVIDER=mock` is the code
+  default, and `BILLING_ENFORCED=false` (shadow mode: everything metered and
+  shown, nothing refused) until the operator turns it on.
 - **Tests.** *DB:* two concurrent project creates at limit−1 → exactly one
   succeeds. Expired trial → read works, write 403/404 (positive control:
   active). Viewers don't count as seats. *Unit:* the entitlement matrix per
   plan. *e2e:* hit the limit and see the prompt.
-- **Docs.** New `docs/billing.md`, api.md, data-model.md.
+- **Docs.** [billing.md](../billing.md) (from #641 Phase 1), api.md,
+  data-model.md.
 - **Acceptance.** No plan limit can be bypassed through the API, including
   under parallel requests.
-- **Size.** M.
-- **Depends on.** WP-4.1, D2 (placeholders are fine to build against).
+- **Size.** M, of which #641 Phases 1–2 build most before Step 4; what is
+  left here is the move to `organisation`.
+- **Depends on.** WP-4.1. D2 is decided (#641).
 
 ### WP-4.6 Billing, invoices and VAT
 
@@ -441,12 +471,17 @@ run in parallel after WP-4.1.
     existing Stripe organization (one account per project). The operator
     registers for SA VAT as a foreign supplier of electronic services once
     over the threshold ([SARS VAT-REG-02-G02]).
-  - Paystack or PayFast ([Paystack ZA pricing], [Paystack recurring
-    charges]) would come back only if the seller became an SA entity: both
-    need an SA company and bank account.
+  - Paystack, PayFast, Peach Payments and Yoco ([Paystack ZA pricing],
+    [Paystack recurring charges]) would come back only if the seller became
+    an SA entity: all four need an SA-registered business and an SA bank
+    account, so none can onboard the operator.
   - B2B customers pay Stripe invoices by card or SWIFT, unless a US Wise
     Business account can take ZAR by EFT (to check once, #641).
-  - #641's phases build metering and limits first, then Stripe (Phase 3).
+  - #641's phases build metering and limits first (Phases 1–2), then the
+    Stripe adapter, checkout, portal and webhooks (Phase 3). Stripe Checkout
+    and the Customer Portal are hosted, so no card data reaches us (PCI
+    SAQ A). Prices are set in ZAR, paid out in USD
+    ([billing.md](../billing.md)).
 - **VAT facts** (verify with a tax adviser before go-live):
   - Standard rate 15%.
   - Compulsory registration for SA vendors from **R2.3 million** taxable
@@ -459,9 +494,9 @@ run in parallel after WP-4.1.
     with both parties' names, addresses and VAT numbers
     ([SARS tax invoice checklist]).
 - **Changes**
-  - *backend:* `backend/src/billing/provider.ts` interface (`manual` or
-    `stripe`). `invoice.ts` renders a PDF (same renderer as
-    Step 2 reports). Webhook route `/billing/webhook/:provider`
+  - *backend:* `backend/src/billing/provider.ts` interface (`mock`, the
+    code default; `manual` for B2B invoices and staff grants; `stripe`).
+    `invoice.ts` renders a PDF (same renderer as Step 2 reports). Webhook route `/billing/webhook/:provider`
     (public allowlist): verify the HMAC over the raw body (Stripe:
     `Stripe-Signature`, HMAC-SHA256 with a timestamp), deduplicate on the event id, and
     make it the **only** writer of payment status.
@@ -480,7 +515,9 @@ run in parallel after WP-4.1.
   `PUT /orgs/:id/billing-profile`, `POST /billing/webhook/:provider`.
 - **UI.** Invoice list (empty: "No invoices yet"). Downloads. Past-due
   banner for admins only.
-- **Local-first.** `manual` needs nothing. For Stripe, a local
+- **Local-first.** `mock` (the default) and `manual` need nothing; the
+  mock's checkout page posts a signed synthetic event to the same webhook
+  route, and production refuses `mock`. For Stripe, a local
   webhook-sink fixture replays signed synthetic events (`dev:billing:replay`),
   and `stripe-mock` runs in docker-compose (the feohledger `stripe:up`
   pattern).
@@ -488,8 +525,8 @@ run in parallel after WP-4.1.
   no gaps, HMAC verify (good, bad, replay). *DB:* immutability trigger,
   deduplication. *e2e:* issue an invoice → download PDF → it shows every s20
   field.
-- **Docs.** billing.md, security.md (webhook boundary), the sub-processor list
-  (provider).
+- **Docs.** [billing.md](../billing.md), security.md (webhook boundary), the
+  sub-processor list (Stripe, and the s72 transfer to the US).
 - **Acceptance.** A replayed or forged webhook changes nothing. An issued
   invoice can't be edited.
 - **Size.** M (manual + one provider). +M for dunning and proration.
@@ -1320,7 +1357,7 @@ Run before building (`/persona …`) and record each **Need verdict** here.
 
 | # | Decision | Options | Recommendation | Who decides |
 | --- | --- | --- | --- | --- |
-| D1 | **Seller entity and payment provider** | (a) client's SA company + Paystack/PayFast; (b) operator's non-SA entity + Stripe Billing, SA VAT as a foreign e-services supplier; (c) manual EFT invoicing first | **Decided 2026-10-28 (#641): (b).** The operator, a US sole proprietor, sells on Stripe; the client service agreement records that the operator owns the software | Operator (decided); tax adviser still to confirm VAT (#641 Phase 0) |
+| D1 | **Seller entity and payment provider** | (a) an SA company + Paystack/PayFast/Peach/Yoco (each needs an SA entity and bank account); (b) the operator, a US seller, + Stripe Billing, SA VAT as a foreign e-services supplier; (c) manual EFT invoicing first | **Decided 2026-10-28 (#641): (b), Stripe unless the seller changes.** The operator, a US sole proprietor, sells on Stripe, as a new account in the estate's Stripe organization; the client service agreement records that the operator owns the software. B2B pays Stripe invoices by card or SWIFT unless ZAR EFT to a US seller is confirmed ([billing.md](../billing.md)) | Operator (decided); tax adviser still to confirm VAT (#641 Phase 0) |
 | D2 | **Prices and plan limits** | Per catchment; per editor seat; flat per org | **Decided 2026-10-28/29 (#641):** Free / Pro R899 / Team R2,499 incl. 3 editors; Free never limits modelling, only AI, live catchments, server PDFs and issued packs | Operator (decided) |
 | D3 | **Tenancy model** | Shared schema + RLS org wall; database-per-tenant (feohledger); stack-per-tenant | Shared + RLS. Offer a dedicated stack to one large customer if ever needed | Operator (CISO consulted) |
 | D4 | **Outbound internet from the VPC Lambdas** (SSO, webhooks, fetchers) | NAT gateway (~$33/month + data); NAT instance (~$4); a non-VPC egress Lambda fed by SQS (no NAT, more moving parts) | Reuse Step 2's pattern (WP-2.10: a non-VPC egress Lambda fed by SQS) for webhooks and fetchers; add a small NAT instance only for SSO token calls, which must run inline | Operator |
@@ -1338,12 +1375,12 @@ Run before building (`/persona …`) and record each **Need verdict** here.
 | --- | --- | --- | --- |
 | R1 **Cross-tenant data leak** through a policy that skips `app_has_role` or a new principal | Low–Med | Very high | One chokepoint (`app_project_role`) for all principals; cross-org tests with positive controls for every table; a catalogue test that every table with `project_id`/`organisation_id` has RLS; `/audit/auth`; persona-adversary each WP |
 | R2 **SSO account takeover** via an IdP asserting someone else's email | Med | High | Link by email only for DNS-verified domains of that org; pin the Entra `tid`; JIT never grants admin |
-| R3 **No payment rail** because Stripe excludes SA entities | Low (the US operator sells, D1) | Med | Stripe under the operator; a Paystack adapter behind the feohledger-style interface only if the seller ever becomes an SA entity |
+| R3 **No payment rail** because Stripe excludes SA entities | Low (the US operator sells, D1) | Med | Stripe under the operator (#641). The SA providers (Paystack, PayFast, Peach, Yoco) can't onboard a US seller; a Paystack adapter behind the `provider.ts` interface only if the seller ever becomes an SA entity. Residual: SA customers who insist on ZAR EFT or debit orders, covered by Stripe invoices (card, SWIFT) and the staff grant |
 | R4 **VAT mistakes** (thresholds changed April 2026; foreign-supplier rule unclear) | Med | Med | Tax adviser sign-off before the first invoice; VAT rate and registration stored as config, not code |
 | R5 **Single-tenant restore is hard** in a shared database | Med | High | A tested copy-one-org script from a PITR restore; rehearse before the first external tenant; export (WP-4.8) as the tenant's own backup |
 | R6 **Egress adds cost and attack surface** | High | Low–Med | D4; SSRF guard; separate egress role with no DB access where possible |
 | R7 **WR2012 licensing blocks hosted data** | Med | Low | User uploads; importer works on their files |
-| R8 **Scope and time** (18 WPs, one developer) | High | High | Tracks in parallel; SAML, SCIM and a second region only on demand; build WP-4.5/4.6 as manual first |
+| R8 **Scope and time** (18 WPs, one developer) | High | High | Tracks in parallel; SAML, SCIM and a second region only on demand; build WP-4.5/4.6 in #641's order: metering in shadow mode, then limits, then Stripe |
 | R9 **Ensemble results misread** as forecasts | Med | Med | Clear labelling, seed and method on every chart, the hydrologist's wording in help |
 | R10 **Runoff module never calibrates well enough** | Med | Low | Keep GR4J as the default (the b023 recession was removed in engine 1.0.0); the module ships only on the hydrologist's acceptance |
 | R11 **Support load swamps the operator** | Med | Med | Guides for the top tasks, the tour, the guided wizard, D9 |
