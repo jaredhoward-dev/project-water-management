@@ -23,7 +23,7 @@ export type MockSession =
 			accountId: string;
 			returnUrl: string;
 			/** The live subscription to offer to cancel, when there is one (the mock's own: external ref sub_mock_…). */
-			subscription: { planCode: string; status: string; periodStart: string; periodEnd: string; cancelAtPeriodEnd: boolean; seats: number } | null;
+			subscription: { planCode: string; planName?: string; status: string; periodStart: string; periodEnd: string; cancelAtPeriodEnd: boolean; seats: number } | null;
 			exp: number;
 	  };
 
