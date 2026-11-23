@@ -19,8 +19,8 @@ const script = join(here, 'tf.sh');
 const which = (tool) => spawnSync('bash', ['-c', `command -v ${tool}`], { encoding: 'utf8' }).stdout.trim();
 const BASH = which('bash');
 const KEYS = ['auth_jwt_secret', 'db_app_password', 'alerts_token_secret', 'cloudfront_private_key', 'app_encryption_key'];
-/** Keys passed only when present (a feature's, off until the operator adds it: station API feeds, issue #784). */
-const OPTIONAL_KEYS = ['feed_credential_private_key'];
+/** Keys passed only when present (a feature's, off until the operator adds it: station API feeds, issue #784; Stripe billing, #641). */
+const OPTIONAL_KEYS = ['feed_credential_private_key', 'stripe_secret_key', 'billing_webhook_secret'];
 const VALUES = {
 	auth_jwt_secret: 'synthetic-jwt-0123456789abcdef0123456789abcdef',
 	db_app_password: 'synthetic0db0password0123456789',
@@ -126,7 +126,13 @@ test('an optional key reaches Terraform when the sops file has it, and its absen
 	assert.equal(withKey.status, 0, withKey.stderr);
 	assert.deepEqual(withKey.tf[0].tfvars, { ...VALUES, feed_credential_private_key: key });
 	assert.deepEqual(withKey.tf[0].bare, [], 'the bare optional name is unset too');
-	for (const extra of [{}, { feed_credential_private_key: '' }]) {
+	// The Stripe pair (issue #641) the same way.
+	const stripe = { stripe_secret_key: 'synthetic-stripe-key-0000000000', billing_webhook_secret: 'synthetic-webhook-secret-00000000000' };
+	const withStripe = run(setup(), ['plan'], { FAKE_SOPS_ENV: JSON.stringify({ ...VALUES, ...stripe }) });
+	assert.equal(withStripe.status, 0, withStripe.stderr);
+	assert.deepEqual(withStripe.tf[0].tfvars, { ...VALUES, ...stripe });
+	assert.deepEqual(withStripe.tf[0].bare, []);
+	for (const extra of [{}, { feed_credential_private_key: '' }, { stripe_secret_key: '', billing_webhook_secret: '' }]) {
 		const ctx2 = setup();
 		const r = run(ctx2, ['plan'], { FAKE_SOPS_ENV: JSON.stringify({ ...VALUES, ...extra }) });
 		assert.equal(r.status, 0, r.stderr);

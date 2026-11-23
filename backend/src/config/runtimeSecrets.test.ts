@@ -83,7 +83,24 @@ describe('loadRuntimeSecrets', () => {
 		);
 		expect(runtimeSecretKeys('fetcher', { STATION_API_FEEDS: 'on' })).toEqual(['FEED_CREDENTIAL_PRIVATE_KEY']);
 		expect(runtimeSecretKeys('fetcher', {})).toEqual([]);
-		expect(runtimeSecretKeys('api', {})).toEqual(RUNTIME_SECRETS.api); // positive control: no switch on the API's keys
+		expect(runtimeSecretKeys('api', { STATION_API_FEEDS: 'on' })).not.toContain('FEED_CREDENTIAL_PRIVATE_KEY');
+	});
+
+	it('the API reads the Stripe secrets only with BILLING_PROVIDER=stripe (issue #641), and then fails closed without them', async () => {
+		const STRIPE = { STRIPE_SECRET_KEY: 'stripe-key-that-must-never-be-printed-0000', BILLING_WEBHOOK_SECRET: 'whsec-that-must-never-be-printed-000000000' };
+		expect(runtimeSecretKeys('api', { BILLING_PROVIDER: 'stripe' })).toEqual(RUNTIME_SECRETS.api); // positive control
+		for (const provider of [undefined, 'manual', 'mock']) {
+			expect(runtimeSecretKeys('api', { BILLING_PROVIDER: provider }), String(provider)).toEqual(Object.keys(VALUES));
+			// Under manual Terraform leaves them out of the secret; one there anyway is a key this role must not hold.
+			const err = await refusal(lambdaEnv({ BILLING_PROVIDER: provider }), serve({ ...VALUES, ...STRIPE }));
+			expect(err.message).toMatch(/must not have: STRIPE_SECRET_KEY, BILLING_WEBHOOK_SECRET/);
+		}
+		const env: Record<string, string | undefined> = lambdaEnv({ BILLING_PROVIDER: 'stripe' });
+		await loadRuntimeSecrets('api', env, serve({ ...VALUES, ...STRIPE }));
+		expect(env).toMatchObject(STRIPE);
+		const err = await loadRuntimeSecrets('api', lambdaEnv({ BILLING_PROVIDER: 'stripe' }), serve(VALUES)).catch((e: unknown) => e);
+		expect((err as Error).message).toMatch(/missing keys: STRIPE_SECRET_KEY, BILLING_WEBHOOK_SECRET/);
+		expect((err as Error).message).not.toContain('must-never-be-printed');
 	});
 
 	it('refuses a missing key, naming it', async () => {

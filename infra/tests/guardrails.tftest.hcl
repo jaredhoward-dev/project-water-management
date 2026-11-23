@@ -951,13 +951,25 @@ run "runtime_secrets" {
   assert {
     condition = (
       toset(keys(local.runtime_secrets)) == toset(["api", "migrate", "worker", "assistant", "fetcher"]) &&
-      toset(keys(local.runtime_secrets.api)) == toset(["AUTH_JWT_SECRET", "DATABASE_URL", "CLOUDFRONT_SHARED_SECRET", "CLOUDFRONT_PRIVATE_KEY", "APP_ENCRYPTION_KEY"]) &&
+      toset(keys(local.runtime_secrets.api)) == toset(["AUTH_JWT_SECRET", "DATABASE_URL", "CLOUDFRONT_SHARED_SECRET", "CLOUDFRONT_PRIVATE_KEY", "APP_ENCRYPTION_KEY", "STRIPE_SECRET_KEY", "BILLING_WEBHOOK_SECRET"]) &&
       toset(keys(local.runtime_secrets.worker)) == toset(["AUTH_JWT_SECRET", "DATABASE_URL", "ALERTS_TOKEN_SECRET"]) &&
       toset(keys(local.runtime_secrets.migrate)) == toset(["WATER_APP_PASSWORD"]) &&
       toset(keys(local.runtime_secrets.assistant)) == toset(["AUTH_JWT_SECRET", "DATABASE_URL", "CLOUDFRONT_SHARED_SECRET"]) &&
       toset(keys(local.runtime_secrets.fetcher)) == toset(["FEED_CREDENTIAL_PRIVATE_KEY"])
     )
     error_message = "Each runtime secret holds exactly its Lambda's keys: the download signing key and the TOTP sealing key for the API only (the edge secret for the API and the assistant), the unsubscribe key for the worker only, the water_app password for migrate only."
+  }
+  # Billing is manual by default (issue #641): the API's secret as written
+  # holds no Stripe key, not even an empty one (the backend refuses a key it
+  # doesn't expect under manual, runtimeSecrets.ts ONLY_WHEN), and nothing
+  # else is dropped.
+  assert {
+    condition = (
+      var.billing_provider == "manual" && var.stripe_secret_key == "" && var.billing_webhook_secret == "" &&
+      toset(keys(local.runtime_secrets_written.api)) == toset(["AUTH_JWT_SECRET", "DATABASE_URL", "CLOUDFRONT_SHARED_SECRET", "CLOUDFRONT_PRIVATE_KEY", "APP_ENCRYPTION_KEY"]) &&
+      alltrue([for role in ["worker", "migrate", "assistant", "fetcher"] : toset(keys(local.runtime_secrets_written[role])) == toset(keys(local.runtime_secrets[role]))])
+    )
+    error_message = "With billing_provider = manual (the default) the API's runtime secret holds no Stripe key, and every other secret holds all its keys."
   }
   assert {
     condition = (
@@ -1180,6 +1192,105 @@ run "rejects_placeholder_app_encryption_key" {
   }
 
   expect_failures = [var.app_encryption_key]
+}
+
+# --- Stripe billing (issue #641; docs/deployment.md § Turning on Stripe) ------
+# Synthetic, live-shaped values: no real key is ever in this repo.
+
+run "stripe_secrets_reach_the_runtime_secret_only" {
+  command = plan
+
+  variables {
+    billing_provider       = "stripe"
+    stripe_secret_key      = "rk_live_0000synthetic0000000000"
+    billing_webhook_secret = "whsec_synthetic0000000000000000000000"
+  }
+
+  assert {
+    condition     = aws_lambda_function.backend.environment[0].variables["BILLING_PROVIDER"] == "stripe"
+    error_message = "billing_provider = stripe sets BILLING_PROVIDER=stripe on the API."
+  }
+  assert {
+    condition = (
+      local.runtime_secrets_written.api.STRIPE_SECRET_KEY == var.stripe_secret_key &&
+      local.runtime_secrets_written.api.BILLING_WEBHOOK_SECRET == var.billing_webhook_secret &&
+      toset(keys(local.runtime_secrets_written.api)) == toset(keys(local.runtime_secrets.api))
+    )
+    error_message = "With stripe, the API's runtime secret carries both Stripe values from their sops-fed variables, beside its other keys."
+  }
+  assert {
+    condition = alltrue([for role in ["worker", "migrate", "assistant", "fetcher"] :
+      !contains(keys(local.runtime_secrets_written[role]), "STRIPE_SECRET_KEY") && !contains(keys(local.runtime_secrets_written[role]), "BILLING_WEBHOOK_SECRET")
+    ])
+    error_message = "Only the API holds the Stripe pair."
+  }
+  assert {
+    condition = alltrue([for k in keys(aws_lambda_function.backend.environment[0].variables) :
+      !contains(["STRIPE_SECRET_KEY", "BILLING_WEBHOOK_SECRET"], k) && !can(regex("PASSWORD|PRIVATE_KEY|TOKEN$|SECRET$|_KEY$", k)) || contains(["CLOUDFRONT_PUBLIC_KEY", "FEED_CREDENTIAL_PUBLIC_KEY"], k)
+    ])
+    error_message = "Neither Stripe secret may be in the API's environment block (any GetFunctionConfiguration caller reads it): they go in its runtime secret."
+  }
+  assert {
+    condition     = ephemeralasnull(var.stripe_secret_key) == null && ephemeralasnull(var.billing_webhook_secret) == null && ephemeralasnull(local.runtime_secrets_written.api.STRIPE_SECRET_KEY) == null
+    error_message = "The Stripe values are ephemeral, so no state or plan holds them."
+  }
+}
+
+run "stripe_needs_both_secrets" {
+  command = plan
+
+  variables {
+    billing_provider = "stripe"
+  }
+
+  expect_failures = [var.billing_provider]
+}
+
+run "stripe_needs_the_webhook_secret" {
+  command = plan
+
+  variables {
+    billing_provider  = "stripe"
+    stripe_secret_key = "rk_live_0000synthetic0000000000"
+  }
+
+  expect_failures = [var.billing_provider]
+}
+
+run "stripe_refuses_a_test_mode_key" {
+  command = plan
+
+  variables {
+    billing_provider       = "stripe"
+    stripe_secret_key      = "sk_test_0000synthetic0000000000"
+    billing_webhook_secret = "whsec_synthetic0000000000000000000000"
+  }
+
+  # The key's own validation fails first; billing_provider's check of it is then skipped.
+  expect_failures = [var.stripe_secret_key]
+}
+
+run "stripe_refuses_a_placeholder_webhook_secret" {
+  command = plan
+
+  variables {
+    billing_provider       = "stripe"
+    stripe_secret_key      = "rk_live_0000synthetic0000000000"
+    billing_webhook_secret = "dev-only-billing-webhook-secret-00000000000"
+  }
+
+  # The secret's own validation fails first; billing_provider's check of it is then skipped.
+  expect_failures = [var.billing_webhook_secret]
+}
+
+run "billing_provider_refuses_mock" {
+  command = plan
+
+  variables {
+    billing_provider = "mock"
+  }
+
+  expect_failures = [var.billing_provider]
 }
 
 run "rejects_fractional_runtime_secret_version" {
@@ -3119,8 +3230,8 @@ run "map_data" {
 
   # --- Billing provider: manual until Stripe is set up (config/production.ts refuses unset or mock; issue #641) ---
   assert {
-    condition     = aws_lambda_function.backend.environment[0].variables["BILLING_PROVIDER"] == "manual"
-    error_message = "The API runs BILLING_PROVIDER=manual (no webhooks) until the Stripe secret exists; production refuses an unset or mock provider, so dropping it stops the API starting."
+    condition     = var.billing_provider == "manual" && aws_lambda_function.backend.environment[0].variables["BILLING_PROVIDER"] == "manual"
+    error_message = "The API runs BILLING_PROVIDER=manual (no webhooks) by default (var.billing_provider) until the operator moves to stripe; production refuses an unset or mock provider, so dropping it stops the API starting."
   }
 
   # --- Delineation off by default: no DEM, no grant -----------------------------------------

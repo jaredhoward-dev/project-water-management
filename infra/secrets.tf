@@ -39,6 +39,16 @@ locals {
   # The fetcher's key for station API feeds (issue #784): only while
   # station_api_feeds is on, which the variable's validation enforces.
   feed_credential_private_key = var.feed_credential_private_key
+  # The API's Stripe pair (issue #641): only while billing_provider is stripe,
+  # which the variables' validations enforce.
+  stripe_secret_key      = var.stripe_secret_key
+  billing_webhook_secret = var.billing_webhook_secret
+
+  # Keys left out of a runtime secret while their switch is off. The backend
+  # refuses a key it doesn't expect as firmly as a missing one
+  # (runtimeSecrets.ts ONLY_WHEN), so under manual the API's secret must not
+  # hold the Stripe pair, even empty.
+  runtime_secret_keys_off = var.billing_provider == "stripe" ? [] : ["STRIPE_SECRET_KEY", "BILLING_WEBHOOK_SECRET"]
 }
 
 # Shape checks live as validations on the variables (variables.tf), so a
@@ -104,6 +114,10 @@ locals {
       CLOUDFRONT_PRIVATE_KEY = local.cloudfront_private_key
       # Seals two-step sign-in's TOTP secrets (backend/src/auth/secretBox.ts); from sops.
       APP_ENCRYPTION_KEY = local.app_encryption_key
+      # Stripe's API key and the webhook signing secret (issue #641), from sops,
+      # written only while billing_provider is stripe (runtime_secret_keys_off).
+      STRIPE_SECRET_KEY      = local.stripe_secret_key
+      BILLING_WEBHOOK_SECRET = local.billing_webhook_secret
     }
     worker = {
       # A re-run job stores a run, stamped under a key derived from the
@@ -135,6 +149,14 @@ locals {
     }
   }
 
+  # What each secret holds: its keys less those whose switch is off
+  # (runtime_secret_keys_off).
+  runtime_secrets_written = {
+    for role, values in local.runtime_secrets : role => {
+      for k, v in values : k => v if !contains(local.runtime_secret_keys_off, k)
+    }
+  }
+
   # The role that may read each secret. The assistant's only while it exists,
   # the fetcher's only while station API feeds are on.
   runtime_secret_roles = merge({
@@ -160,7 +182,7 @@ resource "aws_secretsmanager_secret_version" "runtime" {
   secret_id = each.value.id
   # Write-only: never in state or a plan. Never secret_string (the tftest
   # refuses it).
-  secret_string_wo         = jsonencode(local.runtime_secrets[each.key])
+  secret_string_wo         = jsonencode(local.runtime_secrets_written[each.key])
   secret_string_wo_version = var.runtime_secret_version
 
   lifecycle {
