@@ -939,6 +939,33 @@ are #641's checklist. Open items from building it:
       `proration_behavior` decided with the operator), and the plan page's
       seat field kept for a live Team. Trigger: a paying Team asks for
       another editor seat.
+- [ ] **Team's seat field starts at the included seats.** The team plan
+      page's seat field opens at Team's 3 included seats, not at the team's
+      current editor count, so a team with more editors than that checks out
+      fewer seats than it uses unless the admin raises the number.
+      Durable fix: `AccountPlan` (`GET /teams/:id/plan`) carries the team's
+      member or editor count, and the field starts at the larger of that and
+      the included seats. Trigger: a team with more editors than included
+      seats checks out.
+- [ ] **`subscription` records no billing interval.** Neither the
+      webhook's normalised event nor `app_billing_apply` keeps whether a
+      subscription is monthly or annual, so the plan page can't show
+      what a Team with extra seats pays. Durable fix: an interval column on
+      `subscription` (a forward migration), written by `app_billing_apply`
+      from the normalised event (the normaliser, `provider/stripe.ts`, reads
+      it from the subscription item's price, `recurring.interval`, and the
+      mock sends it), and the plan page's total worked out from it and
+      `seats`. Trigger: the plan page needs to show a subscription's
+      total.
+- [ ] **No Lambda route for the operator's billing commands.** The staff
+      grant and the abuse report run as the schema owner, which production
+      reaches only from a temporary instance inside the VPC
+      (deployment.md § Runbooks 21 and 22, infra/README.md § Database access
+      and recovery); the read-only checks can't write and refuse rows with an
+      email. Durable fix: fixed, named migrate-Lambda events for a grant, a
+      revoke and the report's counts (no SQL in the event, the report
+      redacted as the script prints it), like the read-only checks. Trigger:
+      the first staff grant or monthly report in production.
 
 ## DB tests share the mail outbox (2026-10-02, PR #360)
       **Decided (round 3, N):** a bounded whole-file pass (data-sources.md § ssebop-eta); the build is its own item below.

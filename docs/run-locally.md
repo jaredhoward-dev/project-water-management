@@ -643,6 +643,11 @@ Each prints the API's status and answer (`applied`, `recorded`, `duplicate`,
 account answers `unknown_account`. The script signs only with a `dev-only-`
 key and posts only to localhost.
 
+To grant a plan by hand (the operator's staff grant: an invoiced customer, a
+founding user, Team's trial), `pnpm dev:billing:grant <email|team-id> <plan>
+[--until YYYY-MM-DD] --reason "…"` (`--revoke`, `--list`; [billing.md § Staff
+grants](./billing.md#staff-grants)).
+
 ## Assistant
 
 The project assistant (issue #610) is off by default: `ASSISTANT_PROVIDER=off`
