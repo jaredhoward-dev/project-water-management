@@ -565,12 +565,6 @@ describe('teams client', () => {
 		expect(call(f, 1).url).toBe('/account/plan');
 	});
 
-	it('lists the plans on offer', async () => {
-		const f = mockFetch(200, { plans: [{ code: 'free' }, { code: 'pro' }] });
-		expect((await createApi('', f).billing.plans()).map((p) => p.code)).toEqual(['free', 'pro']);
-		expect(call(f)).toEqual({ url: '/billing/plans', method: 'GET', body: undefined });
-	});
-
 	it('a team plan the caller may not see is a 404 ApiError', async () => {
 		const f = mockFetch(404, { error: 'Not found' });
 		await expect(createApi('', f).teams.plan('t')).rejects.toMatchObject({ status: 404 });

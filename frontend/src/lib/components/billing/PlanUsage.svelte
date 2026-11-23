@@ -42,7 +42,11 @@
 				<li class="row" data-usage={r.key} data-over={r.over ? 'true' : undefined}>
 					<div class="row-head">
 						<span class="label" id="u-{r.key}">{r.label}</span>
-						<span class="figures"><span data-figures>{r.figures}</span> · <span class="status" class:over={r.over} data-status>{r.status}</span></span>
+						<span class="figures"
+							><span data-figures class:over={r.over && r.status === null}>{r.figures}</span
+							>{#if r.status !== null}
+								· <span class="status" class:over={r.over} data-status>{r.status}</span>{/if}</span
+						>
 					</div>
 					{#if r.fraction !== null && r.limit !== null}
 						<div
@@ -53,7 +57,7 @@
 							aria-valuemin="0"
 							aria-valuemax={r.limit}
 							aria-valuenow={Math.min(r.used, r.limit)}
-							aria-valuetext="{r.figures}, {r.status}"
+							aria-valuetext={r.status === null ? r.figures : `${r.figures}, ${r.status}`}
 						>
 							<span style="width: {r.fraction * 100}%"></span>
 						</div>
@@ -98,7 +102,7 @@
 		padding: 0.5rem 0.65rem;
 		border-radius: 6px;
 		background: var(--accent-soft);
-		font-size: 13px;
+		font-size: var(--font-sm);
 	}
 	.empty {
 		margin: 0 0 0.6rem;
@@ -123,7 +127,8 @@
 		font-variant-numeric: tabular-nums;
 		color: var(--text-2);
 	}
-	.status.over {
+	.status.over,
+	[data-figures].over {
 		color: var(--warning);
 		font-weight: 600;
 	}
@@ -145,6 +150,6 @@
 	}
 	.row-note {
 		margin: 0.3rem 0 0;
-		font-size: 13px;
+		font-size: var(--font-sm);
 	}
 </style>

@@ -23,7 +23,8 @@ function plan(over: Partial<AccountPlan> = {}): AccountPlan {
 			catchments: { used: 3, limit: null },
 			reports: { used: 3, limit: 5 },
 			packsIssued: { used: 1, limit: 0 },
-			assistantTokens: { used: 12_345, limit: null }
+			assistantTokens: { used: 12_345, limit: null },
+			assistantCost: { usedUsdMicros: 420_000, limitUsdMicros: 1_000_000, unpricedTurns: 0 }
 		},
 		enforced: false,
 		...over
@@ -96,34 +97,61 @@ describe('subscriptionLine', () => {
 describe('usageRows', () => {
 	const rows = usageRows(plan());
 	const by = (k: string) => rows.find((r) => r.key === k)!;
+	const withUsage = (u: Partial<AccountPlan['usage']>) => usageRows(plan({ usage: { ...plan().usage, ...u } }));
 
 	it('keeps the order: catchments, reports, packs, assistant', () => {
-		expect(rows.map((r) => r.key)).toEqual(['catchments', 'reports', 'packsIssued', 'assistantTokens']);
+		expect(rows.map((r) => r.key)).toEqual(['catchments', 'reports', 'packsIssued', 'assistantCost']);
 		expect(by('reports').label).toBe('Reports in November 2026');
 	});
 	it('says Unlimited and draws no bar where the limit is null', () => {
 		expect(by('catchments')).toMatchObject({ figures: '3 used', status: 'Unlimited', fraction: null, over: false });
 	});
+	it('counts every catchment billed to the account (there is no archived state to leave out)', () => {
+		expect(by('catchments').note).toBe('Every catchment billed to this account counts, whoever made it.');
+		expect(by('catchments').note).not.toMatch(/archiv/i);
+	});
 	it('counts what is left against a limit', () => {
 		expect(by('reports')).toMatchObject({ figures: '3 of 5', status: '2 left', fraction: 0.6, over: false });
-		expect(usageRows(plan({ usage: { ...plan().usage, reports: { used: 5, limit: 5 } } }))[1]!.status).toBe('At the limit');
+		expect(withUsage({ reports: { used: 5, limit: 5 } })[1]!.status).toBe('At the limit');
 	});
 	it('says how far over a limit the count is (shadow mode: counted, not refused), the bar full', () => {
-		expect(by('packsIssued')).toMatchObject({ figures: '1 of 0', status: '1 over the limit', fraction: 1, over: true });
-		const over = usageRows(plan({ usage: { ...plan().usage, reports: { used: 8, limit: 5 } } }))[1]!;
+		const over = withUsage({ reports: { used: 8, limit: 5 } })[1]!;
 		expect(over).toMatchObject({ status: '3 over the limit', fraction: 1, over: true });
 	});
-	it('an empty bar at a zero limit with nothing used', () => {
-		expect(usageRows(plan({ usage: { ...plan().usage, packsIssued: { used: 0, limit: 0 } } }))[2]!).toMatchObject({ fraction: 0, status: 'At the limit', over: false });
+	it('a zero limit is not included in the plan: no bar, never "0 of 0" or "At the limit"', () => {
+		expect(withUsage({ packsIssued: { used: 0, limit: 0 } })[2]!).toMatchObject({
+			figures: 'Not included in Free',
+			status: null,
+			fraction: null,
+			over: false
+		});
+		expect(by('packsIssued')).toMatchObject({ figures: '1 issued; not included in Free', status: null, fraction: null, over: true });
+		expect(withUsage({ reports: { used: 2, limit: 0 } })[1]!.figures).toBe('2 made; not included in Free');
 	});
-	it('says the assistant is capped by cost, a month or per seat', () => {
-		expect(by('assistantTokens')).toMatchObject({ figures: `12${TS}345 used`, status: 'Unlimited' });
-		expect(by('assistantTokens').note).toBe('Capped by cost, not tokens: $1.00 of assistant use a month.');
-		const team = plan();
-		team.plan = { ...team.plan, limits: { ...team.plan.limits, assistant_usd_micros_per_month: null, assistant_usd_micros_per_seat_month: 15_000_000 } };
-		expect(usageRows(team)[3]!.note).toBe('Capped by cost, not tokens: $15.00 of assistant use per seat a month.');
-		team.plan = { ...team.plan, limits: {} };
-		expect(usageRows(team)[3]!.note).toBeNull();
+	it('shows the assistant as dollars used of the dollar limit, with a bar, by the UTC month', () => {
+		expect(by('assistantCost')).toMatchObject({
+			label: 'Assistant use in November 2026',
+			used: 420_000,
+			limit: 1_000_000,
+			figures: '$0.42 of $1.00',
+			status: '$0.58 left',
+			fraction: 0.42,
+			over: false
+		});
+		expect(by('assistantCost').note).toBe('Counted by the UTC month, which starts at 02:00 South African time on the 1st.');
+		expect(rows.some((r) => r.status === 'Unlimited' && r.key === 'assistantCost')).toBe(false);
+	});
+	it('says when some assistant turns are unpriced, and how far over its dollars it went', () => {
+		const r = withUsage({ assistantCost: { usedUsdMicros: 1_100_000, limitUsdMicros: 1_000_000, unpricedTurns: 3 } })[3]!;
+		expect(r).toMatchObject({ figures: '$1.10 of $1.00', status: '$0.10 over the limit', fraction: 1, over: true });
+		expect(r.note).toMatch(/^Some turns unpriced \(3\), so the true cost is higher\. Counted by the UTC month/);
+	});
+	it('an assistant with no dollar limit reads dollars used, with no bar', () => {
+		expect(withUsage({ assistantCost: { usedUsdMicros: 2_500_000, limitUsdMicros: null, unpricedTurns: 0 } })[3]!).toMatchObject({
+			figures: '$2.50 used',
+			status: 'Unlimited',
+			fraction: null
+		});
 	});
 	it('fmtUsdMicros reads millionths of a dollar', () => {
 		expect(fmtUsdMicros(1_500_000)).toBe('$1.50');
