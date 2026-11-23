@@ -79,6 +79,22 @@ export interface CheckoutPlan {
 	priceMonthlyMinor: number;
 	priceAnnualMinor: number;
 	currency: string;
+	/** Editor seats the base price includes (limits.seats_included; 1 when the plan says none). */
+	seatsIncluded: number;
+	/** The price of each seat past seatsIncluded (features.extra_seat_*_minor), or null when the plan sells no extra seats (Pro). */
+	extraSeatMonthlyMinor: number | null;
+	extraSeatAnnualMinor: number | null;
+}
+
+/** The most editor seats one checkout sells (Team; docs/billing.md § Team seats at checkout). Past it is Agency, a contract. */
+export const MAX_CHECKOUT_SEATS = 50;
+
+/** The checkout's prices: the base, and the extra seats past the included ones at their price (0 of them when none). */
+export function checkoutPrices(plan: CheckoutPlan, interval: BillingInterval, seats: number): { baseMinor: number; extraSeats: number; extraSeatMinor: number; totalMinor: number } {
+	const baseMinor = interval === 'year' ? plan.priceAnnualMinor : plan.priceMonthlyMinor;
+	const extraSeatMinor = (interval === 'year' ? plan.extraSeatAnnualMinor : plan.extraSeatMonthlyMinor) ?? 0;
+	const extraSeats = Math.max(0, seats - plan.seatsIncluded);
+	return { baseMinor, extraSeats, extraSeatMinor, totalMinor: baseMinor + extraSeats * extraSeatMinor };
 }
 /** The account's live subscription as app_account_plan answers it, for the mock portal. */
 export interface LiveSubscription {
@@ -90,6 +106,8 @@ export interface LiveSubscription {
 	periodEnd: string | null;
 	cancelAtPeriodEnd: boolean;
 	seats: number;
+	/** The plan's included seats, so the mock's portal event carries the subscription's items as checkout made them. */
+	seatsIncluded?: number;
 }
 export interface ReturnUrls {
 	/** Where the provider sends the person back to: the plan page, with `?checkout=done` or `?checkout=cancelled` for checkout. */
@@ -131,8 +149,8 @@ export interface BillingProvider {
 	/** Whether POST /billing/webhook/<name> exists at all (404 when not). */
 	acceptsWebhooks: boolean;
 	verifyAndNormalise(rawBody: string, headers: Record<string, string | undefined>, nowMs?: number): VerifyResult;
-	/** Where to send the person to buy `plan` at `interval` for `account`. */
-	createCheckout(account: CheckoutAccount, plan: CheckoutPlan, interval: BillingInterval, urls: ReturnUrls): Promise<CheckoutResult>;
+	/** Where to send the person to buy `plan` at `interval` for `account`, with `seats` editor seats in all (the route checked them; default the plan's included seats). */
+	createCheckout(account: CheckoutAccount, plan: CheckoutPlan, interval: BillingInterval, urls: ReturnUrls, seats?: number): Promise<CheckoutResult>;
 	/** Where to send the person to manage the account's billing (card, invoices, cancel). */
 	createPortal(account: CheckoutAccount, subscription: LiveSubscription | null, urls: ReturnUrls): Promise<CheckoutResult>;
 }
@@ -160,7 +178,6 @@ function verifier(secret: string | undefined): BillingProvider['verifyAndNormali
 	};
 }
 
-const priceFor = (plan: CheckoutPlan, interval: BillingInterval) => (interval === 'year' ? plan.priceAnnualMinor : plan.priceMonthlyMinor);
 const exp = (nowMs: number) => Math.floor(nowMs / 1000) + MOCK_SESSION_TTL_SECONDS;
 
 /**
@@ -176,14 +193,18 @@ function mockProvider(secret: string | undefined, now: () => number): BillingPro
 		name: 'mock',
 		acceptsWebhooks: true,
 		verifyAndNormalise: verifier(secret),
-		async createCheckout(account, plan, interval, urls) {
+		async createCheckout(account, plan, interval, urls, seats = plan.seatsIncluded) {
+			const prices = checkoutPrices(plan, interval, seats);
 			const t = sign({
 				kind: 'checkout',
 				accountId: account.id,
 				planCode: plan.code,
 				planName: plan.name,
-				amountMinor: priceFor(plan, interval),
+				amountMinor: prices.totalMinor,
 				currency: plan.currency,
+				seats: Math.max(seats, plan.seatsIncluded),
+				seatsIncluded: plan.seatsIncluded,
+				extraSeatMinor: prices.extraSeatMinor,
 				interval,
 				successUrl: urls.successUrl,
 				cancelUrl: urls.cancelUrl,
@@ -222,8 +243,9 @@ function stripeProvider(webhookSecret: string | undefined, secretKey: string | u
 		name: 'stripe',
 		acceptsWebhooks: true,
 		verifyAndNormalise: verifier(webhookSecret),
-		async createCheckout(account, plan, interval, urls) {
+		async createCheckout(account, plan, interval, urls, seats = plan.seatsIncluded) {
 			const o = client();
+			const prices = checkoutPrices(plan, interval, seats);
 			return call(async () => {
 				const made = account.customerRef ? undefined : await createCustomer(o, account.id);
 				const url = await createCheckoutSession(o, {
@@ -232,7 +254,10 @@ function stripeProvider(webhookSecret: string | undefined, secretKey: string | u
 					planCode: plan.code,
 					planName: plan.name,
 					currency: plan.currency,
-					unitAmountMinor: priceFor(plan, interval),
+					unitAmountMinor: prices.baseMinor,
+					seatsIncluded: plan.seatsIncluded,
+					extraSeats: prices.extraSeats,
+					extraSeatMinor: prices.extraSeatMinor,
 					interval,
 					successUrl: urls.successUrl,
 					cancelUrl: urls.cancelUrl

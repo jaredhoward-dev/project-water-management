@@ -95,6 +95,11 @@ export interface StripeCheckoutParams {
 	planName: string;
 	currency: string;
 	unitAmountMinor: number;
+	/** The editor seats the base price includes, recorded in the metadata for the normaliser (provider/stripe.ts). */
+	seatsIncluded: number;
+	/** Seats past the included ones, sold as a second line item at extraSeatMinor each; 0 sells none. */
+	extraSeats: number;
+	extraSeatMinor: number;
 	interval: 'month' | 'year';
 	successUrl: string;
 	cancelUrl: string;
@@ -102,27 +107,28 @@ export interface StripeCheckoutParams {
 
 /**
  * A subscription-mode Checkout session. The price is inline (price_data) from
- * our plan table, so the table stays the one source of prices; the metadata
- * on the session and the subscription is what the webhook's normaliser reads
- * (provider/stripe.ts: billing_account_id, plan_code).
+ * our plan table, so the table stays the one source of prices: the plan at
+ * quantity 1, and, when seats past the included ones are bought (Team), a
+ * second line item of that many extra editor seats. No trial_period_days:
+ * checkout sells no trial (docs/billing.md § Trials). The metadata on the
+ * session and the subscription is what the webhook's normaliser reads
+ * (provider/stripe.ts: billing_account_id, plan_code, seats_included).
  */
 export async function createCheckoutSession(o: StripeClientOptions, p: StripeCheckoutParams): Promise<string> {
-	const metadata = { billing_account_id: p.accountId, plan_code: p.planCode };
+	const metadata = { billing_account_id: p.accountId, plan_code: p.planCode, seats_included: String(p.seatsIncluded) };
+	const price = (unitAmount: number, name: string) => ({
+		currency: p.currency.toLowerCase(),
+		unit_amount: unitAmount,
+		recurring: { interval: p.interval },
+		product_data: { name }
+	});
+	const lineItems: Record<string, unknown>[] = [{ quantity: 1, price_data: price(p.unitAmountMinor, `IC-WBT ${p.planName}`) }];
+	if (p.extraSeats > 0) lineItems.push({ quantity: p.extraSeats, price_data: price(p.extraSeatMinor, `IC-WBT ${p.planName}: extra editor seat`) });
 	const s = await post(o, '/v1/checkout/sessions', {
 		mode: 'subscription',
 		customer: p.customer,
 		client_reference_id: p.accountId,
-		line_items: [
-			{
-				quantity: 1,
-				price_data: {
-					currency: p.currency.toLowerCase(),
-					unit_amount: p.unitAmountMinor,
-					recurring: { interval: p.interval },
-					product_data: { name: `IC-WBT ${p.planName}` }
-				}
-			}
-		],
+		line_items: lineItems,
 		metadata,
 		subscription_data: { metadata },
 		success_url: p.successUrl,

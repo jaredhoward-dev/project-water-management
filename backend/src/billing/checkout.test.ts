@@ -47,8 +47,20 @@ const T = '33333333-3333-4333-8333-333333333333';
 const planOf = (kind: 'user' | 'team', subscription: unknown = null) => ({ account: { id: A, kind }, plan: { code: 'free', name: 'Free' }, subscription, usage: {} });
 const PLANS = [
 	{ p: { code: 'free', name: 'Free', price_monthly_minor: 0, price_annual_minor: 0, currency: 'ZAR', limits: {}, features: {}, trial_days: 0, active: true } },
-	{ p: { code: 'pro', name: 'Pro', price_monthly_minor: 89900, price_annual_minor: 899000, currency: 'ZAR', limits: {}, features: {}, trial_days: 14, active: true } },
-	{ p: { code: 'team', name: 'Team', price_monthly_minor: 249900, price_annual_minor: 2499000, currency: 'ZAR', limits: {}, features: {}, trial_days: 30, active: true } }
+	{ p: { code: 'pro', name: 'Pro', price_monthly_minor: 89900, price_annual_minor: 899000, currency: 'ZAR', limits: { seats_included: 1 }, features: {}, trial_days: 14, active: true } },
+	{
+		p: {
+			code: 'team',
+			name: 'Team',
+			price_monthly_minor: 249900,
+			price_annual_minor: 2499000,
+			currency: 'ZAR',
+			limits: { seats_included: 3 },
+			features: { extra_seat_monthly_minor: 49900, extra_seat_annual_minor: 499000 },
+			trial_days: 30,
+			active: true
+		}
+	}
 ];
 const post = (path: string, body?: unknown, user: string | null = U) =>
 	app.request(path, {
@@ -143,7 +155,42 @@ describe('POST /teams/:id/plan/checkout and /portal', () => {
 		expect(res.status).toBe(200);
 		const t = new URL(((await res.json()) as { url: string }).url).searchParams.get('t')!;
 		const payload = JSON.parse(Buffer.from(t.split('.')[0]!, 'base64url').toString());
-		expect(payload).toMatchObject({ planCode: 'team', interval: 'year', amountMinor: 2499000, successUrl: `http://site.test/teams/${T}/plan?checkout=done` });
+		expect(payload).toMatchObject({ planCode: 'team', interval: 'year', amountMinor: 2499000, seats: 3, seatsIncluded: 3, successUrl: `http://site.test/teams/${T}/plan?checkout=done` });
+	});
+
+	const tokenPayload = async (res: Response) => {
+		const t = new URL(((await res.json()) as { url: string }).url).searchParams.get('t')!;
+		return JSON.parse(Buffer.from(t.split('.')[0]!, 'base64url').toString()) as Record<string, unknown>;
+	};
+
+	it('sells Team’s extra seats: 5 seats is the base plus 2 at the extra-seat price, shown on the mock’s page', async () => {
+		answers.set('app_team_billing_account', [{ id: A }]);
+		answers.set('app_account_plan', [{ plan: planOf('team') }]);
+		const res = await post(`/teams/${T}/plan/checkout`, { plan: 'team', interval: 'month', seats: 5 });
+		expect(res.status).toBe(200);
+		const payload = await tokenPayload(res.clone());
+		expect(payload).toMatchObject({ seats: 5, seatsIncluded: 3, extraSeatMinor: 49900, amountMinor: 249900 + 2 * 49900 });
+		const html = await (await app.request(((await res.json()) as { url: string }).url)).text();
+		expect(html).toContain('ZAR 3497.00 a month');
+		expect(html).toContain('data-mock-seats="5">5 editor seats: 3 included and 2 extra at ZAR 499.00 each.');
+		const year = await tokenPayload(await post(`/teams/${T}/plan/checkout`, { plan: 'team', interval: 'year', seats: 4 }));
+		expect(year).toMatchObject({ seats: 4, amountMinor: 2499000 + 499000 });
+	});
+
+	it('refuses seats under the included ones, past the maximum, or not a whole number', async () => {
+		answers.set('app_team_billing_account', [{ id: A }]);
+		answers.set('app_account_plan', [{ plan: planOf('team') }]);
+		for (const seats of [2, 0, 51, 3.5, '5']) expect((await post(`/teams/${T}/plan/checkout`, { plan: 'team', interval: 'month', seats })).status, String(seats)).toBe(400);
+		expect((await post(`/teams/${T}/plan/checkout`, { plan: 'team', interval: 'month', seats: 50 })).status).toBe(200);
+	});
+});
+
+describe('checkout seats on Pro', () => {
+	it('takes 1 (its one seat) and refuses more: Pro sells no extra seats', async () => {
+		expect((await post('/account/plan/checkout', { plan: 'pro', interval: 'month', seats: 1 })).status).toBe(200);
+		const res = await post('/account/plan/checkout', { plan: 'pro', interval: 'month', seats: 2 });
+		expect(res.status).toBe(400);
+		expect(await res.json()).toMatchObject({ error: 'the Pro plan has 1 seat and sells no extra ones' });
 	});
 });
 
