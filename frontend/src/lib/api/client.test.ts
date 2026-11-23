@@ -554,6 +554,28 @@ describe('teams client', () => {
 		expect(call(f)).toEqual({ url: '/teams/t%2F1/portfolio', method: 'GET', body: undefined });
 	});
 
+	// Billing, Phase 1 (issue #641): the plan and usage come as the API sends them.
+	it('reads a team’s plan with its id encoded, and your own plan', async () => {
+		const body = { account: { id: 'a', kind: 'team' }, plan: { code: 'team' }, subscription: null, usage: { month: '2026-11' }, enforced: false };
+		const f = mockFetch(200, body);
+		const api = createApi('', f);
+		expect(await api.teams.plan('t/1')).toEqual(body);
+		expect(call(f)).toEqual({ url: '/teams/t%2F1/plan', method: 'GET', body: undefined });
+		await api.billing.mine();
+		expect(call(f, 1).url).toBe('/account/plan');
+	});
+
+	it('lists the plans on offer', async () => {
+		const f = mockFetch(200, { plans: [{ code: 'free' }, { code: 'pro' }] });
+		expect((await createApi('', f).billing.plans()).map((p) => p.code)).toEqual(['free', 'pro']);
+		expect(call(f)).toEqual({ url: '/billing/plans', method: 'GET', body: undefined });
+	});
+
+	it('a team plan the caller may not see is a 404 ApiError', async () => {
+		const f = mockFetch(404, { error: 'Not found' });
+		await expect(createApi('', f).teams.plan('t')).rejects.toMatchObject({ status: 404 });
+	});
+
 	it('builds member management requests with encoded ids', async () => {
 		const f = mockFetch(200, { member: { userId: 'u/1', role: 'member' }, team: { id: 't' } });
 		const api = createApi('', f);

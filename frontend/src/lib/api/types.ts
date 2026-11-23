@@ -4659,3 +4659,70 @@ export type AssistantStreamEvent =
 	| { type: 'usage'; inputTokens: number; outputTokens: number; tokensUsed: number; tokensPerMonth: number; scope: AssistantBudgetScope }
 	| { type: 'error'; code: string; error: string }
 	| { type: 'done' };
+
+// ---- Billing, Phase 1: shadow mode (issue #641; docs/ui.md § Plan and usage) ----
+
+export type PlanCode = 'free' | 'pro' | 'team';
+
+/** A plan's limits, keyed as the database keeps them (snake_case); `null` is unlimited. */
+export interface PlanLimits {
+	catchments?: number | null;
+	editors_per_project?: number | null;
+	live_catchments?: number | null;
+	reports_per_month?: number | null;
+	packs_included_per_month?: number | null;
+	seats_included?: number | null;
+	assistant_usd_micros_per_month?: number | null;
+	assistant_usd_micros_per_seat_month?: number | null;
+}
+
+/** One plan as an account sees it: prices in minor units (cents) of `currency`. */
+export interface Plan {
+	code: PlanCode;
+	name: string;
+	priceMonthlyMinor: number;
+	priceAnnualMinor: number;
+	currency: string;
+	limits: PlanLimits;
+	features: Record<string, unknown>;
+}
+
+/** GET /billing/plans: every plan on offer (public). */
+export interface PlanOffer extends Plan {
+	trialDays: number;
+}
+
+export type SubscriptionStatus = 'trialing' | 'active' | 'past_due' | 'canceled' | 'expired';
+
+export interface Subscription {
+	status: SubscriptionStatus;
+	seats: number;
+	periodStart: string | null;
+	periodEnd: string | null;
+	trialEnd: string | null;
+	cancelAtPeriodEnd: boolean;
+}
+
+/** One counted thing this month; `limit: null` is unlimited. */
+export interface UsageCount {
+	used: number;
+	limit: number | null;
+}
+
+/** GET /account/plan and GET /teams/:id/plan (team admins; 404 otherwise). */
+export interface AccountPlan {
+	account: { id: string; kind: 'user' | 'team' };
+	plan: Plan;
+	/** No live subscription: the account is on Free. */
+	subscription: Subscription | null;
+	usage: {
+		/** "YYYY-MM", the month in Africa/Johannesburg. */
+		month: string;
+		catchments: UsageCount;
+		reports: UsageCount;
+		packsIssued: UsageCount;
+		assistantTokens: UsageCount;
+	};
+	/** BILLING_ENFORCED: false in Phase 1, when limits are counted but nothing is refused. */
+	enforced: boolean;
+}
