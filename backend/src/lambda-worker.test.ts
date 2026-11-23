@@ -8,6 +8,7 @@ const tick: TickResult = { purged: 1, invitesPurged: 0, notesPurged: 0, erasures
 	erratumNotices: { purged: 0, queued: 0, sent: 0, skipped: 0, failed: 0 },
 	licenceRecords: { due: 0, sent: 0, skipped: 0, failed: 0 },
 	mfaResets: { completed: 0, reminded: 0, purged: 0, failed: 0 },
+	renewalNotices: { queued: 0, sent: 0, skipped: 0, failed: 0 },
 	assessmentsFailed: 0,
 	packReproductionsFailed: 0
 };

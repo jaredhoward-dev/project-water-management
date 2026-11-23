@@ -314,6 +314,86 @@ The fixtures are `checkout-completed`, `subscription-created` (trialing),
 - `billing/webhook.db.test.ts`: the route against 326. A signed event applies,
   a replay or a forgery changes nothing, and an unknown account is a `200`.
 
+## Renewal notice
+
+The Consumer Protection Act s14(2)(c) has a supplier tell an individual on a
+fixed-term agreement, **not more than 80 nor less than 40 business days**
+before it ends, that it is ending, of any material change on renewal, and
+of their options. #641 sends it **60 business days** before. The code is
+`backend/src/billing/renewal.ts` and `businessDays.ts`; the sent-log is
+`329_renewal_notice.sql`.
+
+**Who gets one.** A subscription that is `active` or `past_due`, not
+`cancel_at_period_end`, on a **person's** account (`billing_account.kind =
+'user'`; s14(1) leaves out agreements between juristic persons, and a team's
+account is its organisation's), whose period is **a year**. `subscription`
+records no billing interval, so a year is read from the period:
+`period_end − period_start` of 300 days or more. A Stripe subscription's
+current period is its interval, so this needs nothing new from the webhook;
+a monthly period (≤ 31 days) is never picked, and a trial isn't either (it is
+`trialing`). The email goes to the account's person, in their language.
+
+**When.** Each worker tick (after the jobs, [architecture.md § Background
+work](./architecture.md)) takes today's date in South Africa and queues every
+such subscription whose period ends on a date with **45 to 60** business days
+strictly between today and it (neither day counts). So the notice is queued
+on the first tick 60 business days out; a missed day (an outage, a
+subscription recorded late) still sends, down to 45. The floor is 45, not
+the Act's 40, to leave room for up to five public holidays declared after
+the code was written (an election day), which the count can't know.
+
+**Business days.** Weekdays less South Africa's public holidays
+(`businessDays.ts`): the Public Holidays Act's ten fixed dates, Good Friday
+and Family Day (from Easter, computed), and the Monday after a holiday that
+falls on a Sunday. Without them a weekday-only count runs up to six days
+long over December and Easter, which at the 40-day edge would make a notice
+late; no dependency is needed for them.
+
+**Once per period.** `renewal_notice`'s primary key is (subscription,
+`period_end`): two ticks at once insert one row, and claiming moves it to
+`sending` under `FOR UPDATE SKIP LOCKED`, so two senders never both send it.
+A renewed period has a new `period_end` and gets its own notice next year.
+Like the pack notices (133): a send error retries on the next tick (3
+attempts), and a worker that dies mid-send leaves the notice `failed`, never
+sent twice. The rows are kept (no purge) as the record that the notice went,
+go with the subscription, and are in the person's data export (`billing`).
+
+**Built as the recipient.** Each notice is built in a read-only transaction
+as its person, under RLS: the subscription is read again as they see it, and
+a notice whose plan was cancelled, ended or moved to another period since it
+was queued is `skipped`, as is one to an unconfirmed or suppressed address.
+
+**What it says** (`renewalNoticeMail`, keys `mail.renewal.*` in
+`backend/src/mail/i18n/en.ts`): the plan's name, the date this year of it
+ends and renews (South African date), the next year's price
+(`plan.price_annual_minor`, as rand), how to cancel (the plan page,
+`/account/plan`, which goes on to the billing portal; cancelling before the
+date charges nothing more), and the Act's right to end a yearly plan at any
+time on 20 business days' notice. The log lines (`renewal_notice_sent`,
+`renewal_notice_skipped`, `renewal_notice_prepare_failed`) name the
+subscription id only: never the address, the person or the price.
+
+**Open points** (for the CPA opinion, [legal-status.md](./legal-status.md)):
+
+- s14(2)(d) continues an expired fixed-term agreement **month to month**
+  unless the consumer directs otherwise; #641 renews the year. Whether a
+  yearly renewal needs the person's express choice is for counsel.
+- The price in the email is the plan table's. If Stripe's price for the
+  subscription ever differs (a price change on 30 days' notice), the email
+  must take the provider's.
+- The cancellation penalty for ending a yearly plan early (#641 recommends
+  none or one month) is not decided; the email names none.
+- The email links the plan page, not the portal itself: a Stripe portal
+  session is short-lived and per sign-in, so it can't go in an email.
+
+**Tests.** `billing/businessDays.test.ts` (holidays, Easter, the Sunday rule,
+weekends, month and year edges, the date range against the count for every
+day of 2026–2028); `billing/renewal.db.test.ts` (who is picked, the 45/60
+edges, one send from two ticks at once, team accounts, monthly plans, trials
+and cancelling plans left out with positive controls, a skip after a cancel,
+RLS on the log). All run under the workspace's skewed `TZ` (CLAUDE.md rule
+7).
+
 ## Later phases
 
 Pointers to [issue #641](https://github.com/jaredhoward-dev/project-water-management/issues/641);
