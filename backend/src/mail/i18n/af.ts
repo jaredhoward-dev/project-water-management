@@ -1,7 +1,8 @@
 // Afrikaans wording of the farmer emails (WP-2.5). Only checked text goes
-// here. A key with no entry is sent in English (and the email is marked
-// lang="en"), and it must be on docs/i18n/af-translation-sheet.md, which is
-// what the translator fills in. Add returned wording with
+// here. While any key of en.ts has no entry, every Afrikaans email is sent
+// wholly in English, marked lang="en" (mailLanguage, ./index.ts), and
+// `pnpm check:i18n` fails; the key must be on
+// docs/i18n/af-translation-sheet.md, which is what the translator fills in. Add returned wording with
 // `pnpm gen:i18n:apply`, or by hand and then `pnpm gen:i18n:sheet`.
 //
 // Provenance (2026-09-26, issue #49): every entry was written by the
