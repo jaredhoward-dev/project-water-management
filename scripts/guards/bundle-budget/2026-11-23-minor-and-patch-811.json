@@ -1,0 +1,4 @@
+{
+	"addKb": 1,
+	"why": "maplibre-gl 6.17.0 → 6.18.0 and proj4 2.22.0 → 2.23.0 (#811): total measured 2509 KB on origin/main b2881d466, 2510 KB with the bumps (the maplibre worker alone +235 B gzipped)"
+}

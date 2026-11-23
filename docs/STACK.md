@@ -65,7 +65,7 @@ sides share.
   Global Surface Water after `pnpm dev:tiles:water` ([maps.md § Assisted
   drawing](./maps.md#assisted-drawing)).
   The rain data copy (`src/mirror/`, issue #604, in progress) reads and
-  writes Zarr v3 arrays with `zarrita` 0.7.5 and `@zarrita/storage` 0.2.0
+  writes Zarr v3 arrays with `zarrita` 0.7.6 and `@zarrita/storage` 0.2.1
   (exact pins; a `node:zlib` gzip codec for writing) from `MIRROR_URL`
   (`file://` or `s3://`, the latter through `@aws-sdk/client-s3`); the
   committed synthetic copy is `backend/fixtures/mirror/` (`pnpm

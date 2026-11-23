@@ -53,7 +53,7 @@ services:
   # Docker Hub: CI's shards pull it on every run, and Docker Hub's anonymous
   # pull limit refused them (issue #492).
   mailpit:
-    image: ghcr.io/axllent/mailpit:v1.33.1@sha256:aef2aacc11f075ec0fb6874275ee4a421e688e11a96ebb296134d1735c7761ce
+    image: ghcr.io/axllent/mailpit:v1.34.0@sha256:23a2ef85bc50853ab3093645d1d64679afd8887e89da5e48a88940c172591a4e
     container_name: water-management-mail
     ports:
       - "127.0.0.1:1026:1025"
