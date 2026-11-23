@@ -4,9 +4,13 @@ Paid plans for IC-WBT ([issue #641](https://github.com/jaredhoward-dev/project-w
 This page covers **Phase 1, shadow mode**: every plan, limit and count exists
 and is shown, and **nothing is refused** (no `402`). Phase 3's provider
 seam, webhook, checkout and portal are built and run locally behind the mock
-provider; production runs `manual` until the Stripe account exists. The issue holds the full design (tiers, enforcement,
-provider, legal and tax prerequisites); the later phases are listed at the end
-as pointers to it.
+provider; production runs `manual` until the Stripe account exists
+(Terraform's `billing_provider` switch; the operator's steps are
+[deployment.md § Turning on Stripe](./deployment.md#turning-on-stripe)). It
+also covers [staff grants](#staff-grants), the operator's plans by hand
+(invoiced business customers, founding users, Team's trial). The issue holds
+the full design (tiers, enforcement, provider, legal and tax prerequisites);
+the later phases are listed at the end as pointers to it.
 
 ## Who the plan belongs to
 
@@ -119,7 +123,9 @@ pnpm dev:billing:report --show-emails       # operator only: prints the addresse
 It reads two owner-only functions (`325_billing_metrics.sql`; never granted
 to `water_app`, [data-model.md](./data-model.md)) on this checkout's
 database (`MIGRATION_DATABASE_URL`); in production the operator runs it with
-the schema owner's connection. The maths is `backend/src/billing/metrics.ts`
+the schema owner's connection, from inside the VPC ([deployment.md §
+Runbooks](./deployment.md#runbooks) 22: the report, or the account rows in
+plain SQL; there is no Lambda route yet). The maths is `backend/src/billing/metrics.ts`
 (unit tests beside it), the script `backend/scripts/billing-report.ts`.
 
 **What it prints.** Counts and aggregates; account or person ids only where a
@@ -678,7 +684,8 @@ pnpm dev:billing:grant <email|team-id> --list
 
 It runs as the schema owner on this checkout's database (like
 `dev:billing:report`); in production the operator calls the same functions as
-the schema owner. An address is used only to find the person's account and
+the schema owner, step by step in [deployment.md § Runbooks](./deployment.md#runbooks)
+21 (finding the account, the exact `SELECT`, revoking, checking the log). An address is used only to find the person's account and
 is printed only as the operator typed it. `--by` defaults to the operator's
 login.
 
