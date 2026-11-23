@@ -1915,6 +1915,8 @@ export const af: Catalogue = {
 	'8c942903': 'Kies watter waarskuwings jy per e-pos kry, en hoe gereeld.',
 	// Your invitations
 	'327fdffa': 'Jou uitnodigings',
+	// Plan and usage
+	'dd6bd500': 'Plan en gebruik',
 	// Your data
 	'0819f3fe': 'Jou data',
 	// Download a copy of what we keep about you: your account, the projects and hydrological units you’re linked to, your hydrological units’ figures and registered volumes, notes you wrote, and the history of what you did and what was done about you. It’s a JSON file.
