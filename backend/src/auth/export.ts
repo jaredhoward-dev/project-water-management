@@ -57,6 +57,10 @@ export const APP_USER_EXCLUDED: Record<string, string> = {
  * classifies what deletion does. "Made by" columns on the project's own
  * records are left out: the row is the project's, the person is named only as
  * its maker, and the act itself is in auditEvents.
+ *
+ * A section is a top-level key of the export, or a dotted path into one
+ * (`billing.renewalNotices`): an array of the rows, or, for a table with one
+ * row per person (`billing.account`), that row as an object.
  */
 export const USER_FK_COVERAGE: Record<string, { section: string } | { excluded: string }> = {
 	'account_mail_quota.user_id': { excluded: 'a count of reset / verification emails for the daily cap, a day at most' },
@@ -147,9 +151,9 @@ export const USER_FK_COVERAGE: Record<string, { section: string } | { excluded: 
 	'registration_check.user_id': { section: 'registrationChecks' },
 	'registration_check.recorded_by': { excluded: 'a check this owner recorded of another member’s registration; it is that member’s, and registration.checked is in auditEvents' },
 	// The person's own billing account (323_billing, issue #641): with its subscriptions and monthly counters. A team's is the team's.
-	'billing_account.user_id': { section: 'billing' },
+	'billing_account.user_id': { section: 'billing.account' },
 	// The annual renewal notices sent to them (329, CPA s14): in billing, beside the subscription each is about.
-	'renewal_notice.user_id': { section: 'billing' },
+	'renewal_notice.user_id': { section: 'billing.renewalNotices' },
 	'team.created_by': { excluded: 'the team itself; the membership is in teamMemberships' },
 	'team_member.user_id': { section: 'teamMemberships' },
 	// The person's own display preferences (083): the workspace sections they hid.
@@ -352,7 +356,8 @@ export async function buildSubjectExport(userId: string, now = new Date()) {
 			 FROM renewal_notice WHERE user_id = $1 ORDER BY period_end DESC`,
 			[userId]
 		);
-		const billing = billingAccount[0] ? { account: billingAccount[0], subscriptions, usageCounters, renewalNotices } : null;
+		// A notice is keyed to the person, not the account, so it is exported even if the account were gone.
+		const billing = billingAccount[0] || renewalNotices.length ? { account: billingAccount[0] ?? null, subscriptions, usageCounters, renewalNotices } : null;
 		// Two-step sign-in (150): own rows only under RLS. The authenticator's state, never its sealed secret or the code hashes.
 		const { rows: twoStepSignIn } = await db.query(
 			`SELECT t.created_at AS "createdAt", t.confirmed_at AS "confirmedAt",
