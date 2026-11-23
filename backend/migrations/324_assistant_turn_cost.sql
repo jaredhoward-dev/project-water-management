@@ -31,6 +31,16 @@
 -- as an unpriced turn. RLS and grants are unchanged: members still read only
 -- their own rows (262 assistant_usage_own), and the new columns come with the
 -- table's SELECT grant.
+--
+-- app_account_plan (latest: 323) gains usage.assistantCost, the account's
+-- dollar allowance beside its spend this (UTC) month (#641's Gate addendum;
+-- docs/billing.md § Shadow mode): usedUsdMicros, the cost_usd_micros of the
+-- account's projects; limitUsdMicros, the plan's
+-- assistant_usd_micros_per_month, or for a per-seat plan (Team)
+-- assistant_usd_micros_per_seat_month × its seats (the live subscription's
+-- seats, never fewer than seats_included), NULL when the plan gives neither
+-- (unlimited); unpricedTurns, so a reader knows
+-- the cost is a floor. assistantTokens stays.
 
 ALTER TABLE assistant_usage
 	ADD COLUMN cache_read_tokens  bigint  NOT NULL DEFAULT 0 CHECK (cache_read_tokens >= 0),
@@ -133,3 +143,69 @@ CREATE OR REPLACE FUNCTION app_assistant_charge(p_project uuid, p_reservation uu
 	$$;
 REVOKE ALL ON FUNCTION app_assistant_charge(uuid, uuid, bigint, bigint) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app_assistant_charge(uuid, uuid, bigint, bigint) TO water_app;
+
+-- As 323's app_account_plan, with usage.assistantCost.
+CREATE OR REPLACE FUNCTION app_account_plan(p_account uuid) RETURNS jsonb
+	LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public
+	AS $$
+	DECLARE
+		v_kind text;
+		v_plan plan;
+		v_sub subscription;
+		v_month date := app_billing_month();
+		v_utc_month date := date_trunc('month', now() AT TIME ZONE 'UTC')::date;
+		v_tokens bigint;
+		v_cost bigint;
+		v_unpriced bigint;
+		v_seats bigint;
+		v_cost_limit bigint;
+	BEGIN
+		IF NOT app_billing_account_readable(p_account) THEN
+			RETURN NULL;
+		END IF;
+		SELECT kind INTO v_kind FROM billing_account WHERE id = p_account;
+		SELECT * INTO v_sub FROM subscription
+			WHERE billing_account_id = p_account AND status IN ('trialing', 'active', 'past_due');
+		SELECT * INTO v_plan FROM plan WHERE code = coalesce(v_sub.plan_code, 'free');
+		-- The account's projects' assistant use in assistant_usage's own (UTC) month (262).
+		SELECT coalesce(sum(u.input_tokens + 5 * u.output_tokens), 0), coalesce(sum(u.cost_usd_micros), 0), coalesce(sum(u.unpriced_turns), 0)
+			INTO v_tokens, v_cost, v_unpriced
+			FROM assistant_usage u JOIN project p ON p.id = u.project_id
+			WHERE p.billing_account_id = p_account AND u.month = v_utc_month;
+		-- A per-account allowance, else a per-seat one × the seats (the live subscription's, never fewer than included).
+		v_cost_limit := (v_plan.limits ->> 'assistant_usd_micros_per_month')::bigint;
+		IF v_cost_limit IS NULL AND (v_plan.limits ->> 'assistant_usd_micros_per_seat_month') IS NOT NULL THEN
+			v_seats := greatest(coalesce((v_plan.limits ->> 'seats_included')::bigint, 1), coalesce(v_sub.seats, 0));
+			v_cost_limit := (v_plan.limits ->> 'assistant_usd_micros_per_seat_month')::bigint * v_seats;
+		END IF;
+		RETURN jsonb_build_object(
+			'account', jsonb_build_object('id', p_account, 'kind', v_kind),
+			'plan', jsonb_build_object(
+				'code', v_plan.code, 'name', v_plan.name,
+				'priceMonthlyMinor', v_plan.price_monthly_minor, 'priceAnnualMinor', v_plan.price_annual_minor,
+				'currency', v_plan.currency, 'limits', v_plan.limits, 'features', v_plan.features
+			),
+			'subscription', CASE WHEN v_sub.id IS NULL THEN NULL ELSE jsonb_build_object(
+				'status', v_sub.status, 'seats', v_sub.seats, 'periodStart', v_sub.period_start, 'periodEnd', v_sub.period_end,
+				'trialEnd', v_sub.trial_end, 'cancelAtPeriodEnd', v_sub.cancel_at_period_end
+			) END,
+			'usage', jsonb_build_object(
+				'month', to_char(v_month, 'YYYY-MM'),
+				-- Every project the account bills (projects have no archived or deleted state yet: a deleted one is gone).
+				'catchments', jsonb_build_object(
+					'used', (SELECT count(*) FROM project WHERE billing_account_id = p_account),
+					'limit', v_plan.limits -> 'catchments'),
+				'reports', jsonb_build_object(
+					'used', coalesce((SELECT qty FROM usage_counter WHERE billing_account_id = p_account AND kind = 'reports' AND month = v_month), 0),
+					'limit', v_plan.limits -> 'reports_per_month'),
+				'packsIssued', jsonb_build_object(
+					'used', coalesce((SELECT qty FROM usage_counter WHERE billing_account_id = p_account AND kind = 'packs_issued' AND month = v_month), 0),
+					'limit', v_plan.limits -> 'packs_included_per_month'),
+				-- Weighted tokens (input + 5 × output).
+				'assistantTokens', jsonb_build_object('used', v_tokens, 'limit', NULL),
+				'assistantCost', jsonb_build_object('usedUsdMicros', v_cost, 'limitUsdMicros', v_cost_limit, 'unpricedTurns', v_unpriced)
+			)
+		);
+	END
+	$$;
+GRANT EXECUTE ON FUNCTION app_account_plan(uuid) TO water_app;

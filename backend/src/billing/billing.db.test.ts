@@ -216,6 +216,48 @@ describe('usage', () => {
 		expect(await sqlState(withUser(owner.id, (db) => db.query(`SELECT app_usage_add($1, 'reports', 0)`, [projectId])))).toBe('22023');
 		expect(await reports()).toBe(before + 13);
 	});
+
+	it("shows the assistant's dollar spend this UTC month beside the plan's allowance, per seat on Team, with its unpriced turns (324)", async () => {
+		const account = (await accountOfUser(owner.id))!;
+		const team = (await accountOfTeam(teamId))!;
+		const usage = (projectId: string, userId: string, month: string, cost: number, unpriced: number) =>
+			asOwner(
+				`INSERT INTO assistant_usage (project_id, user_id, month, input_tokens, output_tokens, cost_usd_micros, unpriced_turns, messages)
+				 VALUES ($1, $2, $3::date, 1000, 100, $4, $5, 1)`,
+				[projectId, userId, month, cost, unpriced]
+			);
+		const { m, prev } = ((await asOwner(
+			`SELECT date_trunc('month', now() AT TIME ZONE 'UTC')::date::text AS m, (date_trunc('month', now() AT TIME ZONE 'UTC') - interval '1 month')::date::text AS prev
+		`)) as { m: string; prev: string }[])[0]!;
+		try {
+			// Two people on the owner's project this month, one turn of the editor's unpriced; last month's never counts.
+			await usage(projectId, owner.id, m, 420_000, 0);
+			await usage(projectId, editor.id, m, 80_000, 1);
+			await usage(projectId, owner.id, prev, 9_000_000, 3);
+			await usage(teamProjectId, teamMember.id, m, 1_000_000, 0);
+			const cost = async (u: User, acc: string) => (await one<Record<string, any>>(u, 'SELECT app_account_plan($1) AS v', [acc])).usage;
+			// Free: $1.00 a month.
+			expect(await cost(owner, account)).toMatchObject({
+				assistantCost: { usedUsdMicros: 500_000, limitUsdMicros: 1_000_000, unpricedTurns: 1 },
+				assistantTokens: { used: 2 * (1000 + 5 * 100), limit: null }
+			});
+			// A team account with no subscription is on Free like anyone: $1.00.
+			expect(await cost(teamAdmin, team)).toMatchObject({ assistantCost: { usedUsdMicros: 1_000_000, limitUsdMicros: 1_000_000, unpricedTurns: 0 } });
+			// A live Team subscription with 5 seats: 5 × $15; one with fewer seats than included (3) still gets 3 × $15.
+			await asOwner(`INSERT INTO subscription (billing_account_id, plan_code, status, provider, seats) VALUES ($1, 'team', 'active', 'manual', 5)`, [team]);
+			expect((await cost(teamAdmin, team)).assistantCost.limitUsdMicros).toBe(75_000_000);
+			await asOwner(`UPDATE subscription SET seats = 1 WHERE billing_account_id = $1`, [team]);
+			expect((await cost(teamAdmin, team)).assistantCost.limitUsdMicros).toBe(45_000_000);
+			// Pro: $15 a month for the account, whatever its seats.
+			await asOwner(`INSERT INTO subscription (billing_account_id, plan_code, status, provider, seats) VALUES ($1, 'pro', 'active', 'manual', 4)`, [account]);
+			expect((await cost(owner, account)).assistantCost).toEqual({ usedUsdMicros: 500_000, limitUsdMicros: 15_000_000, unpricedTurns: 1 });
+			// Still NULL to anyone else (positive control above).
+			expect(await one(editor, 'SELECT app_account_plan($1) AS v', [account])).toBeNull();
+		} finally {
+			await asOwner('DELETE FROM subscription WHERE billing_account_id = ANY($1)', [[account, team]]);
+			await asOwner('DELETE FROM assistant_usage WHERE project_id = ANY($1)', [[projectId, teamProjectId]]);
+		}
+	});
 });
 
 describe('moves, backfill and deletion', () => {
