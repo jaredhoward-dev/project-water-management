@@ -38,6 +38,7 @@ vi.mock('../auth/middleware.js', async (orig) => {
 });
 
 const { createApp } = await import('../app.js');
+const { billingProviderName } = await import('./provider.js');
 const app = createApp();
 
 const U = '11111111-1111-4111-8111-111111111111';
@@ -85,7 +86,7 @@ describe('GET /account/plan', () => {
 		const res = await get('/account/plan', U);
 		expect(res.status).toBe(200);
 		expect(res.headers.get('cache-control')).toBe('no-store');
-		expect(await res.json()).toEqual({ ...PLAN, enforced: false });
+		expect(await res.json()).toEqual({ ...PLAN, enforced: false, provider: billingProviderName() });
 		expect(users).toEqual([U]);
 		expect(queries.find((q) => q.sql.includes('app_account_plan'))!.params).toEqual([A]);
 	});
@@ -135,7 +136,7 @@ describe('GET /teams/:id/plan', () => {
 		answers.set('app_account_plan', [{ plan: team }]);
 		const res = await get(`/teams/${T}/plan`, U);
 		expect(res.status).toBe(200);
-		expect(await res.json()).toEqual({ ...team, enforced: false });
+		expect(await res.json()).toEqual({ ...team, enforced: false, provider: billingProviderName() });
 		expect(queries.find((q) => q.sql.includes('app_team_billing_account'))!.params).toEqual([T]);
 		expect(users).toEqual([U]);
 	});

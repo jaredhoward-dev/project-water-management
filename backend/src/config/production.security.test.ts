@@ -778,6 +778,13 @@ describe('each Lambda refuses a missing or local-default setting', () => {
 
 	it('takes manual or stripe for the billing provider, and needs the webhook secret only with stripe (positive control for the BILLING_PROVIDER refusals)', () => {
 		expect(problemNames('api', prod('api', { BILLING_PROVIDER: 'manual', BILLING_WEBHOOK_SECRET: undefined }))).not.toContain('BILLING_WEBHOOK_SECRET');
+		// Checkout's API key (issue #641 Phase 3): needed, and live, only with stripe.
+		expect(problemNames('api', prod('api', { BILLING_PROVIDER: 'manual', STRIPE_SECRET_KEY: undefined }))).not.toContain('STRIPE_SECRET_KEY');
+		for (const v of [undefined, '', 'sk_test_' + 'a'.repeat(24), 'pk_live_' + 'a'.repeat(24), 'sk_live_short'])
+			expect(problemNames('api', prod('api', { BILLING_PROVIDER: 'stripe', BILLING_WEBHOOK_SECRET: 'w'.repeat(38), STRIPE_SECRET_KEY: v })), String(v)).toContain('STRIPE_SECRET_KEY');
+		expect(
+			problemNames('api', prod('api', { BILLING_PROVIDER: 'stripe', BILLING_WEBHOOK_SECRET: 'w'.repeat(38), STRIPE_SECRET_KEY: 'rk_live_' + 'a'.repeat(24) }))
+		).not.toContain('STRIPE_SECRET_KEY');
 		expect(problemNames('api', prod('api', { BILLING_PROVIDER: 'stripe', BILLING_WEBHOOK_SECRET: 'w'.repeat(38) }))).not.toContain('BILLING_PROVIDER');
 		expect(problemNames('api', prod('api', { BILLING_PROVIDER: 'stripe', BILLING_WEBHOOK_SECRET: 'w'.repeat(38) }))).not.toContain('BILLING_WEBHOOK_SECRET');
 		// stripe without a real secret: unset, short, or the committed dev key.

@@ -117,8 +117,11 @@ describe('accountPlan', () => {
 
 	it('passes app_account_plan’s answer through and adds enforced', async () => {
 		const db = fakeDb(() => [{ plan }]);
-		expect(await accountPlan(db as never, A, {})).toEqual({ ...plan, enforced: false });
-		expect(await accountPlan(db as never, A, { BILLING_ENFORCED: 'true' })).toEqual({ ...plan, enforced: true });
+		expect(await accountPlan(db as never, A, {})).toEqual({ ...plan, enforced: false, provider: 'mock' });
+		expect(await accountPlan(db as never, A, { BILLING_ENFORCED: 'true' })).toEqual({ ...plan, enforced: true, provider: 'mock' });
+		// The provider the page reads to show Upgrade and Manage billing (Phase 3); a name that is none is null.
+		expect((await accountPlan(db as never, A, { BILLING_PROVIDER: 'manual' }))?.provider).toBe('manual');
+		expect((await accountPlan(db as never, A, { BILLING_PROVIDER: 'stripey' }))?.provider).toBeNull();
 		expect(db.queries[0]).toEqual({ sql: 'SELECT app_account_plan($1) AS plan', params: [A] });
 	});
 
