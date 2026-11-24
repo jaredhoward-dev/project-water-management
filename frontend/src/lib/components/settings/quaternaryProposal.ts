@@ -6,6 +6,7 @@
 // covers it (quaternaryProposal.test.ts).
 import type { MapFeature, MapPosition, QuaternaryProposal } from '#lib/api/types.js';
 import { fmtNum } from '#lib/format/number.js';
+import type { Wr2012Lookup } from '@water-management/engine';
 import type { Wr2012Draft } from './wr2012';
 
 export type ProposalKey = 'quaternary' | 'areaKm2' | 'mapMm' | 'marMm3' | 'period' | 'monthlyMm3' | 'source';
@@ -97,13 +98,27 @@ export interface LookupPoint {
 	id: string;
 	label: string;
 	at: MapPosition;
+	/** The feature the point is taken from, as it stands now (recorded with the reference: recordLookup). */
+	feature: NonNullable<Wr2012Lookup['feature']>;
 }
 
 /** The points the lookup can start from: the catchment boundary's centre, then each gauge on the map. */
 export function lookupPoints(features: readonly MapFeature[]): LookupPoint[] {
 	const out: LookupPoint[] = [];
 	const b = features.find((f) => f.kind === 'catchment_boundary');
-	if (b) out.push({ id: b.id, label: `The catchment boundary’s centre${b.name ? ` (${b.name})` : ''}`, at: b.center });
-	for (const g of features.filter((f) => f.kind === 'gauge')) out.push({ id: g.id, label: `Gauge ${g.name || g.nodeName || ''}`.trim(), at: g.center });
+	if (b) out.push({ id: b.id, label: `The catchment boundary’s centre${b.name ? ` (${b.name})` : ''}`, at: b.center, feature: { id: b.id, kind: 'catchment_boundary', updatedAt: b.updatedAt, areaM2: b.areaM2 } });
+	for (const g of features.filter((f) => f.kind === 'gauge')) {
+		out.push({ id: g.id, label: `Gauge ${g.name || g.nodeName || ''}`.trim(), at: g.center, feature: { id: g.id, kind: 'gauge', updatedAt: g.updatedAt, areaM2: null } });
+	}
 	return out;
+}
+
+/**
+ * Record where the quaternary was looked up with the reference (followups F8/F14): the point, the code found there and
+ * the feature the point came from (null for typed coordinates), so the Map's Checks can flag the reference once that
+ * feature is redrawn or moved (map/wr2012Lookup.ts). Called with each value used from a proposal; the form still needs
+ * saving. A copy, so the draft never shares the lookup's arrays.
+ */
+export function recordLookup(ref: Wr2012Draft, p: QuaternaryProposal, at: MapPosition, from: LookupPoint['feature'] | null): void {
+	ref.lookup = { point: [at[0], at[1]], code: p.code, feature: from ? { ...from } : null };
 }

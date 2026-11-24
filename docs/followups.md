@@ -8351,7 +8351,7 @@ editor's and a large boundary's notes in step 4
       drains-into unticked. Trigger: a client dividing without a DEM, or
       more than a handful of units redrawn at once (start-from-map.md § Not
       built).
-- [ ] **The WR2012 quaternary isn't re-checked after a boundary edit** (F8,
+- [x] **The WR2012 quaternary isn't re-checked after a boundary edit** (F8,
       F14). The reference stores the quaternary's values, not the point or
       feature it was looked up at (it may have been a gauge, or typed), so
       nothing can tell that the moved boundary now lies in another
@@ -8360,6 +8360,15 @@ editor's and a large boundary's notes in step 4
       and flag it in the Checks when that feature's outline changed or its
       point's quaternary differs. Trigger: the next WR2012 change, or a
       client catchment redrawn across a quaternary line.
+      Done (2026-11-24, no migration: settings are JSON): Propose from the
+      map saves `reference.lookup` (engine `Wr2012Lookup`: the point, the
+      code, the boundary or gauge with its `updatedAt` and area), and the
+      Map's Checks flag the reference when that boundary is another outline
+      or no longer holds the point, or that gauge moved over 50 m or is
+      gone, linking back to the lookup ([maps.md §
+      Checks](./maps.md#checks)). A reference without a lookup (typed, or
+      saved before) is never flagged. The Checks say the feature changed,
+      not which quaternary it lies in now: the re-run lookup says that.
 - [ ] **WR2012 uses one quaternary** (F14). A catchment across two
       quaternaries gets the first one's MAR × the area ratio. Durable fix:
       area-weight every quaternary the boundary covers (the quaternary

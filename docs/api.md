@@ -838,7 +838,12 @@ alongside teams, e.g. to give an outside client `viewer` access.
   `reference` (`null`, the default, or the whole object `{ quaternary` 1–16
   chars, `areaKm2` > 0, `marMm3` ≥ 0 (Mm³ a year), `monthlyMm3` 12 values ≥ 0
   (Mm³ **per month**, Oct … Sep), `periodStart`, `periodEnd` (whole water
-  years, start ≤ end), `mapMm` (> 0 or `null`), `source` 1–500 chars `}`),
+  years, start ≤ end), `mapMm` (> 0 or `null`), `source` 1–500 chars, and
+  optionally `lookup` (`null`, or `{ point: [lon, lat], code, feature }`,
+  `feature` `null` or `{ id` (uuid), `kind` (`catchment_boundary` | `gauge`),
+  `updatedAt` (ISO), `areaM2` (≥ 0 or `null`) `}`: where Propose from the map
+  looked the quaternary up; provenance the Map's Checks read, never the
+  comparison; [maps.md § Checks](./maps.md#checks)) `}`),
   `scaling` (`area` | `areaRain`), `lowFlowMonths` (calendar months 1–12, at
   least one, or `null` = from each run), `flags` (the whole `{ notePct,
   queryPct, queryWetterPct, unusablePct }`, each above 0 and at most 1 000 %, note ≤ query ≤

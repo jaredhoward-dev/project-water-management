@@ -25,6 +25,32 @@ export interface Wr2012Reference {
 	mapMm: number | null;
 	/** Where the numbers come from (study, table, version). */
 	source: string;
+	/**
+	 * Where the quaternary was looked up on the map, when a value was taken
+	 * from Settings' "Propose from the map" (docs/maps.md § Quaternary
+	 * lookup): absent or null for a reference typed by hand or saved before it
+	 * was recorded, which nothing then re-checks. Provenance only: the
+	 * comparison never reads it.
+	 */
+	lookup?: Wr2012Lookup | null;
+}
+
+/**
+ * The quaternary lookup a reference's values came from: the point, the code
+ * found there, and the map feature the point was taken from as it stood (the
+ * Map's Checks flag the reference once that feature is redrawn or moved).
+ */
+export interface Wr2012Lookup {
+	/** The point looked up, [longitude, latitude] in degrees. */
+	point: [number, number];
+	/** The quaternary the lookup found at the point. */
+	code: string;
+	/**
+	 * The feature the point came from: the catchment boundary (its centre) or
+	 * a gauge, with its `updatedAt` and area (m², null for a gauge) then.
+	 * null for typed coordinates.
+	 */
+	feature: { id: string; kind: 'catchment_boundary' | 'gauge'; updatedAt: string; areaM2: number | null } | null;
 }
 
 /**
