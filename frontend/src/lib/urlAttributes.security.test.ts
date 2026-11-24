@@ -32,6 +32,7 @@ import { calibrationHref } from './components/calibration/links';
 import { warningParts, warningPlaceHref } from './components/runs/warningText';
 import { runHref } from './components/overview/attention';
 import { curtailmentHref } from './components/portfolio/portfolio';
+import { planHref } from './components/billing/planPause';
 import { riverHref } from './components/river/links';
 import { mapNodeHref } from './workspace/mapLinks';
 import { supplyHref } from './components/supply/links';
@@ -81,6 +82,7 @@ const REVIEWED: Record<string, { why: string; in: string[] }> = {
 	bundleUrl: { why: 'pack page: api.packs.bundleUrl (PUBLIC_API_URL + the encoded project and pack ids), never from a response', in: ['routes/projects/[id]/packs/[packId]/+page.svelte'] },
 	manifestUrl: { why: 'pack page: URL.createObjectURL of the manifest JSON it builds, a blob: URL for the download', in: ['routes/projects/[id]/packs/[packId]/+page.svelte'] },
 	curtailmentHref: { why: 'BUILDER: "<base>/projects/…" (portfolio.ts; the team page wraps it under the same name)', in: ['routes/teams/[id]/+page.svelte', 'lib/components/projects/ProjectTable.svelte'] },
+	'paused.href': { why: 'the workspace’s paused notice: billing/planPause.ts pausedNotice → planHref (BUILDER), basePath() + "/teams/" + the encoded team id + "/plan", or basePath() + "/account/plan" (#641, 341)', in: ['routes/projects/[id]/+page.svelte'] },
 	historyHref: { why: 'BUILDER: compare/attribution.ts "/projects/" + encoded project id + "?tab=history"', in: ['lib/components/compare/CompareView.svelte'] },
 	// Local builders and constants in the component itself: a literal "?" or "#" head, or resolve() of a literal path.
 	tabHref: { why: 'routes/projects/[id]: "?tab=<TabId>" (&run=<encoded run id> on a run tab, workspace/tabLinks.ts) or the current pathname', in: ['routes/projects/[id]/+page.svelte'] },
@@ -622,6 +624,8 @@ describe('URL attributes', () => {
 				farmDrawerHref(null, id),
 				compareTabHref({ projectId: id, runId: id }, { projectId: id, runId: id }),
 				curtailmentHref({ id, sourceRunId: id }),
+				planHref(id),
+				planHref(id, '/app'),
 				fieldHistoryHref({ filter: id }, id),
 				noteHref({ target: 'node', nodeId: id, runId: null, settingKey: null }) ?? '',
 				noteHref({ target: 'run', nodeId: null, runId: id, settingKey: null }) ?? '',
