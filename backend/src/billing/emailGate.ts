@@ -6,14 +6,36 @@
 // domain (auth/disposable.ts). Off, or on a paid or trialing account, nothing
 // changes. Which projects are on Free, and the caller's own address, come from
 // app_free_email_gate (343), as the caller.
+// Each refusal is logged (email_gate_refused: the code and feature, never the
+// address or its domain) and counted per SAST day in email_gate_refusal (348)
+// for the abuse report (billing/metrics.ts).
 import { isDisposable } from '../auth/disposable.js';
-import type { Db } from '../db/tx.js';
+import { queryWithoutUser, type Db } from '../db/tx.js';
 import { ApiError } from '../http/errors.js';
+import { logEvent } from '../logging/logEvent.js';
+import { safeError } from '../logging/safeError.js';
 
 /** What the gate refuses: the assistant or switching a feed on. */
 export type GatedFeature = 'assistant' | 'feeds';
 
 const WHAT: Record<GatedFeature, string> = { assistant: 'use the assistant', feeds: 'switch on a live data feed' };
+
+export type GateRefusal = 'email_unverified' | 'email_disposable';
+
+/**
+ * Logs and counts one refusal. The count is its own autocommit statement on
+ * a second pooled connection (the route's transaction rolls back with the
+ * 403), as no user: app_email_gate_refused (348) takes no address. A failed
+ * count is logged and the refusal still answers 403, never a 500.
+ */
+export async function recordGateRefusal(code: GateRefusal, feature: GatedFeature): Promise<void> {
+	logEvent('info', { event: 'email_gate_refused', code, feature });
+	try {
+		await queryWithoutUser('SELECT app_email_gate_refused($1, $2)', [code, feature]);
+	} catch (err) {
+		logEvent('warn', { event: 'email_gate_count_failed', code, feature, ...safeError(err) });
+	}
+}
 
 /**
  * Refuses (403 email_unverified or email_disposable) when the gate applies to
@@ -27,9 +49,11 @@ export async function requireFreeVerifiedEmail(db: Db, projectId: string, featur
 	if (!gate) return;
 	if (!gate.verified) {
 		// No address in the error (it reaches logs and caches); the panel shows the signed-in person's own.
+		await recordGateRefusal('email_unverified', feature);
 		throw ApiError.coded(403, 'email_unverified', `Verify your email to ${WHAT[feature]}. We sent you a link.`);
 	}
 	if (isDisposable(gate.email)) {
+		await recordGateRefusal('email_disposable', feature);
 		throw ApiError.coded(
 			403,
 			'email_disposable',
