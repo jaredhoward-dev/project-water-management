@@ -4522,8 +4522,10 @@ readable by anyone. The rules:
   sweep keeps reporting from history is listed, after reading the line, by
   its exact commit, file, line and detector in
   `.github/secret-scan-reviewed.txt` and reported as `reviewed` (a notice);
-  a verified finding fails even when listed, and no path or detector is
-  excluded from the scan (issue #818). For the gitleaks hook, reviewed false positives are
+  a verified finding fails even when listed, an entry whose commit isn't in
+  the history fails, and no path or detector is excluded from the scan
+  (issue #818; the step is `scripts/ci/secret_scan_report.py`, tested by
+  `pnpm test:guards`). For the gitleaks hook, reviewed false positives are
   allowlisted by their exact value in `.gitleaks.toml` (m³/day field names,
   fake test tokens, the mocked-provider Terraform tests' synthetic secrets),
   never by path; add one only after checking the match isn't real.
