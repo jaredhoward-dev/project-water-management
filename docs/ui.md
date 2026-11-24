@@ -1106,7 +1106,12 @@ takes the bar away, a live region outside it says "Changes saved." or
 reason and Preview, `revert()`); the page adapts the details and the
 settings to it and saves them in `saveAll`. The optional reason field shows
 with model or settings edits (it goes into History with them; one reason for
-both). A failed save says so in the bar ("Save failed: …"), beside Save.
+both). A failed save says so in the bar ("Save failed: …"), beside Save,
+except Free's live-catchment refusal (automatic runs switched on in a second
+live catchment, the draft's `liveLimit`): the bar shows the information note
+(`LiveLimitNotice`, *Compare plans*) under its row instead, the edit stays
+unsaved, and the next save clears it ([billing.md § Live catchments
+(Free)](./billing.md#live-catchments-free)).
 Discard and Save (and Preview) sit in one box that never splits on a
 phone. Every other card on the Project page acts at once. Settings has no
 save bar of its own. A save keeps what was typed while it was in flight:
@@ -3225,7 +3230,11 @@ The page is two cards, side by side where they fit and stacked on a phone:
   Back from the mock's page, a refused request (its words inline, the focus
   kept) and a payment confirmed a read late.
 - **Usage in <month>**: one row each for catchments (every catchment billed
-  to the account counts, whoever made it; there is no archived state),
+  to the account counts, whoever made it; there is no archived state), live
+  catchments (340: those with data feeds, alerts or automatic runs on, or a
+  farm view published; "1 of 1 · At the limit" on Free, left out when an
+  older API doesn't send it; [billing.md § Live catchments
+  (Free)](./billing.md#live-catchments-free)),
   reports, issued evidence packs and the assistant's spend this month. A row
   with a limit reads "3 of 5 · 2 left" over a bar (`role="meter"`, its value
   text the same words); past the limit it says "1 over the limit" and the bar
@@ -11014,7 +11023,10 @@ read it before.
   notice: the level with its percentage ("Advisory · 10 %"), its text in
   each language written (table order, `noticeLanguages`), the next update
   date and who last changed it. Editors get, in the panel's head (issue
-  #521), **Publish this run** on any other run: a confirm dialog says what changes
+  #521), **Publish this run** on any other run (on Free with another catchment
+  live, the dialog shows the live-catchment information note,
+  `LiveLimitNotice`, in place of an error and stays open; billing.md § Live
+  catchments (Free)): a confirm dialog says what changes
   for stakeholders (each farmer sees this run's figures for their own farm
   from 1 October to the run's last day, day first, and the notice; it replaces the current baseline, which
   stays in the history), warns when farm dams have no stop level ("N farm

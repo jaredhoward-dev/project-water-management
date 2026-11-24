@@ -9,6 +9,8 @@
 //  - a Pro account (live_catchments null) is never refused;
 //  - the app role can't call the counting functions;
 //  - two parallel switches on two catchments: exactly one wins.
+// 340_live_catchment_gaps: a copy or an import at the limit starts with automatic runs off (never refused) and says so;
+// a live catchment moving to another billing account is checked against that account's limit; the Plan page counts them.
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
@@ -118,10 +120,28 @@ describe('338: Free’s one live catchment', () => {
 		expect(await publish(false)).toBeNull();
 	});
 
-	it('on: a new project created with automatic runs on (a copy, an import) is never refused: Free doesn’t ration copying', async () => {
-		const create = (on: boolean) =>
-			inTx(`INSERT INTO project (name, created_by, settings) VALUES ('Live C', $1, '{"autoRun": {"enabled": true}}')`, [owner.id], on, true);
-		expect(await create(true)).toBeNull();
+	it('on: a new project created with automatic runs on (a copy, an import) is never refused, and starts with them off (340)', async () => {
+		const create = async (on: boolean) => {
+			const client = new pg.Client({ connectionString: process.env.TEST_MIGRATION_DATABASE_URL });
+			await client.connect();
+			try {
+				await client.query('BEGIN');
+				if (on) await client.query(`SELECT set_config('app.billing_enforced', 'on', true)`);
+				const { rows } = await client.query<{ on: string | null }>(
+					`INSERT INTO project (name, created_by, settings) VALUES ('Live C', $1, '{"autoRun": {"enabled": true, "debounceMinutes": 5}}')
+					 RETURNING settings -> 'autoRun' ->> 'enabled' AS on`,
+					[owner.id]
+				);
+				return rows[0]!.on;
+			} finally {
+				await client.query('ROLLBACK');
+				await client.end();
+			}
+		};
+		// A is live, so the account is at its one: on, the new project starts with automatic runs off (its other fields kept).
+		expect(await create(true)).toBe('false');
+		// Off, as stored.
+		expect(await create(false)).toBe('true');
 	});
 
 	it('on: switching A off frees the slot, so B can go live (the owner picks)', async () => {
@@ -192,5 +212,96 @@ describe('338: Free’s one live catchment', () => {
 		const got = await Promise.all([x, y].map((p) => race.call('PUT', `/projects/${p}/alert-rules`, alertBody)));
 		expect(got.map((r) => r.status).sort()).toEqual([200, 402]);
 		expect(await liveCount(await accountOf(x))).toBe(1);
+	});
+});
+
+describe('340: what 338 left (copy, import, a move to another account, the Plan page)', () => {
+	const autoOn = async (pid: string) =>
+		((await asOwner(`SELECT settings -> 'autoRun' ->> 'enabled' AS on FROM project WHERE id = $1`, [pid])) as { on: string | null }[])[0]!.on === 'true';
+	const exportDoc = async (u: User, pid: string) => {
+		const res = await u.call('GET', `/projects/${pid}/export.json`);
+		expect(res.status).toBe(200);
+		return res.body;
+	};
+
+	it('on, at the limit: a copy or an import of a catchment with automatic runs on starts with them off and says so; nothing is refused', async () => {
+		const u = await signUp('LiveCopy');
+		const x = await newProject(u, 'Copy X');
+		expect((await u.call('PATCH', `/projects/${x}`, { settings: { autoRun: { enabled: true } } })).status).toBe(200);
+		const account = await accountOf(x);
+		enforce();
+		const copy = await u.call('POST', `/projects/${x}/copy`, { name: 'Copy X2' });
+		expect(copy.status, JSON.stringify(copy.body)).toBe(201);
+		made.push(copy.body.project.id);
+		expect(copy.body.autoRunsOff).toBe('live_catchments');
+		expect(copy.body.project.settings.autoRun.enabled).toBe(false);
+		expect(await autoOn(copy.body.project.id)).toBe(false);
+		const doc = await exportDoc(u, x);
+		const imp = await u.call('POST', '/projects/import', doc);
+		expect(imp.status, JSON.stringify(imp.body)).toBe(201);
+		made.push(imp.body.project.id);
+		expect(imp.body.autoRunsOff).toBe('live_catchments');
+		expect(await autoOn(imp.body.project.id)).toBe(false);
+		// Still one live catchment, the original, untouched.
+		expect(await liveCount(account)).toBe(1);
+		expect(await autoOn(x)).toBe(true);
+	});
+
+	it('positive controls: below the limit, or with enforcement off, the copy keeps automatic runs on and says nothing', async () => {
+		const u = await signUp('LiveCopyFree');
+		const x = await newProject(u, 'Below X');
+		expect((await u.call('PATCH', `/projects/${x}`, { settings: { autoRun: { enabled: true } } })).status).toBe(200);
+		// Off: the copy keeps them on (two live).
+		const off = await u.call('POST', `/projects/${x}/copy`, { name: 'Below X2' });
+		expect(off.status).toBe(201);
+		made.push(off.body.project.id);
+		expect(off.body.autoRunsOff).toBeUndefined();
+		expect(await autoOn(off.body.project.id)).toBe(true);
+		// On, below the limit (a fresh account's first catchment): the import keeps them on.
+		const v = await signUp('LiveImportFirst');
+		enforce();
+		const imp = await v.call('POST', '/projects/import', await exportDoc(u, x));
+		expect(imp.status, JSON.stringify(imp.body)).toBe(201);
+		made.push(imp.body.project.id);
+		expect(imp.body.autoRunsOff).toBeUndefined();
+		expect(await autoOn(imp.body.project.id)).toBe(true);
+	});
+
+	it('a live catchment moving into a Free team that has its live one is refused on; a catchment that isn’t live moves; off, both move', async () => {
+		const u = await signUp('LiveMove');
+		const teamId = (await u.call('POST', '/teams', { name: 'Live move WUA' })).body.team.id as string;
+		const t = (await u.call('POST', '/projects', { name: 'Team live', teamId })).body.project.id as string;
+		made.push(t);
+		expect((await u.call('PUT', `/projects/${t}/alert-rules`, alertBody)).status).toBe(200);
+		const [x, quiet] = [await newProject(u, 'Move X'), await newProject(u, 'Move quiet')];
+		expect((await u.call('PUT', `/projects/${x}/alert-rules`, alertBody)).status).toBe(200);
+		enforce();
+		const moved = await u.call('PATCH', `/projects/${x}`, { teamId });
+		expect(moved.status).toBe(402);
+		expect(moved.body).toMatchObject({ code: 'plan_limit', params: { limit: 1, used: 2, plan: 'free', key: 'live_catchments' } });
+		expect(await accountOf(x)).not.toBe(await accountOf(t));
+		// Positive control: a catchment that isn't live moves.
+		expect((await u.call('PATCH', `/projects/${quiet}`, { teamId })).status).toBe(200);
+		// Off, the live one moves too.
+		delete process.env.BILLING_ENFORCED;
+		expect((await u.call('PATCH', `/projects/${x}`, { teamId })).status).toBe(200);
+		expect(await liveCount(await accountOf(t))).toBe(2);
+	});
+
+	it('the Plan page’s usage counts live catchments against the plan’s limit', async () => {
+		const u = await signUp('LivePlan');
+		const x = await newProject(u, 'Plan X');
+		await newProject(u, 'Plan Y');
+		expect((await u.call('GET', '/account/plan')).body.usage.liveCatchments).toEqual({ used: 0, limit: 1 });
+		expect((await u.call('PUT', `/projects/${x}/alert-rules`, alertBody)).status).toBe(200);
+		expect((await u.call('GET', '/account/plan')).body.usage.liveCatchments).toEqual({ used: 1, limit: 1 });
+	});
+
+	it('the app role can’t call the new trigger functions', async () => {
+		const u = await signUp('LiveFn');
+		for (const fn of ['project_live_start_off', 'project_move_live_guard']) {
+			const { rows } = await withUser(u.id, (db) => db.query<{ ok: boolean }>(`SELECT has_function_privilege('water_app', $1 || '()', 'EXECUTE') AS ok`, [fn]));
+			expect(rows[0]!.ok, fn).toBe(false);
+		}
 	});
 });

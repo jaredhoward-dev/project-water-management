@@ -990,10 +990,25 @@ a second one when `BILLING_ENFORCED` is on.
   refused, even on an account past its limit (live before enforcement, or
   after a downgrade), and nothing already on is turned off. Pausing
   operations on the other catchments after a downgrade's 14-day grace is
-  [§ Pausing after a downgrade](#pausing-after-a-downgrade). A copy or an import of
-  a catchment with automatic runs on isn't refused either: refusing it
-  would ration copying and importing, which Free never limits (the durable
-  fix is in followups.md).
+  [§ Pausing after a downgrade](#pausing-after-a-downgrade).
+- **Copy and import start not live (340).** A copy or an import of a
+  catchment with automatic runs on is never refused (refusing would ration
+  copying and importing, which Free never limits). With enforcement on and
+  the account's live catchments all in use, the new project starts with
+  automatic runs off instead (`project_live_start_off`, a BEFORE INSERT
+  trigger on `project` that fires after `project_billing_account_set`, under
+  the same account lock), its other automatic-run fields kept, and the
+  answer says so (`autoRunsOff: "live_catchments"`, [api.md](./api.md)).
+  Automatic runs are the only way a new project is live: a copy leaves feeds
+  with the original and copies no alert rules or publications, and an import
+  has none. Below the limit, or with enforcement off, the copy keeps them on.
+- **Moving to another account (340).** A live catchment moving into or out
+  of a team (`PATCH /projects/:id` with `teamId`, which moves its billing
+  account) is checked against the new account's limit
+  (`project_move_live_guard`, AFTER UPDATE OF `team_id`, `billing_account_id`,
+  calling 338's guard): a move that would give a Free account a second live
+  catchment answers the same `402`. A catchment that isn't live moves
+  freely.
 - **The answer.** `402 plan_limit` with `{ limit: 1, used, plan: 'free',
   key: 'live_catchments' }` and fixed words ([api.md §
   Billing](./api.md#billing)). The numbers keep 334's shape (`limit` the
@@ -1004,14 +1019,30 @@ a second one when `BILLING_ENFORCED` is on.
   on) and the alert rules editor show it as an information note, not an
   error (`LiveLimitNotice.svelte`, `liveLimit.ts` in
   `frontend/src/lib/components/billing/`), in #641's tone (no "quota" or
-  "402"), with *Compare plans* linking to Plan and usage. The settings save
-  bar (automatic runs) and Publish to farmers still show the server's fixed
-  words in their error style ([followups.md](./followups.md)).
+  "402"), with *Compare plans* linking to Plan and usage. So do the
+  settings save bar (automatic runs; `SaveBar.svelte`, from the settings
+  draft's `liveLimit`, the edit kept unsaved) and the Publish this run
+  dialog (`PublicationPanel.svelte`, the dialog kept open), each in place of
+  the error line (340's round, issue #641 round 9).
+- **On the Plan page.** `app_account_plan` (340) returns
+  `usage.liveCatchments { used, limit }` from `app_live_catchments_in_use`,
+  and Plan and usage shows it as the *Live catchments* row after
+  *Catchments* ("1 of 1 · At the limit"; "Unlimited" on Pro and Team; past
+  the limit, after a downgrade or from before enforcement, the warning
+  colour, as every row). The row is left out when an older API doesn't send
+  it (the web and the backend release apart).
 - **Tests.** `backend/src/billing/liveCatchments.db.test.ts`: off, two
   catchments go live; on, each route (feed, alert rules, automatic runs)
   and a publication is refused in a second catchment and passes in the
   first; switching the first off frees the slot; past the limit nothing is
-  refused in a live catchment; Pro is never refused; the race.
+  refused in a live catchment; Pro is never refused; the race. 340's: a
+  copy and an import at the limit start with automatic runs off and say so
+  (positive controls: below the limit, and off, they stay on); a live
+  catchment moving into a Free team with its live one is refused, one that
+  isn't live moves; the Plan's `usage.liveCatchments`. Frontend:
+  `plan.test.ts` (the row), `settingsDraft.test.ts` (the note cleared);
+  e2e: `settings-page.spec.ts` and `publication.spec.ts` (the 402 mocked
+  with `page.route`).
 
 ## Pausing after a downgrade
 

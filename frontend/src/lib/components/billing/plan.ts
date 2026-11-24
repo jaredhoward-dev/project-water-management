@@ -89,7 +89,7 @@ export function subscriptionTotalLine(p: Pick<AccountPlan, 'account' | 'plan' | 
 
 /** One usage bar: its label, the figures as words, and how full it is (null when there is no bar). */
 export interface UsageRow {
-	key: 'catchments' | 'reports' | 'packsIssued' | 'assistantCost';
+	key: 'catchments' | 'liveCatchments' | 'reports' | 'packsIssued' | 'assistantCost';
 	label: string;
 	used: number;
 	limit: number | null;
@@ -136,7 +136,8 @@ function row(key: UsageRow['key'], label: string, used: number, limit: number | 
 const count = (n: number) => fmtNum(n);
 
 /**
- * The page's four bars, in the order the plan is read: catchments, reports
+ * The page's bars, in the order the plan is read: catchments, live
+ * catchments (340; left out when an older API doesn't send them), reports
  * this month, packs issued this month, the assistant's spend this month. The
  * assistant is capped by cost, so its row is in dollars, counted by the UTC
  * month (the others by South African time), and says when some turns carry
@@ -156,6 +157,16 @@ export function usageRows(p: AccountPlan): UsageRow[] {
 			planName,
 			note: 'Every catchment billed to this account counts, whoever made it.'
 		}),
+		...(u.liveCatchments
+			? [
+					row('liveCatchments', 'Live catchments', u.liveCatchments.used, u.liveCatchments.limit, {
+						fmt: count,
+						verb: 'live',
+						planName,
+						note: 'A catchment is live while it has data feeds, alerts or automatic runs on, or a farm view published. Runs, calibration, scenarios and exports have no limit.'
+					})
+				]
+			: []),
 		row('reports', `Reports in ${month}`, u.reports.used, u.reports.limit, { fmt: count, verb: 'made', planName }),
 		row('packsIssued', `Evidence packs issued in ${month}`, u.packsIssued.used, u.packsIssued.limit, { fmt: count, verb: 'issued', planName }),
 		row('assistantCost', `Assistant use in ${month}`, cost.usedUsdMicros, cost.limitUsdMicros, {

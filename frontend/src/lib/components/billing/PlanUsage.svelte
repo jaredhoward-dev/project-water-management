@@ -2,7 +2,8 @@
 	// The Plan and usage page's body (issue #641 Phase 1, docs/ui.md § Plan and
 	// usage), shared by /account/plan (your own account) and /teams/[id]/plan
 	// (a team's, for its admins): the plan with its price and renewal or trial
-	// date, then this month's usage as one bar per counted thing. Usage is
+	// date, then this month's usage as one bar per counted thing (live
+	// catchments among them, 340: plan.ts usageRows). Usage is
 	// counted and, in shadow mode (BILLING_ENFORCED off), nothing is refused.
 	// Phase 3: Upgrade (no subscription; each priced from GET /billing/plans) or
 	// Manage billing (one) when the billing provider isn't manual; each asks the

@@ -120,3 +120,40 @@ test('a publish whose history refresh fails still closes as published', async ({
 	await expect(panel.getByRole('button', { name: 'Publish this run' })).toHaveCount(0);
 	await page.unroute(publicationUrl);
 });
+
+// Free's one live catchment (338; docs/billing.md § Live catchments (Free)): a first publication in a second catchment is
+// refused 402 plan_limit when billing is enforced (e2e runs it off, so the refusal is mocked, as data-feeds.spec.ts's
+// refuseLive does). The dialog shows the information note, not the server's words as an error, and stays open.
+test('on Free with another catchment live, Publish shows the live-limit note instead of an error and keeps the dialog', async ({ page, owner }) => {
+	void owner;
+	const project = await seedRunnableProject(page.request, 'Publish, second catchment');
+	await createRun(page.request, project.id, 'Baseline');
+	const publicationUrl = `${API_URL}/projects/${project.id}/publication`;
+	await page.route(publicationUrl, (route) =>
+		route.request().method() === 'POST'
+			? route.fulfill({
+					status: 402,
+					contentType: 'application/json',
+					body: JSON.stringify({
+						error: 'Free runs one catchment live (data feeds, automatic runs, alerts and published farm views): switch them off in the other catchment, or compare plans',
+						code: 'plan_limit',
+						params: { limit: 1, used: 2, plan: 'free', key: 'live_catchments' }
+					})
+				})
+			: route.fallback()
+	);
+	await page.goto(`/projects/${project.id}?tab=runs`);
+	const panel = page.getByRole('region', { name: /^Publication/ });
+	await expect(panel).toContainText('Nothing is published yet');
+	await panel.getByRole('button', { name: 'Publish this run' }).click();
+	const dialog = page.getByRole('dialog', { name: 'Publish this run?' });
+	await dialog.getByRole('button', { name: 'Publish', exact: true }).click();
+	const note = dialog.getByTestId('live-limit');
+	await expect(note).toBeVisible();
+	await expect(note).toContainText('Free runs one catchment live: data feeds, automatic runs, alerts and farm views.');
+	await expect(note.getByRole('link', { name: 'Compare plans' })).toHaveAttribute('href', /\/account\/plan$/);
+	await expect(dialog.getByRole('alert')).toHaveCount(0);
+	await expect(dialog).toBeVisible();
+	await expect(panel).toContainText('Nothing is published yet');
+	await page.unroute(publicationUrl);
+});

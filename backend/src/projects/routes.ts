@@ -32,6 +32,7 @@ import { resolveResponsibleAuthority } from './authoritySettings.js';
 import { readJson } from '../http/body.js';
 import { projectName } from '../http/visibleName.js';
 import { bodyLimit } from 'hono/body-limit';
+import { AUTO_RUNS_OFF, autoRunsStartedOff } from '../billing/liveStart.js';
 import { copyAllocations } from './copyAllocations.js';
 import { copyCatchmentMap } from './copyMap.js';
 import { freshIds, IMPORT_MAX_BYTES, insertProjectFile, parseProjectFile, runImported } from './import.js';
@@ -329,14 +330,15 @@ export const projectRoutes = new Hono<AuthEnv>()
 			// stored in the same transaction, so a failure keeps neither.
 			const report = parseImportReport(raw);
 			const userId = c.get('userId');
-			const project = await withUser(userId, async (db) => {
+			const { project, autoRunsOff } = await withUser(userId, async (db) => {
 				const id = await insertProjectFile(db, data, { teamId: query.teamId ?? null });
 				if (report) await insertImportReport(db, id, report);
-				return full(await getProject(db, id));
+				// A file with automatic runs on, on an account at its live catchments, imports with them off (340).
+				return { project: full(await getProject(db, id)), autoRunsOff: await autoRunsStartedOff(db, id, data.settings) };
 			});
 			// After the commit: a run that fails leaves the import standing (runError).
 			const run = query.run === '1' || query.run === 'true' ? await runImported(userId, project.id) : {};
-			return c.json({ project, ...run }, 201);
+			return c.json({ project, ...(autoRunsOff ? { autoRunsOff: AUTO_RUNS_OFF } : {}), ...run }, 201);
 		}
 	)
 	// What the importer flagged when the project was imported (017_project_import).
@@ -490,6 +492,10 @@ export const projectRoutes = new Hono<AuthEnv>()
 				 VALUES ($1, $2, $3, $4, app_current_user_id(), $5, $6)`,
 				[newId, body.name, src.description, JSON.stringify(copiedSettings), teamId, src.time_zone]
 			);
+			// A copy of a catchment with automatic runs on, on an account at its live catchments, starts with them off
+			// (340, never refused); the settings written back below keep them off, and the answer says so.
+			const autoRunsOff = await autoRunsStartedOff(db, newId, copiedSettings);
+			if (autoRunsOff) copiedSettings.autoRun = { ...(copiedSettings.autoRun as Record<string, unknown>), enabled: false };
 			await saveModel(db, newId, copied);
 			// A gauge record's site (084_gauge_records) follows its gauge to the copy's id; one whose
 			// node has left the model has nothing to follow, so it keeps no site in the copy. A land unit's
@@ -532,7 +538,7 @@ export const projectRoutes = new Hono<AuthEnv>()
 			// re-authoring as the copier would misattribute. The original keeps them.
 			// The copy's history starts with its first state; the original's stays with the original.
 			await recordModelRevision(db, newId, { source: 'copy', before: null, reason: [`Copied from "${src.name}"`, allocNote, ewrNote].filter((x): x is string => !!x).map((x) => x.replace(/\.$/, '')).join('. ').slice(0, 500) });
-			return c.json({ project: full(await getProject(db, newId)) }, 201);
+			return c.json({ project: full(await getProject(db, newId)), ...(autoRunsOff ? { autoRunsOff: AUTO_RUNS_OFF } : {}) }, 201);
 		});
 	})
 	// --- members -------------------------------------------------------------

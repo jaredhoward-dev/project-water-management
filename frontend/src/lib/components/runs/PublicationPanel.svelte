@@ -15,6 +15,8 @@
 	import { tick } from 'svelte';
 	import { api, PUBLICATION_TEXT_MAX, type Publication, type PublicationMeta, type Run } from '#lib/api/index.js';
 	import Dialog from '#lib/components/common/Dialog.svelte';
+	import LiveLimitNotice from '#lib/components/billing/LiveLimitNotice.svelte';
+	import { isLiveLimit } from '#lib/components/billing/liveLimit.js';
 	import { focusHeading } from '#lib/help/anchor.js';
 	import { fmtDay, fmtStamp } from '#lib/format/number.js';
 	import { damsWithoutStopLevel, draftFrom, emptyDraft, LEVEL_LABEL, noticeLanguages, noticeTextFields, parseDraft, publishBlocker, restrictionSummary, type NoticeDraft } from './publication';
@@ -93,6 +95,8 @@
 	let pubDraft = $state<NoticeDraft>(emptyDraft());
 	// A failed publish's message belongs to the dialog; a failed save's to the edit form.
 	let pubError = $state<string | null>(null);
+	// A first publication in a second catchment on Free (338): an information note, not an error.
+	let liveLimit = $state(false);
 	let note = $state('');
 	let saving = $state(false);
 	let error = $state<string | null>(null);
@@ -103,6 +107,7 @@
 		pubDraft = draftFrom(current);
 		note = '';
 		pubError = null;
+		liveLimit = false;
 		done = null;
 		dialogOpen = true;
 	}
@@ -133,6 +138,7 @@
 		}
 		saving = true;
 		pubError = null;
+		liveLimit = false;
 		try {
 			const { publication, farms } = await api.publication.publish(projectId, {
 				runId: run.id,
@@ -160,7 +166,8 @@
 			// Publish this run has gone with the dialog (the run is published now).
 			await focusAfter('title');
 		} catch (e) {
-			pubError = msg(e);
+			if (isLiveLimit(e)) liveLimit = true;
+			else pubError = msg(e);
 		} finally {
 			saving = false;
 		}
@@ -316,6 +323,7 @@
 	<label for="{uid}-note">Note for the project’s staff <span class="muted">(optional; farmers don’t see it)</span></label>
 	<textarea id="{uid}-note" rows="2" maxlength={PUBLICATION_TEXT_MAX} bind:value={note}></textarea>
 	{#if pubError}<div class="alert alert-error" role="alert">{pubError}</div>{/if}
+	{#if liveLimit}<LiveLimitNotice />{/if}
 	{#snippet actions()}
 		<button type="button" class="btn" onclick={() => (dialogOpen = false)} disabled={saving}>Cancel</button>
 		<button type="button" class="btn btn-primary" onclick={publish} aria-disabled={saving}>{saving ? 'Publishing…' : 'Publish'}</button>
