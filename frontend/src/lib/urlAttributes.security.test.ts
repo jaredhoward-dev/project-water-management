@@ -174,7 +174,12 @@ const REVIEWED: Record<string, { why: string; in: string[] }> = {
 	srcset: { why: 'landing Diorama: `<base>/landing/hero-<day|dusk>-<width>.<avif|webp>`, the widths from art.generated.ts (numbers)', in: ['lib/components/landing/Diorama.svelte'] },
 	set: { why: 'landing Shot: `<base>/landing/screen-<name>-<light|dark>-<width>.<avif|webp>`, name a literal from Screens.svelte', in: ['lib/components/landing/Shot.svelte'] },
 	addressOf: { why: 'LanguageSwitch: its `addressOf` prop; the landing page passes `<base>` + landingPath(code), "/welcome" or "/welcome/<code>" for a code of the language table (issue #137)', in: ['lib/i18n/LanguageSwitch.svelte'] },
-	abs: { why: 'landing link-preview tags: new URL(`<base>` + a literal path, page.url).href, the page’s own origin', in: ['lib/components/landing/Landing.svelte'] },
+	abs: {
+		why: 'landing and pricing link-preview tags: new URL(`<base>` + a path, page.url).href, the page’s own origin; the path a literal, LANDING_PATH or PRICING_PATH, or landingPath/pricingPath(code) (auth/session.svelte.ts: "/welcome" or "/welcome/pricing", + "/" + a code of the language table)',
+		in: ['lib/components/landing/Landing.svelte', 'lib/components/pricing/Pricing.svelte']
+	},
+	pricingHref: { why: 'Landing: `<base>` + pricingPath(the page’s Locale prop or wordsLang()), "/welcome/pricing" or "/welcome/pricing/<code>" for a code of the language table (auth/session.svelte.ts; #641 Phase 4)', in: ['lib/components/landing/Landing.svelte'] },
+	homeHref: { why: 'Pricing: `<base>` + landingPath(its Locale prop, the route’s locale-matched param), "/welcome" or "/welcome/<code>" (auth/session.svelte.ts; #641 Phase 4)', in: ['lib/components/pricing/Pricing.svelte'] },
 	// Objects built in code from the builders above.
 	'done.href': { why: 'the invitations page: `<base>/teams/`, `/farm/` or `/projects/` + the encoded id of what was joined', in: ['routes/account/invitations/+page.svelte'] },
 	'back.href': { why: 'FarmShell prop: callers pass `<base>/farm`, farmHref(…), or (the words page) `<base>` + a ?from= farmReturn accepted', in: ['lib/components/farm/FarmShell.svelte'] },
