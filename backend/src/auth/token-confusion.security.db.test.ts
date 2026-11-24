@@ -4,7 +4,8 @@
 // SHA-256, auth/tokens.ts): an email verify and reset token, an invite token,
 // a share link's token, a render token, an alert unsubscribe token and an
 // alert's "Was this useful?" token (151_alert_feedback), and a second-factor
-// reset's confirmation and cancel tokens (205_mfa_recovery); beside
+// reset's confirmation and cancel tokens (205_mfa_recovery), and an email
+// address change's link (347_email_change); beside
 // them an API key (`wm_<prefix>_<secret>`), a session cookie and a render
 // session cookie (both JWTs). Each is only ever looked up where it was
 // stored, for the purpose it was issued. This file proves it as a matrix:
@@ -53,6 +54,8 @@ const KINDS = [
 	// Recovering a lost second factor (205_mfa_recovery): the emailed link that starts the 3-day wait, and a cancel link.
 	'mfaResetConfirm',
 	'mfaResetCancel',
+	// Changing the email address (347_email_change): the link mailed to the new address.
+	'emailChange',
 	// Not credentials, but they pass the token format check (43 base64url
 	// characters): the API key's secret without its prefix, and the session
 	// JWT's signature. Neither is stored anywhere, so neither opens anything.
@@ -91,6 +94,9 @@ let projectId: string;
 let runId: string;
 const creds = {} as Record<Kind, string>;
 let resetEmail: string;
+/** The account whose email change the emailChange link confirms, and the address it moves to. */
+let mover: User;
+let moverNext: string;
 
 /**
  * Each slot a credential can be presented in, what counts as accepted there,
@@ -131,6 +137,12 @@ const SLOTS: { name: string; own: Kind[]; run: (cred: string) => Promise<Res>; a
 		name: 'body: POST /auth/mfa/reset/cancel',
 		own: ['mfaResetCancel'],
 		run: (cred) => post('/auth/mfa/reset/cancel', { token: cred }),
+		accepted: (r) => r.status === 200
+	},
+	{
+		name: 'body: POST /auth/confirm-email-change',
+		own: ['emailChange'],
+		run: (cred) => post('/auth/confirm-email-change', { token: cred }),
 		accepted: (r) => r.status === 200
 	},
 	{
@@ -257,6 +269,11 @@ beforeAll(async () => {
 	expect((await post('/auth/mfa/reset/confirm', { token: canceller.token })).status).toBe(200);
 	creds.mfaResetCancel = tokenIn(lastMailTo(canceller.u.email));
 	expect(creds.mfaResetCancel).not.toBe(canceller.token);
+	// emailChange: another account asks to move to a fresh address (app_issue_email_change, 347); the link goes there.
+	mover = await signUp('TCmover');
+	moverNext = `tc-moved-${crypto.randomUUID()}@example.com`;
+	expect((await mover.call('POST', '/auth/change-email', { newEmail: moverNext, currentPassword: 'correct horse' })).status).toBe(202);
+	creds.emailChange = tokenIn(lastMailTo(moverNext));
 	// session, and its bare signature.
 	creds.session = jwtOf(owner.cookie);
 	creds.sessionSignature = creds.session.split('.')[2]!;
@@ -289,6 +306,9 @@ describe('every credential in every other kind’s slot', () => {
 		expect((await asOwner(`SELECT mode FROM alert_subscription WHERE user_id = $1 AND project_id = $2 AND kind = 'data_stale'`, [owner.id, projectId]))[0].mode).toBe('immediate');
 		expect((await post('/auth/login', { email: resetEmail, password: 'correct horse' })).status).toBe(200);
 		expect((await asOwner(`SELECT answered_at FROM alert_feedback WHERE user_id = $1 AND project_id = $2`, [owner.id, projectId]))[0].answered_at).toBeNull();
+		// The email change is still pending and the mover's address unchanged.
+		expect(await asOwner('SELECT new_email FROM email_change WHERE user_id = $1', [mover.id])).toEqual([{ new_email: moverNext }]);
+		expect((await asOwner('SELECT email FROM app_user WHERE id = $1', [mover.id]))[0].email).toBe(mover.email);
 
 		// Positive controls, last: each credential works in each of its own
 		// slots, so none was burnt by being presented elsewhere. (A single-use
@@ -304,6 +324,7 @@ describe('every credential in every other kind’s slot', () => {
 		expect(missed).toEqual([]);
 		expect((await asOwner(`SELECT mode FROM alert_subscription WHERE user_id = $1 AND project_id = $2 AND kind = 'data_stale'`, [owner.id, projectId]))[0].mode).toBe('off');
 		expect((await post('/auth/login', { email: resetEmail, password: 'a brand new password' })).status).toBe(200);
+		expect((await asOwner('SELECT email FROM app_user WHERE id = $1', [mover.id]))[0].email).toBe(moverNext);
 	}, 60_000);
 
 	it('a purpose is fixed in the database too: an email token of one purpose is never consumed as the other', async () => {
@@ -320,6 +341,25 @@ describe('every credential in every other kind’s slot', () => {
 		expect(await consume(verify, 'verify')).toBe(u.id);
 		expect(await consume(reset, 'reset')).toBe(u.id);
 		expect(await consume(reset, 'reset')).toBeNull();
+	});
+
+	it('an email change link and an email token are never consumed as each other (347 keeps its own table)', async () => {
+		const u = await signUp('TCchange', { verified: false });
+		const verify = tokenIn(lastMailTo(u.email));
+		const next = `tc-change-${crypto.randomUUID()}@example.com`;
+		expect((await u.call('POST', '/auth/change-email', { newEmail: next, currentPassword: 'correct horse' })).status).toBe(202);
+		const change = tokenIn(lastMailTo(next));
+		const { hashToken } = await import('./tokens.js');
+		const consumeToken = async (token: string, purpose: string) =>
+			(await asOwner('SELECT app_consume_email_token($1, $2::email_token_purpose) AS u', [hashToken(token), purpose]))[0].u as string | null;
+		const consumeChange = async (token: string) => await asOwner('SELECT * FROM app_consume_email_change($1)', [hashToken(token)]);
+		expect(await consumeToken(change, 'verify')).toBeNull();
+		expect(await consumeToken(change, 'reset')).toBeNull();
+		expect(await consumeChange(verify)).toEqual([]);
+		// Positive control: each is consumed by its own function, once.
+		expect(await consumeChange(change)).toEqual([{ user_id: u.id, new_email: next }]);
+		expect(await consumeChange(change)).toEqual([]);
+		expect(await consumeToken(verify, 'verify')).toBe(u.id);
 	});
 });
 
