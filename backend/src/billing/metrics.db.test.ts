@@ -108,6 +108,69 @@ describe('billing_metrics_people', () => {
 	});
 });
 
+describe('the reverse trial and the live catchments (342, 338)', () => {
+	const NOW = new Date('2026-11-23T00:00:00Z');
+	const report = (month: string) => gatherReport(process.env.TEST_MIGRATION_DATABASE_URL!, month, NOW);
+	let lateAccount: string;
+
+	beforeAll(async () => {
+		lateAccount = ((await asOwner(
+			`INSERT INTO billing_account (kind, user_id) VALUES ('user', $1) ON CONFLICT (user_id) DO UPDATE SET kind = EXCLUDED.kind RETURNING id`,
+			[late.id]
+		)) as { id: string }[])[0]!.id;
+		const grant = (acct: string, at: string, by: string, plan = 'pro') =>
+			asOwner(
+				`INSERT INTO billing_grant_log (billing_account_id, action, plan_code, reason, granted_by, created_at) VALUES ($1, 'grant', $2, 'metrics test', $3, $4)`,
+				[acct, plan, by, at]
+			);
+		// early: a trial at 00:30 SAST on 1 March (in March), paid by card 20 days later (a canceled mock subscription, so
+		// the account stays Free today), and an earlier card plan from before the trial, which doesn't count.
+		await grant(account, '2001-02-28T22:30:00Z', 'reverse trial');
+		await asOwner(
+			`INSERT INTO subscription (billing_account_id, plan_code, status, provider, external_ref, created_at) VALUES
+			 ($1, 'pro', 'canceled', 'mock', 'metrics-early-before', '2001-01-10T00:00:00Z'),
+			 ($1, 'pro', 'canceled', 'mock', 'metrics-early-paid', '2001-03-20T22:30:00Z')`,
+			[account]
+		);
+		// late: a trial at 23:30 SAST on 31 March (in March), then only a staff grant (not paid) within the 30 days and a
+		// paid invoice after them; and a second trial row at 00:30 SAST on 1 April (April's).
+		await grant(lateAccount, '2001-03-31T21:30:00Z', 'reverse trial');
+		await grant(lateAccount, '2001-04-05T00:00:00Z', 'operator');
+		await grant(lateAccount, '2001-05-15T00:00:00Z', 'invoice');
+		await grant(lateAccount, '2001-03-31T22:30:00Z', 'reverse trial');
+	});
+
+	afterAll(async () => {
+		await asOwner(`DELETE FROM billing_grant_log WHERE reason = 'metrics test'`);
+		await asOwner(`DELETE FROM subscription WHERE external_ref IN ('metrics-early-before', 'metrics-early-paid')`);
+		await asOwner(`UPDATE project SET settings = settings - 'autoRun' WHERE id = $1`, [projectId]);
+	});
+
+	it('counts the SAST month’s reverse trials and those paid within 30 days, by a card plan or an invoice, not a staff grant', async () => {
+		expect((await report('2001-03')).reverseTrial).toEqual({ cohort: 2, paid: 1, share: 0.5, pending: 0, pendingPaid: 0 });
+		// April's trial: its invoice came 44 days on, so it isn't counted either.
+		expect((await report('2001-04')).reverseTrial).toEqual({ cohort: 1, paid: 0, share: 0, pending: 0, pendingPaid: 0 });
+		expect((await report('2001-02')).reverseTrial.cohort).toBe(0);
+	});
+
+	it('counts a trial whose 30 days are still open as pending', async () => {
+		expect((await gatherReport(process.env.TEST_MIGRATION_DATABASE_URL!, '2001-03', new Date('2001-04-10T00:00:00Z'))).reverseTrial).toEqual({
+			cohort: 1, paid: 1, share: 1, pending: 1, pendingPaid: 0
+		});
+	});
+
+	it('counts an active Free account at its live-catchment limit once a catchment goes live (positive control)', async () => {
+		const at = async () => (await report('2001-03')).freeLimits.limits.find((l) => l.limit === 'live_catchments')!;
+		const before = await at();
+		expect(before.value).toBe(1);
+		await asOwner(`UPDATE project SET settings = jsonb_set(coalesce(settings, '{}'::jsonb), '{autoRun}', '{"enabled": true}') WHERE id = $1`, [projectId]);
+		const after = await at();
+		expect(after.at).toBe(before.at + 1);
+		// Counts only: the report names no account for it.
+		expect(JSON.stringify(after)).not.toContain(account);
+	});
+});
+
 describe('owner only', () => {
 	it('water_app can neither execute nor call them; the owner can (positive control)', async () => {
 		const grants = (await asOwner(
