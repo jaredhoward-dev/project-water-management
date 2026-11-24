@@ -573,13 +573,17 @@ nothing about the account changes. Limits: the verification email's one-a-minute
 cooldown and the account's daily cap of reset, verification and change emails
 (078's `account_mail_quota`). **No enumeration:** the answer is the same `202`
 whether or not the new address has an account (a taken address gets no
-mail), after the same time (`answerAlike`) and under the same limits (the link
+link: its holder gets sign-up's "you already have an account" email, or a
+fresh confirmation link, under that address's own cooldown and cap, sent
+inside the same `answerAlike`), after the same time (`answerAlike`) and under the same limits (the link
 is issued, and counted, before the address is looked up), so this reveals no
 more than sign-up. If an account takes the address after the link went out,
 the switch is refused (`409 email_change_taken`) by `app_user`'s unique email;
 only the holder of that inbox can see it. On the switch the address is marked
 verified, a bounce suppression (the old address's) is cleared, and outstanding
-verify and reset links to the old address are dropped. Sessions are kept. A
+verify and reset links to the old address are dropped. Every session of the
+account is signed out, as a password change does; the browser that confirms
+keeps a fresh session if it is signed in to that account. A
 disposable new address is refused only with `BILLING_ENFORCED` on, as at
 sign-up ([billing.md § Verified email on Free](./billing.md#verified-email-on-free)).
 
@@ -817,7 +821,8 @@ sign-up ([billing.md § Verified email on Free](./billing.md#verified-email-on-f
   Free](./billing.md#verified-email-on-free)), and refreshed by a monthly PR
   (data-sources.md § disposable-email-domains). With `BILLING_ENFORCED` on,
   sign-up (`400 signup_disposable`) and an email change (`400
-  email_change_disposable`) refuse it too.
+  email_change_disposable`) refuse it too (a sign-up through a live invite for exactly that address is
+  exempt).
 
 ### Throttles that don't depend on the WAF
 

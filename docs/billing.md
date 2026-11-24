@@ -249,7 +249,7 @@ output never goes into an issue, a PR, a chat or an agent's transcript.
 | Sign-ups per day | Per SAST day of the month; the three busiest printed | |
 | Domain clusters | Email domains with 5 or more sign-ups in some 7 days of the month; common providers are marked, not hidden | Escalation (a) |
 | Canonical clusters | Canonical addresses (lower-cased, `+tag` dropped, Gmail's dots dropped, googlemail.com as gmail.com) with more than one account, ever, where one signed up this month; the user ids | Escalation (a) |
-| Disposable-domain refusals | Refusals by the [verified-email gate](#verified-email-on-free) of a disposable-domain address (`email_disposable`) this SAST month, by feature (assistant, feeds), and beside them its unverified refusals (`email_unverified`). Counted per SAST day in the owner-only `email_gate_refusal` (348; counts only: no address, domain, person or project), one autocommit `app_email_gate_refused` call per refusal on its own connection, since the refusal rolls the route's transaction back; each refusal is also logged as `email_gate_refused` with its code and feature. Zero while `BILLING_ENFORCED` is off (the gate is), and no data before 348 | |
+| Disposable-domain refusals | Refusals by the [verified-email gate](#verified-email-on-free) of a disposable-domain address (`email_disposable`) this SAST month, by feature (assistant, feeds), and beside them its unverified refusals (`email_unverified`). Counted per SAST day in the owner-only `email_gate_refusal` (348; counts only: no address, domain, person or project), one autocommit `app_email_gate_refused` call per refusal made after the route's transaction has rolled back (`countGateRefusals`), so it never needs a second pooled connection (the assistant Lambda's pool is one); each refusal is also logged as `email_gate_refused` with its code and feature. Zero while `BILLING_ENFORCED` is off (the gate is), and no data before 348 | |
 
 The plan is each account's plan **today**; in Phase 1 that is Free for
 everyone. Runs, reports and sign-ups use the SAST month; the assistant's
@@ -1362,7 +1362,11 @@ them on together.
 - **Counted.** Each refusal is logged (`email_gate_refused`, its code and
   feature, never the address or domain) and counted per SAST day in
   `email_gate_refusal` (348) for the abuse report
-  ([§ Metrics and the abuse report](#metrics-and-the-abuse-report)).
+  ([§ Metrics and the abuse report](#metrics-and-the-abuse-report)). The
+  count is written once the route's transaction has ended
+  (`EmailGateRefused` and `countGateRefusals` in `billing/emailGate.ts`); a
+  failed count still answers 403. A test runs a refusal on a pool of one
+  connection and checks it answers promptly and is counted.
 - **Tests.** `backend/src/billing/emailGate.db.test.ts` (off allowed; on,
   unverified and disposable refused for the assistant and for attaching and
   switching on a feed; verified, paid and attached-off allowed; a
@@ -1380,7 +1384,9 @@ them on together.
   accounts), and so does changing the address (`400 email_change_disposable`).
   Off, both take any address, like every other Free rule: #641 builds
   anti-abuse into Phases 1–2 and Phase 2 switches the limits on together.
-  An invite sign-up is no exception: the address is still the account's. A person refused here, or by the
+  A sign-up through a live invite for exactly that address is exempt:
+  invitees are farmers and viewers a catchment's manager chose, always free
+  (changing the address afterwards is still refused). A person refused here, or by the
   gate above, fixes it on the Account page's **Email address** card (POST
   `/auth/change-email`): a link goes to the new address and the account
   switches only when it is used ([security.md § Changing the email
