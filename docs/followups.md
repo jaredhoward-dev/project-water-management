@@ -957,14 +957,15 @@ are #641's checklist. Open items from building it:
       day (`assistant_trial_cap`, `assistant_trial_daily_cap`), still in the
       Free pool (billing.md § The reverse trial).
 - [ ] **The reverse trial: what 342 left** (round 9, #641). Built and off
-      (`REVERSE_TRIAL` and `BILLING_ENFORCED`). Still to do: (1) **buying Pro
-      during a trial**: checkout answers 409 while any subscription is live
-      (`billing/routes.ts`), and `app_billing_apply` would meet
-      `subscription_one_live_per_account` inserting the paid row; durable fix:
-      checkout accepts an account whose live row is a reverse trial, and the
-      webhook ends that trial (status `canceled`, logged) in the same
-      transaction it writes the paid row; trigger: before `REVERSE_TRIAL` goes
-      on; (2) the banner 3 days before the end and the end-of-trial email;
+      (`REVERSE_TRIAL` and `BILLING_ENFORCED`). Done: (1) **buying Pro during
+      a trial** (round 10, 344): checkout accepts an account whose live row
+      is a reverse trial, and `app_billing_apply` ends the trial (`expired`,
+      logged as an `expire` by `checkout`) in the transaction that writes the
+      paid row (billing.md § The reverse trial). Its UI half is open: the
+      Plan page offers Manage billing, not Upgrade, while the trial is live
+      (`components/billing/plan.ts` `billingActions`), and the plan JSON
+      doesn't yet say a subscription is a reverse trial; trigger: before
+      `REVERSE_TRIAL` goes on. Still to do: (2) the banner 3 days before the end and the end-of-trial email;
       (3) the live-catchment picker at the end and stopping automatic runs on
       the others 7 days later (the 338 item below); (4) the assistant panel's
       words for `assistant_trial_cap` and `assistant_trial_daily_cap`

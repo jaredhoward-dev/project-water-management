@@ -81,15 +81,31 @@ async function accountState(db: Db, accountId: string | null): Promise<AccountSt
 	return { id: accountId, kind, customerRef: rows[0]?.ref ?? null, plan: plan as AccountPlanJson };
 }
 
+/**
+ * Whether the account's live subscription stops a checkout: any does but the
+ * reverse trial (342: provider `manual`, status `trialing`), which the paid
+ * plan replaces when its webhook lands (344's app_billing_apply ends the trial).
+ * A staff or invoice grant (`manual`, `active`) and a paid plan still do.
+ */
+export function checkoutBlockedBy(sub: { status: string } | null | undefined, liveProvider: string | null | undefined): boolean {
+	if (!sub) return false;
+	return !(sub.status === 'trialing' && liveProvider === 'manual');
+}
+
 async function checkout(c: Context<AuthEnv>, resolve: (db: Db) => Promise<string | null>, pagePath: string) {
 	// Access first, so a stranger meets 404 whatever the provider.
-	const state = await withUser(c.get('userId'), async (db) => accountState(db, await resolve(db)));
+	const state = await withUser(c.get('userId'), async (db) => {
+		const s = await accountState(db, await resolve(db));
+		if (!s?.plan.subscription) return s && { ...s, liveProvider: null };
+		const { rows } = await db.query<{ ref: { provider?: string } | null }>('SELECT app_billing_live_subscription_ref($1) AS ref', [s.id]);
+		return { ...s, liveProvider: rows[0]?.ref?.provider ?? null };
+	});
 	if (!state) throw new ApiError(404, 'not found');
 	const provider = billingProvider();
 	if (!provider || provider.name === 'manual') throw new BillingUnavailableError();
 	const body = checkoutBody.parse(await readJson(c));
 	if (PURCHASABLE[state.kind] !== body.plan) throw new ApiError(400, `this account can subscribe to the ${PURCHASABLE[state.kind]} plan only`);
-	if (state.plan.subscription) throw new ApiError(409, 'this account already has a subscription; change it from Manage billing');
+	if (checkoutBlockedBy(state.plan.subscription, state.liveProvider)) throw new ApiError(409, 'this account already has a subscription; change it from Manage billing');
 	const plans = await withoutUser((db) => listPlans(db));
 	const found = plans.find((p) => p.code === body.plan);
 	if (!found) throw new ApiError(400, 'no such plan');

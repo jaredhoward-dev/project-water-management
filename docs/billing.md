@@ -563,7 +563,11 @@ its admins) ([api.md § Billing](./api.md#billing)). Each:
 2. Refuses `manual` or no provider (`409 billing_unavailable`).
 3. Checkout only: the plan must be the account's kind (Pro for a person,
    Team for a team), and there must be no live subscription (`409`: Manage
-   billing changes the one there is, so Stripe never holds two). The body's
+   billing changes the one there is, so Stripe never holds two), except a
+   reverse trial (`manual` + `trialing`, read through
+   `app_billing_live_subscription_ref`; `checkoutBlockedBy`), which the paid
+   plan replaces when its webhook lands ([§ The reverse trial](#the-reverse-trial-built-off),
+   344). A staff or invoice grant, or a paid plan, still answers `409`. The body's
    optional `seats` must be a whole number from the plan's included seats to
    50, on a plan that sells extra seats (`400` otherwise;
    [§ Team seats at checkout](#team-seats-at-checkout)).
@@ -880,11 +884,28 @@ its spend counts toward the pool. The caps are fixed in SQL, not settings:
 #641 states them, and a DB test (`reverseTrial.db.test.ts`) pins the SQL pair to
 `TRIAL_CAPS`.
 
+**Buying Pro during the trial** (`344_trial_checkout.sql`, round 10).
+Checkout opens for an account whose only live subscription is its reverse
+trial ([§ Checkout and portal](#checkout-and-portal)). When the paid
+subscription's webhook lands, `app_billing_apply` ends the trial in the same
+transaction, before it writes the paid row: `expired` (as the tick ends
+one), its `period_end` and `trial_end` moved to now (never before it began),
+logged as an `expire` by `checkout`. So the one-live index holds and the
+account goes from the trial straight to the paid plan, never through Free.
+Only a live (`trialing`, `active` or `past_due`) Pro or Team subscription
+from a payment provider (`mock` or `stripe`) ends a trial; a `manual` event,
+and any other live subscription already there (a staff or invoice grant, a
+paid plan), is still a `conflict`. A replay is a duplicate (326), and a
+later update to the paid plan finds no trial to end. The claim stays: the
+person had their trial. 344 also takes the account's billing lock (334's
+advisory lock) before the account row's `FOR UPDATE`, as 341 and 342 do,
+since every subscription write fires 341's sync, which takes it.
+
 **Not built yet** ([followups.md § Billing](./followups.md#billing-issue-641)):
 the banner 3 days before the end, the live-catchment picker and the 7-day
-stop of automatic runs after it, buying Pro during a trial (checkout answers
-`409` while any subscription is live, and the webhook's new row would meet the
-one-live index), and the assistant panel's own words for the two new codes.
+stop of automatic runs after it, the Plan page's Upgrade button during a
+trial (it offers Manage billing while any subscription is live,
+`billingActions`), and the assistant panel's own words for the two new codes.
 
 **Tests.** `billing/reverseTrial.db.test.ts` (off grants and claims nothing;
 on, a first verification starts 14 days of Pro, logged and on the plan page;
@@ -893,6 +914,11 @@ unverified caller gets none and is granted once verified; a live plan keeps
 it; the tick ends it to Free with the project still there; the claim table
 closed to `water_app`; the trial caps refuse only enforced, wait to 00:00 SAST
 or the trial's end, ignore spend before the trial, and count in the pool),
+`billing/trialCheckout.db.test.ts` (344: mock checkout during the trial, then
+the webhook: Pro paid and live, the trial expired now and logged, one live
+plan; a replay is a duplicate; a provider's own trialing ends it too; a
+staff grant still refuses checkout and the paid event; a `manual` or Free
+event never ends a trial), `billing/checkout.test.ts` (`checkoutBlockedBy`),
 `billing/reverseTrial.test.ts` (the setting, the hash), `assistant/dollarCaps.test.ts`.
 
 ### Stripe

@@ -117,6 +117,39 @@ describe('POST /account/plan/checkout', () => {
 		expect((await post('/account/plan/checkout', { plan: 'pro', interval: 'month' })).status).toBe(409);
 	});
 
+	describe('during the reverse trial (342: manual + trialing; 344 ends it when the paid plan lands)', () => {
+		const trialing = { status: 'trialing', seats: 1, periodStart: null, periodEnd: null, trialEnd: null, cancelAtPeriodEnd: true };
+		it('opens checkout for the reverse trial', async () => {
+			answers.set('app_account_plan', [{ plan: planOf('user', trialing) }]);
+			answers.set('app_billing_live_subscription_ref', [{ ref: { provider: 'manual', externalRef: null } }]);
+			const res = await post('/account/plan/checkout', { plan: 'pro', interval: 'month' });
+			expect(res.status).toBe(200);
+			expect(((await res.json()) as { url: string }).url).toMatch(/\/billing\/mock\/checkout\?t=/);
+		});
+		it('still refuses a staff or invoice grant (manual, active) and a paid trial (a provider’s own trialing)', async () => {
+			answers.set('app_account_plan', [{ plan: planOf('user', { ...trialing, status: 'active' }) }]);
+			answers.set('app_billing_live_subscription_ref', [{ ref: { provider: 'manual', externalRef: null } }]);
+			expect((await post('/account/plan/checkout', { plan: 'pro', interval: 'month' })).status).toBe(409);
+			answers.set('app_account_plan', [{ plan: planOf('user', trialing) }]);
+			answers.set('app_billing_live_subscription_ref', [{ ref: { provider: 'mock', externalRef: 'sub_x' } }]);
+			expect((await post('/account/plan/checkout', { plan: 'pro', interval: 'month' })).status).toBe(409);
+		});
+		it('checkoutBlockedBy: only the reverse trial gives way', async () => {
+			const { checkoutBlockedBy } = await import('./routes.js');
+			expect(checkoutBlockedBy(null, null)).toBe(false);
+			expect(checkoutBlockedBy({ status: 'trialing' }, 'manual')).toBe(false);
+			for (const [status, provider] of [
+				['active', 'manual'],
+				['past_due', 'manual'],
+				['trialing', 'stripe'],
+				['trialing', 'mock'],
+				['active', 'stripe'],
+				['trialing', null]
+			] as const)
+				expect(checkoutBlockedBy({ status }, provider), `${status} ${provider}`).toBe(true);
+		});
+	});
+
 	it('manual: 409 billing_unavailable', async () => {
 		vi.stubEnv('BILLING_PROVIDER', 'manual');
 		const res = await post('/account/plan/checkout', { plan: 'pro', interval: 'month' });
