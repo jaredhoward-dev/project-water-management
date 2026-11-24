@@ -998,18 +998,27 @@ are #641's checklist. Open items from building it:
       migrate Lambda has no `BILLING_PROVIDER=stripe`, no key and no route to
       Stripe, so the action answers `billing_unavailable`
       (`backend/src/lambda-migrate.ts`). Durable fix: give the function the
-      provider's settings and a route out (the same choice as the next
-      item). Trigger: the first B2B order.
-- [ ] **The API Lambda can't reach api.stripe.com.** It runs in the private
-      VPC, which has no internet gateway and no NAT (`infra/network.tf`,
-      the API function's `vpc_config` in `infra/lambda.tf`), so once
-      `billing_provider = "stripe"` checkout, the portal and seat changes
-      fail with `billing_provider_error`. Durable fix, the operator's
-      choice: run the Stripe calls through the fixed-egress VPC the fetcher
-      and mirror-ingest use (`fixed_egress_enabled`, `infra/egress.tf`), or
-      a NAT for the API's subnets (a monthly cost), or a Lambda outside the
-      VPC that makes only the provider calls. Trigger: before Stripe is
-      turned on (deployment.md § Turning on Stripe).
+      provider's settings, `STRIPE_SECRET_KEY` in its runtime secret
+      (`RUNTIME_SECRETS.migrate` in `backend/src/config/runtimeSecrets.ts`
+      and `infra/secrets.tf`, only while billing is `stripe`) and a route
+      out: put its `vpc_config` on the Stripe egress module's subnets and
+      HTTPS-out group, as the API's is (`infra/egress.tf`, deployment.md §
+      Stripe egress). Trigger: the first B2B order.
+- [x] **The API Lambda can't reach api.stripe.com.** It runs in the private
+      VPC, which has no internet gateway and no NAT (`infra/network.tf`).
+      Done (round 7): `stripe_egress_enabled` (off by default; plan refuses
+      `billing_provider = "stripe"` without it) adds a NAT gateway to the
+      private VPC and two subnets of the API's own routed through it, plus an
+      HTTPS-out security group on the API only; RDS and the other Lambdas
+      keep the route-less subnets (`infra/modules/stripe-egress/`,
+      deployment.md § Stripe egress, about $45 a month in af-south-1).
+      Left open: a security group can't name a host, so the API may reach
+      any HTTPS host through it. Durable fix if that matters: a small Lambda
+      outside the VPC that makes only the provider calls, invoked through a
+      Lambda interface endpoint (cheaper, and the private VPC keeps no route
+      out), at the cost of a backend transport change and a second deploy
+      artifact. Trigger: a security review that wants hostname-level egress,
+      or the NAT's cost becoming an objection.
 - [ ] **Paying a B2B invoice doesn't grant the plan.** `invoice.paid` for a
       standalone invoice changes nothing yet: the operator grants the plan
       through the invoice's period by hand (deployment.md runbook 23,

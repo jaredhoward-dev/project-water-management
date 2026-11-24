@@ -151,9 +151,11 @@ resource "aws_lambda_function" "backend" {
     log_group = aws_cloudwatch_log_group.lambda.name
   }
 
+  # network.tf's private subnets, or with stripe_egress_enabled the API's own
+  # subnets routed through a NAT gateway plus an HTTPS-out group (egress.tf).
   vpc_config {
-    subnet_ids         = aws_subnet.private[*].id
-    security_group_ids = [aws_security_group.api_lambda.id]
+    subnet_ids         = local.api_subnet_ids
+    security_group_ids = local.api_security_group_ids
   }
 
   environment {
