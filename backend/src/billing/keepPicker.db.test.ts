@@ -6,6 +6,7 @@
 //  - POST /account/plan/keep: the owner chooses, and past the grace, enforced, the pause moves at once;
 //  - a project that isn't one of the account's live catchments, a stranger's choice and a team member's are all 404;
 //  - a bad body is 400 after the access check;
+//  - a catchment of another account the caller can use (a team admin's own, the team's) is 404 through either route;
 //  - GET /projects/:id says when the project was paused (the workspace's notice), and null on the kept one.
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { asOwner, disableFeedsAfterFile, retirePendingJobs, signUp } from '../__tests__/helpers.js';
@@ -155,7 +156,19 @@ describe('345: a team’s picker is its admins’ only', () => {
 		expect((await admin.call('GET', '/teams/not-a-team/plan/live-catchments')).status).toBe(404);
 	});
 
-	it('a team’s catchment can’t be chosen through a personal account’s route', async () => {
+	// The cross-account pair (cross-project-refs.security.db.test.ts's inventory points here for billing/routes.ts:projectId):
+	// the admin can use both catchments, so only the account each belongs to stops it, in either direction.
+	it('a catchment is chosen only through its own account’s route, in either direction', async () => {
+		const own = await newProject(admin, 'Keep admin own');
+		const kept = async (accountOfProject: string) =>
+			((await asOwner('SELECT kept_project_id AS k FROM billing_account WHERE id = $1', [await accountOf(accountOfProject)])) as { k: string | null }[])[0]!.k;
+		// Positive controls: each through its own account's route.
+		expect((await admin.call('POST', '/account/plan/keep', { projectId: own })).status).toBe(200);
+		expect((await admin.call('POST', `/teams/${teamId}/plan/keep`, { projectId: p })).status).toBe(200);
+		// Crossed: 404, and neither account's choice moves.
 		expect((await admin.call('POST', '/account/plan/keep', { projectId: p })).status).toBe(404);
+		expect((await admin.call('POST', `/teams/${teamId}/plan/keep`, { projectId: own })).status).toBe(404);
+		expect(await kept(own)).toBe(own);
+		expect(await kept(p)).toBe(p);
 	});
 });

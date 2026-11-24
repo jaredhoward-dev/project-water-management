@@ -1420,6 +1420,10 @@ const FIELDS: Record<string, string[] | string> = {
 	'projects/document.ts:siteNodeId': 'a node of the file’s own model, moved to its fresh id on import (projectFileProblems refuses any other): series/site.db.test.ts',
 	'projects/authorityDelegates.ts:userId': ['POST /projects/:id/authority-delegates userId'],
 	'projects/routes.ts:teamId': 'a team, not a project row: teams/teams.security.db.test.ts',
+	// POST /account/plan/keep and /teams/:id/plan/keep (345): the route's home is a billing account, not a project, and both
+	// worlds are the dual editor's own account, so the sweep's (A, B) pair names no other account's row.
+	'billing/routes.ts:projectId':
+		'a billing account’s live catchment, not a project row of the route’s project: app_billing_keep_live finds it WHERE billing_account_id = the route’s account, so a catchment of another account the caller can use is 404 through either route (billing/keepPicker.db.test.ts, with its positive controls)',
 	'assistant/routes.ts:runId':
 		'looked up within the project (WHERE id = … AND project_id = …) before the turn is counted, so another project’s run is 404; the sweep runs with the assistant off, which answers first (assistant/assistant.db.test.ts tries it on the mock provider, with a positive control)',
 	'publish/publish.ts:runId': ['POST /projects/:id/publication runId'],
