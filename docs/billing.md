@@ -880,6 +880,8 @@ its spend counts toward the pool. The caps are fixed in SQL, not settings:
 #641 states them, and a DB test (`reverseTrial.db.test.ts`) pins the SQL pair to
 `TRIAL_CAPS`.
 
+**3 days before the end** the person gets an email ([§ Plan emails](#plan-emails)).
+
 **Not built yet** ([followups.md § Billing](./followups.md#billing-issue-641)):
 the banner 3 days before the end, the live-catchment picker and the 7-day
 stop of automatic runs after it, buying Pro during a trial (checkout answers
@@ -1169,8 +1171,10 @@ Built but off: nothing is paused unless `BILLING_ENFORCED` is on.
   once), switching the extra catchments' operations off so the account is
   back within Free, or enforcement turned off: the markers go and the grace
   ends. Everything runs again as it was.
-- **Not yet.** The owners' email, the picker on the Plan page and the
-  workspace banner on a paused catchment ([followups.md](./followups.md)).
+- **The owners are told** when the grace starts and when the pause lands
+  ([§ Plan emails](#plan-emails)).
+- **Not yet.** The picker on the Plan page and the workspace banner on a
+  paused catchment ([followups.md](./followups.md)).
 - **Tests.** `backend/src/billing/planPause.db.test.ts`: the grace recorded
   on a lapse and nothing paused within it; nothing paused with enforcement
   off; past it, enforced, two of three catchments paused, the most recent
@@ -1179,6 +1183,65 @@ Built but off: nothing is paused unless `BILLING_ENFORCED` is on.
   (positive control); members read the marker, strangers don't; the owner's
   choice moves the pause and a stranger's is refused; an upgrade resumes
   everything; a never-paid account isn't paused; only the worker sweeps.
+
+## Plan emails
+
+`346_billing_notices.sql`, `billing/planNotices.ts`, `planNoticeMail` in
+`mail/templates.ts` (keys `mail.plan.*` in `backend/src/mail/i18n/en.ts`,
+with Afrikaans). #641: after a downgrade "automatic runs and alerts … stop
+after a 14-day grace, with an email to the owners", and the reverse trial's
+end is announced. Three emails, each **once** per occurrence and recipient,
+sent by the worker's tick after the pause sweep:
+
+| Email | When | Gated by | Says |
+| --- | --- | --- | --- |
+| Grace started (`grace`) | An account has `over_free_since` (341: a paid plan, trial or grant ended with more live catchments than Free's) and the 14 days are still running, nothing paused yet | `BILLING_ENFORCED=true` | The date the pause lands (`over_free_since` + 14 days, SAST), the catchments that will pause, the ones that stay on, that nothing is deleted and everything stays readable, editable, runnable and downloadable, and how to keep another one on or upgrade (the plan page) |
+| Pause landed (`paused`) | A catchment of the account is paused (`project_plan_pause`) | `BILLING_ENFORCED=true` | The catchments paused, the ones on, nothing deleted, how to resume |
+| Trial ending (`trial_ending`) | A reverse trial (342: `manual` + `trialing`, a person's account) ends within 3 days | A trial existing (342 grants none unless `REVERSE_TRIAL` and `BILLING_ENFORCED` are on) | The plan and the end date, that nothing is charged (no card), nothing deleted, the 14-day grace if more catchments are live than Free's, and the plan page |
+
+With enforcement off nothing pauses (341), so no grace or pause email is
+queued: it would announce something that won't happen. A grace first seen
+already past its 14 days (enforcement turned on late) gets only the pause
+email. A Stripe trial isn't emailed here: Stripe sends its own reminder.
+
+**Who.** The account's owners, those who may change its plan
+(`app_billing_account_readable`, 323): the person for a personal account,
+each admin of the team for a team's. Each gets their own email, in their
+language.
+
+**Once.** `billing_notice`'s primary key is (account, kind, `about`,
+recipient), `about` being the occurrence: `over_free_since` for the grace
+and pause emails (a later lapse is a new grace with new emails), `trial_end`
+for the trial's. Queueing is `ON CONFLICT DO NOTHING`; claiming is under
+`FOR UPDATE SKIP LOCKED` with a lease; a send error retries on the next tick
+(3 attempts); a worker that dies mid-send leaves it `failed`, never sent
+twice (329's pattern). The rows are kept as the record that the email went,
+go with the account and with the person, and are in the person's data export
+(`billing.planNotices`).
+
+**Built as the recipient.** Each email is built in a read-only transaction
+as its recipient, under RLS: the account is read again as they see it (an
+email whose grace is over, back on a plan or within Free, whose pause has
+lifted, whose trial ended or was replaced, or with enforcement now off, is
+`skipped`, as is one to an unconfirmed or suppressed address). What pauses
+comes from `app_plan_pause_preview(account)`: 341's order (the kept one,
+else the most recently active), for the account's owner only, with no id for
+a catchment the caller can't read (a catchment they left, still billed to
+their account; a team catchment they're not a member of). The email names
+only the catchments the recipient can read and counts the rest ("and 1 more
+catchment of the account that you are not a member of"). The log lines
+(`plan_notice_sent`, `plan_notice_skipped`, `plan_notice_prepare_failed`,
+`plan_notice_queue_failed`) name the account id and the kind only.
+
+**Tests.** `billing/planNotices.db.test.ts` (off sends and queues nothing;
+enforced, the grace email goes once, with the date, the catchments to pause,
+the kept one, and the one the owner left counted, never named, and nobody
+else emailed; the pause email once and no second grace email; the trial
+email once at 3 days, not at 5, not for a staff grant, even with enforcement
+off; a trial replaced before the send is skipped; the preview answers the
+owner and not a stranger; only the worker queues, claims and finishes),
+`mail/templates.plan.test.ts` (the SAST date under the skewed `TZ`, the
+team's name, the count, Afrikaans), `mail/outbound.security.test.ts`.
 
 ## Verified email on Free
 

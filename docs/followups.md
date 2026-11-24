@@ -964,7 +964,9 @@ are #641's checklist. Open items from building it:
       checkout accepts an account whose live row is a reverse trial, and the
       webhook ends that trial (status `canceled`, logged) in the same
       transaction it writes the paid row; trigger: before `REVERSE_TRIAL` goes
-      on; (2) the banner 3 days before the end and the end-of-trial email;
+      on; (2) the banner 3 days before the end (the email 3 days before is
+      done: 346, billing.md § Plan emails; the banner belongs on the Plan
+      page and the workspace);
       (3) the live-catchment picker at the end and stopping automatic runs on
       the others 7 days later (the 338 item below); (4) the assistant panel's
       words for `assistant_trial_cap` and `assistant_trial_daily_cap`
@@ -1097,8 +1099,8 @@ are #641's checklist. Open items from building it:
       Still to do: (2) the picker at the end of the reverse trial (341
       pauses the other catchments' operations after the 14-day grace and
       keeps `app_billing_keep_catchment`'s choice, but no route or Plan page
-      control calls it yet), the owners' email when the grace starts and
-      when the pause lands, and a workspace banner on a paused catchment
+      control calls it yet; ~~the owners' email when the grace starts and
+      when the pause lands~~, done in 346, billing.md § Plan emails), and a workspace banner on a paused catchment
       linking to Plan and usage (billing.md § Pausing after a downgrade);
       (4) the abuse report's "share at the live-catchment limit" can now be
       measured from 338's count; (6) *Compare plans* always opens the
