@@ -122,10 +122,12 @@ pnpm dev:billing:report --show-emails       # operator only: prints the addresse
 
 It reads two owner-only functions (`325_billing_metrics.sql`; never granted
 to `water_app`, [data-model.md](./data-model.md)) on this checkout's
-database (`MIGRATION_DATABASE_URL`); in production the operator runs it with
-the schema owner's connection, from inside the VPC ([deployment.md §
-Runbooks](./deployment.md#runbooks) 22: the report, or the account rows in
-plain SQL; there is no Lambda route yet). The maths is `backend/src/billing/metrics.ts`
+database (`MIGRATION_DATABASE_URL`); in production the operator runs the
+same code through the migrate Lambda's `billing-report` owner action
+(`.github/workflows/billing-admin.yml`, approved in the `production`
+environment; [deployment.md § Owner actions](./deployment.md#owner-actions)
+and runbook 22), which answers with the report redacted as the script prints
+it: never `--show-emails`. The maths is `backend/src/billing/metrics.ts`
 (unit tests beside it), the script `backend/scripts/billing-report.ts`.
 
 **What it prints.** Counts and aggregates; account or person ids only where a
@@ -683,9 +685,15 @@ pnpm dev:billing:grant <email|team-id> --list
 ```
 
 It runs as the schema owner on this checkout's database (like
-`dev:billing:report`); in production the operator calls the same functions as
-the schema owner, step by step in [deployment.md § Runbooks](./deployment.md#runbooks)
-21 (finding the account, the exact `SELECT`, revoking, checking the log). An address is used only to find the person's account and
+`dev:billing:report`); in production the operator runs the same code
+(`backend/src/billing/staffGrant.ts`) through the migrate Lambda's owner
+actions `billing-grant`, `billing-revoke` and `billing-grants`
+(`.github/workflows/billing-admin.yml`, approved in the `production`
+environment, with the run's GitHub login as `--by`; [deployment.md § Owner
+actions](./deployment.md#owner-actions)), or, as a fallback, the functions
+in SQL step by step in [deployment.md § Runbooks](./deployment.md#runbooks)
+21. The Lambda's answer carries ids, never the address, and the workflow's
+public summary leaves out the reasons. An address is used only to find the person's account and
 is printed only as the operator typed it. `--by` defaults to the operator's
 login.
 

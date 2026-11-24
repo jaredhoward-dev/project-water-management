@@ -4556,7 +4556,7 @@ key there would let any read-only principal forge any user's session.
 - **CI's dependency cache is not trusted by release builds.** Every job in
   `ci.yml` (and `dependabot-lockfile.yml`'s credential-free job) restores
   pnpm's store through `actions/setup-node`'s `cache: pnpm`; both deploy
-  workflows and `load-reference.yml` restore no cache at all, setup-node's
+  workflows, `load-reference.yml` and `billing-admin.yml` restore no cache at all, setup-node's
   implicit `packageManager` cache included (`package-manager-cache: false`;
   `check_workflows.mjs` rule `no-cache`, [deployment.md § What each deploy
   does](./deployment.md#what-each-deploy-does)).
@@ -4803,6 +4803,19 @@ key there would let any read-only principal forge any user's session.
   for one other key, `tiles/water.pmtiles` (`api_water`); off by default.
   The file sits under `tiles/`, so `/tiles/*` serves it by bounded ranges
   like the other archives; GSW's terms allow redistribution.
+- **Owner actions run as the schema owner** (issue #641; [deployment.md §
+  Owner actions](./deployment.md#owner-actions)): a staff grant, its revoke,
+  the grant list, the monthly billing report and the operator's authority
+  confirmation, through `billing-admin.yml`, gated exactly like a reference
+  load (`production` environment, `main` only, the `preflight` job, the
+  session narrowed to invoking the migrate function). The event is a fixed,
+  named action whose every field a strict schema checks before anything
+  connects (`backend/src/ops/ownerActions.ts`); it never carries SQL. The
+  run's log is public, so no input is put in a step's environment or a
+  command (the payload is built by `jq` from the event file, the address
+  masked first), and the job summary prints ids, plans, dates and counts
+  only: the Lambda's answer carries no address or name, and the workflow
+  leaves out grants' reasons and the report's email domains too.
 - **Reference loads run as the schema owner**, so they are gated like a
   deploy: `load-reference.yml` reaches AWS only in the `production`
   environment (a required reviewer, then OIDC), from `main` only, after a
