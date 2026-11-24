@@ -52,10 +52,10 @@
 		onapply?: (proposal: AssistantProposal) => void | Promise<void>;
 	} = $props();
 
-	/** This site's address, for the disclaimer's `{site}` (the Terms link), as liability/Disclaimer.svelte. */
 	/** Compare plans opens the plan that bills this catchment: its team's, else your own (planLink.ts). */
 	const billingTeam = useBillingTeam();
 
+	/** This site's address, for the disclaimer's `{site}` (the Terms link), as liability/Disclaimer.svelte. */
 	const site = typeof location === 'undefined' ? basePath() : `${location.origin}${basePath()}`;
 
 	const EXAMPLES = ['Why does the simulated flow at the outlet not respond to rainfall?', 'Which settings would you change to improve the fit at the outlet?'];
