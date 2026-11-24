@@ -35,8 +35,32 @@ const renderAt = async (href: string, lang?: string) => {
 	url.href = href;
 	return render(Page, { props: { data: await loadFor(lang) } as never });
 };
-/** The page's text with tags dropped and the no-break spaces as spaces. */
-const text = (html: string) => html.replace(/<!--[^>]*-->/g, '').replace(/<[^>]+>/g, ' ').replace(/\u00a0|\u202f|&nbsp;/g, ' ').replace(/\s+/g, ' ');
+/**
+ * The page's text: a scan that drops comments and tags (a quoted attribute value may hold a '>'),
+ * each tag read as a space, then the no-break spaces as spaces and runs of space as one.
+ */
+const text = (html: string) => {
+	let out = '';
+	let i = 0;
+	while (i < html.length) {
+		if (html.startsWith('<!--', i)) {
+			const end = html.indexOf('-->', i + 4);
+			i = end === -1 ? html.length : end + 3;
+		} else if (html[i] === '<') {
+			let quote = '';
+			i++;
+			while (i < html.length && (quote || html[i] !== '>')) {
+				if (quote) {
+					if (html[i] === quote) quote = '';
+				} else if (html[i] === '"' || html[i] === "'") quote = html[i]!;
+				i++;
+			}
+			i++;
+			out += ' ';
+		} else out += html[i++];
+	}
+	return out.replace(/\u00a0|\u202f|&nbsp;/g, ' ').replace(/\s+/g, ' ');
+};
 
 afterEach(() => setLocale('en'));
 
