@@ -781,6 +781,17 @@ token, a malformed or unknown one, a live invite for another address) is
   checks that adding a member, team member or farmer (single and bulk) and
   signing in answer the same for an unknown address and an unverified or
   wrong-password one.
+- **Verified email on Free** (issue #641, 343_free_email_gate; off unless
+  `BILLING_ENFORCED`): on a Free project an unverified or disposable-domain
+  address can't start an assistant turn or switch a data feed on (`403
+  email_unverified` / `email_disposable`), so the costly parts need a real
+  inbox. `app_free_email_gate` is a definer function that answers a
+  non-member NULL and a member only their own address and whether it is
+  verified; the error text never carries the address. The disposable list
+  is vendored (CC0, `backend/src/auth/disposableDomains.ts`), never fetched
+  at runtime ([billing.md § Verified email on
+  Free](./billing.md#verified-email-on-free)). Sign-up doesn't check it yet
+  ([followups.md](./followups.md)).
 
 ### Throttles that don't depend on the WAF
 

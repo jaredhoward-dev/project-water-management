@@ -3801,7 +3801,7 @@ page holds the conversation and sends it with each turn.
   turn still running keeps counting with its `user_id` cleared, until it is
   charged or expires.
 
-### Billing (323_billing.sql, 331_billing_rls_order.sql, 338_live_catchments.sql, 339_team_assistant_share.sql)
+### Billing (323_billing.sql, 331_billing_rls_order.sql, 338_live_catchments.sql, 339_team_assistant_share.sql, 343_free_email_gate.sql)
 
 Plans, who each project bills to, and monthly usage, in **shadow mode**
 (issue #641 Phase 1): everything is counted, nothing is refused, and no
@@ -3905,6 +3905,12 @@ never to a farmer, contributor or viewer.
     `live_catchments` (no live subscription = Free, 1) and raises `23514`
     with constraint `plan_limit` (DETAIL key `live_catchments`) past it.
     [billing.md § Live catchments (Free)](./billing.md#live-catchments-free).
+  - `app_free_email_gate(project) → jsonb` (343): NULL unless
+    `app.billing_enforced` is `on`, the caller is a member of the project
+    (`app_project_role`) and its billing account has no live subscription
+    (Free); then the caller's own `{ email, verified }`. Definer, executable
+    by `water_app`; the routes refuse an unverified or disposable address
+    ([billing.md § Verified email on Free](./billing.md#verified-email-on-free)).
   - `app_entitlements(project) → jsonb`: `{ plan, limits, features,
     status }` for an editor or owner; NULL for anyone else.
   - `app_usage_add(project, kind, qty = 1)`: adds to the project's

@@ -1069,6 +1069,25 @@ are #641's checklist. Open items from building it:
       ration modelling); durable fix: on Free past the limit, the copy or
       import starts with automatic runs off and its response says so. Trigger:
       before `BILLING_ENFORCED` goes on in production.
+- [ ] **Free's verified-email gate: what 343 left** (issue #641 round 9,
+      2026-11-24). `343_free_email_gate` refuses the assistant and switching
+      a feed on, on Free, to an unverified or disposable-domain address when
+      `BILLING_ENFORCED=true` (billing.md § Verified email on Free). Still to
+      do: (1) sign-up and an email change (#641 item 5) don't call
+      `isDisposable` yet (`app_register`'s path, `auth/routes.ts`), and
+      there is no email change route at all, so a person whose address is
+      disposable has no way to fix it in the app (the refusal says only that
+      the address is temporary); durable fix: refuse at sign-up with its own
+      code, then an email change that re-verifies; (2) the reverse trial
+      (#641) is to call `isDisposable` before granting (wired at round 9's
+      merge); (3) the list's monthly refresh is by hand: a scheduled workflow
+      that fetches the pinned upstream file, refuses a size change past
+      ±20 % and opens a PR (#641: "refreshed monthly with a size-change
+      guard"); (4) the abuse report's "disposable rejections" count, which
+      needs the refusals logged (a `logEvent` with no address); (5) other
+      live operations (alert rules, automatic runs, publishing) aren't gated:
+      #641 names the assistant and live feeds only. Trigger: (1) and (3)
+      before `BILLING_ENFORCED` goes on in production.
 - [ ] **`billing-invoice` can't reach Stripe from the migrate Lambda.** The
       migrate Lambda has no `BILLING_PROVIDER=stripe`, no key and no route to
       Stripe, so the action answers `billing_unavailable`
