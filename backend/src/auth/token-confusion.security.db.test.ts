@@ -395,6 +395,11 @@ describe('where the backend reads a credential (source sweep)', () => {
 		'auth/session.ts': ['getCookie(c, MFA_CHALLENGE_COOKIE)', 'getCookie(c, SESSION_COOKIE)'],
 		'ingest/auth.ts': ["c.req.header('authorization')"],
 		'alerts/routes.ts': ["c.req.query('token')"],
+		// The billing provider's webhook signature (issue #641): an HMAC over the raw body, POST /billing/webhook/:provider only.
+		'billing/webhook.ts': ['c.req.header(SIGNATURE_HEADER)'],
+		// The mock billing pages' session token (issue #641 Phase 3), signed with the dev key for one account and an hour,
+		// and the two choices their forms post in the query: 404 unless BILLING_PROVIDER=mock, which production refuses.
+		'billing/mockCheckout.ts': ["c.req.query('t')", "c.req.query('outcome')", "c.req.query('action')"],
 		// Not a user's credential: CloudFront's shared secret on the origin (app.ts).
 		'app.ts': ["c.req.header('x-cloudfront-shared-secret')"],
 		// Not an access credential: the sign-in lockout's trusted-device mark

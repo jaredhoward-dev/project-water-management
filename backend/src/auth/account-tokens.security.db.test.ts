@@ -41,6 +41,8 @@ const NOT_A_CREDENTIAL: Record<string, string> = {
 	'data_feed_run_now.tokens': 'the “Run now” bucket’s fill level (a number), not a secret',
 	'assistant_usage.input_tokens': 'a count of the model tokens a turn read (a number), not a secret',
 	'assistant_usage.output_tokens': 'a count of the model tokens a turn wrote (a number), not a secret',
+	'assistant_usage.cache_read_tokens': 'a count of the input tokens read from the prompt cache (a number), not a secret',
+	'assistant_usage.cache_write_tokens': 'a count of the input tokens written to the prompt cache (a number), not a secret',
 	'job.lease_token': 'a worker’s lease on a claimed job (uuid); it authorises nothing outside the worker',
 	'app_user.password_hash': 'Argon2id, not SHA-256: checked on its own below'
 };

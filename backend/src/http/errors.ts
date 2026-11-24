@@ -167,6 +167,12 @@ export const ERROR_CODES = [
  *     stream's `error` event (assistant/orchestrator.ts TURN_ERRORS):
  *     assistant_hop_limit, assistant_output_limit, assistant_turn_limit,
  *     assistant_timeout, assistant_provider_error.
+ *   billing_* (issue #641 Phase 3, billing/provider.ts; docs/api.md § Billing):
+ *     POST …/plan/checkout and …/plan/portal, from the English Plan and usage
+ *     page. billing_unavailable (409, the manual provider or none: no online
+ *     billing), billing_provider_error (503, the provider failed or isn't set
+ *     up; never its text), billing_no_customer (409, the portal for an
+ *     account that never checked out).
  */
 export const MACHINE_ERROR_CODES = [
 	'render_token_refused',
@@ -191,7 +197,10 @@ export const MACHINE_ERROR_CODES = [
 	'assistant_output_limit',
 	'assistant_turn_limit',
 	'assistant_timeout',
-	'assistant_provider_error'
+	'assistant_provider_error',
+	'billing_unavailable',
+	'billing_provider_error',
+	'billing_no_customer'
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number] | (typeof MACHINE_ERROR_CODES)[number];
 

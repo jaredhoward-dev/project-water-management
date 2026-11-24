@@ -95,7 +95,8 @@ language switch and the farm view's m³ / ML, [§ Language](#language)), a
 **Your data** panel whose **Download my data** button saves the
 data-subject export (`GET /auth/me/export`, a JSON file; the download
 helpers load on click, and a second click within the minute shows the
-server's `429` message in an alert) and a
+server's `429` message in an alert; under it, outside the farm frame, a
+**Plan and usage** link to `/account/plan`, [§ Plan and usage](#plan-and-usage)) and a
 **Password** form
 (current, new, repeat; `POST /auth/change-password`). Changing the password
 signs out every other device while this browser stays signed in. Errors show
@@ -3008,7 +3009,8 @@ roles. *New team* stays in the header, and the empty state explains teams.
 **`/teams/:id`** leads with outcomes. The header has the team's name and
 your role, a summary line ("5 projects (1 red, 4 green) · 4 members ·
 created 26 Sep 2026") and the actions: **Project list**, **Team settings**,
-**Add member** (admins; focuses the add form) and **New project** (members
+**Plan and usage** (admins only, as the API answers; [§ Plan and
+usage](#plan-and-usage)), **Add member** (admins; focuses the add form) and **New project** (members
 and admins; opens the New project dialog with the team preselected). The
 main column is **Projects**: two tiles (EWR bar, alerts firing), then each project worst first with its source
 ("Published run"…), EWR pill, figures age and *Stale* flag, farms short
@@ -3092,6 +3094,119 @@ portfolio's keys, `status`, `name`, `age`, `farms` and `dam`, are all list
 sorts; `projects/grouping.ts` `portfolioListHref`). `GET /teams/:id/portfolio`
 stays: the teams list and the team page read their tiles and traffic lights
 from it.
+
+## Plan and usage
+
+Issue #641 Phase 1 (shadow mode): an account's plan and this month's usage,
+counted against the plan's limits while nothing is charged or refused. Two
+addresses, one body (`components/billing/PlanUsage.svelte`, its words and
+figures from `billing/plan.ts`):
+
+- **`/account/plan`**: your own account's (`GET /account/plan`), linked as
+  *Plan and usage* from the account page's Your data panel. A farmer-only
+  user, whose account pages sit in the farm frame (§ App shell), gets no link,
+  and the address sends them back to `/account` before anything is read: no
+  farmer page shows a plan, a price or usage. The page is English, like the
+  rest of the workspace: `/account/plan` is left out of the translated
+  `/account` paths (`lib/auth/session.svelte.ts` `ENGLISH_PATHS`), so its
+  `lang` is English and its words don't go through `t()`.
+- **`/teams/:id/plan`**: a team's (`GET /teams/:id/plan`), linked as *Plan and
+  usage* from the team page's header for its admins only. Anyone else gets the
+  API's 404, shown as the team page shows a team you can't see ("This team
+  doesn't exist or you're not one of its admins", with Back to teams). The
+  breadcrumb names the team (from `GET /teams/:id`; the page works without it).
+
+The page is two cards, side by side where they fit and stacked on a phone:
+
+- **Plan**: its name, its price from the minor units (`R 899.00 a month or
+  R 8 990.00 a year`; *No charge* for Free; another currency by its code),
+  then the subscription: *Renews 1 Dec 2026*, *Trial ends …*, or in the
+  warning colour *Ends …; it won't renew*, *Payment overdue*, *Cancelled* or
+  *Expired*. No subscription says the account is on its plan (Free). Phase 3
+  adds the billing buttons, shown only when the API's `provider` is `mock` or
+  `stripe` (never with `manual`, production's setting until Stripe is set
+  up): with no subscription, *Upgrade to Pro, monthly (R 899.00 a month)* and
+  *…, yearly (R 8 990.00 a year)* (*Team* on a team's page), priced from
+  `GET /billing/plans` (unpriced until it answers, or if it fails); with one,
+  *Manage billing*. Team's Upgrade has an *Editor seats* number field above
+  the buttons (a `NumberInput` spinbutton with `whole`, labelled, from the 3
+  included to 50, a hint under it with each extra seat's monthly and yearly
+  price, named by `aria-describedby`; ArrowUp and ArrowDown step it by one),
+  and both buttons price the seats chosen: *Upgrade to Team, monthly
+  (R 3 497.00 a month for 5 editor seats)*. The field starts at the included
+  seats once, when the offer arrives, then keeps exactly what is typed: a
+  blank, a count outside the range, a decimal (*4.5*, *4,5*) or an exponent
+  (*1e1*) stays as typed, marks the field `aria-invalid` with *Choose a whole
+  number of seats from 3 to 50.* under it, and leaves the buttons
+  `aria-disabled` and unpriced (*Upgrade to Team, monthly*), so no price for
+  some other count shows. It always starts at the included seats, not the
+  team's current editors: `AccountPlan` has no member count (`plan.ts`
+  `seatOffer`, `upgradeLabel`, `checkoutTotalMinor`;
+  [billing.md § Team seats at checkout](./billing.md#team-seats-at-checkout)).
+  Once a team has a subscription, a line under it says its seats: *5 editor
+  seats (3 included, 2 extra)*, or *3 editor seats (all included)*
+  (`subscriptionSeatsLine`). It shows no total, since `Subscription` doesn't
+  record whether it is billed monthly or yearly. While `enforced` is false, a note says nothing is refused:
+  with no buttons, that plans aren't charged yet; beside them (which can
+  charge), only that limits aren't enforced yet (`plan.ts` `shadowNote`). Each
+  button asks the API for a URL (`POST …/plan/checkout` or `…/plan/portal`)
+  and sends the person there: Stripe's hosted page, or the mock's local page
+  on the API ([billing.md § Checkout and portal](./billing.md#checkout-and-portal)).
+  Only those: `plan.ts` `billingRedirect` takes https on `checkout.stripe.com`
+  or `billing.stripe.com`, or `/billing/mock/checkout|portal` on the API's
+  own origin, and refuses any other answer with the page's error (the
+  `location.assign` is on the URL-sink allowlist of
+  `urlAttributes.security.test.ts` for that reason). The priced labels wrap
+  inside their buttons on a phone. While it asks, the buttons are `aria-disabled` (never `disabled`, which
+  would throw the focus to the page; ui-playbook § 4) and the card
+  `aria-busy`; a press then is ignored. A refusal shows inline as the API's
+  own English message ("Couldn't open billing: …"), as the other workspace
+  pages do: the `billing_*` codes are machine-only, so `errorText` would
+  word every 409 as a clash. Back from the provider's page frees the buttons
+  (`pageshow` with `persisted`, for a page the back-forward cache restored
+  mid-press). Coming back with `?checkout=done` or `?checkout=cancelled`
+  shows a line in a live region (`role="status"`, there before its text):
+  *Nothing was charged*, or *the payment went through*. A paid checkout is
+  confirmed by the provider's webhook, which can land after the person is
+  back: while the plan still has no subscription the line says *Waiting for
+  the payment provider to confirm…* and the page re-reads the plan in place
+  (`reload`, not the loading state) a bounded few times (`CONFIRM_DELAYS_MS`,
+  about 15 s), then says to reload in a minute if it never shows. Then
+  `?checkout=` comes off the address (SvelteKit's `replaceState`), the line
+  staying in the component, so a reload doesn't thank anyone twice.
+  `e2e/tests/billing-checkout.spec.ts` follows the mock end to end, plus
+  Back from the mock's page, a refused request (its words inline, the focus
+  kept) and a payment confirmed a read late.
+- **Usage in <month>**: one row each for catchments (every catchment billed
+  to the account counts, whoever made it; there is no archived state),
+  reports, issued evidence packs and the assistant's spend this month. A row
+  with a limit reads "3 of 5 · 2 left" over a bar (`role="meter"`, its value
+  text the same words); past the limit it says "1 over the limit" and the bar
+  turns the warning colour, since Phase 1 counts rather than refuses. A null
+  limit reads "12 used · Unlimited" with no bar. A zero limit is something
+  the plan doesn't include, not a full allowance: it reads "Not included in
+  Free" with no bar, or "1 issued; not included in Free" in the warning
+  colour when some was used anyway. The assistant's row is in dollars, from
+  `usage.assistantCost` ("$0.42 of $1.00 · $0.58 left", the bar against the
+  plan's monthly allowance, per seat × seats on Team), since the assistant is
+  capped by cost, not tokens; its note says it is counted by the UTC month
+  (from 02:00 South African time on the 1st; the other rows use South African
+  time), and "Some turns unpriced (N), so the true cost is higher" when
+  `unpricedTurns` is above 0. With nothing used yet, a line says so above the
+  rows.
+
+Loading, a failed load (with Try again) and the not-found go through
+`common/LoadState.svelte`. A failed load reads "Couldn't look up your plan:"
+(or "this team's plan:") and the error from its code (`errorText`), never the
+server's own text. Tests: `billing/plan.test.ts` (prices, the
+subscription line, the rows, Team's seat range and price, the redirect check), `api/client.test.ts` (the two calls), and
+`e2e/tests/billing-plan.spec.ts` (both pages, the not-found for a stranger
+and for a team member who isn't an admin, a farmer-only user sent back to
+`/account`, no way to pay, a 360 px phone without sideways scroll, axe at
+both widths, the team's Upgrade to Team with its seat field, the two priced
+buttons wrapping at 360 px); `auth/redirect.test.ts` keeps `/account/plan` English. The
+frontend calls `GET /billing/plans` only for the Upgrade buttons' prices
+(the planned pricing page will too).
 
 ## Network
 
@@ -15458,7 +15573,19 @@ saved unit with the error above them). There it is `segmented`:
 - **`lang`.** `<html lang>` is `wordsLang()` on the translated routes and
   `en` elsewhere: it stays `en` until the Afrikaans catalogue is complete, so
   a page of mostly English words never claims to be Afrikaans. An email is
-  `lang="af"` only when every word in it came from the Afrikaans catalogue.
+  in one language throughout: the reader's when that language's email
+  catalogue has every key `en.ts` has (`isMailComplete`, `mailLanguage` in
+  `mail/i18n/index.ts`), else English, words, plural rules and dates alike,
+  with `<html lang>` naming it. A catalogue one string short sends every
+  email in English rather than a mostly-Afrikaans email marked `en` (read
+  with English pronunciation, WCAG 3.1.1) or an Afrikaans-marked one with
+  English inside; `pnpm check:i18n` fails on that gap for an offered
+  language, so Afrikaans readers get Afrikaans. (`<span lang="en">` around
+  each fallback string was the alternative; it would have threaded marked
+  runs through every subject, heading, button and link label of every
+  template, for a state the guard already forbids.) A run in another
+  language inside an email (a WUA notice written in English) still carries
+  its own `<span lang>` (§ Alerts).
   The landing page is prerendered once per language (issue #137): `/welcome`
   ships `lang="en"` (`app.html`) and `/welcome/af` `lang="af"`, set at build
   time by `hooks.server.ts` from the language its words came out in
@@ -15529,7 +15656,24 @@ saved unit with the error above them). There it is `segmented`:
   placeholder or a bold marker, and on a note or section nothing uses.
   `pnpm check:i18n` prints what has no words yet and lists any stale
   translation, for every language, and fails when a sheet or the id list is
-  out of date, a message can't be read, or a translation is stale. A stale
+  out of date, a message can't be read, or a translation is stale. It also
+  fails when an **offered** language (every row of `LANGUAGES` but English,
+  unless marked `translating: true`) has a site message with no words: the
+  page's `lang` stays `en` until the site catalogue is complete
+  (`isComplete`), so one missing string would make every farm, sign-in,
+  account and `/share` page announce Afrikaans text as English to a screen
+  reader (WCAG 3.1.1). The failure names each untranslated id with its
+  English and the fix: `pnpm gen:i18n:export <code> <dir>`, the
+  i18n-translator and i18n-checker agents, `pnpm gen:i18n:apply <code> …`.
+  So a PR that adds or changes a farmer-facing string carries its
+  translation. It fails the same way when an offered language lacks an
+  **email** string (`missingMail`: a key of `backend/src/mail/i18n/en.ts`
+  with no words in `<code>.ts`), since such a language's emails go out
+  wholly in English (`mailLanguage`, below), naming each key with its
+  English and the same fix. Glossary entries don't count (each falls back
+  to English on its own, and nothing decides a page's `lang` from them);
+  they stay a count in the report. `locale.test.ts` pins that `isComplete`'s entry count and
+  the guard's per-id check (`missingSite`) agree on every real catalogue. A stale
   site translation is moved to the new id once the translator has checked
   it against the new English, or deleted. When the English of a translated
   glossary entry changes, the entry goes back on its sheet (marked "the
@@ -15549,8 +15693,10 @@ translation run. No other code changes; `frontend/src/lib/i18n/testLanguage.test
 fixture repo, never the real one) prove it with a stand-in `xx` that exists
 only in the tests.
 
-1. **Table entry.** Add `{ code, name, intl, decimalMark }` to `LANGUAGES`
-   in `packages/engine/src/languages.ts`: `code` the BCP 47 primary tag
+1. **Table entry.** Add `{ code, name, intl, decimalMark, translating: true }`
+   to `LANGUAGES` in `packages/engine/src/languages.ts` (`translating` keeps
+   `pnpm check:i18n` from failing while its site and email catalogues are
+   still being filled; remove it once the translation run is done): `code` the BCP 47 primary tag
    (2–3 lower-case letters), `name` in the language itself, `intl` the Intl
    locale South Africa writes it in (e.g. `zu-ZA`), `decimalMark` `.` or `,`.
    The next migration run adds the code to the `language` table (no
@@ -15565,11 +15711,15 @@ only in the tests.
      `const HELP_<CODE>` (loaded lazily by `/farm/words`,
      `lib/help/translations.ts`).
    Start each empty: a missing message shows in English, and the page keeps
-   `lang="en"` until the site catalogue is complete. The unit tests fail
+   `lang="en"` until the site catalogue is complete; its emails go out in
+   English until the email catalogue is. The unit tests fail
    until all three exist (`locale.test.ts`, `translations.test.ts`,
    `catalogues.test.ts`).
 3. **Translation run.** `pnpm gen:i18n:export <code> <dir>`, translate,
    `pnpm check:i18n`, `pnpm gen:i18n:apply <code> …` (§ Translation above).
+   Once the site and email catalogues are complete, delete `translating: true`
+   from the table entry: from then on `pnpm check:i18n` fails on any site
+   message or email string without its words.
 4. **Layout and axe.** `e2e/tests/lang-layout.spec.ts` already runs once
    per non-English language in the table, so the new one needs no new spec
    file — make sure it (and `language.spec.ts`) passes. From the third

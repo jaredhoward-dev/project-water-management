@@ -190,6 +190,31 @@ variable "feed_credential_private_key" {
   }
 }
 
+variable "stripe_secret_key" {
+  description = "Stripe's API key for checkout and the Customer Portal (STRIPE_SECRET_KEY; backend/src/billing/provider/stripeApi.ts). The API only, in its runtime secret (secrets.tf), and only while billing_provider is stripe. sops key stripe_secret_key: a live restricted key (rk_live_…) with the permissions docs/billing.md lists. Empty (the default) while billing is manual (docs/deployment.md § Turning on Stripe)."
+  type        = string
+  default     = ""
+  sensitive   = true
+  ephemeral   = true
+  validation {
+    # Live only: a test-mode key would take no real payment, and the API refuses it at cold start too (config/production.ts).
+    condition     = var.stripe_secret_key == "" || can(regex("^(sk|rk)_live_[A-Za-z0-9]{16,}$", var.stripe_secret_key))
+    error_message = "stripe_secret_key in prod.sops.yaml must be empty or a live Stripe key (rk_live_… or sk_live_…); a test-mode or publishable key is refused."
+  }
+}
+
+variable "billing_webhook_secret" {
+  description = "The signing secret of Stripe's webhook endpoint (BILLING_WEBHOOK_SECRET, whsec_…; backend/src/billing/provider/). The API only, in its runtime secret (secrets.tf), and only while billing_provider is stripe. sops key billing_webhook_secret. Empty (the default) while billing is manual (docs/deployment.md § Turning on Stripe)."
+  type        = string
+  default     = ""
+  sensitive   = true
+  ephemeral   = true
+  validation {
+    condition     = var.billing_webhook_secret == "" || (length(var.billing_webhook_secret) >= 32 && !can(regex("^(dev|test)-only-", var.billing_webhook_secret)))
+    error_message = "billing_webhook_secret in prod.sops.yaml must be empty or the endpoint's signing secret (32+ characters), never a committed dev/test placeholder."
+  }
+}
+
 variable "runtime_secret_version" {
   description = "Version of the runtime secrets' write-only values (secrets.tf). Terraform never reads a write-only value back, so it cannot see that a sops value changed; any change to this number writes every runtime secret again and cold-starts the API, worker and migrate Lambdas. Don't set it in a tfvars file: scripts/tf.sh derives it from prod.sops.yaml's sops.lastmodified (YYYYMMDDhhmmss), so every sops edit rotates, and refuses a var file that pins it. Pass -var runtime_secret_version=… only to force a rewrite of unchanged values (docs/deployment.md § Rotating a secret)."
   type        = number
@@ -479,6 +504,26 @@ variable "delineation_dem" {
   description = "Catchment delineation in production (docs/design/delineation.md, docs/deployment.md § Map tiles): true sets the API's and the worker's DEM_URL to s3://<tiles bucket>/tiles/terrain.pmtiles and lets both roles read that one key (the worker delineates a catchment too large for the request, with at least 2048 MB). Turn it on only once terrain.pmtiles is uploaded and the Copernicus liability sentence (Art. 6(c)) is in the app's legal notice. false (the default): no Delineate."
   type        = bool
   default     = false
+}
+
+variable "billing_provider" {
+  description = "The billing provider the API's webhook route serves (BILLING_PROVIDER; backend/src/billing/provider.ts, docs/billing.md). manual (the default): no webhooks and no Stripe secrets. stripe: checkout and the Customer Portal through Stripe; plan then needs stripe_secret_key (live) and billing_webhook_secret in prod.sops.yaml, and writes both into the API's runtime secret, never its environment (secrets.tf; docs/deployment.md § Turning on Stripe)."
+  type        = string
+  default     = "manual"
+  validation {
+    # Never mock: anyone holding the committed dev key could sign its events (the API refuses it too).
+    condition     = contains(["manual", "stripe"], var.billing_provider)
+    error_message = "billing_provider must be manual or stripe."
+  }
+  validation {
+    # Ephemeral values may appear in a validation; this asks only whether the key is live-shaped.
+    condition     = var.billing_provider != "stripe" || can(regex("^(sk|rk)_live_[A-Za-z0-9]{16,}$", var.stripe_secret_key))
+    error_message = "billing_provider = \"stripe\" needs a live stripe_secret_key (rk_live_…) in prod.sops.yaml (docs/deployment.md § Turning on Stripe)."
+  }
+  validation {
+    condition     = var.billing_provider != "stripe" || (length(var.billing_webhook_secret) >= 32 && !can(regex("^(dev|test)-only-", var.billing_webhook_secret)))
+    error_message = "billing_provider = \"stripe\" needs billing_webhook_secret (the webhook endpoint's signing secret, 32+ characters) in prod.sops.yaml (docs/deployment.md § Turning on Stripe)."
+  }
 }
 
 variable "signup_open" {

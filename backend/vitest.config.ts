@@ -1,3 +1,4 @@
+import { availableParallelism } from 'node:os';
 import { defineConfig } from 'vitest/config';
 import { testTimeZone } from '../scripts/test-tz.mjs';
 
@@ -58,7 +59,13 @@ export default defineConfig({
 					// test; vitest 4+ fails one that returns after the timeout, and the
 					// engine-backed ones (examples.invariants, ~2 s alone) pass the
 					// default 5 s with every file in parallel on a loaded machine.
-					testTimeout: 60_000 * coverageSlowdown
+					testTimeout: 60_000 * coverageSlowdown,
+					// At most four workers, leaving a core for vitest (the engine's fuzz rule).
+					// On CI's 4-core runners that is 3, vitest's own default, so CI is unchanged;
+					// on a many-core laptop the default (a worker a core) ran past `heavy`'s
+					// memory cap and was OOM-killed (2026-11-23: 20 workers, killed at 7 GB;
+					// passed with 4). docs/testing.md § Memory.
+					maxWorkers: Math.max(1, Math.min(4, availableParallelism() - 1))
 				}
 			},
 			{

@@ -106,10 +106,25 @@ personal information under POPIA (see [plan.md questions](./plan.md#questions-fo
   second-factor reset's confirm and cancel tokens, 205, each in its own
   table: `mfa_reset.confirm_hash`, `mfa_reset_cancel`), so each is
   looked up only in its own table and, for email tokens, for its own purpose.
-  The backend reads a credential in exactly three places: the `wm_session`
+  The backend reads a credential in exactly five places: the `wm_session`
   cookie (`auth/session.ts`), `Authorization: Bearer` on `/ingest/*` only
-  (`ingest/auth.ts`), and `?token=` on the one-click unsubscribe; every other
-  token travels in its public route's JSON body. No route takes a token from a
+  (`ingest/auth.ts`), `?token=` on the one-click unsubscribe, the billing
+  provider's `Stripe-Signature` on `POST /billing/webhook/:provider` only
+  (`billing/provider/signature.ts`: an HMAC-SHA256 over `t.` + the raw body
+  under `BILLING_WEBHOOK_SECRET`, compared in constant time, 300 s either way,
+  a 256 KiB body cap; 404 unless the path names the configured provider, and
+  `app_billing_apply` runs with no user, docs/billing.md § Webhooks and
+  providers), and `?t=` on the mock provider's checkout and portal pages
+  (`GET`/`POST /billing/mock/checkout` and `/billing/mock/portal`,
+  `billing/mockCheckout.ts`; dev only). Those four routes are public: the
+  credential is a signed session token (`billing/provider/mock.ts`: the
+  account, the plan or subscription and the return URLs, HMAC-SHA256 under
+  the dev `BILLING_WEBHOOK_SECRET` with its own context string, so it is
+  never a valid webhook signature), for one account and one hour. They answer
+  `404` unless `BILLING_PROVIDER=mock`, which production refuses (§ Infrastructure,
+  "Production configuration fails closed"), so they never answer on the deployed API. The two POSTs are
+  exempt from the CSRF check (§ Alerts, "The unsubscribe token" › CSRF), docs/billing.md § The
+  mock. Every other token travels in its public route's JSON body. No route takes a token from a
   path parameter. An unsubscribe token turns off only its own subscription,
   whose person, project, kind and farm can never change (trigger
   `alert_subscription_stamp`). `auth/token-confusion.security.db.test.ts`
@@ -1803,12 +1818,17 @@ against its owner, and a farmer's mail naming a neighbour's farm.
     acts on the click, not on arrival, so a mail scanner that opens (and
     even renders) links can't silently switch a farmer's dam alerts off.
     The one-click header is the one-click path.
-  - *CSRF.* `POST /alerts/unsubscribe` is the only route exempt from the
-    `csrf()` check (`app.ts`, exact method and path): a mail client
-    form-posts it from its own servers with no Origin. It reads no session
-    cookie, so a forged cross-site post can do only what the token's holder
-    could do anyway. `routes.test.ts` checks the exemption stays that
-    narrow (the same form post to any other route is refused).
+  - *CSRF.* `POST /alerts/unsubscribe` is exempt from the `csrf()` check
+    (`app.ts`, exact method and path): a mail client form-posts it from its
+    own servers with no Origin. It reads no session cookie, so a forged
+    cross-site post can do only what the token's holder could do anyway.
+    The only other exemptions are the mock billing pages' two form posts
+    (`POST /billing/mock/checkout`, `POST /billing/mock/portal`), on the
+    same reasoning: they post from the API's own origin, which isn't a site
+    origin, read no session, act only for their signed token's account, and
+    answer `404` unless `BILLING_PROVIDER=mock`, which production refuses.
+    `routes.test.ts` checks the exemption stays that narrow (the same form
+    post to any other route is refused).
   - *Rate limiting.* The WAF's per-IP rule on `/api/*`; a 256-bit token
     can't be guessed.
 - **"Was this useful?" (issue #74, `151_alert_feedback`).**
@@ -1925,6 +1945,19 @@ In short:
   the seed function it calls runs with its caller's rights and `water_app`
   can't execute it, so it can't be used to write rows into a project the
   caller has no role on (`irrigationSystems.db.test.ts`).
+- **Billing** (`323_billing.sql`, issue #641; [billing.md](./billing.md)). A
+  plan and its usage are read by the account's person, and a team's by the
+  team's admins only: `GET /teams/:id/plan` answers `404` to anyone else
+  (a member, an outsider), and no project role (editor, viewer, farmer) reads
+  another person's account. `water_app` has SELECT only on `plan`,
+  `billing_account`, `subscription` and `usage_counter`; every write goes
+  through the SECURITY DEFINER functions (`app_my_billing_account`,
+  `app_team_billing_account`, `app_usage_add`) and triggers
+  (`billing.db.test.ts`). Subscription status is written only by
+  `app_billing_apply` (326), the provider webhook's function, which runs
+  with no user and refuses (`42501`) inside a user's or an API key's
+  transaction; `billing_event`, its de-duplication, is owner-only
+  (`apply.db.test.ts`).
 - **Accounts under RLS** (`068_app_user_rls.sql`). `app_user` had no RLS
   (sign-in reads it before anyone is signed in), so any `water_app`
   transaction, an API key's or the job tick's included, could read every
@@ -2737,7 +2770,9 @@ In short:
   Treat a failing RLS test like a failing auth check: never skip it.
 - **Every route needs a session unless it is on the public allowlist**
   (`/health`, register, login, logout, forgot/reset password, verify email,
-  invite info). `backend/src/routes.test.ts` (a unit test, no DB) walks every
+  invite info, and the billing routes [§ Credentials](#credentials-never-stand-in-for-each-other)
+  describes: the plan list, the provider's webhook and the dev-only mock
+  checkout and portal pages). `backend/src/routes.test.ts` (a unit test, no DB) walks every
   registered route and fails if a non-public one answers an anonymous request
   with anything but `401`.
 - **Errors never echo the database.** `backend/src/http/errors.ts` maps
@@ -4147,7 +4182,13 @@ PDF someone else asked for kept the person as a recipient
 | Resets of a lost second factor (205): when asked for, confirmed and ended, and how; the confirm and cancel links' hashes (SHA-256); requests counted for the daily cap | `mfa_reset`, `mfa_reset_cancel`, `mfa_reset_quota` | An ended reset 90 days (the tick, `app_mfa_reset_purge`); a link's hash until used or the reset ends; counts 24 hours | Deleted | – |
 | Adds by email, counted for the daily cap: the adder's id and the project's or team's (101) | `invite_throttle` | 24 hours from the window's first add | Lapses with its window | Lapses with its window |
 | Dam traces, counted for the hourly cap: the user's id and the project's (186) | `map_compute_throttle` | One hour from the window's first attempt | Lapses with its window | Lapses with its window |
-| The assistant's use (262): the person's tokens (input and output) and messages per project and UTC month, as counts only (never the conversation); own rows only under RLS; in "Download my data" (`assistantUsage`) | `assistant_usage` | The month it counts and the 12 after it (`ASSISTANT_USAGE_RETENTION_MONTHS`, 13), then deleted by the job tick (`app_purge_assistant`) | Kept without the name (`user_id` set null), so the month still counts what was spent, until its retention ends | Deleted |
+| The assistant's use (262; 324 added the cache tokens and the cost in micro-USD): the person's tokens (input and output) and messages per project and UTC month, as counts only (never the conversation); own rows only under RLS; in "Download my data" (`assistantUsage`) | `assistant_usage` | The month it counts and the 12 after it (`ASSISTANT_USAGE_RETENTION_MONTHS`, 13), then deleted by the job tick (`app_purge_assistant`) | Kept without the name (`user_id` set null), so the month still counts what was spent, until its retention ends | Deleted |
+| The person's billing account (323, issue #641): kind (`user`), its lifetime count of projects created and when it was made; made when their first project needs it or when they open their plan (`GET /account/plan`); own row only under RLS (a team's account is the team's, read by its admins); its customer reference at the billing provider (328, `external_customer_ref`: Stripe's `cus_…`, set at the first checkout; null under the mock and `manual`); in "Download my data" (`billing.account`, the reference included). `project.billing_account_id` points at it | `billing_account` | Until the account is deleted | Deleted (cascades from `app_user`); each project it billed keeps going with `billing_account_id` set null | – (the account isn't the project's) |
+| The billing account's subscriptions (323): plan, status, seats, period, trial end, whether it cancels at period end, the provider and its reference; empty in Phase 1 (no provider); read under RLS by the account's person (or its team's admins); in "Download my data" (`billing.subscriptions`) | `subscription` | Until the account is deleted | Deleted (cascades from `billing_account`) | – |
+| The billing provider's webhook events for the account (326): the provider, its event id and type, when it arrived, what it did, and the account it named; no one reads it under RLS (owner-only); not in "Download my data", which already holds the subscriptions they set | `billing_event` | 90 days from arrival, then the tick deletes it (327 `app_purge_billing_events`, `BILLING_EVENT_RETENTION_DAYS`; never under 4 days, past Stripe's 3-day redelivery window) | Kept without the account (`account_id` set null when the billing account cascades away) | – |
+| The billing account's monthly counts (323): server PDF reports queued and evidence packs issued, per SAST month, counts only; read under RLS as `subscription`; in "Download my data" (`billing.usageCounters`) | `usage_counter` | Until the account is deleted | Deleted (cascades from `billing_account`) | – (counted on the account, not the project) |
+| The yearly renewal notices sent to the person (329, issue #641; CPA s14(2)(c)): one per subscription and period, with the period end it was about, its send status, attempts, when it was claimed, sent and settled, and a short failure reason; the email's words aren't stored. Written only by the worker's definer functions; own rows readable under RLS; in "Download my data" (`billing.renewalNotices`: period end, status, when sent and when made) | `renewal_notice` | Kept as the record that the notice went, until its subscription or the person's account is deleted | Deleted (cascades from `app_user`, and from `subscription` with the billing account) | – |
+| The staff grants of the account's plan (330, issue #641): plan, until when, the reason, who granted or revoked it (the operator's name) and when, and each expiry. The reason is written for the customer to read. Written only by the schema owner's grant and revoke functions and the worker's expiry; read under RLS by the account's person and its team's admins; the person's in "Download my data" (`billing.grants`: action, plan, until, reason, granted by, when) | `billing_grant_log` | Kept as the audit record of the plan while the account exists | Deleted (cascades from `billing_account`, so from `app_user` or `team`) | – |
 | The assistant's messages per person in the current hour, for the hourly cap (262); no one reads it but the cap's own function | `assistant_rate` | Until its hour is over: the person's next message or the job tick deletes it | Deleted | – |
 | A running assistant turn's reserved budget (264): who began it, on which project, and how many weighted tokens; no one reads it but the assistant's own functions | `assistant_reservation` | While the turn runs: deleted when it is charged, or, if never charged, converted into the usage row in full once it expires (the turn's deadline + 120 s; the next turn or the job tick) | Kept without the name (`user_id` set null) until it is charged or expires | – |
 | Display preferences: the workspace sections a person hid from their sidebar (083); own row only under RLS | `user_preferences` | Until the account is deleted | Deleted | – |
@@ -4627,6 +4668,18 @@ key there would let any read-only principal forge any user's session.
   each entry point's bundle with a production-shaped env (the positive control).
   Terraform also refuses a placeholder `auth_jwt_secret` at plan time
   (`infra/lambda.tf` precondition, `rejects_dev_placeholder_jwt_secret`).
+  Billing (issue #641): the API refuses a `BILLING_PROVIDER` that is unset,
+  `mock` or unknown (only `manual` or `stripe`; Terraform's
+  `billing_provider` defaults to `manual` and refuses anything else at plan
+  time, `tests/guardrails.tftest.hcl`), and with `stripe` a
+  `BILLING_WEBHOOK_SECRET` shorter than 32 characters or a `dev-only-`
+  placeholder, or a `STRIPE_SECRET_KEY` that isn't a live key (`sk_live_…`
+  or `rk_live_…`: a test-mode key in production would take no real
+  payments). Terraform refuses the same at plan time, and writes both into
+  the API's runtime secret only with `stripe` (never its environment;
+  deployment.md § Turning on Stripe). The committed dev key is a `dev-only-` value `check:env` pins
+  (`scripts/guards/check_env_isolation.mjs`), and `pnpm dev:billing:replay`
+  signs only with such a key, only to localhost.
 - **WAF:** five per-IP rate limits on CloudFront: a tight 100-requests-per-5-minutes
   limit scoped to `/api/auth/*`, the elevation-model routes
   (`waf_dem_rate_limit_per_ip`, default 300, scoped by a regex to
@@ -4899,7 +4952,9 @@ sends project data to a model. What goes, and what keeps it bounded:
   one never settled is charged in full when it expires. The only residual
   is a provider counting more input tokens than UTF-8 bytes plus a fixed
   framing allowance, or writing past the output cap it was given
-  (architecture.md § Assistant). A message cap per
+  (architecture.md § Assistant). Each turn's cost in micro-USD, priced per
+  model with the cache apart, is recorded on its usage row too (324,
+  `assistant/pricing.ts`), but no cap reads it yet (issue #641 Phase 1). A message cap per
   person per hour across projects (`ASSISTANT_MESSAGES_PER_HOUR`, 30; 429
   with `Retry-After`). All counted in Postgres under advisory locks taken in
   one order (the deployment's, the project's, then the person's row), so

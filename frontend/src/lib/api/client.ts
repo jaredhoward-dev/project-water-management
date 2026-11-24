@@ -27,6 +27,10 @@ import type {
 } from '@water-management/engine';
 import type {
 	MapAreaBasis,
+	AccountPlan,
+	PlanOffer,
+	BillingInterval,
+	BillingRedirect,
 	EmailCodeSent,
 	MfaChallenge,
 	MfaMethod,
@@ -749,7 +753,25 @@ export function createApi(baseUrl: string, fetchFn: FetchFn = (...a) => fetch(..
 			/** Remove a member's lost second factor at once (admin, a code from the last 10 minutes; never yourself). 204. */
 			resetMemberMfa: (id: string, userId: string) => request<void>('POST', `${t(id)}/members/${enc(userId)}/mfa-reset`),
 			/** Every team catchment you can see, with its latest figures (WP-2.14). */
-			portfolio: (id: string) => request<Portfolio>('GET', `${t(id)}/portfolio`)
+			portfolio: (id: string) => request<Portfolio>('GET', `${t(id)}/portfolio`),
+			/** The team's plan and this month's usage (team admin; 404 otherwise; issue #641). */
+			plan: (id: string) => request<AccountPlan>('GET', `${t(id)}/plan`),
+			/** Start checkout for the Team plan (team admin; issue #641 Phase 3), with `seats` editor seats in all (omitted: the included ones). */
+			checkout: (id: string, interval: BillingInterval, seats?: number) =>
+				request<BillingRedirect>('POST', `${t(id)}/plan/checkout`, seats === undefined ? { plan: 'team', interval } : { plan: 'team', interval, seats }),
+			/** Open the team's billing portal (team admin). */
+			portal: (id: string) => request<BillingRedirect>('POST', `${t(id)}/plan/portal`)
+		},
+		/** Plans and usage (issue #641, Phase 1: counted, never charged or refused). */
+		billing: {
+			/** Every plan on offer (public): the plan page's Upgrade buttons show their prices. */
+			plans: () => request<{ plans: PlanOffer[] }>('GET', '/billing/plans').then((r) => r.plans),
+			/** Your own account's plan and this month's usage. */
+			mine: () => request<AccountPlan>('GET', '/account/plan'),
+			/** Start checkout for Pro on your own account (Phase 3). */
+			checkout: (interval: BillingInterval) => request<BillingRedirect>('POST', '/account/plan/checkout', { plan: 'pro', interval }),
+			/** Open your own account's billing portal. */
+			portal: () => request<BillingRedirect>('POST', '/account/plan/portal')
 		},
 		model: {
 			get: (id: string) => request<ProjectModel>('GET', `${p(id)}/model`),

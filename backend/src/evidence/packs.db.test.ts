@@ -1298,6 +1298,16 @@ describe.skipIf(!minio)('an application pack’s bundle', () => {
 			return { row, pred, audit: audit.map((a) => a.kind), jobs: jobs.map((j) => j.kind) };
 		};
 		const issuedBefore = (await asOwner(`SELECT count(*)::int AS n FROM audit_event WHERE project_id = $1 AND kind = 'pack.issued' AND subject->>'packId' = $2`, [projectId, first.id]))[0]!.n;
+		// This SAST month's packs_issued on the project's billing account (323_billing, issue #641): counted in the issue's transaction.
+		const packsCounted = async () =>
+			(
+				await asOwner(
+					`SELECT coalesce(sum(u.qty), 0)::int AS n FROM usage_counter u JOIN project p ON p.billing_account_id = u.billing_account_id
+					 WHERE p.id = $1 AND u.kind = 'packs_issued' AND u.month = app_billing_month()`,
+					[projectId]
+				)
+			)[0]!.n as number;
+		const countedBefore = await packsCounted();
 		// A store that answers nothing (a closed port), so the put fails inside the issue's transaction.
 		vi.stubEnv('S3_ENDPOINT', 'http://127.0.0.1:9');
 		resetStorageClient();
@@ -1315,10 +1325,14 @@ describe.skipIf(!minio)('an application pack’s bundle', () => {
 		expect(after.audit.filter((k) => k === 'pack.issued')).toHaveLength(issuedBefore);
 		expect(after.audit).not.toContain('pack.superseded');
 		expect(after.jobs).toEqual([]);
+		// The failed issue's count rolled back with it.
+		expect(await packsCounted()).toBe(countedBefore);
 
 		// The store back: the same draft issues, supersedes the first, and records its bundle.
 		const res = await issue(editor, v2.id);
 		expect(res.status, JSON.stringify(res.body)).toBe(200);
+		// One pack issued, one counted (positive control for the rollback above).
+		expect(await packsCounted()).toBe(countedBefore + 1);
 		const done = await state();
 		expect(done.row).toMatchObject({ status: 'issued', bundle_sha256: res.body.pack.bundleSha256 });
 		expect(done.pred).toEqual({ status: 'superseded', superseded_by_pack_id: v2.id });

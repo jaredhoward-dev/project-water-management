@@ -1,0 +1,4 @@
+{
+	"addKb": 1,
+	"why": "#641 Phase 3's Upgrade and Manage billing buttons on the plan page and their API calls (round 3 lane C): total measured 2517 KB on the round branch before, 2518 KB after; the other round-3 lanes add no frontend code"
+}

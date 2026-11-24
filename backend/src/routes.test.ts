@@ -55,6 +55,18 @@ const PUBLIC = new Set([
 	// already does plus, while the pack is issued, a redacted projection of its
 	// own frozen report (share/pack-share.db.test.ts).
 	'POST /share/pack',
+	// The billing provider's webhook (issue #641 Phase 3): the signature over the
+	// raw body (Stripe's t=…,v1=… scheme) is the credential; 404 unless the path
+	// names the configured provider (billing/webhook.test.ts, webhook.db.test.ts).
+	'POST /billing/webhook/:provider',
+	// The mock provider's checkout and portal pages (issue #641 Phase 3): 404
+	// unless BILLING_PROVIDER=mock (which production refuses); a token signed
+	// with the dev key, for one account and an hour, is the credential
+	// (billing/mockCheckout.test.ts, checkout.db.test.ts).
+	'GET /billing/mock/checkout',
+	'POST /billing/mock/checkout',
+	'GET /billing/mock/portal',
+	'POST /billing/mock/portal',
 	// One-click unsubscribe from alert emails (WP-2.13): the token is the
 	// credential, and it can only turn off the one subscription it names,
 	// through app_alert_unsubscribe (alerts/alerts.db.test.ts). The only
@@ -68,7 +80,10 @@ const PUBLIC = new Set([
 	// Verify an evidence pack (WP-3.14): the code is printed on the pack, not
 	// a secret; app_verify_pack returns only a pack's printed fields, and
 	// nothing for a draft (evidence/packs.db.test.ts).
-	'GET /verify/:code'
+	'GET /verify/:code',
+	// The plans and their prices (issue #641 Phase 1): public prices, no one's data, read
+	// through app_billing_plans (billing/routes.db.test.ts).
+	'GET /billing/plans'
 ]);
 
 const app = createApp();
@@ -417,6 +432,31 @@ describe('route auth inventory', () => {
 		}
 	});
 
+	// Billing, Phase 1 (issue #641): the plan list is public; your own plan and a team's are auth-gated (billing/routes.db.test.ts: a team's is 404 to all but its admins).
+	it('inventories the billing routes: the plan list public, the account and team plans auth-gated', () => {
+		expect(routes).toContain('GET /billing/plans');
+		expect(PUBLIC.has('GET /billing/plans')).toBe(true);
+		expect(routes).toContain('POST /billing/webhook/:provider');
+		expect(PUBLIC.has('POST /billing/webhook/:provider')).toBe(true);
+		for (const r of ['GET /account/plan', 'GET /teams/:id/plan']) {
+			expect(routes).toContain(r);
+			expect(PUBLIC.has(r)).toBe(false);
+		}
+	});
+
+	// Billing, Phase 3 (issue #641): checkout and the portal are auth-gated (billing/checkout.db.test.ts: a team's is 404
+	// to all but its admins); the mock's own pages are public, their signed token the credential.
+	it('inventories checkout and the portal as auth-gated and the mock pages as public', () => {
+		for (const r of ['POST /account/plan/checkout', 'POST /account/plan/portal', 'POST /teams/:id/plan/checkout', 'POST /teams/:id/plan/portal']) {
+			expect(routes).toContain(r);
+			expect(PUBLIC.has(r)).toBe(false);
+		}
+		for (const r of ['GET /billing/mock/checkout', 'POST /billing/mock/checkout', 'GET /billing/mock/portal', 'POST /billing/mock/portal']) {
+			expect(routes).toContain(r);
+			expect(PUBLIC.has(r)).toBe(true);
+		}
+	});
+
 	// The team portfolio (WP-2.14): team members only (portfolio/portfolio.db.test.ts, a farmer gets 404).
 	it('inventories the portfolio route as auth-gated', () => {
 		expect(routes).toContain('GET /teams/:id/portfolio');
@@ -479,7 +519,7 @@ describe('route auth inventory', () => {
 		expect(routes).toContain('POST /alerts/feedback');
 	});
 
-	it('exempts only POST /alerts/unsubscribe from the CSRF check: a form post with no Origin reaches it, and is refused elsewhere', async () => {
+	it('exempts only POST /alerts/unsubscribe and the mock billing pages from the CSRF check: a form post with no Origin reaches them, and is refused elsewhere', async () => {
 		const form = { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: 'List-Unsubscribe=One-Click' };
 		// No token: the route itself answers (400), not the CSRF check (403).
 		expect((await app.request('/alerts/unsubscribe', form)).status).toBe(400);
@@ -490,6 +530,11 @@ describe('route auth inventory', () => {
 		expect((await app.request('/share/view', form)).status).toBe(403);
 		// The feedback answer too: only the feedback page (same origin) posts it.
 		expect((await app.request('/alerts/feedback', form)).status).toBe(403);
+		// The mock billing pages (billing/mockCheckout.ts): the route answers (404, no valid token), not the CSRF check.
+		expect((await app.request('/billing/mock/checkout?outcome=pays', form)).status).toBe(404);
+		expect((await app.request('/billing/mock/portal?action=cancel', form)).status).toBe(404);
+		// Checkout itself is not exempt: the SPA calls it with JSON, so a cross-site form post is refused.
+		expect((await app.request('/account/plan/checkout', form)).status).toBe(403);
 	});
 
 	it('inventories the share-link routes as auth-gated, and the share reads as public', () => {

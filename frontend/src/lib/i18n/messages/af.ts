@@ -1927,6 +1927,8 @@ export const af: Catalogue = {
 	'7247e23b': 'Laai my data af',
 	// Your data has been downloaded.
 	'a51c54d9': 'Jou data is afgelaai.',
+	// Plan and usage
+	'dd6bd500': 'Plan en gebruik',
 	// Choose which alerts you get by email for each catchment, and how often. Alerts come from the catchment model: estimates, not instructions.
 	'2ba7c149': 'Kies watter waarskuwings jy per e-pos kry vir elke opvanggebied, en hoe gereeld. Waarskuwings kom van die opvanggebied se model: skattings, nie opdragte nie.',
 	// Back to your account

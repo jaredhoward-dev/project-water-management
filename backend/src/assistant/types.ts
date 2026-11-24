@@ -50,7 +50,12 @@ export interface ProviderRequest {
 export type ProviderEvent =
 	| { type: 'text'; delta: string }
 	| { type: 'tool_call'; call: ToolCall }
-	| { type: 'usage'; inputTokens: number; outputTokens: number };
+	/**
+	 * Every input token the call carried (cache reads and writes included, as the caps count them) and its output.
+	 * `cacheReadTokens` and `cacheWriteTokens` are the part of `inputTokens` read from or written to the prompt cache,
+	 * which are priced apart (pricing.ts); absent is none.
+	 */
+	| { type: 'usage'; inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number };
 
 export interface AssistantProvider {
 	readonly name: Exclude<AssistantProviderName, 'off'>;

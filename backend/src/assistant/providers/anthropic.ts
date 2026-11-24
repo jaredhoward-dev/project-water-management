@@ -89,6 +89,14 @@ export function anthropicRequest(model: string, req: ProviderRequest): Anthropic
 
 type Usage = { input_tokens?: number | null; output_tokens?: number | null; cache_creation_input_tokens?: number | null; cache_read_input_tokens?: number | null };
 const inputOf = (u: Usage) => (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0);
+/** One attempt's tokens: every input token (cache reads and writes included), the output, and the cache's part of the input (priced apart, pricing.ts). */
+type Counted = { input: number; output: number; cacheRead: number; cacheWrite: number };
+const counted = (u: Usage, output = u.output_tokens ?? 0): Counted => ({
+	input: inputOf(u),
+	output,
+	cacheRead: u.cache_read_input_tokens ?? 0,
+	cacheWrite: u.cache_creation_input_tokens ?? 0
+});
 
 /** What a status means to the person reading the chat; never the upstream's own text. */
 function statusError(status: number | undefined): Error {
@@ -126,17 +134,15 @@ export function anthropicProvider(cfg?: Pick<AssistantConfig, 'model'>, opts: An
 
 			let pending: { id: string; name: string; json: string }[] = [];
 			const open = new Map<number, { id: string; name: string; json: string }>();
-			let input = 0;
-			let output = 0;
-			let iterations: { input: number; output: number } | null = null;
+			let top: Counted = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+			let iterations: Counted | null = null;
 			let stopReason: string | null = null;
 			try {
 				const stream = await client.beta.messages.create(anthropicRequest(model, req), { signal: req.signal });
 				for await (const ev of stream) {
 					switch (ev.type) {
 						case 'message_start':
-							input = inputOf(ev.message.usage);
-							output = ev.message.usage.output_tokens ?? 0;
+							top = counted(ev.message.usage);
 							break;
 						case 'content_block_start': {
 							const b = ev.content_block;
@@ -167,14 +173,16 @@ export function anthropicProvider(cfg?: Pick<AssistantConfig, 'model'>, opts: An
 						case 'message_delta': {
 							stopReason = ev.delta.stop_reason ?? stopReason;
 							const u = ev.usage;
-							if (u.input_tokens != null) input = inputOf(u);
-							output = u.output_tokens ?? output;
+							top = u.input_tokens != null ? counted(u, u.output_tokens ?? top.output) : { ...top, output: u.output_tokens ?? top.output };
 							// With a fallback the top-level usage is the last attempt's; every attempt is billed.
 							if (u.iterations?.length) {
-								iterations = { input: 0, output: 0 };
+								iterations = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 								for (const it of u.iterations) {
-									iterations.input += inputOf(it as Usage);
-									iterations.output += (it as Usage).output_tokens ?? 0;
+									const c = counted(it as Usage);
+									iterations.input += c.input;
+									iterations.output += c.output;
+									iterations.cacheRead += c.cacheRead;
+									iterations.cacheWrite += c.cacheWrite;
 								}
 							}
 							break;
@@ -200,7 +208,8 @@ export function anthropicProvider(cfg?: Pick<AssistantConfig, 'model'>, opts: An
 					yield { type: 'tool_call', call };
 				}
 			}
-			yield { type: 'usage', inputTokens: iterations?.input ?? input, outputTokens: iterations?.output ?? output };
+			const used = iterations ?? top;
+			yield { type: 'usage', inputTokens: used.input, outputTokens: used.output, cacheReadTokens: used.cacheRead, cacheWriteTokens: used.cacheWrite };
 		}
 	};
 }

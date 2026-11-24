@@ -5,7 +5,7 @@
 	// while signed in, two-step sign-in (issue #282, TwoStepSignIn), a link to the alert emails page (WP-2.13), with a
 	// banner when SES stopped delivering to the address (alert emails paused
 	// until the person turns them back on), "download my data" (POPIA,
-	// GET /auth/me/export) and "delete my account" (issue #112, DELETE
+	// GET /auth/me/export), a link to Plan and usage in the Your data panel, outside the farm frame (issue #641), and "delete my account" (issue #112, DELETE
 	// /auth/me, components/account/DeleteAccount.svelte). The header's account menu links here. docs/ui.md § App
 	// header and account menu, § Language. Its words come from $lib/i18n.
 	import { onMount, tick } from 'svelte';
@@ -26,8 +26,11 @@
 	import { t } from '#lib/i18n/locale.svelte.js';
 	import { APP_SHORT_NAME } from '#lib/brand.js';
 	import { errorText } from '#lib/i18n/apiError.js';
+	import { farmFrameReader } from '#lib/auth/frame.js';
 
 	const msg = errorText;
+	/** A farmer-only user's account page sits in the farm frame: no plan link there (issue #641). */
+	const inFarmFrame = farmFrameReader();
 
 	// A link to the Two-step sign-in panel (the account menu, the two-step prompt, the Project page's and
 	// team settings' "Account page", issue #586): land on it and focus its heading, so Tab carries on there.
@@ -379,6 +382,8 @@
 						</button>
 						<p class="status" role="status" aria-live="polite">{exported ? t('Your data has been downloaded.') : ''}</p>
 					</div>
+					<!-- Your plan and usage (issue #641): a workspace page, never linked in the farm frame. -->
+					{#if !inFarmFrame()}<p class="link-row"><a class="btn" href={resolve('account/plan')}>{t('Plan and usage')}</a></p>{/if}
 				</section>
 
 			</div>

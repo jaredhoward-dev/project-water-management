@@ -26,7 +26,7 @@ one historical answer.
 | --- | --- | --- | --- |
 | **Consultancy owner / principal hydrologist** | Run 5–30 catchment studies a year for different clients. Hand each client a report and keep the model. | b023 workbooks copied per catchment, WRSM2000/Pitman, Excel, email | Setup takes hours instead of days, results are defensible, and one plan covers the whole practice |
 | **Org admin** (IT at a CMA or larger consultancy) | Control who gets in, meet security policy (Entra ID SSO, MFA), off-board leavers the same day | Entra ID for everything else; shared spreadsheets on SharePoint | SSO with Entra, enforced MFA, SCIM or JIT, an audit trail, a POPIA operator agreement |
-| **Billing contact / finance** | Pay on a SARS-valid tax invoice, by EFT or card, against a PO | Supplier invoices by email | A clear plan, VAT-correct invoices, no surprise overage |
+| **Billing contact / finance** | Pay an invoice against a PO, by card or SWIFT (ZAR EFT only if a US seller can receive it, #641) | Supplier invoices by email | A clear plan, VAT-correct invoices (no VAT before the operator registers, s20 after), no surprise overage |
 | **Integrator** (a CMA data team, another model, a dashboard vendor) | Pull runs and push series programmatically | CSV exports, screen scraping | A versioned OpenAPI, scoped keys, webhooks, stable limits |
 | **Planning hydrologist** (DWS/CMA reconciliation studies) | Reliability of supply and yield under climate change and drought | WReMP / WRYM ensembles run by specialist consultants | Stochastic ensembles and drought replay in the same tool as the daily balance, with the assumptions visible |
 | **Platform operator** (you) | Onboard tenants, support them without seeing data they didn't share, keep cost per tenant bounded | Nothing yet (one deployment, one client) | A console, metering, per-tenant limits, runbooks |
@@ -40,7 +40,8 @@ one historical answer.
   and migration from today's teams.
 - Per-tenant settings and branding. Support access by grant, never
   impersonation.
-- Plans, seats, catchment counts, trials, usage metering, invoices, SA VAT.
+- Plans, seats, catchment counts, trials, usage metering, Stripe's invoices,
+  and SA VAT once the operator registers (#641).
 - MFA (TOTP + recovery codes), SSO with Microsoft Entra ID (OIDC), JIT
   provisioning, then SCIM.
 - Fast onboarding: WR2012 quaternary data, DWS gauge records, a guided setup,
@@ -139,7 +140,7 @@ What changes in the existing system:
 | Tenancy | New `organisation`, `organisation_member`. `team.organisation_id`, `project.organisation_id`. `app_project_role()` gains the org wall, so every existing policy inherits it (the same trick 002 used for teams) | `backend/migrations/002_teams.sql` (latest `app_project_role`), `backend/src/teams/*`, `backend/src/projects/access.ts`, `backend/src/invites/invites.ts` (`app_accept_invites`) |
 | Session | `withUser(userId, fn)` becomes `withSession(ctx, fn)`, which also sets `app.auth_method` and `app.auth_org`. The JWT gains `amr` and `sso_org` claims. Still HS256 via jose in the `wm_session` cookie | `backend/src/db/tx.ts`, `backend/src/auth/session.ts`, `backend/src/auth/middleware.ts` |
 | Auth | TOTP MFA, OIDC SSO (`openid-client`), SCIM 2.0 endpoints | `backend/src/auth/`, new `backend/src/sso/`, `backend/src/scim/` |
-| Billing | `plan`, `subscription`, `billing_invoice`, `usage_event`. Entitlements are enforced in Postgres where they must hold under concurrency (catchment count) | new `backend/src/billing/` |
+| Billing | #641's `plan`, `billing_account` (becomes `organisation`), `subscription`, `usage_counter`, `billing_event`, plus `usage_event`; invoices stay in Stripe (WP-4.6). Entitlements are enforced in Postgres where they must hold under concurrency (catchment count) | new `backend/src/billing/` |
 | Run storage | `run_series.values` moves to one compressed S3 object per run. The DB keeps metadata and summaries | `backend/src/runs/execute.ts`, `backend/src/runs/routes.ts`, `backend/src/export/*`, `backend/src/compare/routes.ts` |
 | Engine | Scenario transforms, seeded stochastic generator, ensemble statistics, `bucket-v1` flow generator | `packages/engine/src/runoff/` (`flow.ts` went in engine 1.0.0), new `packages/engine/src/scenario/`, `packages/engine/src/flow/bucket.ts` |
 | Public API | `/v1` sub-app with `@hono/zod-openapi`, API-client principal in RLS, webhooks on the queue | `backend/src/app.ts`, new `backend/src/v1/` |
@@ -376,17 +377,28 @@ run in parallel after WP-4.1.
 
 - **Goal.** Each org has one live subscription to a plan. Limits and features
   are enforced where they can't be raced.
-- **Value metric.** **Catchments (projects) per org** first, editor seats
-  second. **Viewers, guests and Step 2 farmers are always free and
+- **Built ahead of Step 4 (issue #641).** Pricing doesn't wait for track A.
+  #641 Phase 1 (in progress) bills to a **`billing_account`** that is either
+  a person or a team, which is exactly WP-4.1's mapping (team → org,
+  team-less project → personal org). In this WP, `billing_account` becomes
+  `organisation` 1:1 (rename or FK, expand/contract), and #641's tables
+  become this WP's tables. Nothing is thrown away. The design and current
+  state are in [billing.md](../billing.md).
+- **Value metric.** Running catchments **live** (feeds, automatic runs,
+  alerts, published farm views), the AI assistant, server reports and issued
+  evidence packs; editor seats on Team. **Core modelling is never limited**,
+  not even on Free. **Viewers, guests and Step 2 farmers are always free and
   unlimited**, so a WUA never pays per farmer. Ensemble compute is metered.
-- **Illustrative plan shape** (prices are D2; the client sets them):
+- **Plans** (D2, decided in #641; prices in ZAR, what the customer pays):
 
-  | Plan | Catchments | Editor seats | Features |
-  | --- | --- | --- | --- |
-  | Trial (30 days, no card) | 2 | 3 | Everything except API, SSO, ensembles > 50 members |
-  | Practitioner | 3 | 2 | Scenarios, reports, stakeholder views |
-  | Team | 15 | 10 | + API (read), ensembles, templates |
-  | Agency | 50+ (contract) | 25+ | + SSO/SCIM, API write, webhooks, region choice, SLA |
+  | Plan | Price | Catchments | Editor seats | Features |
+  | --- | --- | --- | --- | --- |
+  | Free | R0 | unlimited, non-commercial use; 1 live | 2 per catchment | All modelling; AI ≈ $1 a month; 5 server reports a month; packs paid per issue |
+  | Pro (one hydrologist) | R899/month, R8,990/year | 15 | 5 per catchment | Every catchment live; AI $15 a seat; unlimited reports |
+  | Team (WUA, consultancy) | R2,499/month incl. 3 editors, +R499 each | 50 | seats on the plan | As Pro, pooled per seat |
+  | Agency (Step 4) | from R7,500, contract | contract | seats | + SSO/SCIM, `/v1` API, webhooks, region choice, SLA |
+
+  A 14-day reverse trial of Pro replaces the old 30-day no-card trial.
 
 - **Changes**
   - *backend:* `backend/src/billing/entitlements.ts` has
@@ -395,41 +407,61 @@ run in parallel after WP-4.1.
     `project` that takes an advisory lock per org, so two parallel creates
     can't both pass. Seats are enforced on member add and invite accept.
     Over-limit returns `402 { error: 'plan_limit', limit, used }`.
-  - A trial that ends becomes read-only (`subscription.status = 'expired'`
-    → `app_org_access` allows viewer-level only). **Data is never deleted
-    because a trial ended.** Deletion follows WP-4.8 retention.
+  - A trial that ends, or a lapsed plan, drops to Free limits (#641):
+    catchments over a limit become read-only (`project.plan_paused_at`; read,
+    export and verify still work), automatic runs and alerts stop after a
+    14-day grace, and published farm views stay up. **Data is never deleted
+    because a trial or plan ended.** Deletion follows WP-4.8 retention.
   - *frontend:* a plan and usage page, and upgrade prompts at the limit.
-- **Data model.** `plan(code PK, name, currency, price_monthly_minor,
-  price_annual_minor, limits jsonb, features jsonb, trial_days, active)`:
-  global, SELECT for all, written only by migrations or staff functions.
-  `subscription(id, organisation_id, plan_code, status ('trialing','active',
-  'past_due','expired','canceled'), seats, period_start, period_end,
-  trial_end, external_ref)`, with a partial unique index "one live per org"
-  (feohledger's `uq_subscription_one_live_per_org`).
-  `usage_event(organisation_id, kind, qty, at)` for runs, job-seconds,
-  API calls and storage bytes; monthly rollups in `usage_month`. RLS: org
-  admins and `billing` read. Writes go only through `SECURITY DEFINER`
-  functions.
-- **API.** `GET /orgs/:id/subscription`, `GET /plans`,
-  `POST /orgs/:id/subscription/change` (staff or provider-driven in v1).
+- **Data model.** #641 Phase 1's tables, carried over:
+  - `plan(code PK, name, price_monthly_minor, price_annual_minor, currency
+    'ZAR', limits jsonb, features jsonb, trial_days, active)`: global,
+    SELECT for all, written only by migrations. `limits` keys are a closed,
+    CHECK-validated set, since SQL reads them.
+  - `billing_account(id, kind ('user','team'), user_id, team_id,
+    created_at)`, exactly one of the two set, and `project.billing_account_id`.
+    Here it becomes `organisation` 1:1, and `project.billing_account_id`
+    folds into `project.organisation_id`.
+  - `subscription(id, billing_account_id, plan_code, status ('trialing',
+    'active','past_due','canceled','expired'), seats, period_start,
+    period_end, trial_end, cancel_at_period_end, provider, external_ref,
+    created_at)`, with a partial unique index "one live per account"
+    (feohledger's `uq_subscription_one_live_per_org`). No live subscription
+    means Free.
+  - `usage_counter(billing_account_id, kind, month, qty)` for monthly
+    counts (reports, issued packs, assistant tokens); the assistant's total
+    is summed from `assistant_usage`, not copied.
+  - Added in this WP: `usage_event(organisation_id, kind, qty, at)` for
+    job-seconds, API calls and storage bytes (WP-4.13's cost controls).
+  - RLS: the billing owner, team (later org) admins and the `billing` role
+    read. Writes go only through `SECURITY DEFINER` functions with a pinned
+    `search_path`.
+- **API.** #641 Phase 1 ships `GET /billing/plans`, `GET /account/plan` and
+  `GET /teams/:id/plan`; this WP adds `GET /orgs/:id/subscription`. Plan
+  changes come from the provider's webhook or the staff grant
+  (`app_staff_grant_plan`), never from a client call.
 - **UI.** Usage bars (catchments 12/15). A trial banner with days left. States
   for past-due and expired. The billing role sees only this page.
-- **Local-first.** No provider needed: `BILLING_PROVIDER=manual` is the code
-  default.
+- **Local-first.** No provider needed: `BILLING_PROVIDER=mock` is the code
+  default, and `BILLING_ENFORCED=false` (shadow mode: everything metered and
+  shown, nothing refused) until the operator turns it on.
 - **Tests.** *DB:* two concurrent project creates at limit−1 → exactly one
   succeeds. Expired trial → read works, write 403/404 (positive control:
   active). Viewers don't count as seats. *Unit:* the entitlement matrix per
   plan. *e2e:* hit the limit and see the prompt.
-- **Docs.** New `docs/billing.md`, api.md, data-model.md.
+- **Docs.** [billing.md](../billing.md) (from #641 Phase 1), api.md,
+  data-model.md.
 - **Acceptance.** No plan limit can be bypassed through the API, including
   under parallel requests.
-- **Size.** M.
-- **Depends on.** WP-4.1, D2 (placeholders are fine to build against).
+- **Size.** M, of which #641 Phases 1–2 build most before Step 4; what is
+  left here is the move to `organisation`.
+- **Depends on.** WP-4.1. D2 is decided (#641).
 
 ### WP-4.6 Billing, invoices and VAT
 
-- **Goal.** Tenants get SARS-valid tax invoices and can pay. The provider is
-  swappable.
+- **Goal.** Tenants can pay, and get an invoice for every payment: Stripe's,
+  with no VAT until the operator registers for SA VAT, then a s20 tax
+  invoice. The provider is swappable.
 - **The estate constraint.** feohledger bills through a pluggable adapter
   (`mock` default, `stripe_billing` live, `stripe-mock` locally, HMAC-verified
   and deduplicated webhooks; [feohledger backend/docs/billing.md]). Reuse that
@@ -441,58 +473,98 @@ run in parallel after WP-4.1.
     existing Stripe organization (one account per project). The operator
     registers for SA VAT as a foreign supplier of electronic services once
     over the threshold ([SARS VAT-REG-02-G02]).
-  - Paystack or PayFast ([Paystack ZA pricing], [Paystack recurring
-    charges]) would come back only if the seller became an SA entity: both
-    need an SA company and bank account.
+  - Paystack, PayFast, Peach Payments and Yoco ([Paystack ZA pricing],
+    [Paystack recurring charges]) would come back only if the seller became
+    an SA entity: all four need an SA-registered business and an SA bank
+    account, so none can onboard the operator.
   - B2B customers pay Stripe invoices by card or SWIFT, unless a US Wise
     Business account can take ZAR by EFT (to check once, #641).
-  - #641's phases build metering and limits first, then Stripe (Phase 3).
-- **VAT facts** (verify with a tax adviser before go-live):
+  - #641's phases build metering and limits first (Phases 1–2), then the
+    Stripe adapter, checkout, portal and webhooks (Phase 3). Stripe Checkout
+    and the Customer Portal are hosted, so no card data reaches us (PCI
+    SAQ A). Prices are set in ZAR, paid out in USD
+    ([billing.md](../billing.md)).
+- **Invoices: Stripe's are the record (#641).** An earlier version of this
+  WP had us issue our own s20 tax invoices: `billing_profile` and
+  `billing_invoice` tables, gap-free numbering from a sequence, VAT computed
+  per line, our own PDF, an immutability trigger and credit notes. #641
+  replaces all of that. The seller is a US sole proprietor who isn't
+  registered for SA VAT, Stripe Billing already numbers, renders, emails and
+  keeps every invoice and receipt (in the Customer Portal too), and a second
+  invoice store of ours would only drift from it.
+  - **Before SA VAT registration** (expected for year 1), invoices show **no
+    VAT**: they must not. Stripe Tax is off, and the price shown is the full
+    price ("No VAT is charged").
+  - **After registration** (#641 Phase 6, once the threshold is near): Stripe
+    Tax with the ZA registration adds the VAT lines, an SA tax representative
+    is appointed, and a test checks the s20 fields on a Stripe invoice. The
+    same ZAR figures then become VAT-inclusive for individuals; Team is "+ VAT"
+    for VAT vendors.
+  - **B2B purchase orders:** the operator issues a Stripe Invoice from the
+    staff tool (`collection_method = send_invoice`, net 30, in ZAR, the PO
+    number on it), paid by card on Stripe's hosted page or by SWIFT; the
+    staff grant (`app_staff_grant_plan`) honours it until it's paid
+    (#641 Phase 5).
+  - **No billing profile of our own.** The customer's legal name, billing
+    address and VAT number are entered in Stripe (Checkout, the Customer
+    Portal, or on the B2B invoice) and held by Stripe as our operator for
+    billing data; the privacy notice lists them (#641 § Tax and consumer law,
+    POPIA).
+  - **Retention.** Invoices are kept 5 years (Tax Administration Act s29;
+    confirm), in Stripe, apart from account deletion, which pseudonymises the
+    person but keeps the invoice.
+- **VAT facts** (pre-counsel research in #641; a tax adviser confirms before
+  go-live):
   - Standard rate 15%.
   - Compulsory registration for SA vendors from **R2.3 million** taxable
     supplies in 12 months, from 1 April 2026 (was R1 million). Voluntary from
     R120,000 ([SARS threshold FAQ], [SARS Budget 2026 FAQ]).
-  - Foreign e-service suppliers: R1 million under the SARS guide. The Budget
-    2026 FAQ doesn't say whether that threshold also rose ([SARS
-    VAT-REG-02-G02], [SARS Budget 2026 FAQ]).
-  - Tax invoice content follows VAT Act s20: a full tax invoice above R5,000,
-    with both parties' names, addresses and VAT numbers
-    ([SARS tax invoice checklist]).
+  - Foreign e-service suppliers (the operator): R1 million under the SARS
+    guide; Stripe's ZA page shows R2.3 million, so the adviser confirms which
+    applies ([SARS VAT-REG-02-G02], [SARS Budget 2026 FAQ]). Since 1 April
+    2025 a foreign supplier is outside the rules only if it supplies
+    exclusively to VAT-registered SA vendors, so one non-vendor customer
+    brings every SA supply into the count. SA supplies are summed monthly
+    against the threshold.
+  - Once registered, invoices follow VAT Act s20: a full tax invoice above
+    the abridged limit (commonly R5,000; confirm), with both parties' names,
+    addresses and VAT numbers ([SARS tax invoice checklist]).
 - **Changes**
-  - *backend:* `backend/src/billing/provider.ts` interface (`manual` or
-    `stripe`). `invoice.ts` renders a PDF (same renderer as
-    Step 2 reports). Webhook route `/billing/webhook/:provider`
-    (public allowlist): verify the HMAC over the raw body (Stripe:
-    `Stripe-Signature`, HMAC-SHA256 with a timestamp), deduplicate on the event id, and
-    make it the **only** writer of payment status.
-  - *frontend:* billing profile (legal name, address, VAT number), invoice
-    list and download.
-- **Data model.** `billing_profile(organisation_id PK, legal_name, address,
-  vat_number, email)`. `billing_invoice(id, organisation_id, number UNIQUE
-  from a sequence, issued_at, period, lines jsonb, subtotal_minor, vat_rate
-  numeric, vat_minor, total_minor, currency, status ('issued','paid','void'),
-  pdf_key)`. Money is integer minor units, never float. A trigger makes
-  issued invoices immutable except `status`; voiding issues a credit note.
-  `billing_event(provider, event_id, PK(provider,event_id), received_at)`.
-  RLS: admins and `billing` read their org. Writes only via functions or the
-  webhook.
-- **API.** `GET /orgs/:id/invoices`, `GET /orgs/:id/invoices/:n.pdf`,
-  `PUT /orgs/:id/billing-profile`, `POST /billing/webhook/:provider`.
-- **UI.** Invoice list (empty: "No invoices yet"). Downloads. Past-due
-  banner for admins only.
-- **Local-first.** `manual` needs nothing. For Stripe, a local
+  - *backend:* `backend/src/billing/provider.ts` interface (`mock`, the
+    code default; `manual` for B2B invoices and staff grants; `stripe`).
+    Webhook route `/billing/webhook/:provider` (public allowlist): verify the
+    HMAC over the raw body (Stripe: `Stripe-Signature`, HMAC-SHA256 with a
+    timestamp), deduplicate on the event id, and make it the **only** writer
+    of subscription and payment status (`app_billing_apply`). Events:
+    `checkout.session.completed`, `customer.subscription.created|updated|deleted`,
+    `invoice.paid`, `invoice.payment_failed`.
+  - *frontend:* Manage billing (a Customer Portal session) on the plan page,
+    where invoices, receipts, card and billing details live.
+- **Data model.** No invoice or billing-profile table. `billing_event(provider,
+  event_id, PK(provider,event_id), received_at, type)` for webhook
+  deduplication; `subscription.external_ref` links to the Stripe
+  subscription. RLS: admins and `billing` read their org's subscription.
+  Writes only via definer functions or the webhook.
+- **API.** `POST /billing/webhook/:provider`, and a route that opens a
+  Customer Portal session for the billing owner or an org admin.
+- **UI.** Manage billing opens the portal. Past-due banner for billing
+  owners and admins only.
+- **Local-first.** `mock` (the default) and `manual` need nothing; the
+  mock's checkout page posts a signed synthetic event to the same webhook
+  route, and production refuses `mock`. For Stripe, a local
   webhook-sink fixture replays signed synthetic events (`dev:billing:replay`),
   and `stripe-mock` runs in docker-compose (the feohledger `stripe:up`
   pattern).
-- **Tests.** *Unit:* VAT rounding per line and total, invoice numbering has
-  no gaps, HMAC verify (good, bad, replay). *DB:* immutability trigger,
-  deduplication. *e2e:* issue an invoice → download PDF → it shows every s20
-  field.
-- **Docs.** billing.md, security.md (webhook boundary), the sub-processor list
-  (provider).
-- **Acceptance.** A replayed or forged webhook changes nothing. An issued
-  invoice can't be edited.
-- **Size.** M (manual + one provider). +M for dunning and proration.
+- **Tests.** *Unit:* HMAC verify (good, bad, replay). *DB:* deduplication;
+  the webhook is the only path that changes a subscription's status.
+  *After VAT registration:* a Stripe test-mode invoice carries every s20
+  field. *Before it:* no invoice line or price shows VAT.
+- **Docs.** [billing.md](../billing.md), security.md (webhook boundary), the
+  sub-processor list (Stripe, and the s72 transfer to the US).
+- **Acceptance.** A replayed or forged webhook changes nothing. Every paid
+  period has a Stripe invoice the customer can download from the portal.
+- **Size.** M (manual + Stripe). Dunning (Smart Retries) and proration are
+  Stripe's.
 - **Depends on.** WP-4.5, D2, counsel on terms, a tax adviser (#641 Phase 0).
   D1 is decided (Stripe).
 
@@ -593,14 +665,15 @@ run in parallel after WP-4.1.
   - *backend:* `POST /orgs/:id/export` is a queue job that writes a zip to S3
     (`orgs/<org>/exports/…`, 24 h presigned link, auto-expired). It holds one
     `project.json` per catchment in the `import:project` format, series CSVs,
-    run summaries, members, invoices and the audit log. It reuses
+    run summaries, members and the audit log (invoices stay in Stripe's
+    Customer Portal, WP-4.6). It reuses
     `backend/src/export/*`.
   - `DELETE /orgs/:id` needs admin, MFA and typing the org name. It sets
     `status='deleting'` (invisible at once, via the org wall). After a 30-day
-    grace a job hard-deletes the rows (cascade), the S3 prefix
-    `orgs/<org>/`, and the billing-provider customer. Invoices are kept for
-    the statutory period in a separate, minimal `billing_invoice` archive
-    (D10). Backups age out with RDS PITR retention; the DPA states the number
+    grace a job hard-deletes the rows (cascade) and the S3 prefix
+    `orgs/<org>/`, and pseudonymises the Stripe customer. Its invoices are
+    kept in Stripe for the statutory period (5 years, Tax Administration Act
+    s29; confirm), apart from the deletion (#641, D10). Backups age out with RDS PITR retention; the DPA states the number
     of days.
   - Retention defaults per plan: runs kept per project
     (`RUNS_KEPT_PER_PROJECT` becomes a plan limit), ensemble scratch 7 days,
@@ -1242,8 +1315,9 @@ Counsel for the DPA and terms (one-off). An external status page, if used.
 
 **Support load.** Expect onboarding help for each new tenant (first catchment
 setup), SSO setup calls with agency IT, and invoice questions. Write
-`docs/guides/` for the top three before the first external tenant. Decide who
-answers (plan.md Q17 → D9).
+`docs/guides/` for the top three before the first external tenant. The
+operator answers (D9, decided in #641); whether the client takes domain
+questions is client question 7.
 
 **Runbooks.** Listed in WP-4.17. Each is rehearsed once on a staging stack
 before the first external tenant.
@@ -1266,9 +1340,14 @@ Run before building (`/persona …`) and record each **Need verdict** here.
 
 **Client questions**
 
-1. Who sells: your SA company, the operator's entity, or a partner? (D1)
-2. What would a consultancy, a WUA and a CMA pay per year? Anchor on the
-   consulting days a catchment study costs today. (D2)
+1. The operator sells IC-WBT, on Stripe (D1, decided in #641). For the
+   client service agreement (Gate D): do you agree that the operator owns the
+   software and may offer it to others, and what do you get in return (for
+   example your Team plan through the staff grant, a revenue share, or
+   exclusivity in your own catchment)? (D1)
+2. Do the decided prices (Pro R899, Team R2,499 a month) fit what a
+   consultancy and a WUA would pay, and what would a CMA pay per year for
+   Agency? Anchor on the consulting days a catchment study costs today. (D2)
 3. Which prospects need SSO with Entra ID, and do any need SAML or SCIM from
    day one? (D7)
 4. May tenants' catchment data be used, anonymised, to improve templates and
@@ -1277,7 +1356,8 @@ Run before building (`/persona …`) and record each **Need verdict** here.
    tenants? (D5)
 6. Which services stay yours to sell on top of the tool (calibration
    sign-off, EWR, licence evidence)?
-7. Who answers support, in which hours? (D9)
+7. The operator answers platform support and refunds (D9). Will you take
+   domain questions (calibration, EWR) from tenants, and in which hours?
 
 ## 10. Exit criteria
 
@@ -1295,8 +1375,9 @@ Run before building (`/persona …`) and record each **Need verdict** here.
   enforcement and MFA required for admins. Password accounts keep working for
   everyone else.
 - **Billing.** Plans and limits are enforced (including under parallel
-  requests). Invoices meet SARS s20. The VAT position is signed off by a tax
-  adviser.
+  requests). Every payment has a Stripe invoice: no VAT before SA VAT
+  registration, every s20 field after it (tested). The VAT position is
+  signed off by a tax adviser.
 - **Compute.** Runs are stored in S3 with the lifecycle policy. Ensembles run
   on the queue within the SLO. The engine invariants and a `FUZZ_CASES=20000`
   soak pass for every new generator.
@@ -1320,7 +1401,7 @@ Run before building (`/persona …`) and record each **Need verdict** here.
 
 | # | Decision | Options | Recommendation | Who decides |
 | --- | --- | --- | --- | --- |
-| D1 | **Seller entity and payment provider** | (a) client's SA company + Paystack/PayFast; (b) operator's non-SA entity + Stripe Billing, SA VAT as a foreign e-services supplier; (c) manual EFT invoicing first | **Decided 2026-10-28 (#641): (b).** The operator, a US sole proprietor, sells on Stripe; the client service agreement records that the operator owns the software | Operator (decided); tax adviser still to confirm VAT (#641 Phase 0) |
+| D1 | **Seller entity and payment provider** | (a) an SA company + Paystack/PayFast/Peach/Yoco (each needs an SA entity and bank account); (b) the operator, a US seller, + Stripe Billing, SA VAT as a foreign e-services supplier; (c) manual EFT invoicing first | **Decided 2026-10-28 (#641): (b), Stripe unless the seller changes.** The operator, a US sole proprietor, sells on Stripe, as a new account in the estate's Stripe organization; the client service agreement records that the operator owns the software. B2B pays Stripe invoices by card or SWIFT unless ZAR EFT to a US seller is confirmed ([billing.md](../billing.md)) | Operator (decided); tax adviser still to confirm VAT (#641 Phase 0) |
 | D2 | **Prices and plan limits** | Per catchment; per editor seat; flat per org | **Decided 2026-10-28/29 (#641):** Free / Pro R899 / Team R2,499 incl. 3 editors; Free never limits modelling, only AI, live catchments, server PDFs and issued packs | Operator (decided) |
 | D3 | **Tenancy model** | Shared schema + RLS org wall; database-per-tenant (feohledger); stack-per-tenant | Shared + RLS. Offer a dedicated stack to one large customer if ever needed | Operator (CISO consulted) |
 | D4 | **Outbound internet from the VPC Lambdas** (SSO, webhooks, fetchers) | NAT gateway (~$33/month + data); NAT instance (~$4); a non-VPC egress Lambda fed by SQS (no NAT, more moving parts) | Reuse Step 2's pattern (WP-2.10: a non-VPC egress Lambda fed by SQS) for webhooks and fetchers; add a small NAT instance only for SSO token calls, which must run inline | Operator |
@@ -1328,7 +1409,7 @@ Run before building (`/persona …`) and record each **Need verdict** here.
 | D6 | **Stochastic method** | kNN block bootstrap of water years; parametric Markov + gamma; both | Bootstrap first | Hydrologist |
 | D7 | **SAML and SCIM timing** | Build with OIDC; build on first request | On first signed request | Operator, after client Q3 |
 | D8 | **SLO level** | 99.5% single-AZ; 99.9% with Multi-AZ RDS | 99.5% until an Agency contract needs more | Client + operator |
-| D9 | **Who supports tenants** | Client; operator; shared with hours | The client does domain support, the operator platform support | Client (plan.md Q17) |
+| D9 | **Who supports tenants** | Client; operator; shared with hours | **Decided 2026-10-28 (#641): the operator handles support and refunds**, with a 7-day no-questions refund on a first payment. Open: whether the client takes domain questions (client question 7) | Operator (decided); client for domain support (plan.md Q17) |
 | D10 | **Retention of audit logs and licence evidence vs deletion** | Delete everything with the org; keep evidence packs for N years in an archive | Keep only what law or a licence process requires, minimised, stated in the DPA | Counsel + client |
 | D11 | **Excel format** | `.xlsm` into the tenant's template (if the SheetJS VBA spike works); `.xlsx` values only | Spike first, decide after | Operator |
 
@@ -1338,12 +1419,12 @@ Run before building (`/persona …`) and record each **Need verdict** here.
 | --- | --- | --- | --- |
 | R1 **Cross-tenant data leak** through a policy that skips `app_has_role` or a new principal | Low–Med | Very high | One chokepoint (`app_project_role`) for all principals; cross-org tests with positive controls for every table; a catalogue test that every table with `project_id`/`organisation_id` has RLS; `/audit/auth`; persona-adversary each WP |
 | R2 **SSO account takeover** via an IdP asserting someone else's email | Med | High | Link by email only for DNS-verified domains of that org; pin the Entra `tid`; JIT never grants admin |
-| R3 **No payment rail** because Stripe excludes SA entities | Low (the US operator sells, D1) | Med | Stripe under the operator; a Paystack adapter behind the feohledger-style interface only if the seller ever becomes an SA entity |
-| R4 **VAT mistakes** (thresholds changed April 2026; foreign-supplier rule unclear) | Med | Med | Tax adviser sign-off before the first invoice; VAT rate and registration stored as config, not code |
+| R3 **No payment rail** because Stripe excludes SA entities | Low (the US operator sells, D1) | Med | Stripe under the operator (#641). The SA providers (Paystack, PayFast, Peach, Yoco) can't onboard a US seller; a Paystack adapter behind the `provider.ts` interface only if the seller ever becomes an SA entity. Residual: SA customers who insist on ZAR EFT or debit orders, covered by Stripe invoices (card, SWIFT) and the staff grant |
+| R4 **VAT mistakes** (thresholds changed April 2026; foreign-supplier rule unclear) | Med | Med | Tax adviser sign-off before the first invoice; Stripe Tax stays off (no VAT on invoices) until the operator registers; SA supplies summed monthly against the threshold (#641) |
 | R5 **Single-tenant restore is hard** in a shared database | Med | High | A tested copy-one-org script from a PITR restore; rehearse before the first external tenant; export (WP-4.8) as the tenant's own backup |
 | R6 **Egress adds cost and attack surface** | High | Low–Med | D4; SSRF guard; separate egress role with no DB access where possible |
 | R7 **WR2012 licensing blocks hosted data** | Med | Low | User uploads; importer works on their files |
-| R8 **Scope and time** (18 WPs, one developer) | High | High | Tracks in parallel; SAML, SCIM and a second region only on demand; build WP-4.5/4.6 as manual first |
+| R8 **Scope and time** (18 WPs, one developer) | High | High | Tracks in parallel; SAML, SCIM and a second region only on demand; build WP-4.5/4.6 in #641's order: metering in shadow mode, then limits, then Stripe |
 | R9 **Ensemble results misread** as forecasts | Med | Med | Clear labelling, seed and method on every chart, the hydrologist's wording in help |
 | R10 **Runoff module never calibrates well enough** | Med | Low | Keep GR4J as the default (the b023 recession was removed in engine 1.0.0); the module ships only on the hydrologist's acceptance |
 | R11 **Support load swamps the operator** | Med | Med | Guides for the top tasks, the tour, the guided wizard, D9 |

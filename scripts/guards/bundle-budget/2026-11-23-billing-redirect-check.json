@@ -1,0 +1,4 @@
+{
+	"addKb": 1,
+	"why": "#817 CI fix: the plan page's billingRedirect allowlist (Stripe checkout/billing hosts or the API's mock pages) and the phone-width button wrap: measured +225 B JS and +30 B CSS gzipped in the plan chunk, total 2519 KB before, 2520 KB after"
+}

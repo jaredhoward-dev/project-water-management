@@ -57,6 +57,10 @@ export const APP_USER_EXCLUDED: Record<string, string> = {
  * classifies what deletion does. "Made by" columns on the project's own
  * records are left out: the row is the project's, the person is named only as
  * its maker, and the act itself is in auditEvents.
+ *
+ * A section is a top-level key of the export, or a dotted path into one
+ * (`billing.renewalNotices`): an array of the rows, or, for a table with one
+ * row per person (`billing.account`), that row as an object.
  */
 export const USER_FK_COVERAGE: Record<string, { section: string } | { excluded: string }> = {
 	'account_mail_quota.user_id': { excluded: 'a count of reset / verification emails for the daily cap, a day at most' },
@@ -146,6 +150,10 @@ export const USER_FK_COVERAGE: Record<string, { section: string } | { excluded: 
 	// The host's checks of the person's professional registration, recorded by a project owner (167_signers): own rows under RLS.
 	'registration_check.user_id': { section: 'registrationChecks' },
 	'registration_check.recorded_by': { excluded: 'a check this owner recorded of another member’s registration; it is that member’s, and registration.checked is in auditEvents' },
+	// The person's own billing account (323_billing, issue #641): with its subscriptions and monthly counters. A team's is the team's.
+	'billing_account.user_id': { section: 'billing.account' },
+	// The annual renewal notices sent to them (329, CPA s14): in billing, beside the subscription each is about.
+	'renewal_notice.user_id': { section: 'billing.renewalNotices' },
 	'team.created_by': { excluded: 'the team itself; the membership is in teamMemberships' },
 	'team_member.user_id': { section: 'teamMemberships' },
 	// The person's own display preferences (083): the workspace sections they hid.
@@ -320,10 +328,42 @@ export async function buildSubjectExport(userId: string, now = new Date()) {
 		// The assistant's usage counters (262): own rows only under RLS. Counts only; no chat text is ever kept.
 		const { rows: assistantUsage } = await db.query(
 			`SELECT project_id AS "projectId", to_char(month, 'YYYY-MM') AS month, input_tokens::float8 AS "inputTokens",
-				output_tokens::float8 AS "outputTokens", messages, updated_at AS "updatedAt"
+				output_tokens::float8 AS "outputTokens", cache_read_tokens::float8 AS "cacheReadTokens",
+				cache_write_tokens::float8 AS "cacheWriteTokens", cost_usd_micros::float8 AS "costUsdMicros",
+				unpriced_turns AS "unpricedTurns", messages, updated_at AS "updatedAt"
 			 FROM assistant_usage WHERE user_id = $1 ORDER BY month DESC, project_id`,
 			[userId]
 		);
+		// Their own billing account (323_billing; kind 'user', never a team's), its subscriptions and its monthly counters: own rows under RLS.
+		// null when they never needed one.
+		const { rows: billingAccount } = await db.query<{ id: string }>(
+			`SELECT id, kind, projects_created AS "projectsCreated", external_customer_ref AS "externalCustomerRef", created_at AS "createdAt" FROM billing_account WHERE user_id = $1`,
+			[userId]
+		);
+		const billingId = billingAccount[0]?.id ?? null;
+		const { rows: subscriptions } = await db.query(
+			`SELECT plan_code AS "planCode", status, seats, period_start AS "periodStart", period_end AS "periodEnd", trial_end AS "trialEnd",
+				cancel_at_period_end AS "cancelAtPeriodEnd", provider, external_ref AS "externalRef", created_at AS "createdAt"
+			 FROM subscription WHERE billing_account_id = $1 ORDER BY created_at DESC, id`,
+			[billingId]
+		);
+		const { rows: usageCounters } = await db.query(
+			`SELECT kind, to_char(month, 'YYYY-MM') AS month, qty::float8 AS qty FROM usage_counter WHERE billing_account_id = $1 ORDER BY month DESC, kind`,
+			[billingId]
+		);
+		const { rows: renewalNotices } = await db.query(
+			`SELECT period_end AS "periodEnd", status, sent_at AS "sentAt", created_at AS "createdAt"
+			 FROM renewal_notice WHERE user_id = $1 ORDER BY period_end DESC`,
+			[userId]
+		);
+		// The staff grants of their plan (330): what was granted, until when, why and by whom, as the account reads it.
+		const { rows: grants } = await db.query(
+			`SELECT action, plan_code AS "planCode", until, reason, granted_by AS "grantedBy", created_at AS "createdAt"
+			 FROM billing_grant_log WHERE billing_account_id = $1 ORDER BY created_at DESC, id`,
+			[billingId]
+		);
+		// A notice is keyed to the person, not the account, so it is exported even if the account were gone.
+		const billing = billingAccount[0] || renewalNotices.length ? { account: billingAccount[0] ?? null, subscriptions, usageCounters, renewalNotices, grants } : null;
 		// Two-step sign-in (150): own rows only under RLS. The authenticator's state, never its sealed secret or the code hashes.
 		const { rows: twoStepSignIn } = await db.query(
 			`SELECT t.created_at AS "createdAt", t.confirmed_at AS "confirmedAt",
@@ -382,6 +422,7 @@ export async function buildSubjectExport(userId: string, now = new Date()) {
 			erratumNotices,
 			preferences: prefs,
 			assistantUsage,
+			billing,
 			twoStepSignIn,
 			twoStepSignInResets,
 			twoStepEmail,

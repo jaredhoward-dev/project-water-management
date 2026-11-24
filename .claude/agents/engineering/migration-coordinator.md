@@ -35,7 +35,7 @@ pnpm dev:db:status        # is it up? if not: pnpm dev:db:up
 pnpm dev:db:migrate
 ```
 
-If the runner refuses an edited applied file on the dev database, `pnpm dev:db:reset` rebuilds it, but it destroys local data: ask the parent before running it.
+If the runner refuses an edited applied file on the dev database, `pnpm dev:db:reset` rebuilds it: it drops and recreates only this checkout's dev database (`water`, or a worktree's `water_w<tag>`), so this checkout's local data goes but no other checkout's. Ask the parent before running it. Never run `pnpm dev:docker:wipe`: it deletes every checkout's databases.
 
 ### 3. RLS, grants and triggers
 

@@ -24,7 +24,9 @@ import { assistantConfig, weightedTokens, type AssistantConfig } from './config.
 import { safeError } from '../logging/safeError.js';
 import { capConversation, runTurn, turnFloor, type TurnOutcome } from './orchestrator.js';
 import { systemPrompt } from './prompt.js';
+import { ANTHROPIC_DEFAULT_MODEL } from './providers/anthropic.js';
 import { createProvider } from './providers/index.js';
+import { turnCostUsdMicros } from './pricing.js';
 import { sseBody } from './sse.js';
 import { ASSISTANT_TOOLS } from './tools/index.js';
 import type { AssistantProvider, AssistantStatus, AssistantTool, ChatMessage } from './types.js';
@@ -32,6 +34,9 @@ import { beginTurn, bindingBudget, chargeTurn, monthResetsAt, tokensUsed } from 
 
 /** Messages one request may carry; the character cap (maxInputChars) drops the oldest of them anyway. */
 export const MAX_MESSAGES = 200;
+
+/** The model a turn calls, for its price (pricing.ts): ASSISTANT_MODEL, else the anthropic provider's default (Bedrock requires one). */
+export const turnModel = (cfg: Pick<AssistantConfig, 'provider' | 'model'>): string => cfg.model || (cfg.provider === 'anthropic' ? ANTHROPIC_DEFAULT_MODEL : '');
 /** One message's characters as the body schema takes it; the turn's own cap is cfg.maxInputChars. */
 export const MAX_MESSAGE_CHARS = 100_000;
 
@@ -191,10 +196,25 @@ export const assistantRoutes = new Hono<AuthEnv>()
 				return;
 			}
 			// Charged whatever the outcome, the client gone included: the tokens were spent. This settles the reservation.
-			const after = await chargeTurn(userId, id, begun.reservationId, result.inputTokens, result.outputTokens);
+			// What the turn cost (pricing.ts; null for a model the price table hasn't), recorded with the charge (shadow mode: no cap reads it).
+			const costUsdMicros = turnCostUsdMicros(provider.name, turnModel(cfg), result);
+			const after = await chargeTurn(userId, id, begun.reservationId, result.inputTokens, result.outputTokens, {
+				cacheReadTokens: result.cacheReadTokens,
+				cacheWriteTokens: result.cacheWriteTokens,
+				costUsdMicros
+			});
 			const weighted = weightedTokens(result.inputTokens, result.outputTokens);
 			// One line a turn, counts only (no text): the assistant's spend alarm sums weightedTokens (infra/alarms.tf).
-			logEvent('info', { event: 'assistant_turn', inputTokens: result.inputTokens, outputTokens: result.outputTokens, weightedTokens: weighted, end: result.end });
+			logEvent('info', {
+				event: 'assistant_turn',
+				inputTokens: result.inputTokens,
+				outputTokens: result.outputTokens,
+				cacheReadTokens: result.cacheReadTokens,
+				cacheWriteTokens: result.cacheWriteTokens,
+				weightedTokens: weighted,
+				costUsdMicros,
+				end: result.end
+			});
 			if (result.end === 'aborted') return;
 			const used = after ?? { project: usedBefore.project + weighted, user: usedBefore.user + weighted, total: usedBefore.total + weighted };
 			out.send({ type: 'usage', inputTokens: result.inputTokens, outputTokens: result.outputTokens, ...bindingBudget(cfg, used) });

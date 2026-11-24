@@ -170,6 +170,11 @@ A and C remain owed and should be done as soon as possible; setting
     s51, and whether s61 reaches a hosted model), the US $100 floor against
     real fees, §16 and §18 against s48, ECTA s43–44 (address, cooling-off),
     and the s54 quality right.
+    For s14 (an individual's yearly plan), the app sends the 40–80 business
+    day notice (60 days before, [billing.md § Renewal
+    notice](./billing.md#renewal-notice)); open for that opinion: whether a
+    yearly renewal needs the person's express choice given s14(2)(d)'s
+    month-to-month continuation, and the early-cancellation penalty.
   - Jurisdiction and enforcement against a US sole proprietor.
   - Whether English-only Terms bind Afrikaans-reading farmers (the summary
     at sign-up is translated; the Terms are not).

@@ -1,0 +1,17 @@
+{
+	"id": "evt_synthetic_checkout_0001",
+	"object": "event",
+	"api_version": "2025-03-31.basil",
+	"created": 1795000000,
+	"livemode": false,
+	"type": "checkout.session.completed",
+	"data": {
+		"object": {
+			"id": "cs_test_synthetic_0001",
+			"object": "checkout.session",
+			"mode": "subscription",
+			"subscription": "sub_synthetic_0001",
+			"metadata": { "billing_account_id": "00000000-0000-4000-8000-000000000641", "plan_code": "pro" }
+		}
+	}
+}

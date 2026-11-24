@@ -1459,6 +1459,7 @@ email show them by the project role they give, viewer / editor / owner
 | GET | `/teams/:id/invites` | – | `{ invites: Invite[] }` | admin |
 | DELETE | `/teams/:id/invites/:inviteId` | – | `204` | admin |
 | GET | `/teams/:id/portfolio` | – | `Portfolio` (see [Portfolio](#portfolio) below) | viewer |
+| GET | `/teams/:id/plan` | – | `AccountPlan`, the team's billing account (see [Billing](#billing)); `404` to anyone but a team admin (a member, a viewer, a farmer on a team project, a stranger) | admin |
 
 - **History.** A team role is a role on every project of the team, so adding,
   re-roling and removing a member (or their leaving, or accepting a team
@@ -5913,6 +5914,54 @@ report" }` with no `details`, so nothing sent is echoed back. The body goes
 through `readJson` (the general 4 MB cap and its checks). At most 5 reports
 leave a page load, so a crash that repeats can't flood the log. What the line
 holds and where it is kept: [security.md § Client error reports](./security.md#client-error-reports).
+
+## Billing
+
+Plans and usage, Phase 1: **shadow mode** (issue #641, [billing.md](./billing.md)).
+Usage is counted and shown; nothing is refused, and no route answers `402`.
+Each answer comes from a `323_billing` definer function run as the caller.
+
+| Method | Path | Body | Response | Who |
+| --- | --- | --- | --- | --- |
+| GET | `/billing/plans` | – | `{ plans: Plan[] }`, the active plans, cheapest first | anyone, signed out included (public allowlist) |
+| GET | `/account/plan` | – | `AccountPlan` for your own account (created on first ask); `Cache-Control: no-store` | signed in |
+| GET | `/teams/:id/plan` | – | `AccountPlan` for the team's account; `404` unless you are a team admin | team admin |
+| POST | `/account/plan/checkout` | `{ plan: 'pro', interval: 'month' \| 'year', seats?: 1 }` | `{ url }`: where to send the person (Stripe Checkout, or the mock's page; no trial, [billing.md § Trials](./billing.md#trials-decided-2026-11-23)); `400` for another plan (a person buys Pro only), `seats` other than 1 (Pro sells no extra seats) or a bad body; `409` when the account already has a live subscription (Manage billing changes it), or `billing_unavailable` with the `manual` provider or none; `503 billing_provider_error` when the provider fails or has no key; `Cache-Control: no-store` | signed in |
+| POST | `/account/plan/portal` | none (a body sent must be `{}`: anything else is `400`, a hostile one `400 body_refused`) | `{ url }`: the provider's billing portal (Stripe's Customer Portal, or the mock's page); `409 billing_no_customer` (Stripe) when the account never checked out; `409 billing_unavailable`, `503 billing_provider_error` as above | signed in |
+| POST | `/teams/:id/plan/checkout` | `{ plan: 'team', interval, seats? }` | as `/account/plan/checkout`, for the team's account; `seats` is the editor seats in all, a whole number from the plan's included 3 to 50 (absent: 3), each past the included ones sold at the extra-seat price ([billing.md § Team seats at checkout](./billing.md#team-seats-at-checkout)); `400` outside that range; `404` unless you are a team admin (before any provider check) | team admin |
+| POST | `/teams/:id/plan/portal` | – | as `/account/plan/portal`, for the team's account; `404` unless you are a team admin | team admin |
+| GET, POST | `/billing/mock/checkout?t=…`, `/billing/mock/portal?t=…` | – (the POST's choice is in its query: `outcome=pays\|declines\|cancels`, `action=cancel`) | the mock provider's pages, plain HTML forms: `404` unless `BILLING_PROVIDER=mock` (production refuses it) or for a forged or expired token; pays and cancel post signed events to `/billing/webhook/mock` and answer `303` to the plan page; declines answers `402` with the page again | anyone (public allowlist): the token, signed with the dev key for one account and an hour, is the credential; exempt from the CSRF check, since they post from the API's own origin ([billing.md § Checkout and portal](./billing.md#checkout-and-portal)) |
+| POST | `/billing/webhook/:provider` | the provider's event, raw (≤ 256 KiB), signed in `Stripe-Signature: t=…,v1=…` | `200 { received: true, result }`, where `result` is `applied`, `recorded`, `duplicate`, `stale` (older than the event last applied, 327), `conflict`, `unknown_account` or `ignored` (a type not acted on); `400 { error: 'invalid signature' \| 'invalid event' }`; `404` unless `:provider` is the configured `BILLING_PROVIDER` and takes webhooks (`mock` or `stripe`; `manual` takes none); `413` over the cap | anyone (public allowlist): the signature over the raw body is the credential ([billing.md § Webhooks and providers](./billing.md#webhooks-and-providers)) |
+
+- `Plan = { code: 'free' \| 'pro' \| 'team', name, priceMonthlyMinor, priceAnnualMinor, currency, limits, features, trialDays }`.
+  Prices are minor units (ZAR cents). `limits` keeps the database's
+  snake_case keys (`catchments`, `editors_per_project`, `live_catchments`,
+  `reports_per_month`, `packs_included_per_month`, `seats_included`,
+  `assistant_usd_micros_per_month`, `assistant_usd_micros_per_seat_month`);
+  `null` is unlimited.
+- `AccountPlan = { account: { id, kind: 'user' \| 'team' }, plan: { code, name, priceMonthlyMinor, priceAnnualMinor, currency, limits, features }, subscription, usage, enforced, provider }`:
+  - `subscription`: `null` (Free; always in Phase 1) or `{ status, seats, periodStart, periodEnd, trialEnd, cancelAtPeriodEnd }`.
+  - `usage = { month: 'YYYY-MM', catchments, reports, packsIssued, assistantTokens, assistantCost }`,
+    each but `assistantCost` `{ used, limit }` (`limit` `null` = unlimited). `catchments.used`
+    is the account's active projects; `reports` and `packsIssued` are this
+    month's counts (Africa/Johannesburg); `assistantTokens.used` is this
+    month's weighted tokens on the account's projects.
+  - `assistantCost = { usedUsdMicros, limitUsdMicros, unpricedTurns }`: the
+    assistant's cost on the account's projects this UTC month in micro-USD
+    (1 USD = 1 000 000), the plan's allowance (`null` = unlimited; on Team,
+    the per-seat allowance × its seats), and how many turns had no price, so
+    a non-zero `unpricedTurns` means `usedUsdMicros` is a floor.
+  - `enforced`: the backend's `BILLING_ENFORCED` (default `false`). In
+    Phase 1 it is only reported.
+  - `provider`: the configured `BILLING_PROVIDER` (`mock`, `manual` or
+    `stripe`; `null` for a value that names none). The page offers checkout
+    and the portal only for `mock` and `stripe`.
+- **What counts.** A server PDF report counts one `reports` when it is queued
+  (`POST /projects/:id/reports`, or a schedule firing), and issuing an
+  evidence pack counts one `packsIssued` (`POST /projects/:id/packs/:packId/issue`),
+  each in the action's own transaction against the project's account. Neither
+  is ever refused for it.
+- No farmer route, share link, `/verify` or email returns plan data.
 
 ## Health
 

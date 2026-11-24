@@ -268,6 +268,8 @@ Keys this app needs:
 | `alerts_token_secret` | `ALERTS_TOKEN_SECRET` in the worker's runtime secret: signs the one-click unsubscribe links and the "Was this useful?" links in alert emails (32+ alphanumeric characters, `openssl rand -hex 32`). Rotating it breaks the unsubscribe link in every alert already sent, and the feedback links of the last 30 days |
 | `app_encryption_key` | `APP_ENCRYPTION_KEY` in the API's runtime secret: seals two-step sign-in's TOTP secrets at rest (32+ alphanumeric characters, `openssl rand -hex 32`). Rotating it voids every authenticator ([§ Runbooks](#runbooks) 15) |
 | `feed_credential_private_key` | Optional, only with `station_api_feeds = true`: `FEED_CREDENTIAL_PRIVATE_KEY` in the fetcher's runtime secret, which opens the keys owners save for station API feeds (43 base64url characters from `pnpm gen:feed-credential-key`, whose public half goes in `prod.tfvars.sops` as `feed_credential_public_key`). Rotating it voids every saved station key ([§ Station API feeds](#station-api-feeds)) |
+| `stripe_secret_key` | Optional, only with `billing_provider = "stripe"` (issue #641): `STRIPE_SECRET_KEY` in the API's runtime secret, Stripe's API key for checkout and the Customer Portal (`billing/provider/stripeApi.ts`). A **live restricted** key (`rk_live_…`) with the permissions in [§ Turning on Stripe](#turning-on-stripe); plan refuses a test-mode (`sk_test_…`/`rk_test_…`) or publishable key. Left out of the runtime secret under `manual` |
+| `billing_webhook_secret` | Optional, only with `billing_provider = "stripe"` (issue #641): `BILLING_WEBHOOK_SECRET` in the API's runtime secret, the signing secret (`whsec_…`) of Stripe's webhook endpoint for `POST /billing/webhook/stripe` (32+ characters, never the committed `dev-only-` value). Left out of the runtime secret under `manual`, which takes no webhooks ([§ Turning on Stripe](#turning-on-stripe); [billing.md § Webhooks and providers](./billing.md#webhooks-and-providers)) |
 | `cloudfront_private_key` | `CLOUDFRONT_PRIVATE_KEY` in the API's runtime secret: signs report download links (CloudFront signed URLs). An RSA 2048 private key, PEM, as a YAML block scalar; its public half goes in `prod.tfvars.sops` (`report_download_public_keys`, `report_download_signing_key`). Generating and rotating it: [§ The report-download signing key](#the-report-download-signing-key) |
 
 The key list is `infra/prod.sops.yaml.example`. There is no `db_owner_password`
@@ -3277,6 +3279,79 @@ The operator does every step; nothing here is for an agent to run.
   and import it (`infra/scripts/tf.sh import 'aws_secretsmanager_secret.runtime["fetcher"]' <its ARN>`)
   before the apply.
 
+## Billing
+
+The API's billing provider is Terraform's `billing_provider`: `manual` (the
+default) takes no webhooks and needs no Stripe secret; `stripe` sells plans
+through Stripe Checkout and the Customer Portal ([billing.md](./billing.md)).
+With `stripe`, `stripe_secret_key` and `billing_webhook_secret` go from
+`prod.sops.yaml` into the API's runtime secret (`infra/secrets.tf`), never its
+environment. Under `manual` Terraform leaves both out of the secret, even when
+they are in sops, since the API refuses a key it doesn't expect
+(`config/runtimeSecrets.ts`). Plan refuses `stripe` without both, with a
+test-mode key or with a webhook secret under 32 characters, and refuses `mock`
+outright (`infra/tests/guardrails.tftest.hcl`).
+
+### Turning on Stripe
+
+The operator does every step; nothing here is for an agent to run, and no
+key goes into a chat, an issue or a CI log.
+
+1. **Open the Stripe account** on the estate's owner identity
+   (`~/github/project-mgmt/docs/vendor-accounts.md` and its Runbook H; add the
+   registry row), and finish its activation (business details, payout bank
+   account) so live mode is available.
+2. **Make a restricted key** in live mode: Developers → API keys → Create
+   restricted key, named `ic-wbt-api`. Give it exactly what the API calls
+   (billing.md § Stripe): **Customers: Write**, **Checkout Sessions: Write**
+   and **Customer portal: Write**; everything else **None**. Stripe shows the
+   `rk_live_…` value once: go straight to step 4 with it.
+3. **Make the webhook endpoint** in live mode: Developers → Webhooks → Add
+   endpoint, URL `https://<site domain>/api/billing/webhook/stripe` (CloudFront
+   sends `/api/*` to the API), API version `2026-10-28.endive` (the one the
+   API pins), and exactly these six events:
+   `customer.subscription.created`, `customer.subscription.updated`,
+   `customer.subscription.deleted`, `checkout.session.completed`,
+   `invoice.paid`, `invoice.payment_failed`. Reveal its signing secret
+   (`whsec_…`). Until step 5's apply the API answers this endpoint `404`
+   (`manual`), and Stripe retries a failed delivery for up to three days, so
+   do steps 4–5 the same day.
+4. **Put both in sops:**
+   `cd ~/github/infra-secrets && AWS_PROFILE=water-management sops water-management/prod.sops.yaml`,
+   adding `stripe_secret_key: "<rk_live_…>"` and
+   `billing_webhook_secret: "<whsec_…>"` (`infra/prod.sops.yaml.example`).
+   `tf.sh` passes each as an ephemeral variable when present; neither reaches
+   state or a saved plan.
+5. **Switch the provider, plan, read it, then apply** with your own
+   go-ahead. Add `billing_provider = "stripe"` to `prod.tfvars.sops`, then
+   `cd infra && AWS_PROFILE=water-management ./scripts/tf.sh plan -var-file=../../infra-secrets/water-management/prod.tfvars.sops -out=<plan>`
+   and `AWS_PROFILE=water-management ./scripts/tf.sh apply <plan>`. Expect:
+   `BILLING_PROVIDER` going from `manual` to `stripe` on the backend function,
+   and every runtime secret version rewritten (the sops edit moved
+   `runtime_secret_version`, so every Lambda cold-starts). Nothing else.
+   A plan that fails on `var.billing_provider` names the missing or
+   malformed key.
+6. **Check it.** First in test mode, which production can't take (it
+   refuses a test key, and a test-mode endpoint's events are signed with a
+   different secret), so on your own machine with the
+   [Stripe CLI](https://docs.stripe.com/stripe-cli): in
+   `backend/.env.development.local` set `BILLING_PROVIDER=stripe`, a test-mode
+   `STRIPE_SECRET_KEY=sk_test_…` and the `whsec_…` that
+   `stripe listen --forward-to http://localhost:3001/billing/webhook/stripe`
+   prints, then run `pnpm dev` and buy a plan from the plan page with Stripe's
+   test card `4242 4242 4242 4242`. The `stripe listen` window shows each of
+   the events answered `200`, and the account's plan page shows the
+   subscription. (`stripe trigger` events carry no `billing_account_id`, so
+   the API rightly refuses them; use a real test checkout.) Then in
+   production, after the apply: the API's log group shows no
+   `refusing to start the api Lambda`, and the first live event appears in
+   the endpoint's delivery log in Stripe's dashboard answered `200`, with a
+   `billing_webhook` line in the API's log. Remove the local keys afterwards.
+
+To turn it off: `billing_provider = "manual"` and apply. The webhook route
+answers `404` again and checkout falls back to recording by hand; disable the
+endpoint in Stripe's dashboard and remove both sops keys.
+
 ## The cutover
 
 Issue #604 moves every feed off its upstream: CHIRPS and CHIRPS-GEFS onto
@@ -5096,6 +5171,94 @@ Every step is an ordinary app action by an owner unless it says "operator".
     The line names the user (`userId`) and can quote a value the page was
     handling, so don't copy it outside the log ([security.md § Client error
     reports](./security.md#client-error-reports)).
+21. **Granting a plan by hand** (operator; 330_staff_grant, issue #641;
+    [billing.md § Staff grants](./billing.md#staff-grants)). For a plan
+    nobody buys through checkout: a business paying by purchase order (a
+    manual Stripe invoice sent from the Stripe dashboard; grant once it is
+    paid, until the end of the invoiced period), the first client's deal,
+    founding users (no end), and Team's 30-day trial on request
+    (billing.md § Trials). It works whatever `billing_provider` is. Writes
+    run as the schema owner, which production reaches only from inside the
+    VPC ([infra/README.md § Database access and
+    recovery](../infra/README.md#database-access-and-recovery): no bastion;
+    a temporary SSM-managed instance in a private subnet, removed
+    afterwards); the read-only checks below can't write.
+    1. **Find the account.** A person's, from the address they gave (it
+       makes the account if they have none yet, as their first plan page
+       does): `SELECT billing_account_ensure('user', (SELECT id FROM
+       app_user WHERE lower(email::text) = lower('<address>')));`. A
+       team's, from its id (`/teams/<id>` in the team page's URL):
+       `SELECT billing_account_ensure('team', '<team id>');`. A `NULL`
+       answer means no person has that address; an unknown team id fails
+       on its foreign key.
+    2. **Grant it**, in one statement:
+       `SELECT app_staff_grant_plan('<account id>', 'team', (('2026-12-31'::date + 1)::timestamp AT TIME ZONE 'Africa/Johannesburg'), '<reason>', '<your name>', false);`
+       The arguments, in order: the account id from step 1; the plan
+       (`pro` or `team`; `free` is refused, revoke instead); the end, a
+       timestamp in the future, written as above so the grant lasts through
+       that South African date and ends at the next SAST midnight (`NULL`:
+       until revoked, a founding user's; a 30-day trial is `now() +
+       interval '30 days'`); the reason (1–500 characters); who grants it
+       (1–100 characters); and `p_replace`. With an end the plan page says
+       it ends and the renewal notice never picks it up. A live **Stripe**
+       subscription on the account is always refused, with `p_replace` or
+       without: cancel it in Stripe, let the webhook end it, then grant. A
+       live mock or manual one is refused unless `p_replace` is `true`,
+       which ends it now (a replaced grant gets a `revoke` row, reason
+       `replaced: …`). An account's lapsed grant the tick hasn't reached
+       yet is expired first, so it never blocks. While a grant is live, a
+       Stripe checkout for the account is a `conflict`: revoke the grant
+       before the customer moves to a card.
+    3. **Write the reason for the customer.** `billing_grant_log` is read by
+       the account's person and its team's admins, and the person's rows
+       are in "Download my data" (`billing.grants`), `granted_by` included:
+       an invoice or purchase order number, "founding user", "Team trial,
+       30 days", never a private note.
+    4. **Revoke** (Free again, nothing deleted; never touches a Stripe or
+       mock subscription): `SELECT app_staff_revoke_grant('<account id>',
+       '<reason>', '<your name>');`. It refuses an account with no live
+       grant.
+    5. **Check it:** `SELECT created_at, action, plan_code, until,
+       granted_by, reason FROM billing_grant_log WHERE billing_account_id =
+       '<account id>' ORDER BY created_at;` and `SELECT
+       billing_account_plan_code('<account id>');` (the plan now).
+    6. **Expiry is automatic.** The worker's tick (every 5 minutes) runs
+       `app_staff_grant_expire()`: a grant past its end becomes `expired`
+       with an `expire` row by `expiry`, and the account is on Free again.
+       Nothing to do at the end of an invoiced period unless the customer
+       renews (a new grant).
+
+    Locally the same is `pnpm dev:billing:grant <email|team-id> <plan>
+    [--until YYYY-MM-DD] --reason "…" [--replace] [--by <name>]` (or
+    `--revoke --reason "…"`, or `--list`). Record the grant, its invoice or
+    reason and its end in the operator log.
+22. **The monthly billing metrics and abuse report** (operator; 325_billing_metrics,
+    issue #641; [billing.md § Metrics and the abuse
+    report](./billing.md#metrics-and-the-abuse-report)). The rows come from
+    two owner-only functions, `billing_metrics_accounts('<YYYY-MM-01>')`
+    (one row per billing account: plan, catchments, the month's runs,
+    reports and assistant spend) and `billing_metrics_people('<YYYY-MM-01>')`
+    (one row per person, **with their address**). The maths (activation,
+    shares near each limit, percentiles, domain and canonical clusters) is
+    TypeScript only (`backend/src/billing/metrics.ts`), so plain SQL gives
+    the rows, not the report. Production has two ways to it, both from inside
+    the VPC like step 21:
+    - **The report:** from a checkout of the released tag on that instance
+      (Node 24, `pnpm install`), with `MIGRATION_DATABASE_URL` set in the
+      shell to the owner's connection, `pnpm dev:billing:report --month
+      YYYY-MM`. The script loads the dev env files but never overrides a
+      variable already set, and only rewrites a localhost URL, so it reads
+      production. Never `--show-emails` there, and never paste its output
+      outside the operator's terminal beyond the counts.
+    - **Just the account rows:** `SELECT plan_code, count(*), sum(runs),
+      sum(reports), sum(assistant_usd_micros) / 1e6 AS assistant_usd FROM
+      billing_metrics_accounts('<YYYY-MM-01>') GROUP BY plan_code;` gives
+      the month's totals by plan without any address.
+
+    There is no Lambda route for either (the read-only checks refuse rows
+    with an email, and a check can't run the TypeScript maths), so until one
+    exists the report needs that temporary instance
+    ([followups.md § Billing](./followups.md#billing-issue-641)).
 
 ## Rollback
 

@@ -56,8 +56,10 @@ secrets="${WM_SECRETS_FILE:-$here/../../../infra-secrets/water-management/prod.s
 keys=(auth_jwt_secret db_app_password alerts_token_secret cloudfront_private_key app_encryption_key)
 # Keys a feature needs only once it is on, passed when present and non-empty:
 # feed_credential_private_key, the fetcher's key for station API feeds (issue
-# #784; variables.tf refuses station_api_feeds without it).
-optional_keys=(feed_credential_private_key)
+# #784; variables.tf refuses station_api_feeds without it), and the Stripe
+# pair, stripe_secret_key and billing_webhook_secret (issue #641; variables.tf
+# refuses billing_provider = "stripe" without them).
+optional_keys=(feed_credential_private_key stripe_secret_key billing_webhook_secret)
 
 die() {
 	echo "tf.sh: $*" >&2

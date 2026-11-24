@@ -593,7 +593,11 @@ lazy chunk, where gzip already folds them).
    take a per-project API key instead (`requireApiKey`, `ingest/auth.ts`):
    the key is checked in constant time and rate-limited per key, and the work
    runs in `withApiKey`, which sets `app.current_api_key_id` and no user
-   ([security.md § API keys](./security.md#api-keys)).
+   ([security.md § API keys](./security.md#api-keys)). The billing
+   provider's webhook (`POST /billing/webhook/:provider`, issue #641) has no
+   session either: its credential is a signature over the raw body, and it
+   applies the event through `app_billing_apply` in `withoutUser`
+   ([billing.md § Webhooks and providers](./billing.md#webhooks-and-providers)).
 4. Project routes open **one transaction** on a pooled `pg` connection as
    `water_app` and run `set_config('app.current_user_id', userId, true)`. Every
    query inside it is filtered by RLS ([data-model.md § Access control](./data-model.md#access-control)).
@@ -855,6 +859,11 @@ alerts plug in as a further kind.
   `runMfaResets`, 205; a step of the tick, not a job kind, since a job
   belongs to a project and a reset to an account;
   [security.md § Two-step sign-in](./security.md#two-step-sign-in) → Recovery).
+  Then it queues and sends the annual renewal notices: one email per
+  subscription and period to a person on a yearly plan, 60 business days
+  before it ends (`billing/renewal.ts` `runRenewalNotices`, 329; a tick step
+  too, since a subscription belongs to an account, not a project;
+  [billing.md § Renewal notice](./billing.md#renewal-notice)).
   Each tick also purges finished jobs
   after 30 days, settled pack notices and erratum notices after 30, report rows after 8, and invites 90 days past their expiry
   (`app_purge_invites`, 048), and ended second-factor resets after 90 days (`app_mfa_reset_purge`, 205).
@@ -3266,6 +3275,22 @@ sequenceDiagram
   reservation never passes a cap, however many turns run at once; turns
   aren't limited to one a person, since the second's budget is only what the
   first left.
+- **Each turn's cost, recorded** (`pricing.ts`, 324_assistant_turn_cost;
+  issue #641 Phase 1, shadow mode): the providers report the cache reads and
+  writes inside each call's input (Bedrock's `cacheReadInputTokens` and
+  `cacheWriteInputTokens`, the Anthropic API's `cache_read_input_tokens` and
+  `cache_creation_input_tokens`, every fallback attempt summed), and the
+  charge records the turn's cost in micro-USD from a per-model price table:
+  uncached input, output, cache reads and cache writes each at their own
+  rate per million tokens, summed exactly and rounded up once a turn. The
+  prices are Bedrock's for the global profile from af-south-1 (AWS Price
+  List, 2026-10-12): Sonnet 5.5, Sonnet 4.6, Haiku 4.5 and Haiku 5.5, a
+  cache write at 1.25 × input (a 5-minute write, the only kind asked for).
+  A model not in the table is recorded as an unpriced turn, never guessed;
+  add its price before `assistant_model_id` names it (a unit test fails if
+  Terraform's default has none). The `assistant_turn` log line carries the
+  cache tokens and `costUsdMicros` too. The caps still count weighted tokens:
+  nothing reads the cost yet.
 - **The turn keeps to its budget** (`orchestrator.ts`): before every hop, the
   first included, the tokens so far, that hop's input at most and its output
   at most (×5) must fit the reserved budget. The hop's output cap

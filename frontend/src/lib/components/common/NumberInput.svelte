@@ -13,6 +13,7 @@
 	// being edited; it is then a plain text box (role textbox). Otherwise the field is a
 	// spinbutton, and ArrowUp/ArrowDown step it by `step` (1 for 'any') as type="number" did.
 	// `decimals` caps how many decimals a plain field shows (display only).
+	// `whole` takes only whole numbers typed as digits ("4.5", "4,5", "1,500" and "1e1" are invalid).
 	import { untrack } from 'svelte';
 	import type { HTMLInputAttributes } from 'svelte/elements';
 	import { NumberField, numberFieldMessage } from './numberField.svelte';
@@ -30,6 +31,7 @@
 		disabled = false,
 		grouped = false,
 		decimals,
+		whole = false,
 		placeholder,
 		invalidMessage,
 		onchange,
@@ -45,6 +47,8 @@
 		grouped?: boolean;
 		/** Show at most this many decimals (display only; the stored value keeps its precision until edited). */
 		decimals?: number;
+		/** Only whole numbers, typed as digits: "4.5", "4,5", "1,500" and "1e1" are invalid. */
+		whole?: boolean;
 		/** Accessible label (use when there's no visible <label for>). */
 		label?: string;
 		id?: string;
@@ -62,10 +66,10 @@
 	const uid = $props.id();
 	const fieldId = $derived(id ?? `${uid}-n`);
 	const errId = $derived(`${fieldId}-err`);
-	const message = $derived(invalidMessage ?? numberFieldMessage({ min, max, nullable }));
+	const message = $derived(invalidMessage ?? numberFieldMessage({ min, max, nullable, whole }));
 
 	const field = new NumberField(
-		() => ({ value, scale, grouped, decimals, disabled, step, min, max, nullable }),
+		() => ({ value, scale, grouped, decimals, disabled, step, min, max, nullable, whole }),
 		(v) => {
 			value = v;
 			onchange?.(v);
@@ -113,7 +117,7 @@
 	bind:this={el}
 	id={fieldId}
 	type="text"
-	inputmode="decimal"
+	inputmode={whole ? 'numeric' : 'decimal'}
 	role={grouped ? undefined : 'spinbutton'}
 	aria-valuemin={grouped ? undefined : min}
 	aria-valuemax={grouped ? undefined : max}

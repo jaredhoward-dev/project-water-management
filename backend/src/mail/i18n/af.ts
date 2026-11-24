@@ -1,7 +1,8 @@
 // Afrikaans wording of the farmer emails (WP-2.5). Only checked text goes
-// here. A key with no entry is sent in English (and the email is marked
-// lang="en"), and it must be on docs/i18n/af-translation-sheet.md, which is
-// what the translator fills in. Add returned wording with
+// here. While any key of en.ts has no entry, every Afrikaans email is sent
+// wholly in English, marked lang="en" (mailLanguage, ./index.ts), and
+// `pnpm check:i18n` fails; the key must be on
+// docs/i18n/af-translation-sheet.md, which is what the translator fills in. Add returned wording with
 // `pnpm gen:i18n:apply`, or by hand and then `pnpm gen:i18n:sheet`.
 //
 // Provenance (2026-09-26, issue #49): every entry was written by the
@@ -336,4 +337,20 @@ export const af: Partial<Record<MailKey, string>> = {
 	'mail.mfaCode.notYouSignIn': 'As dit nie jy was nie, ken iemand jou wagwoord: verander dit dadelik op jou Rekening-bladsy.',
 	// If this wasn’t you, change your password on your Account page straight away.
 	'mail.mfaCode.notYou': 'As dit nie jy was nie, verander jou wagwoord dadelik op jou Rekening-bladsy.',
+	// Your yearly {plan} plan renews on {date} — {product}
+	'mail.renewal.subject': 'Jou jaarlikse {plan}-plan word op {date} hernu — {product}',
+	// Your yearly plan renews soon
+	'mail.renewal.heading': 'Jou jaarlikse plan word binnekort hernu',
+	// Your {product} {plan} plan for {email} is a yearly plan. This year of it ends on {date}.
+	'mail.renewal.body': 'Jou {product} {plan}-plan vir {email} is ’n jaarlikse plan. Hierdie jaar van die plan eindig op {date}.',
+	// Unless you cancel, it renews on {date}, and {amount} is charged for the next year.
+	'mail.renewal.renews': 'Tensy jy kanselleer, word dit op {date} hernu, en {amount} word vir die volgende jaar gehef.',
+	// To cancel, or to change to a monthly plan, open your plan page and go to billing from there. If you cancel before {date}, nothing more is charged, and you keep the plan until then.
+	'mail.renewal.cancel': 'Om te kanselleer, of na ’n maandelikse plan oor te skakel, maak jou planbladsy oop en gaan van daar na fakturering. As jy voor {date} kanselleer, word niks meer gehef nie, en jy behou die plan tot dan.',
+	// Under the Consumer Protection Act you can also end a yearly plan at any time, on 20 business days’ notice.
+	'mail.renewal.right': 'Volgens die Wet op Verbruikersbeskerming kan jy ook ’n jaarlikse plan enige tyd beëindig, met 20 werksdae se kennisgewing.',
+	// Open your plan
+	'mail.renewal.action': 'Maak jou plan oop',
+	// We send this once a year, between 40 and 80 business days before a yearly plan ends, as the Consumer Protection Act asks.
+	'mail.renewal.why': 'Ons stuur dit een keer per jaar, tussen 40 en 80 werksdae voordat ’n jaarlikse plan eindig, soos die Wet op Verbruikersbeskerming vra.',
 };

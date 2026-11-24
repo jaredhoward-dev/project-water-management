@@ -1181,6 +1181,10 @@ export const GUIDES: Guide[] = [
 					{
 						type: 'p',
 						text: 'Every addition, role change and link is recorded on the [[change-history|History]] page with who made it.'
+					},
+					{
+						type: 'p',
+						text: 'A team’s plan covers every catchment in it. Its admins see the plan and this month’s usage (catchments, reports, evidence packs issued and the assistant’s spend) from **Plan and usage** on the team’s page; your own catchments’ plan is under **Plan and usage** on your Account page. Where billing is set up, the page has **Upgrade** (to Pro for you, to Team for a team, monthly or yearly, each with its price; on a team you first choose the editor seats, 3 included, and the buttons show the price for them) or, once there is a subscription, **Manage billing** to change or cancel it. Limits aren’t enforced yet: usage is counted, and nothing is refused.'
 					}
 				]
 			}
@@ -1309,6 +1313,7 @@ export const GUIDES: Guide[] = [
 						items: [
 							'Each person can send a set number of messages an hour. Past it, the panel says how long to wait.',
 							'Each project has a monthly budget, shown under the box. Once it is used up the assistant rests until the date shown.',
+							'What the assistant cost this month, in dollars against your plan’s allowance, is on **Plan and usage** (from your Account page, or the team’s page for a team’s catchments). It counts by the UTC month.',
 							'Nothing you type is kept on our servers. Your browser keeps your 20 newest chats on each project until you delete them or sign out.'
 						]
 					}

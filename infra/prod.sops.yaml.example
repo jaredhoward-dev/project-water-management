@@ -61,3 +61,14 @@ app_encryption_key: "REPLACE_ME"
 # tf.sh passes it when present; leave it out while station API feeds are off.
 # Rotating it voids every saved station key (each owner enters theirs again).
 # feed_credential_private_key: "REPLACE_ME"
+
+# OPTIONAL, only with billing_provider = "stripe" (issue #641; docs/deployment.md
+# § Turning on Stripe): the API's two Stripe secrets, in its runtime secret
+# only. tf.sh passes them when present; leave both out while billing is manual.
+# stripe_secret_key: a LIVE restricted key (rk_live_…) with exactly the
+# permissions docs/billing.md lists (a full sk_live_ key also passes, but don't).
+# Never a test key: plan refuses sk_test_/rk_test_.
+# stripe_secret_key: "REPLACE_ME"
+# billing_webhook_secret: the webhook endpoint's signing secret (whsec_…),
+# shown once on the endpoint in Stripe's dashboard. 32+ characters.
+# billing_webhook_secret: "REPLACE_ME"

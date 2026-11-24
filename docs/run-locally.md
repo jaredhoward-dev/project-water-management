@@ -64,6 +64,10 @@ In a git worktree both URLs point at that worktree's own dev database,
 | `ALERTS_TOKEN_SECRET` | a dev-only string (≥ 32 chars) | Signs alert emails' unsubscribe and "Was this useful?" links (the worker). Production gets a random one from Terraform. See [Alerts](#alerts) |
 | `API_PUBLIC_URL` | `http://localhost:3001` | Where a mail client posts an alert's one-click unsubscribe (production: `SITE_URL/api`, the default) |
 | `ALERTS_ENABLED` / `ALERTS_DAILY_CAP` | `true` / `5` | The alert kill switch, and immediate alert emails per person per day |
+| `BILLING_ENFORCED` | `false` (code default) | Whether plan limits refuse anything. Phase 1 is shadow mode: usage is counted and shown, nothing is refused, and the API only reports this as `enforced` ([billing.md](./billing.md#billing_enforced)) |
+| `BILLING_PROVIDER` | `mock` (code default) | The billing provider the webhook route serves: `mock` (events signed with the dev key below), `manual` (no webhooks) or `stripe` ([billing.md § Webhooks and providers](./billing.md#webhooks-and-providers)) |
+| `BILLING_WEBHOOK_SECRET` | `dev-only-billing-webhook-secret-…` (committed, `.env.development`) | Signs and checks billing webhook events. The committed value is a public dev-only key; production refuses the mock, and Stripe's real secret lives in infra-secrets ([deployment.md § 2. Secrets](./deployment.md#2-secrets-one-time-then-as-needed)) |
+| `STRIPE_SECRET_KEY` | unset (never set locally) | Stripe's API key, for checkout and the Customer Portal with `BILLING_PROVIDER=stripe` only. The mock needs none: its checkout and portal are pages on the local API ([billing.md § The mock](./billing.md#the-mock)). Production requires a live key (`sk_live_…` or `rk_live_…`) from infra-secrets; never put a real key in an env file here |
 | `PUBLIC_API_URL` (frontend) | `http://localhost:3001` | `/api` in production |
 | `PUBLIC_WAF_CAPTCHA_SCRIPT_URL`, `PUBLIC_WAF_CAPTCHA_API_KEY` (frontend) | empty (no sign-in CAPTCHA: there is no WAF locally) | set by `deploy-frontend.yml` from Terraform outputs (security.md § Sign-in CAPTCHA) |
 
@@ -609,6 +613,41 @@ that hash on the pack. MinIO keeps it like any object: the production
 bucket's Object Lock retention (infra/packs.tf) has no local stand-in. Without
 the worker the pack's PDF stays "rendering"; `pnpm dev:jobs:tick` prints it.
 
+## Billing webhooks
+
+The billing webhook runs locally with the mock provider (`BILLING_PROVIDER=mock`,
+the default) and the dev-only key committed in `backend/.env.development`. No
+Stripe account is needed ([billing.md § Webhooks and providers](./billing.md#webhooks-and-providers)).
+
+The quickest way through is the page: with `pnpm dev` running, open
+*Plan and usage* (`/account/plan`), press *Upgrade to Pro, monthly*, and the
+mock's checkout page (on the API, `:3001`) asks which outcome to simulate:
+*Pays* writes the subscription through the webhook and brings you back on
+Pro, *Declines* stays, *Cancels* comes back with nothing changed. *Manage
+billing* then opens the mock portal, which can cancel at the period end
+([billing.md § Checkout and portal](./billing.md#checkout-and-portal)).
+
+To replay single events instead, with `pnpm dev` running, find a billing account (`pnpm dev:db:psql`, then
+`SELECT id FROM billing_account;`; a person's is made on their first
+`GET /account/plan`), then:
+
+```bash
+pnpm dev:billing:replay subscription-created --account <id>
+pnpm dev:billing:replay subscription-updated --account <id>
+pnpm dev:billing:replay subscription-updated --account <id>   # the same event id again: duplicate
+pnpm dev:billing:replay subscription-deleted --account <id> --new-id
+```
+
+Each prints the API's status and answer (`applied`, `recorded`, `duplicate`,
+`stale`, `conflict`, `unknown_account`). Without `--account`, the fixtures' placeholder
+account answers `unknown_account`. The script signs only with a `dev-only-`
+key and posts only to localhost.
+
+To grant a plan by hand (the operator's staff grant: an invoiced customer, a
+founding user, Team's trial), `pnpm dev:billing:grant <email|team-id> <plan>
+[--until YYYY-MM-DD] --reason "…"` (`--revoke`, `--list`; [billing.md § Staff
+grants](./billing.md#staff-grants)).
+
 ## Assistant
 
 The project assistant (issue #610) is off by default: `ASSISTANT_PROVIDER=off`
@@ -976,7 +1015,8 @@ pnpm dev:db:status          # is Postgres up?
 pnpm dev:db:logs            # follow Postgres logs
 pnpm dev:db:psql            # psql as the owner role, on this checkout's dev database
 pnpm dev:db:down            # stop Postgres (data is kept in the docker volume)
-pnpm dev:db:reset           # DELETE all local data (every checkout's databases), recreate and migrate
+pnpm dev:db:reset           # drop and recreate this checkout's dev database only, then migrate (stop its pnpm dev first)
+pnpm dev:docker:wipe        # DELETE both docker volumes: every checkout's databases and MinIO's data (see Common issues)
 ```
 
 ## Checks and tests
@@ -987,7 +1027,7 @@ pnpm test                   # unit tests (engine, frontend, backend) with no DB
 pnpm test:backend:db        # API + RLS tests and catalogue guards (water_test DB; water_test_w<tag> in a worktree); reports/render.db.test.ts renders a real PDF (skips, saying so, without MinIO) and reports/render.origin.db.test.ts drives Chromium (skips without it); under CI both fail instead of skipping (testing.md)
 pnpm test:e2e               # Playwright end-to-end (own water_e2e DB, servers on :3101/:7801; per-worktree slot elsewhere; server-report.spec.ts needs dev:s3:up + dev:mail:up, alerts-mailpit.spec.ts dev:mail:up)
 pnpm test:engine            # engine only; client catchment regression tests run when the data/ fixtures exist
-pnpm check:i18n             # what has no Afrikaans yet, and any stale translation; fails if the sheet (docs/i18n/af-translation-sheet.md) or the message id list is out of date, or a translation is stale
+pnpm check:i18n             # what has no Afrikaans yet, and any stale translation; fails if the sheet (docs/i18n/af-translation-sheet.md) or the message id list is out of date, or a translation is stale, or Afrikaans (an offered language) has a site or email string with no words
 pnpm gen:i18n:sheet         # rewrite it after adding or changing a message, or landing an Afrikaans translation
 pnpm gen:i18n:stamp <id>    # re-stamp a glossary translation from the current English, once the translator has re-checked it
 ```
@@ -1023,7 +1063,20 @@ pnpm build                  # frontend/build (static) + backend/dist/lambda.mjs
 
 **`password authentication failed for user "water_app"`**
 : The docker volume was created before `dev/postgres/00-roles.sql` existed (the
-  init scripts only run on an empty volume). Run `pnpm dev:db:reset`.
+  init scripts only run on an empty volume). Run `pnpm dev:docker:wipe`, then
+  `pnpm run setup`. That deletes every checkout's databases and MinIO's data,
+  for every session on this machine, so check no other checkout needs them
+  first. `pnpm dev:db:reset` can't help here: it recreates one database, and
+  the role is the server's.
+
+**`refusing to migrate: applied migrations are forward-only`**
+: This checkout's dev database applied a migration file that has since
+  changed or gone (an edited file, or a branch that renumbered one). Put the
+  file back if the edit was yours; otherwise `pnpm dev:db:reset` drops and
+  recreates this checkout's database alone (`water`, or a worktree's
+  `water_w<tag>`) and migrates it, leaving every other checkout's alone. It
+  prints the database it reset, and refuses while this checkout's `pnpm dev`
+  or worker is connected.
 
 **Everything returns 404 for a project that exists**
 : Working as intended. Under RLS, a project you are not a member of is

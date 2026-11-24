@@ -26,8 +26,10 @@ import pg from 'pg';
 import { checkoutTag, thisCheckout } from './checkout.js';
 
 export const DEV_DB_URL_VARS = ['DATABASE_URL', 'MIGRATION_DATABASE_URL'] as const;
-const LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost']);
-const DB_NAME = /^[a-z][a-z0-9_]{0,62}$/;
+export const LOCAL_HOSTS: ReadonlySet<string> = new Set(['127.0.0.1', 'localhost']);
+/** The port docker-compose.yml publishes Postgres on (5432 and 5433 are other Postgres servers on this workstation). */
+export const DOCKER_DB_PORT = '5434';
+export const DB_NAME = /^[a-z][a-z0-9_]{0,62}$/;
 
 export function devDbName(checkout: string, isWorktree: boolean): string {
 	return isWorktree ? `water_w${checkoutTag(checkout)}` : 'water';

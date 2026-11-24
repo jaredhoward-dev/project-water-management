@@ -174,12 +174,16 @@ pnpm dev:db:up              # Postgres 17 in docker on :5434
 pnpm dev:db:down
 pnpm dev:db:status | dev:db:logs
 pnpm dev:db:migrate         # apply backend/migrations as `water`
-pnpm dev:db:reset           # drop the volume, recreate, migrate (destroys local data)
+pnpm dev:db:reset           # drop and recreate only this checkout's dev database (water, or a worktree's water_w<tag>), then migrate; refuses any other database, a non-local URL and open connections
+pnpm dev:docker:wipe        # DELETE both docker volumes: every checkout's dev, test and e2e databases and MinIO's data, for every session on this machine (a Postgres major bump, or a volume older than dev/postgres/)
 pnpm dev:db:psql            # psql as the schema owner
 pnpm dev:authority:confirm <project-id> <email> --reference "<letter>"   # the operator confirms who acts for a project's responsible authority (the first one is the operator's; security.md § Authorization)
+pnpm dev:billing:report [--month YYYY-MM] [--json] [--show-emails]   # the operator's billing Phase 1 metrics and staff abuse report, as the schema owner (325_billing_metrics); addresses only with --show-emails, operator only (billing.md § Metrics and the abuse report)
+pnpm dev:billing:grant <email|team-id> <plan> [--until YYYY-MM-DD] --reason "…" [--replace]   # the operator's staff grant of a plan (330_staff_grant), audit-logged, as the schema owner; --revoke --reason "…" ends it, --list shows the log; a live Stripe subscription is never replaced (billing.md § Staff grants)
 pnpm dev:mail:up            # Mailpit: local inbox for all app email (UI :8026)
 pnpm dev:mail:down | dev:mail:status | dev:mail:logs | dev:mail:open
 pnpm dev:mail:bounce <email> [--complaint | --transient]   # stand in for an SES bounce: pauses that account's alert emails (run-locally.md § Alerts)
+pnpm dev:billing:replay <fixture> [--account <id>] [--new-id]   # sign a synthetic Stripe-shaped event (backend/fixtures/billing/) with the dev key and post it to the local mock webhook (run-locally.md § Billing webhooks)
 pnpm dev:s3:up              # MinIO: report PDFs (API :9002, console :9003, minioadmin / minioadmin)
 pnpm dev:s3:down | dev:s3:status | dev:s3:logs
 pnpm dev:tiles:up           # optional basemap for the Map tab, one step, re-runnable: MinIO, tiles + fonts (cached, else fetched), a cached relief DEM, the frontend's URLs; restart pnpm dev
@@ -292,7 +296,7 @@ pnpm gen:e2e:timings       # refresh e2e/shard-timings.json (CI's e2e shards are
 pnpm gen:liability          # regenerate the known limitations, the engine errata and the methodology hashes from engine-audit.md, engine-errata.md and docs/methodology/ (after changing any)
 pnpm gen:assistant:help     # rewrite backend/src/assistant/helpIndex.json, the help guides and glossary the assistant's search_help reads (after changing any; a guard in test:guards fails until you do)
 pnpm gen:i18n:sheet [lang…]        # rewrite a language's translation sheet (default: every non-English language in
-                             # packages/engine/src/languages.ts); check:i18n checks every language
+                             # packages/engine/src/languages.ts); check:i18n checks every language, and fails on an untranslated site or email string in one not marked translating
 pnpm gen:i18n:stamp <lang> <id>    # re-stamp a farmer glossary translation from the current English, once the translator has re-checked it
 pnpm gen:i18n:export <lang> <dir>  # a language's untranslated sheet rows as JSON batches (for the i18n-translator agent, .claude/agents/i18n/)
 pnpm gen:i18n:apply <lang> <f.json …>  # write checked words (sheet Id → text; later files win) into that language's catalogues (creating one
@@ -381,6 +385,7 @@ Deploying (only when the client is ready for it) is covered in
 - `docs/run-comparison.md`: comparing two runs (matching rules, what the input diff sees)
 - `docs/maps.md`: the Map tab: the self-hosted basemap and its fetch recipe, GeoJSON upload checks, server-side areas, the quaternary lookup and loading its dataset, the cultivated area from land cover, the evaporation from the map, the sources table, CSP
 - `docs/data-sources.md`: the source register: every upstream we use or plan (feeds, reference datasets, #604's planned sources) with host, licence and attribution, contact, access pattern, limits, fallback and owner, and the polite-client rules (`scripts/guards/data_sources.mjs` keeps it in step with `FEED_HOSTS` and `data_feed.source`)
+- `docs/billing.md`: plans and usage (issue #641), Phase 1 shadow mode: who a plan belongs to, the billing tables and functions, what is counted, `BILLING_ENFORCED`
 - `docs/allocations.md`: registered water-use volumes (WARMS, licences) vs modelled use: import, matching, the comparison, who sees names
 - `docs/evidence-pack.md`: licensing evidence packs: the manifest and its hash, the short code, the lifecycle (draft, sign, issue, supersede, withdraw) and the public verify lookup
 - `docs/scenarios.md`: scenarios, overrides on a base run (the engine's op catalogue, classification, problems; the backend, data model and API)

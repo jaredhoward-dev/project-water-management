@@ -189,7 +189,7 @@ export async function migrate(databaseUrl: string, log = console.log, opts: Migr
 			throw new MigrateError(
 				`refusing to migrate: applied migrations are forward-only.\n  - ${plan.problems.join('\n  - ')}\n` +
 					'Put the applied file back as it was and make the change in a new NNN_*.sql. ' +
-					'A local database built from an edited 001 or a stale branch: `pnpm dev:db:reset`. ' +
+					'A local database built from an edited 001 or a stale branch: `pnpm dev:db:reset` (this checkout’s dev database only). ' +
 					'Production: docs/deployment.md § Migration integrity.',
 				'integrity',
 				named,

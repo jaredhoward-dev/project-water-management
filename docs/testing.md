@@ -40,6 +40,28 @@ directory, `.git/water-e2e-slots/` of the main checkout
 worktrees hold the same one, and a removed worktree's slot is taken back.
 `E2E_SLOT` still overrides it ([e2e/README.md](../e2e/README.md#several-checkouts-at-once)).
 
+All of them live in one docker Postgres volume. `pnpm dev:db:reset` drops and
+recreates only the checkout's Dev database and never a test or e2e one (those
+rebuild their schema on every run anyway); `pnpm dev:docker:wipe` deletes the
+volume, every checkout's databases with it
+([run-locally.md § Common issues](./run-locally.md#common-issues)).
+
+What guards those two: `backend/src/config/devDbReset.test.ts` covers the
+reset's guard (`resetTarget`, `ownDevDbName`: a non-local URL, another port,
+another checkout's database, a test or e2e database and a stray
+`DEV_DB_NAME` are each refused before anything is dropped), and
+`scripts/guards/docker_volumes.test.mjs` that no root script but
+`dev:docker:wipe` deletes the volumes. The rest of
+`backend/scripts/db-reset.ts` (count open connections and refuse,
+`DROP DATABASE`, `CREATE DATABASE`, then `migrate()`) is left untested on
+purpose. A DB test of it would have to drop and create a database the guard
+never names, so it would need a test-only way round the guard, the one thing
+that keeps a reset off the other checkouts' databases on the shared server;
+and what it would add over the guard's test is three SQL statements and
+`migrate()`, which every DB test run already applies to a fresh
+`water_test…`. Change those statements by hand and run `pnpm dev:db:reset`
+once in a worktree to see it.
+
 Until 2026-10-03 every name came from a hash of the path into 98 slots
 (`water_test_w<1–98>`, `water_w<1–98>`, `water_e2e_<1–98>`), and three
 worktrees once shared `water_test_w3`: each run dropped the others' schema
@@ -51,6 +73,18 @@ and the `format`):
 ```bash
 echo "SELECT format('DROP DATABASE %I WITH (FORCE)', datname) FROM pg_database WHERE datname ~ '^water_(w|test_w|e2e_)[0-9]{1,2}(_migrate)?\$' \gexec" | docker exec -i water-management-db psql -U water -d water
 ```
+
+## Memory
+
+Vitest starts a worker a core by default. On a many-core laptop that is many
+Node processes at once, and the backend's unit project ran past a per-job
+memory cap and was OOM-killed (20 workers; it passed with 4). The backend
+`unit` project and the engine's fuzz shards therefore cap themselves at
+`min(4, cores − 1)` workers (`backend/vitest.config.ts`,
+`packages/engine/vitest.config.ts`): on CI's 4-core runners that is 3,
+vitest's own default, so CI is unchanged. A run killed with exit 137 or 143
+and no failing test printed is a memory limit, not the code; pass
+`--maxWorkers=2` to go lower.
 
 ## Performance budgets
 

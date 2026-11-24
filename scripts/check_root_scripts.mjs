@@ -2,15 +2,19 @@
 // Guard for the root package.json scripts block (CLAUDE.md "Root package.json
 // scripts"). Fails if a script points at a file that doesn't exist, or
 // delegates (`pnpm -C <dir> <script>`) to a workspace script that isn't defined,
-// or if a script sits outside a `//--` group, or if a tracked file tells you to
+// or if a script sits outside a `//--` group, or if a script other than
+// dev:docker:wipe deletes the shared docker volumes, or if a tracked file tells you to
 // run a root script that one of pnpm's own commands shadows (below).
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { volumeWipeProblems } from './guards/docker_volumes.mjs';
+
 const root = new URL('..', import.meta.url).pathname;
 const { scripts } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
-const errors = [];
+// Only dev:docker:wipe may delete the shared docker volumes (guards/docker_volumes.mjs).
+const errors = volumeWipeProblems(scripts);
 let inGroup = false;
 
 for (const [name, cmd] of Object.entries(scripts)) {

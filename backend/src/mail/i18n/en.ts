@@ -3,9 +3,11 @@
 // farmer invite. `{name}` is filled in by mailT (./index.ts); the value is
 // HTML-escaped later, by the template, never here.
 //
-// Afrikaans lives in ./af.ts. A key that has no Afrikaans yet is sent in
-// English and must be on docs/i18n/af-translation-sheet.md (guarded by
-// ./catalogue.test.ts; regenerate the sheet with `pnpm gen:i18n:sheet`).
+// Afrikaans lives in ./af.ts. A key that has no Afrikaans yet must be on
+// docs/i18n/af-translation-sheet.md (guarded by ./catalogue.test.ts;
+// regenerate the sheet with `pnpm gen:i18n:sheet`), and until it has words
+// every Afrikaans email goes out in English (mailLanguage, ./index.ts), so
+// `pnpm check:i18n` fails: a new key here needs its translation run.
 // No imports: scripts/guards/i18n_sheet.mjs loads this file directly.
 
 export const en = {
@@ -212,7 +214,17 @@ export const en = {
 	'mail.mfaCode.expires': 'The code works once, for 10 minutes.',
 	'mail.mfaCode.never': 'Never give this code to anyone, including someone who says they are from {product}. We will never ask you for it.',
 	'mail.mfaCode.notYouSignIn': 'If this wasn’t you, someone knows your password: change it on your Account page straight away.',
-	'mail.mfaCode.notYou': 'If this wasn’t you, change your password on your Account page straight away.'
+	'mail.mfaCode.notYou': 'If this wasn’t you, change your password on your Account page straight away.',
+
+	// The annual renewal notice (329, billing/renewal.ts; CPA s14): to a person on a yearly plan, 60 business days before it ends.
+	'mail.renewal.subject': 'Your yearly {plan} plan renews on {date} — {product}',
+	'mail.renewal.heading': 'Your yearly plan renews soon',
+	'mail.renewal.body': 'Your {product} {plan} plan for {email} is a yearly plan. This year of it ends on {date}.',
+	'mail.renewal.renews': 'Unless you cancel, it renews on {date}, and {amount} is charged for the next year.',
+	'mail.renewal.cancel': 'To cancel, or to change to a monthly plan, open your plan page and go to billing from there. If you cancel before {date}, nothing more is charged, and you keep the plan until then.',
+	'mail.renewal.right': 'Under the Consumer Protection Act you can also end a yearly plan at any time, on 20 business days’ notice.',
+	'mail.renewal.action': 'Open your plan',
+	'mail.renewal.why': 'We send this once a year, between 40 and 80 business days before a yearly plan ends, as the Consumer Protection Act asks.'
 } as const;
 
 export type MailKey = keyof typeof en;
@@ -241,6 +253,8 @@ export const sections: Record<string, string> = {
 		'Emails about removing two-step sign-in (a code from an authenticator app on the phone or one sent by email, asked for after the password) when someone can’t get a code and lost their recovery codes. “confirm” lines: the link that starts a 3-day wait; “pending” lines: sent when the wait starts and once a day after, with a link to cancel; “done” lines: the wait is over; “admin” lines: an admin of the person’s team removed it at once. {date} is a date like “3 Oct 2026”, {time} a time like “14:05 SAST”; {team} is the team’s name.',
 	'mail.mfaCode':
 		'Email: a six-digit code for two-step sign-in, sent instead of a code from an authenticator app. It goes out when someone signs in with the right password, when they confirm an action that needs a recent code, and when they turn this on from the Account page. The code itself is shown on its own line below the text.',
+	'mail.renewal':
+		'Email: sent once a year to a person who pays for a yearly plan in their own name, about two to three months before the year ends, as South Africa’s Consumer Protection Act asks. {plan} is the plan’s name (“Pro”); {date} is a date like “3 Mar 2027”; {amount} is a price in rand like “R 8 990,00”.',
 	'mail.pack':
 		'Evidence pack emails: sent to the catchment’s editors and to the applicant when an evidence pack (a frozen, signed copy of the evidence report for a water-use licence application) is issued or withdrawn. {version} and {previous} are numbers; {code} is a short code like “3f2a-91bc-07de”; {project} is the catchment; {what} is one of the “what” lines; {name} is the application’s name (or the “name” line, for baseline evidence).'
 };

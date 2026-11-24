@@ -83,7 +83,7 @@ describe('anthropic provider', () => {
 		expect(events).toEqual([
 			{ type: 'text', delta: 'The gauge ' },
 			{ type: 'text', delta: 'sits below a dam.' },
-			{ type: 'usage', inputTokens: 120, outputTokens: 12 }
+			{ type: 'usage', inputTokens: 120, outputTokens: 12, cacheReadTokens: 40, cacheWriteTokens: 0 }
 		]);
 		expect(seen[0]!.url).toContain('/v1/messages');
 		// SDK 1.x (API version 2026-10-21) sends the key as a bearer token, no longer as x-api-key.
@@ -106,7 +106,7 @@ describe('anthropic provider', () => {
 			{ type: 'tool_call', call: { id: 'toolu_1', name: 'get_series', arguments: { node: 'Gauge X' } } },
 			{ type: 'tool_call', call: { id: 'toolu_2', name: 'get_run_summary', arguments: {} } },
 			{ type: 'tool_call', call: { id: 'toolu_3', name: 'get_network', arguments: '{"a": ' } },
-			{ type: 'usage', inputTokens: 100, outputTokens: 30 }
+			{ type: 'usage', inputTokens: 100, outputTokens: 30, cacheReadTokens: 0, cacheWriteTokens: 0 }
 		]);
 	});
 
@@ -119,13 +119,13 @@ describe('anthropic provider', () => {
 				{ type: 'content_block_start', index: 2, content_block: { type: 'fallback', from: { model: 'claude-sonnet-5-5' }, to: { model: 'claude-opus-4-8' } } },
 				{ type: 'content_block_stop', index: 2 },
 				...toolUse(3, 'toolu_kept', 'get_run_summary', ['{}']),
-				delta('tool_use', 9, { iterations: [{ type: 'message', input_tokens: 100, output_tokens: 5, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }, { type: 'fallback_message', input_tokens: 110, output_tokens: 9, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }] }),
+				delta('tool_use', 9, { iterations: [{ type: 'message', input_tokens: 100, output_tokens: 5, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }, { type: 'fallback_message', input_tokens: 80, output_tokens: 9, cache_read_input_tokens: 20, cache_creation_input_tokens: 10 }] }),
 				stop
 			])
 		);
 		const events = await collect(anthropicProvider({ model: '' }, { baseURL: url, apiKey: KEY }).complete(req()));
 		expect(events.filter((e) => e.type === 'tool_call')).toEqual([{ type: 'tool_call', call: { id: 'toolu_kept', name: 'get_run_summary', arguments: {} } }]);
-		expect(events.at(-1)).toEqual({ type: 'usage', inputTokens: 210, outputTokens: 14 });
+		expect(events.at(-1)).toEqual({ type: 'usage', inputTokens: 210, outputTokens: 14, cacheReadTokens: 20, cacheWriteTokens: 10 });
 	});
 
 	it('on a refusal runs no tool and says so', async () => {
