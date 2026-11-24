@@ -13,15 +13,16 @@
 //
 // This writes nothing but the account (billing_account_ensure) and its
 // customer (328's column, first writer wins): the invoice lives at the
-// provider, which is its record. Paying it changes no plan by itself: once
-// it is paid the operator grants the plan for the invoiced period
-// (billing-grant, until the period's last day), as § Staff grants says.
+// provider, which is its record. Its metadata carries the grant (plan, seats,
+// interval, period; provider/stripeApi.ts invoiceMetadata), so when it is
+// paid, its invoice.paid grants the plan for the invoiced period through the
+// webhook (app_billing_apply, 335), with no step for the operator.
 //
 // No dotenv here or below: the migrate Lambda bundles this module.
 import { createHash } from 'node:crypto';
 import type pg from 'pg';
 import { listPlans } from './entitlements.js';
-import { checkoutPlanOf, checkoutPrices, PURCHASABLE, type BillingInterval, type BillingProvider, type CheckoutPlan, type InvoiceResult } from './provider.js';
+import { checkoutPlanOf, checkoutPrices, PURCHASABLE, type BillingInterval, type BillingProvider, type CheckoutPlan, type InvoiceRequest as ProviderInvoiceRequest, type InvoiceResult } from './provider.js';
 import { isCalendarDate, ownedAccount, type Owner, type Target } from './staffGrant.js';
 import type { Db } from '../db/tx.js';
 
@@ -61,10 +62,12 @@ export interface Invoiced extends Owner {
 	plan: string;
 	seats: number;
 	interval: BillingInterval;
-	/** The period paid for, as SAST calendar days (through `until`: grant the plan with --until this day once it is paid). */
+	/** The period paid for, as SAST calendar days (through `until`: paying the invoice grants the plan until this day ends). */
 	from: string;
 	until: string;
 	invoice: InvoiceResult;
+	/** What the provider was asked for (the mock's paid event is built from it, provider/mock.ts invoicePaidEvent). */
+	request: ProviderInvoiceRequest;
 }
 
 const SAST_OFFSET_MS = 2 * 3_600_000;
@@ -142,7 +145,7 @@ export async function issueInvoice(client: pg.ClientBase, provider: BillingProvi
 	const from = req.from ?? sastToday(nowMs);
 	const period = invoicePeriod(from, req.interval);
 	const { rows } = await client.query<{ ref: string | null }>('SELECT external_customer_ref AS ref FROM billing_account WHERE id = $1', [accountId]);
-	const invoice = await provider.createInvoice({
+	const request: ProviderInvoiceRequest = {
 		account: { id: accountId, customerRef: rows[0]?.ref ?? null },
 		planCode: plan.code,
 		seats,
@@ -153,10 +156,11 @@ export async function issueInvoice(client: pg.ClientBase, provider: BillingProvi
 		periodEnd: period.end,
 		lines: invoiceLines(plan, req.interval, seats, from, period.until),
 		key: invoiceKey(accountId, plan.code, req.interval, seats, from, req.poNumber)
-	});
+	};
+	const invoice = await provider.createInvoice(request);
 	if (invoice.newCustomerRef) {
 		// First writer wins (328): a checkout that made a customer meanwhile keeps its own.
 		await client.query('UPDATE billing_account SET external_customer_ref = $2 WHERE id = $1 AND external_customer_ref IS NULL', [accountId, invoice.newCustomerRef]);
 	}
-	return { kind: owner.kind, ownerId: owner.ownerId, accountId, plan: plan.code, seats, interval: req.interval, from, until: period.until, invoice };
+	return { kind: owner.kind, ownerId: owner.ownerId, accountId, plan: plan.code, seats, interval: req.interval, from, until: period.until, invoice, request };
 }

@@ -11,7 +11,9 @@
 // to the real webhook route, so app_billing_apply is the only writer, as with
 // Stripe.
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import type { InvoiceRequest } from '../provider.js';
 import { signPayload } from './signature.js';
+import { invoiceMetadata } from './stripeApi.js';
 
 /** How long a mock session lasts (Stripe's Checkout sessions last 24 h; an hour is plenty locally). */
 export const MOCK_SESSION_TTL_SECONDS = 3600;
@@ -183,5 +185,31 @@ export function seatsChangedEvent(
 		type: 'customer.subscription.updated',
 		created: secs(new Date(nowMs)),
 		data: { object: subscriptionObject(accountId, sub.planCode, sub.status, secs(sub.periodStart), secs(sub.periodEnd), sub.cancelAtPeriodEnd, seats, seatsIncluded) }
+	};
+}
+
+/**
+ * The event Stripe sends when a B2B invoice from the staff tool is paid (billing/invoice.ts): invoice.paid on
+ * the invoice, no subscription, the metadata Stripe's createInvoice writes (invoiceMetadata) and its total.
+ * Delivered through the real webhook route, it grants the invoiced plan (app_billing_apply, 335).
+ */
+export function invoicePaidEvent(req: InvoiceRequest, invoiceId: string, nowMs = Date.now()): Record<string, unknown> {
+	return {
+		id: eventId(),
+		object: 'event',
+		type: 'invoice.paid',
+		created: secs(new Date(nowMs)),
+		data: {
+			object: {
+				id: invoiceId,
+				object: 'invoice',
+				status: 'paid',
+				collection_method: 'send_invoice',
+				parent: null,
+				currency: req.currency.toLowerCase(),
+				total: req.lines.reduce((a, l) => a + l.amountMinor, 0),
+				metadata: invoiceMetadata({ ...req, accountId: req.account.id, planCode: req.planCode })
+			}
+		}
 	};
 }
