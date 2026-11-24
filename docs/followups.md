@@ -1142,6 +1142,16 @@ are #641's checklist. Open items from building it:
       live operations (alert rules, automatic runs, publishing) aren't gated:
       #641 names the assistant and live feeds only, so (5) stays open by
       design.
+- [x] **The email change's taken address reused sign-up's email** (#821,
+      round 10). Changing an account's address to one that already has an
+      account mailed its holder sign-up's "Someone tried to create an
+      account" text. Done (2026-11-24 round): its own email,
+      `emailChangeTakenMail` (`email_change_taken`, `mail.changeTaken.*`,
+      Afrikaans through the translator and checker agents): what was asked,
+      that nothing changed on either account, sign in or reset the password
+      (or confirm, for an account never confirmed) if it was them, ignore it
+      if not, never naming the account that asked; same answer, limits and
+      timing for the requester (security.md § Changing the email address).
 - [ ] **`billing-invoice` can't reach Stripe from the migrate Lambda.** The
       migrate Lambda has no `BILLING_PROVIDER=stripe`, no key and no route to
       Stripe, so the action answers `billing_unavailable`

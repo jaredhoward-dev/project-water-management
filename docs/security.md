@@ -573,9 +573,13 @@ nothing about the account changes. Limits: the verification email's one-a-minute
 cooldown and the account's daily cap of reset, verification and change emails
 (078's `account_mail_quota`). **No enumeration:** the answer is the same `202`
 whether or not the new address has an account (a taken address gets no
-link: its holder gets sign-up's "you already have an account" email, or a
-fresh confirmation link, under that address's own cooldown and cap, sent
-inside the same `answerAlike`), after the same time (`answerAlike`) and under the same limits (the link
+link: its holder gets an email of its own, `emailChangeTakenMail`: someone
+asked to change an account's address to this one and nothing changed on
+either account; if it was them, sign in with this address (with a
+password-reset link) or, for an account never confirmed, confirm it (a
+confirmation link); if not, ignore it. It never names the account that
+asked. Under that address's own cooldown and cap, sent inside the same
+`answerAlike`), after the same time (`answerAlike`) and under the same limits (the link
 is issued, and counted, before the address is looked up), so this reveals no
 more than sign-up. If an account takes the address after the link went out,
 the switch is refused (`409 email_change_taken`) by `app_user`'s unique email;

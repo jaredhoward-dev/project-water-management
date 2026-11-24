@@ -39,8 +39,9 @@ export const emailChangeRoutes = new Hono<AuthEnv>()
 	// said, after the same time (answerAlike) and under the same limits (the
 	// link is issued before the address is looked up), so this can't find
 	// accounts any better than sign-up can. As at sign-up, the taken address's
-	// holder is told instead (takenAddressMail: "you already have an account",
-	// or a fresh confirmation link), under that address's own cooldown and cap. Refused outright, before anything is looked up:
+	// holder is told instead (takenAddressMail: its own email, "someone asked to
+	// change an account's address to this one", never naming that account, with
+	// a reset or confirmation link), under that address's own cooldown and cap. Refused outright, before anything is looked up:
 	// the account's own address (email_change_same) and, with BILLING_ENFORCED
 	// on, a disposable domain (email_change_disposable; auth/disposable.ts, the
 	// same rule as sign-up's). The link's cooldown and the daily cap are the
@@ -79,7 +80,7 @@ export const emailChangeRoutes = new Hono<AuthEnv>()
 			if (linkOrTaken !== 'taken') return linkOrTaken;
 			// The holder's mail, in its own transaction once the requester's has ended (one pooled connection at a
 			// time), as no user until the lookup names the holder. Inside answerAlike, so it costs no visible time.
-			return withoutUser((db) => takenAddressMail(db, body.newEmail));
+			return withoutUser((db) => takenAddressMail(db, body.newEmail, 'email-change'));
 		});
 		// The limits are the account's own, not the new address's, so saying so reveals nothing about it.
 		if (refused === 'capped')

@@ -208,17 +208,43 @@ describe('changing the email address', () => {
 		const taken = await u.call('POST', '/auth/change-email', { newEmail: other.email, currentPassword: PASSWORD });
 		expect(taken.status).toBe(202);
 		expect(taken.body).toEqual({ sent: true, email: other.email });
-		// The holder gets sign-up's "you already have an account" (a password-reset link), never a change link.
+		// The holder gets the email change's own "this address already has an account" (a password-reset
+		// link), never sign-up's wording, never a change link, and nothing naming the asker.
 		expect(mailCount(other.email)).toBe(before + 1);
 		const told = lastMailTo(other.email)!;
-		expect(told.kind).toBe('account_exists');
+		expect(told.kind).toBe('email_change_taken');
+		expect(told.subject).toMatch(/This address already has an account/);
+		expect(told.text).toMatch(/asked to change the email address of an IC-WBT account to/);
+		expect(told.text).not.toMatch(/create an/);
 		expect(told.text).toContain('http://localhost:7777/reset-password?token=');
 		expect(told.text).not.toContain('/verify-email/change');
+		expect(told.text).not.toContain(u.email);
+		expect(told.html).not.toContain(u.email);
 		expect((await other.call('GET', '/auth/me')).body.user.email).toBe(other.email);
 		// The cooldown holds after a taken address exactly as after a free one, so a 429 tells nothing.
 		const next = await u.call('POST', '/auth/change-email', { newEmail: fresh('after'), currentPassword: PASSWORD });
 		expect(next.status).toBe(429);
 		expect(next.body.code).toBe('verification_sent_recently');
+	});
+
+	it('a taken but never-confirmed address: its holder gets a confirmation link in the same email, and the reset link never', async () => {
+		const u = await signUp('AskerOfPending');
+		const pending = await signUp('PendingHolder', { verified: false });
+		// Past the sign-up's own confirmation cooldown, so the holder's link can go out.
+		await asOwner("UPDATE email_token SET created_at = created_at - interval '2 hours' WHERE user_id = (SELECT id FROM app_user WHERE email = $1)", [pending.email]);
+		const before = mailCount(pending.email);
+		const res = await u.call('POST', '/auth/change-email', { newEmail: pending.email, currentPassword: PASSWORD });
+		expect([res.status, res.body]).toEqual([202, { sent: true, email: pending.email }]);
+		expect(mailCount(pending.email)).toBe(before + 1);
+		const told = lastMailTo(pending.email)!;
+		expect(told.kind).toBe('email_change_taken');
+		expect(told.text).toMatch(/isn’t confirmed yet/);
+		expect(told.text).toMatch(/http:\/\/localhost:7777\/verify-email\?token=/);
+		expect(told.text).not.toContain('/reset-password');
+		expect(told.text).not.toContain(u.email);
+		// The link confirms the holder's own account (positive control: it's a real verify token).
+		const confirmed = await anon('POST', '/auth/verify-email', { token: tokenIn(told)! });
+		expect(confirmed.status).toBe(200);
 	});
 
 	it('the holder’s mail keeps to the holder’s own cooldown: a second try straight after mails nothing more', async () => {
