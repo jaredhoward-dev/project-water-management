@@ -1088,3 +1088,195 @@ run "fixed_egress_rejects_an_x86_type" {
 
   expect_failures = [var.fixed_egress_instance_type]
 }
+
+# --- Stripe egress (stripe_egress_enabled; modules/stripe-egress,
+# docs/deployment.md § Stripe egress) ---------------------------------------------
+
+run "stripe_egress_off_by_default" {
+  command = plan
+
+  assert {
+    condition     = length(module.stripe_egress) == 0
+    error_message = "No NAT gateway, internet gateway or extra subnet in the private VPC unless stripe_egress_enabled is set."
+  }
+  assert {
+    condition = (
+      toset(aws_lambda_function.backend.vpc_config[0].security_group_ids) == toset([aws_security_group.api_lambda.id]) &&
+      length(local.api_subnet_ids) == 2 &&
+      length(regexall("subnet_ids\\s*=\\s*local\\.api_subnet_ids", file("lambda.tf"))) == 1 &&
+      length(regexall("api_subnet_ids\\s*=\\s*local\\.stripe_egress_on \\? module\\.stripe_egress\\[0\\]\\.api_subnet_ids : aws_subnet\\.private\\[\\*\\]\\.id", file("egress.tf"))) == 1
+    )
+    error_message = "Off, the API Lambda keeps network.tf's two private subnets and its own security group alone."
+  }
+}
+
+run "stripe_egress_on" {
+  command = plan
+
+  variables {
+    stripe_egress_enabled  = true
+    billing_provider       = "stripe"
+    stripe_secret_key      = "rk_live_0000synthetic0000000000"
+    billing_webhook_secret = "whsec_synthetic0000000000000000000000"
+  }
+
+  # The module's IDs are unknown at plan; its insides are pinned by run
+  # "stripe_egress_module" below.
+  override_module {
+    target          = module.stripe_egress
+    override_during = plan
+    outputs = {
+      public_ip             = "203.0.113.20"
+      api_subnet_ids        = ["subnet-00stripeapi1", "subnet-00stripeapi2"]
+      api_security_group_id = "sg-0stripehttpsout"
+    }
+  }
+
+  assert {
+    condition     = length(module.stripe_egress) == 1
+    error_message = "stripe_egress_enabled creates the Stripe egress."
+  }
+  assert {
+    condition = (
+      toset(aws_lambda_function.backend.vpc_config[0].subnet_ids) == toset(["subnet-00stripeapi1", "subnet-00stripeapi2"]) &&
+      toset(aws_lambda_function.backend.vpc_config[0].security_group_ids) == toset([aws_security_group.api_lambda.id, "sg-0stripehttpsout"])
+    )
+    error_message = "On, the API Lambda runs in the module's routed subnets and carries the HTTPS-out group beside its own (which keeps its Postgres and endpoint rules)."
+  }
+  assert {
+    # Only the API moves: the database and every other private-VPC Lambda
+    # keep network.tf's route-less subnets.
+    # (Their subnet IDs are unknown at plan, so their wiring is read from the files.)
+    condition = (
+      length(regexall("resource \"aws_db_subnet_group\" \"main\" \\{\\n[^\\n]*\\n\\s*subnet_ids\\s*=\\s*aws_subnet\\.private\\[\\*\\]\\.id", file("rds.tf"))) == 1 &&
+      length(regexall("(?s)resource \"aws_lambda_function\" \"worker\" \\{.*?vpc_config \\{\\s*subnet_ids\\s*=\\s*aws_subnet\\.private\\[\\*\\]\\.id", file("jobs.tf"))) == 1 &&
+      length(regexall("(?s)resource \"aws_lambda_function\" \"migrate\" \\{.*?vpc_config \\{\\s*subnet_ids\\s*=\\s*aws_subnet\\.private\\[\\*\\]\\.id", file("lambda.tf"))) == 1 &&
+      !contains(aws_lambda_function.worker.vpc_config[0].security_group_ids, "sg-0stripehttpsout") &&
+      !contains(aws_lambda_function.migrate.vpc_config[0].security_group_ids, "sg-0stripehttpsout")
+    )
+    error_message = "Stripe egress moves only the API Lambda: RDS, the worker and migrate stay in the route-less private subnets without the HTTPS-out group."
+  }
+  assert {
+    condition     = length(regexall("\\broute\\s*\\{", regex("(?s)resource \"aws_route_table\" \"private\" \\{.*?\\n\\}", file("network.tf")))) == 0 && toset([for a in aws_route_table_association.private : a.route_table_id]) == toset([aws_route_table.private.id])
+    error_message = "The private route table keeps only its local route, and the private subnets keep it."
+  }
+}
+
+run "stripe_egress_module" {
+  command = plan
+
+  module {
+    source = "./modules/stripe-egress"
+  }
+
+  variables {
+    project  = "water-management"
+    vpc_id   = "vpc-0000000000main"
+    vpc_cidr = "10.60.0.0/16"
+    zone_ids = ["afs1-az1", "afs1-az2"]
+  }
+
+  override_resource {
+    target          = aws_internet_gateway.main
+    override_during = plan
+    values = {
+      id = "igw-00000stripe"
+    }
+  }
+  override_resource {
+    target          = aws_subnet.public
+    override_during = plan
+    values = {
+      id = "subnet-00stripepub"
+    }
+  }
+  override_resource {
+    target          = aws_route_table.public
+    override_during = plan
+    values = {
+      id = "rtb-00stripepub"
+    }
+  }
+  override_resource {
+    target          = aws_route_table.api
+    override_during = plan
+    values = {
+      id = "rtb-00stripeapi"
+    }
+  }
+  override_resource {
+    target          = aws_eip.nat
+    override_during = plan
+    values = {
+      id = "eipalloc-00stripe"
+    }
+  }
+  override_resource {
+    target          = aws_nat_gateway.main
+    override_during = plan
+    values = {
+      id = "nat-0000000stripe"
+    }
+  }
+  override_resource {
+    target          = aws_security_group.api_https_out
+    override_during = plan
+    values = {
+      id = "sg-0stripehttpsout"
+    }
+  }
+
+  # --- The way out: API subnets → NAT gateway (public subnet) → internet gateway
+  assert {
+    condition = (
+      aws_route.api_default.route_table_id == "rtb-00stripeapi" &&
+      aws_route.api_default.destination_cidr_block == "0.0.0.0/0" &&
+      aws_route.api_default.nat_gateway_id == "nat-0000000stripe" &&
+      aws_route.api_default.gateway_id == null &&
+      alltrue([for a in aws_route_table_association.api : a.route_table_id == "rtb-00stripeapi"]) &&
+      length(aws_route_table_association.api) == 2
+    )
+    error_message = "Both API subnets route 0.0.0.0/0 to the NAT gateway, never straight to the internet gateway."
+  }
+  assert {
+    condition = (
+      aws_nat_gateway.main.subnet_id == "subnet-00stripepub" &&
+      aws_nat_gateway.main.allocation_id == "eipalloc-00stripe" &&
+      aws_nat_gateway.main.connectivity_type == "public" &&
+      aws_route.public_default.route_table_id == "rtb-00stripepub" &&
+      aws_route.public_default.gateway_id == "igw-00000stripe" &&
+      aws_route_table_association.public.route_table_id == "rtb-00stripepub"
+    )
+    error_message = "The NAT gateway sits in the public subnet with the Elastic IP, and only the public subnet routes to the internet gateway."
+  }
+  assert {
+    condition = (
+      aws_subnet.public.map_public_ip_on_launch == false &&
+      alltrue([for s in aws_subnet.api : s.map_public_ip_on_launch == false]) &&
+      aws_subnet.public.cidr_block == "10.60.20.0/24" &&
+      [for s in aws_subnet.api : s.cidr_block] == ["10.60.21.0/24", "10.60.22.0/24"] &&
+      [for s in aws_subnet.api : s.availability_zone_id] == ["afs1-az1", "afs1-az2"]
+    )
+    error_message = "No subnet hands out public IPs, and the module's /24s (20, 21, 22) stay clear of network.tf's (10, 11)."
+  }
+
+  # --- The API's extra group: HTTPS out only -------------------------------------
+  assert {
+    condition = (
+      aws_security_group.api_https_out.description == "API Lambda ENIs, beside the API group: HTTPS out through the NAT gateway, for Stripe." &&
+      aws_vpc_security_group_egress_rule.api_https.security_group_id == "sg-0stripehttpsout" &&
+      aws_vpc_security_group_egress_rule.api_https.ip_protocol == "tcp" &&
+      aws_vpc_security_group_egress_rule.api_https.from_port == 443 &&
+      aws_vpc_security_group_egress_rule.api_https.to_port == 443 &&
+      aws_vpc_security_group_egress_rule.api_https.cidr_ipv4 == "0.0.0.0/0"
+    )
+    error_message = "The HTTPS-out group allows TCP 443 out only, and its description is pinned (changing it replaces the group, which stalls an apply while a Lambda ENI holds it)."
+  }
+  assert {
+    condition = aws_security_group.api_https_out.id != "" && alltrue([
+      for f in fileset("modules/stripe-egress", "*.tf") :
+      length(regexall("resource \"aws_vpc_security_group_ingress_rule\"", file("modules/stripe-egress/${f}"))) == 0
+    ])
+    error_message = "The module opens no ingress: a NAT is outbound-only and nothing here listens."
+  }
+}

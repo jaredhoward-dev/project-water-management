@@ -231,7 +231,7 @@ variable "runtime_secret_version" {
 # --- Network -----------------------------------------------------------------
 
 variable "vpc_cidr" {
-  description = "CIDR for the private-only VPC. Two /24 private subnets are carved from it."
+  description = "CIDR for the private-only VPC. Two /24 private subnets are carved from it (numbers 10-11), and with stripe_egress_enabled three more (20-22, modules/stripe-egress)."
   type        = string
   default     = "10.60.0.0/16"
 }
@@ -524,6 +524,11 @@ variable "billing_provider" {
     condition     = var.billing_provider != "stripe" || (length(var.billing_webhook_secret) >= 32 && !can(regex("^(dev|test)-only-", var.billing_webhook_secret)))
     error_message = "billing_provider = \"stripe\" needs billing_webhook_secret (the webhook endpoint's signing secret, 32+ characters) in prod.sops.yaml (docs/deployment.md § Turning on Stripe)."
   }
+  validation {
+    # The API is in the private VPC: without the NAT it can't reach api.stripe.com.
+    condition     = var.billing_provider != "stripe" || var.stripe_egress_enabled
+    error_message = "billing_provider = \"stripe\" needs stripe_egress_enabled = true: the API Lambda can't reach api.stripe.com from the private VPC otherwise (docs/deployment.md § Stripe egress)."
+  }
 }
 
 variable "signup_open" {
@@ -683,6 +688,12 @@ variable "fixed_egress_instance_type" {
     condition     = can(regex("^[a-z][a-z0-9]*g[a-z]*\\.[a-z0-9]+$", var.fixed_egress_instance_type))
     error_message = "fixed_egress_instance_type must be a Graviton (arm64) type such as t4g.micro: the AMI is arm64."
   }
+}
+
+variable "stripe_egress_enabled" {
+  description = "Give the API Lambda a way out of the private VPC to api.stripe.com: a NAT gateway and two subnets of the API's own in the private VPC, routed through it, and an HTTPS-out security group on the API beside its own (egress.tf, modules/stripe-egress; docs/deployment.md § Stripe egress). Needed with billing_provider = stripe: without it checkout, the portal and seat changes fail with billing_provider_error. About $45 a month in af-south-1 (~$33 in us-east-1) plus per-GB processing. Off (the default) adds nothing; RDS and the other Lambdas keep the route-less subnets either way."
+  type        = bool
+  default     = false
 }
 
 # --- Server-side reports (reports.tf) --------------------------------------------

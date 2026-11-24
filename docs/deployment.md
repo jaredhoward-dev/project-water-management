@@ -1948,6 +1948,62 @@ addresses.
   some minutes after it leaves a subnet, so deleting the subnets can stall
   that apply for up to 20 minutes; it finishes on its own.
 
+### Stripe egress
+
+`stripe_egress_enabled` (default off; needed with `billing_provider =
+"stripe"`, and plan refuses `stripe` without it) gives the API Lambda a way
+out of the private VPC to `api.stripe.com` for checkout, the Customer Portal
+and seat changes (`infra/egress.tf`, `infra/modules/stripe-egress/`). Off,
+the private VPC has no route out at all (`infra/network.tf`), and every Stripe call
+fails with `billing_provider_error`.
+
+- **Shape.** Inside the private VPC: an internet gateway, one public subnet
+  (`/24` number 20 of `vpc_cidr`) holding a managed NAT gateway with an
+  Elastic IP, and two subnets of the API's own (`/24`s 21 and 22, two AZs)
+  whose route table sends `0.0.0.0/0` to the NAT gateway. The API Lambda
+  moves its ENIs there and carries a second security group, HTTPS (443) out
+  to anywhere, beside its own (whose rules to Postgres and the endpoints
+  stay as they were). Nothing else moves: RDS, the worker, the migrate
+  Lambda and the interface endpoints keep the original subnets, whose route
+  table still holds only the local route, so RDS stays private (it is
+  reached over the VPC's local route, and a NAT takes no inbound
+  connections). `tests/egress.tftest.hcl` pins it, on and off.
+- **Why a NAT in this VPC.** The API must reach both Postgres (private
+  VPC) and Stripe, and a Lambda sits in one VPC only. The fixed-egress VPC
+  can't carry it: a NAT in another VPC is no route target across peering,
+  and a transit gateway costs about as much as a NAT gateway before any
+  traffic. A Lambda outside the VPC that makes only the Stripe calls,
+  invoked through a Lambda interface endpoint, would keep the private VPC
+  without any route out and cost less (one endpoint, about $7.30 a month an
+  AZ), but it needs the backend's Stripe client to call that function
+  instead of `fetch`, a second deploy artifact and its own IAM; it remains
+  the upgrade if the network allowance below ever matters
+  ([followups.md § Billing](./followups.md)).
+- **Why a NAT gateway, not an instance.** The fixed egress uses a NAT
+  instance because nothing user-facing runs through it. Checkout does: a
+  managed gateway needs no patching, no first-boot script and no recovery
+  alarms. It costs about $45 a month in af-south-1 (~$33 in us-east-1) plus
+  per-GB processing, which Stripe's small JSON calls barely touch
+  ([deployment-tiers.md](./deployment-tiers.md#cheaper-options-and-why-they-arent-used)).
+  One gateway, in the first AZ: if that AZ fails, Stripe calls fail until
+  it is back (the single-AZ database is the larger exposure then anyway).
+- **Least privilege.** Only the API's ENIs have the route and the HTTPS-out
+  group. A security group can't name a host, so the network lets the API
+  reach any HTTPS host; the code calls only Stripe
+  (`backend/src/billing/provider/stripeApi.ts`). A hostname allowlist would
+  need AWS Network Firewall, which costs far more than the NAT itself.
+- **The migrate Lambda** (the `billing-invoice` owner action) still has no
+  provider, key or route: [followups.md § Billing](./followups.md).
+- **Turning it on.** Before or with `billing_provider = "stripe"` (§ Turning
+  on Stripe, step 5): add `stripe_egress_enabled = true` to
+  `prod.tfvars.sops`. Expect in the plan: the module's gateway, subnets,
+  route tables, NAT gateway, Elastic IP and security group, and an in-place
+  update of the backend function's `vpc_config`; nothing else in the VPC.
+- **Turning it off.** Only with `billing_provider = "manual"` (plan refuses
+  `stripe` without it). AWS releases the API's old ENIs some minutes after
+  it leaves the subnets, so deleting them can stall that apply for up to
+  20 minutes; it finishes on its own.
+
 ### ECMWF (the second forecast)
 
 Issue #604 D17 (R4-C): the ECMWF ENS forecast, copied by the same
@@ -3323,9 +3379,12 @@ key goes into a chat, an issue or a CI log.
    `tf.sh` passes each as an ephemeral variable when present; neither reaches
    state or a saved plan.
 5. **Switch the provider, plan, read it, then apply** with your own
-   go-ahead. Add `billing_provider = "stripe"` to `prod.tfvars.sops`, then
+   go-ahead. Add `billing_provider = "stripe"` and `stripe_egress_enabled =
+   true` (§ Stripe egress: the API's route to Stripe) to `prod.tfvars.sops`, then
    `cd infra && AWS_PROFILE=water-management ./scripts/tf.sh plan -var-file=../../infra-secrets/water-management/prod.tfvars.sops -out=<plan>`
    and `AWS_PROFILE=water-management ./scripts/tf.sh apply <plan>`. Expect:
+   the Stripe egress module's resources and the backend function's
+   `vpc_config` moving to its subnets,
    `BILLING_PROVIDER` going from `manual` to `stripe` on the backend function,
    and every runtime secret version rewritten (the sops edit moved
    `runtime_secret_version`, so every Lambda cold-starts). Nothing else.

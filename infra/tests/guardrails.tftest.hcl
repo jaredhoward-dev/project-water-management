@@ -1202,6 +1202,7 @@ run "stripe_secrets_reach_the_runtime_secret_only" {
 
   variables {
     billing_provider       = "stripe"
+    stripe_egress_enabled  = true
     stripe_secret_key      = "rk_live_0000synthetic0000000000"
     billing_webhook_secret = "whsec_synthetic0000000000000000000000"
   }
@@ -1246,6 +1247,19 @@ run "stripe_needs_both_secrets" {
   expect_failures = [var.billing_provider]
 }
 
+run "stripe_needs_the_egress" {
+  command = plan
+
+  # Both secrets right, but no way out of the private VPC to api.stripe.com.
+  variables {
+    billing_provider       = "stripe"
+    stripe_secret_key      = "rk_live_0000synthetic0000000000"
+    billing_webhook_secret = "whsec_synthetic0000000000000000000000"
+  }
+
+  expect_failures = [var.billing_provider]
+}
+
 run "stripe_needs_the_webhook_secret" {
   command = plan
 
@@ -1262,6 +1276,7 @@ run "stripe_refuses_a_test_mode_key" {
 
   variables {
     billing_provider       = "stripe"
+    stripe_egress_enabled  = true
     stripe_secret_key      = "sk_test_0000synthetic0000000000"
     billing_webhook_secret = "whsec_synthetic0000000000000000000000"
   }
@@ -1275,6 +1290,7 @@ run "stripe_refuses_a_placeholder_webhook_secret" {
 
   variables {
     billing_provider       = "stripe"
+    stripe_egress_enabled  = true
     stripe_secret_key      = "rk_live_0000synthetic0000000000"
     billing_webhook_secret = "dev-only-billing-webhook-secret-00000000000"
   }
