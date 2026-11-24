@@ -124,6 +124,32 @@ describe('the local script and the Lambda action', () => {
 		}
 	});
 
+	it('--paid that doesn’t check out (an open-ended grant it never ends): the webhook answers 200, nothing is granted, and the script says so', async () => {
+		vi.stubEnv('BILLING_PROVIDER', 'mock');
+		vi.stubEnv('BILLING_WEBHOOK_SECRET', 'dev-only-test');
+		const warn = vi.spyOn(console, 'warn');
+		try {
+			const person = await signUp('InvoicePaidConflict');
+			const account = (await person.call('GET', '/account/plan')).body.account.id as string;
+			// A founder's grant: manual, active, no end. A paid invoice never ends it (335), so its invoice.paid is a conflict.
+			await asOwner(`INSERT INTO subscription (billing_account_id, plan_code, status, period_start, provider) VALUES ($1, 'pro', 'active', now(), 'manual')`, [account]);
+			const args = parseArgs([person.email, 'pro', '--interval', 'month', '--po', 'PO-9', '--paid']);
+			if (typeof args === 'string') throw new Error(args);
+			// The webhook took the event (a refusal would throw), and recorded it as a conflict.
+			const lines = await runInvoice(OWNER_URL, args, process.env);
+			expect(lines[1]).toBe('Paid (mock), but nothing was granted: the backend log says why (billing_webhook, result conflict).');
+			const logged = warn.mock.calls.map((c) => (typeof c[0] === 'string' ? JSON.parse(c[0]) : c[0])).filter((l) => l.event === 'billing_webhook');
+			expect(logged).toEqual([expect.objectContaining({ provider: 'mock', type: 'invoice.paid', result: 'conflict' })]);
+			// Only the founder's grant, untouched.
+			expect(await asOwner('SELECT provider, external_ref, status, period_end FROM subscription WHERE billing_account_id = $1', [account])).toEqual([
+				{ provider: 'manual', external_ref: null, status: 'active', period_end: null }
+			]);
+		} finally {
+			warn.mockRestore();
+			vi.unstubAllEnvs();
+		}
+	});
+
 	it('the script refuses under manual (its invoices are sent from Stripe’s dashboard)', async () => {
 		const person = await signUp('InvoiceManual');
 		const args = parseArgs([person.email, 'pro', '--interval', 'year', '--po', 'PO1']);

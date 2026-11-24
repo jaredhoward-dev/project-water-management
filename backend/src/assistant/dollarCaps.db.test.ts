@@ -6,13 +6,16 @@
 //     member's share, the Free pool's month and its paced day), and the budget is cut to what the tightest has left;
 //   - concurrent begins never reserve past a cap; a charge moves the dollars onto the day row; an expired
 //     reservation is charged its dollars in full;
-//   - a person reads only their own day rows (with a positive control).
+//   - a person reads only their own day rows (with a positive control);
+//   - through the route, each refusal is 429 with its code, the issue's words, Retry-After, params.seconds and
+//     params.resetsAt (Retry-After from now); a pool account's turn logs `assistant_free_pool` at 50% and 80% of the
+//     pool's month, and not below.
 // The workspace runs under a skewed TZ (CLAUDE.md rule 7); every boundary here is UTC, so the days and months are
 // worked out by Postgres, and a row of yesterday or last month is shown not to count.
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { asOwner, signUp } from '../__tests__/helpers.js';
+import { app, asOwner, signUp } from '../__tests__/helpers.js';
 import { withUser } from '../db/tx.js';
-import { poolDayAllowance } from './dollarCaps.js';
+import { DOLLAR_REFUSAL, poolDayAllowance, type DollarOutcome } from './dollarCaps.js';
 
 type User = Awaited<ReturnType<typeof signUp>>;
 let owner: User;
@@ -94,7 +97,10 @@ beforeAll(async () => {
 	expect(otherAccount).not.toBe(account);
 });
 beforeEach(clear);
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => {
+	vi.unstubAllEnvs();
+	vi.restoreAllMocks();
+});
 afterAll(clear);
 
 const enforce = () => vi.stubEnv('BILLING_ENFORCED', 'true');
@@ -280,5 +286,112 @@ describe('assistant_day_usage', () => {
 			const [r] = await asOwner('SELECT assistant_pool_day_allowance(30000000, $1, $2::date)::float8 AS a', [spent, day]);
 			expect(r!.a, day).toBe(poolDayAllowance(30_000_000, spent, new Date(`${day}T12:00:00Z`)));
 		}
+	});
+});
+
+/** One turn through the route, as the panel sends it (the mock provider: priced at 0, so only a cap already past its limit refuses). */
+function post(u: User, pid: string) {
+	return app.request(`/projects/${pid}/assistant/messages`, {
+		method: 'POST',
+		headers: { cookie: u.cookie, origin: 'http://localhost:7777', 'content-type': 'application/json' },
+		body: JSON.stringify({ messages: [{ role: 'user', content: 'Hello' }] })
+	});
+}
+
+/** The 429 a dollar cap answers: its code, words, Retry-After, params.seconds and params.resetsAt agreeing. */
+async function expectRefusal(res: Response, outcome: DollarOutcome, waitTo: 'day' | 'month') {
+	const sent = Date.now();
+	expect(res.status).toBe(429);
+	const body = (await res.json()) as { error: string; code: string; params: { seconds: number; resetsAt: string } };
+	expect(body.code).toBe(DOLLAR_REFUSAL[outcome].code);
+	const wait = Number(res.headers.get('retry-after'));
+	expect(wait).toBe(body.params.seconds);
+	expect(body.error).toBe(DOLLAR_REFUSAL[outcome].message(body.params.resetsAt));
+	// resetsAt is the next UTC midnight (the day, a pool day) or the next UTC month (the month, a member's share, a pool month).
+	const now = new Date(sent);
+	const boundary = waitTo === 'day' ? Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1) : Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1);
+	expect(Math.abs(Date.parse(body.params.resetsAt) - boundary)).toBeLessThan(60_000);
+	expect(Math.abs(sent + wait * 1000 - boundary)).toBeLessThan(60_000);
+	// Nothing counted: no reservation left by the refusal.
+	expect(await asOwner('SELECT 1 FROM assistant_reservation WHERE project_id = ANY($1)', [[projectId, otherProject]])).toEqual([]);
+}
+
+describe('through the route (enforced): 429, the code, Retry-After, params.seconds and params.resetsAt', () => {
+	beforeEach(() => {
+		vi.stubEnv('ASSISTANT_PROVIDER', 'mock');
+		enforce();
+	});
+
+	it('a fresh Free person’s turn streams (positive control)', async () => {
+		expect((await post(owner, projectId)).status).toBe(200);
+	});
+
+	it('assistant_daily_cap, until UTC midnight', async () => {
+		await dayRow(owner, account, await utcDay(), DAY_MSGS);
+		await expectRefusal(await post(owner, projectId), 'day', 'day');
+	});
+
+	it('assistant_monthly_cap, until the UTC month ends', async () => {
+		await spend(owner, projectId, 1_000_001);
+		await expectRefusal(await post(owner, projectId), 'month', 'month');
+	});
+
+	it('assistant_member_cap, until the month ends; another member still chats', async () => {
+		await asOwner(`INSERT INTO subscription (billing_account_id, plan_code, status, seats, provider) VALUES ($1, 'team', 'active', 3, 'manual')`, [account]);
+		await spend(owner, projectId, 22_500_001);
+		await expectRefusal(await post(owner, projectId), 'member', 'month');
+		expect((await post(editor, projectId)).status).toBe(200);
+	});
+
+	it('assistant_free_pool_spent, until the month ends once the pool’s month is spent, with no upgrade prompt', async () => {
+		// Free spend on this account under its own $1 month and day; a pool smaller than the pool's month so far.
+		await spend(owner, projectId, 500_000);
+		const base = await poolSpent();
+		vi.stubEnv('ASSISTANT_FREE_POOL_USD_PER_MONTH', String((base.month - 1) / 1e6));
+		const res = await post(owner, projectId);
+		await expectRefusal(res.clone(), 'pool', 'month');
+		const body = (await res.json()) as { error: string };
+		expect(body.error).toContain('This isn’t something you did');
+		expect(body.error).not.toMatch(/Pro|plan|upgrade/i);
+	});
+});
+
+describe('the Free pool’s alarm line (shadow mode: logged with enforcement off too)', () => {
+	/** The `assistant_free_pool` lines one turn logs, with the pool set so the month so far is `pct`% of it. */
+	async function poolLines(pct: number) {
+		vi.stubEnv('ASSISTANT_PROVIDER', 'mock');
+		// Spend in the pool on another Free account, so the pool's month is never 0.
+		await spend(other, otherProject, 500_000);
+		const base = await poolSpent();
+		expect(base.month).toBeGreaterThan(0);
+		vi.stubEnv('ASSISTANT_FREE_POOL_USD_PER_MONTH', String(base.month / (pct / 100) / 1e6));
+		const warn = vi.spyOn(console, 'warn');
+		const res = await post(owner, projectId);
+		expect(res.status).toBe(200);
+		await res.text();
+		const lines = warn.mock.calls
+			.map((c) => (typeof c[0] === 'string' ? (JSON.parse(c[0]) as Record<string, unknown>) : (c[0] as Record<string, unknown>)))
+			.filter((l) => l.event === 'assistant_free_pool');
+		warn.mockRestore();
+		return { lines, base };
+	}
+
+	it('is not logged below 50%', async () => {
+		expect((await poolLines(40)).lines).toEqual([]);
+	});
+
+	it('is logged at 50%, amounts only', async () => {
+		const { lines, base } = await poolLines(60);
+		expect(lines).toEqual([{ event: 'assistant_free_pool', share: 50, usedUsdMicros: base.month, poolUsdMicros: expect.any(Number) }]);
+		expect(base.month / (lines[0]!.poolUsdMicros as number)).toBeCloseTo(0.6, 3);
+	});
+
+	it('is logged at 80%', async () => {
+		expect((await poolLines(85)).lines).toEqual([expect.objectContaining({ event: 'assistant_free_pool', share: 80 })]);
+	});
+
+	it('is not logged for a paid account’s turn (it doesn’t draw on the pool)', async () => {
+		await asOwner(`INSERT INTO subscription (billing_account_id, plan_code, status, provider) VALUES ($1, 'pro', 'active', 'manual')`, [account]);
+		expect((await poolLines(85)).lines).toEqual([]);
 	});
 });
