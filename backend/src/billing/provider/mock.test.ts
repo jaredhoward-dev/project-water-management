@@ -93,6 +93,23 @@ describe('mock events', () => {
 		expect(created).toMatchObject({ event: { payload: { periodEnd: '2027-11-23T12:00:00.000Z' } } });
 	});
 
+	it('sends the interval on each item’s price, monthly and yearly, and the portal’s cancel keeps it', () => {
+		expect(normaliseStripeEvent(paidEvents(checkout, NOW)[1])).toMatchObject({ event: { payload: { interval: 'month' } } });
+		const team = { ...checkout, planCode: 'team', planName: 'Team', interval: 'year' as const, seats: 5, seatsIncluded: 3 };
+		expect(normaliseStripeEvent(paidEvents(team, NOW)[1])).toMatchObject({ event: { payload: { seats: 5, interval: 'year' } } });
+		const portal: Extract<MockSession, { kind: 'portal' }> = {
+			kind: 'portal',
+			accountId: ACCOUNT,
+			returnUrl: 'http://localhost:7777/teams/x/plan',
+			subscription: { planCode: 'team', status: 'active', periodStart: '2026-11-23T12:00:00.000Z', periodEnd: '2027-11-23T12:00:00.000Z', cancelAtPeriodEnd: false, seats: 5, seatsIncluded: 3, interval: 'year' },
+			exp: NOW / 1000 + 3600
+		};
+		expect(normaliseStripeEvent(cancelAtPeriodEndEvent(portal, NOW))).toMatchObject({ event: { payload: { seats: 5, interval: 'year', cancelAtPeriodEnd: true } } });
+		// A subscription with no interval recorded (a token signed before 332): no price on the items, so none is sent and the stored one stays.
+		const before = normaliseStripeEvent(cancelAtPeriodEndEvent({ ...portal, subscription: { ...portal.subscription!, interval: null } }, NOW));
+		expect(before.kind === 'event' && 'interval' in before.event.payload).toBe(false);
+	});
+
 	it('gives each event its own id', () => {
 		const ids = [...paidEvents(checkout, NOW), ...paidEvents(checkout, NOW)].map((e) => e.id);
 		expect(new Set(ids).size).toBe(4);
