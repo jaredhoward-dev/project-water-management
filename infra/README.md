@@ -233,8 +233,14 @@ browser ──HTTPS──► CloudFront + WAF (us-east-1 ACL)      icwbt.jaredho
   information (POPIA)). The API carries the same `ASSISTANT_*` values
   (`off` while disabled) for the status it answers. Alarms: errors and
   throttles (essential), p95 duration (full), and the origin-secret filter
-  on its log group; a third budget, `assistant_budget_monthly_usd` (USD 50)
-  on the account's AWS Marketplace charges (the model's billing entity).
+  on its log group; a third budget, `assistant_budget_monthly_usd` (USD 100:
+  issue #641's $30 Free pool + $15 a paid seat + a margin) on the account's
+  AWS Marketplace charges (the model's billing entity). The Free dollar caps
+  (`assistant_free_usd_per_day` $0.30, `assistant_free_messages_per_day` 20,
+  `assistant_free_pool_usd_per_month` $30, the code's defaults) are set on
+  the assistant only, which begins every turn; the plan refuses a pool
+  larger than the assistant budget or than the deployment-wide token cap is
+  worth at the input price.
 - **TLS to RDS** is `sslmode=verify-full` (chain + hostname). Both zips carry
   `infra/certs/rds-global-bundle.pem` (the public AWS RDS CA bundle from
   `https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem`), and
@@ -691,10 +697,10 @@ $0.10 for a typical turn and capped per project, per person and
 deployment-wide in weighted tokens (input + 5 × output, so dollars at the
 input price; [docs/deployment.md § The
 assistant](../docs/deployment.md#the-assistant)). The deployment-wide cap
-defaults to `assistant_budget_monthly_usd` ($50) at that price, and the
-assistant's budget alerts on it. **With the assistant on, raise
-`budget_monthly_usd` to $110 + `assistant_budget_monthly_usd` (≈ $160 on the
-defaults)**: the idle becomes ≈ $88, exactly the $110 budget's ACTUAL 80%
+defaults to `assistant_budget_monthly_usd` ($100, 50 M weighted tokens) at
+that price, and the assistant's budget alerts on it. **With the assistant on,
+raise `budget_monthly_usd` to $110 + `assistant_budget_monthly_usd` (≈ $210
+on the defaults)**: the idle becomes ≈ $88, exactly the $110 budget's ACTUAL 80%
 line, and the model spend counts toward the account total too, so the
 default would alert every month. The worst case AWS bounds is the
 assistant's own Lambda at its reserved concurrency (2 × 1 GB all month,
@@ -720,7 +726,7 @@ alarms are what bound and report a runaway while it happens.
 | Monthly, ACTUAL 80% | the month's spend passes $88 (on the default $110) | Early warning, set above the idle so it doesn't fire every month. |
 | Monthly, ACTUAL 100% | the month's spend passes the budget | |
 | Monthly, FORECASTED 100% | AWS forecasts the month past the budget | Needs ~5 weeks of cost history, so it is silent through the first month. |
-| Assistant, ACTUAL 80% and 100% | the month's AWS Marketplace charges (the model's spend) pass `assistant_budget_monthly_usd` ($50) | Only with `assistant_enabled`. A third budget, ~$0.62 a month. Marketplace charges lag a further 12–24 h; `assistant-tokens-hourly` is the real-time signal. `postapply-check.sh`'s `assistant-budget` confirms the filter catches the charge. |
+| Assistant, ACTUAL 80% and 100% | the month's AWS Marketplace charges (the model's spend) pass `assistant_budget_monthly_usd` ($100) | Only with `assistant_enabled`. A third budget, ~$0.62 a month. Marketplace charges lag a further 12–24 h; `assistant-tokens-hourly` is the real-time signal. `postapply-check.sh`'s `assistant-budget` confirms the filter catches the charge. |
 | Cost Anomaly Detection | one service's spend jumps, total impact ≥ `cost_anomaly_threshold_usd` (off by default; set $10 after the first apply, [§ Operator steps](#operator-steps) step 11) | AWS-services monitor, free, needs ~10 days of history. Off for the first apply because an account holds one services monitor and AWS may have made it already. |
 
 Each topic's policy admits only this account (`aws:SourceAccount`, plus

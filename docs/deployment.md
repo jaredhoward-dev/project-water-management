@@ -4462,9 +4462,14 @@ turn (up to 6 model calls with tool reads between) runs past the API's
   (`ASSISTANT_KEEPALIVE_SECONDS`, kept at 1–30 s by the production check).
   The Free dollar caps' settings (`ASSISTANT_FREE_USD_PER_DAY`,
   `ASSISTANT_FREE_MESSAGES_PER_DAY`, `ASSISTANT_FREE_POOL_USD_PER_MONTH`)
-  aren't set by Terraform yet, so the code's defaults apply ($0.30, 20
-  messages, $30); the production check validates them only when set, and
-  they refuse a turn only while `BILLING_ENFORCED` is on (billing.md §
+  are Terraform's `assistant_free_usd_per_day` ($0.30),
+  `assistant_free_messages_per_day` (20) and
+  `assistant_free_pool_usd_per_month` ($30), the code's defaults, bounded as
+  the production check bounds them; the plan also refuses a pool larger
+  than `assistant_budget_monthly_usd` or than the deployment-wide token cap
+  is worth at the input price, so free use alone passes neither. They are
+  set on this Lambda only (it begins every turn; the status shows the token
+  caps), and refuse a turn only while `BILLING_ENFORCED` is on (billing.md §
   Assistant dollar caps);
   The status (`GET /api/projects/:id/assistant`) stays on the API, which
   carries the same `ASSISTANT_*` values so it shows what the assistant
@@ -4516,8 +4521,8 @@ million input and $10.00 per million output tokens (AWS Price List API,
 it: 2 M a project a month (`assistant_tokens_per_month`),
 1 M a person a month across projects (`assistant_tokens_per_user_month`),
 and a deployment-wide monthly cap (`assistant_tokens_per_month_total`,
-derived by default from the assistant's budget at the input price: 25 M
-for $50 at $2/M), so no number of projects, accounts or turns at once gets
+derived by default from the assistant's budget at the input price: 50 M
+for $100 at $2/M), so no number of projects, accounts or turns at once gets
 past the budget (architecture.md § Assistant); then 30 messages a user an hour
 (`assistant_messages_per_hour`), and per turn 6 model calls
 (`assistant_max_hops`), 150 K weighted tokens (`assistant_max_turn_tokens`,
@@ -4527,7 +4532,9 @@ characters a tool result and 40,000 of conversation (all pinned in the
 Lambda's environment, the bounds checked by Terraform and by the
 production check alike). In AWS:
 the reserved concurrency above, and a third budget,
-`water-management-assistant`, USD 50 a month (`assistant_budget_monthly_usd`,
+`water-management-assistant`, USD 100 a month (`assistant_budget_monthly_usd`;
+issue #641 sizes it as the $30 Free pool + $15 a paid seat + a margin, so
+raise it by $15 a paid seat as subscriptions grow;
 ACTUAL 80% and 100% to the us-east-1 alerts topic), on the account's **AWS
 Marketplace** charges: Anthropic's models on Bedrock are billed through AWS
 Marketplace, "under the model provider (not under Amazon Bedrock)", and
@@ -4535,7 +4542,7 @@ nothing else in the account is. A third budget costs about $0.62 a month;
 Marketplace charges can lag a further 12–24 hours behind other billing
 data, so the app's caps are what stop a runaway and the hourly token alarm
 below is what reports one. With the assistant on, raise
-`budget_monthly_usd` by `assistant_budget_monthly_usd` (~$160 on the
+`budget_monthly_usd` by `assistant_budget_monthly_usd` (~$210 on the
 defaults): the account budget includes the model spend, and the
 assistant's ~$11 of fixed cost would otherwise put af-south-1's idle on the
 ACTUAL 80% line every month (infra/README.md § Cost).

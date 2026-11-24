@@ -38,7 +38,7 @@ The rates that set the bill, per month:
 | Database failure | ~10 min recovery, by AWS, on a new host | ~1–2 min automatic failover |
 | AZ outage | API down until the AZ recovers | API keeps serving |
 | Suggested `budget_monthly_usd` (its ACTUAL 80% alert above the idle; daily budget derived: `ceil(× 2.25 / 30)`) | 110 (af-south-1, the default) / 85 (us-east-1): $9 / $7 a day | 220 (af-south-1) / 180 (us-east-1): $17 / $14 a day |
-| The AI assistant (`assistant_enabled`, off by default; [§ The assistant](#the-assistant)) | + ≈ $10.90 fixed + model spend; budget + `assistant_budget_monthly_usd` ($50): 160 | + ≈ $20.50 fixed (endpoint in 2 AZs) + model spend; budget + $50: 270 |
+| The AI assistant (`assistant_enabled`, off by default; [§ The assistant](#the-assistant)) | + ≈ $10.90 fixed + model spend; budget + `assistant_budget_monthly_usd` ($100): 210 | + ≈ $20.50 fixed (endpoint in 2 AZs) + model spend; budget + $100: 320 |
 
 **Recommendation:** start on **minimal** in af-south-1. It is a complete,
 secure production deployment, not a demo: every feature, WAF, private
@@ -204,11 +204,12 @@ million input and $10.00 per million output tokens from af-south-1 (AWS
 Price List API, read 2026-10-27), about $0.10 a typical turn. The app caps
 it per project, per person and deployment-wide in weighted tokens (input +
 5 × output), the deployment-wide cap derived from
-`assistant_budget_monthly_usd` ($50), so the month's model spend stays
-near that figure; `assistant-tokens-hourly` alarms within the hour.
+`assistant_budget_monthly_usd` ($100: issue #641's $30 Free pool + $15 a
+paid seat + a margin), so the month's model spend stays near that figure;
+`assistant-tokens-hourly` alarms within the hour.
 
 Raise `budget_monthly_usd` by `assistant_budget_monthly_usd` when you turn
-it on (≈ $160 minimal, ≈ $270 full, af-south-1): the account budget counts
+it on (≈ $210 minimal, ≈ $320 full, af-south-1): the account budget counts
 the model spend too, and on minimal the assistant's fixed cost alone puts
 the idle (≈ $88) on the default budget's ACTUAL 80% line.
 

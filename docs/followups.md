@@ -921,12 +921,18 @@ are #641's checklist. Open items from building it:
       from the account's median turn cost, with an e2e case in
       `e2e/tests/assistant.spec.ts`. Trigger: before `BILLING_ENFORCED` is
       on.
-- [ ] **Terraform doesn't set the dollar-cap settings.** The assistant
+- [x] **Terraform doesn't set the dollar-cap settings.** The assistant
       Lambda runs on the code's defaults ($0.30, 20 messages, a $30 pool);
       `ASSISTANT_FREE_*` are checked when set (config/production.ts).
       Durable fix: variables in infra/variables.tf passed in
       infra/assistant.tf, and #641's assistant budget raised to $30 pool +
       $15 × paid seats + a margin. Trigger: before `BILLING_ENFORCED` is on.
+      *Done (#641 round 8): `assistant_free_usd_per_day`,
+      `assistant_free_messages_per_day` and
+      `assistant_free_pool_usd_per_month` set them on the assistant Lambda;
+      `assistant_budget_monthly_usd` defaults to $100 (50 M weighted tokens
+      deployment-wide), and the plan refuses a pool past the budget or the
+      deployment-wide cap (infra/tests/assistant.tftest.hcl).*
 - [ ] **Trials have no caps of their own.** A trialing account draws on the
       Free pool and its plan's month; #641's trial is $2 in all and $1 a day.
       Trigger: the reverse trial (Phase 2).
