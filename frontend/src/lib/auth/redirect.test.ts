@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { safeNext } from './redirect';
-import { isLandingRoot, isPublicPath, isTranslatedPath, LANDING_ROUTE, landingPath, routeAccess, STATIC_ROUTES, termsGateApplies } from './session.svelte';
+import { addressFor, isLandingRoot, isLandingRoute, isPublicPath, isTranslatedPath, LANDING_ROUTE, landingPath, PRICING_ROUTE, pricingPath, routeAccess, STATIC_ROUTES, termsGateApplies } from './session.svelte';
 
 describe('safeNext', () => {
 	it('allows app-relative paths only', () => {
@@ -119,6 +119,25 @@ describe('routeAccess', () => {
 		expect(landingPath('en')).toBe('/welcome');
 		expect(landingPath('af')).toBe('/welcome/af');
 		expect(STATIC_ROUTES).toContain(LANDING_ROUTE);
+	});
+
+	it('opens the pricing page to anyone in every language, translated, and treats it as a landing route (issue #641 Phase 4)', () => {
+		for (const p of ['/welcome/pricing', '/welcome/pricing/af']) {
+			expect(routeAccess(p, '', false), p).toBe('show');
+			expect(routeAccess(p, '', true), p).toBe('show');
+			expect(isTranslatedPath(p), p).toBe(true);
+		}
+		expect(isPublicPath('/app/welcome/pricing/af', '/app')).toBe(true);
+		expect(pricingPath('en')).toBe('/welcome/pricing');
+		expect(pricingPath('af')).toBe('/welcome/pricing/af');
+		expect(STATIC_ROUTES).toContain(PRICING_ROUTE);
+		expect(isLandingRoute(LANDING_ROUTE)).toBe(true);
+		expect(isLandingRoute(PRICING_ROUTE)).toBe(true);
+		expect(isLandingRoute('/privacy')).toBe(false);
+		expect(isLandingRoute(null)).toBe(false);
+		// A visitor whose language is another goes on to that language's address of the same page.
+		expect(addressFor(PRICING_ROUTE, 'af')).toBe('/welcome/pricing/af');
+		expect(addressFor(LANDING_ROUTE, 'af')).toBe('/welcome/af');
 	});
 
 	it('opens the legal pages and the methods page to anyone, signed in or out', () => {

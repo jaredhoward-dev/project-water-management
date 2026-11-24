@@ -882,6 +882,18 @@ plan stays on the issue. Found while building:
 Phase 1 (shadow mode) is in [billing.md](./billing.md); the later phases
 are #641's checklist. Open items from building it:
 
+- [ ] **The Plan page's "Compare plans" could link the public pricing
+      page.** `/welcome/pricing` (Phase 4) now shows the three plans side by
+      side; the Plan page (`PlanUsage.svelte`) and its Compare plans links
+      (assistant panel, live-catchment note) still go to `/account/plan`.
+      Durable fix: a "See all plans" link on the Plan page to
+      `/welcome/pricing`, once its owner settles where comparing plans
+      lives. Trigger: the Plan page's next change.
+- [ ] **The pricing page's Afrikaans has no native review.** Written by the
+      i18n-translator and checked by the i18n-checker (2026-11-24); terms to
+      put to the client's reviewer: "lewendig" for live, "gepubliseerde
+      bladsye vir boere" for published farm views, "assistenttoelaag".
+      Trigger: the next Afrikaans review round.
 - [ ] **Drop the 4-argument `app_assistant_charge`.** Migration 324 keeps
       it as a wrapper (charged as unpriced) so a backend released before
       324 keeps charging during the rollout. Durable fix: a forward

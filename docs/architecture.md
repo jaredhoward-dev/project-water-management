@@ -511,7 +511,8 @@ prerender and the hydration are in the address's language; `hooks.server.ts`
 alone, since the i18n state is module-wide and the fallback `index.html`
 must not inherit the last page's language. CloudFront's `spa_rewrite` function serves
 `/welcome` from `welcome.html`, `/welcome/af` from `welcome/af.html` (its
-`PRERENDERED` list), and `/privacy`, `/terms`, `/methods` and `/data-sources` from theirs (`infra/s3_cloudfront.tf`, guarded in
+`PRERENDERED` list), the pricing page (issue #641, `routes/welcome/pricing/[[lang=locale]]`, built the same way and treated as a landing route by
+`hooks.server.ts` and the root layout: `LANDING_ROUTES`) from `welcome/pricing.html` and `welcome/pricing/af.html`, and `/privacy`, `/terms`, `/methods` and `/data-sources` from theirs (`infra/s3_cloudfront.tf`, guarded in
 `guardrails.tftest.hcl`, and `infra/scripts/cloudfront-functions.test.mjs`
 checks `PRERENDERED` against the routes and the language table, so a new
 language can't 404 in production only; the e2e static server mirrors it). The absolute URLs in

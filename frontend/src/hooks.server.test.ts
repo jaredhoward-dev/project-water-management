@@ -31,6 +31,11 @@ describe('html lang', () => {
 		expect(await htmlFor('/welcome/[[lang=locale]]')).toContain('<html lang="en">');
 	});
 
+	it("is the pricing page's words' language too (issue #641 Phase 4)", async () => {
+		words.lang = 'af';
+		expect(await htmlFor('/welcome/pricing/[[lang=locale]]')).toContain('<html lang="af">');
+	});
+
 	it('stays en everywhere else, the fallback page included', async () => {
 		words.lang = 'af';
 		for (const id of [null, '/privacy', '/terms', '/methods', '/data-sources', '/login']) expect(await htmlFor(id), String(id)).toContain('<html lang="en">');

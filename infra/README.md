@@ -83,6 +83,7 @@ browser ──HTTPS──► CloudFront + WAF (us-east-1 ACL)      icwbt.jaredho
   top-level file or directory in `frontend/static`, or a new prerendered
   page (`PRERENDERED`: the landing page once per language, `/welcome` and
   `/welcome/af`, issue #137, so a new language adds its `/welcome/<code>`;
+  the pricing page `/welcome/pricing` and `/welcome/pricing/af`, issue #641;
   also `/privacy`, `/terms`, `/methods` and `/data-sources`),
   must be added to those lists:
   `infra/scripts/cloudfront-functions.test.mjs` (`pnpm test:guards`) runs the

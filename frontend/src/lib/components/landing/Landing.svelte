@@ -15,7 +15,7 @@
 	import BrandMark from '#lib/components/layout/BrandMark.svelte';
 	import LanguageSwitch from '#lib/i18n/LanguageSwitch.svelte';
 	import { language, LANGUAGES, t, wordsLang, type Locale } from '#lib/i18n/locale.svelte.js';
-	import { LANDING_PATH, landingPath } from '#lib/auth/session.svelte.js';
+	import { LANDING_PATH, landingPath, pricingPath } from '#lib/auth/session.svelte.js';
 	import Audiences from './Audiences.svelte';
 	import Hero from './Hero.svelte';
 	import HowItWorks from './HowItWorks.svelte';
@@ -46,6 +46,8 @@
 	// The Open Graph locale, as `af_ZA` (the table's Intl locale).
 	const ogLocale = (l: Locale) => language(l).intl.replace('-', '_');
 	const switchHref = (l: Locale) => `${basePath()}${landingPath(l)}`;
+	// The pricing page in the page's language (issue #641 Phase 4), prerendered like this one.
+	const pricingHref = $derived(`${basePath()}${pricingPath(lang ?? wordsLang())}`);
 </script>
 
 <svelte:head>
@@ -107,6 +109,7 @@
 					<a class="btn btn-primary btn-lg" href={resolve('register')}>{t('Create an account')}</a>
 					<a class="btn btn-lg" href={resolve('login')}>{t('Sign in')}</a>
 				</div>
+				<p class="pricing-line">{t('Modelling is free on every plan.')} <a href={pricingHref} data-testid="landing-pricing">{t('See plans and prices')}</a></p>
 			</section>
 		</div>
 	</main>
@@ -118,6 +121,7 @@
 			<nav aria-label={t('Footer')}>
 				<a href={resolve('login')}>{t('Sign in')}</a>
 				<a href={resolve('register')}>{t('Create an account')}</a>
+				<a href={pricingHref}>{t('Plans and prices')}</a>
 				<a href={resolve('privacy')}>{t('Privacy notice')}</a>
 				<a href={resolve('terms')}>{t('Terms of use')}</a>
 				<a href={resolve('methods')}>{t('How the model is checked')}</a>
@@ -240,6 +244,12 @@
 		border-color: var(--brand-panel-line);
 		background: transparent;
 		color: var(--brand-panel-text);
+	}
+	.pricing-line {
+		margin: 1.25rem 0 0;
+	}
+	.pricing-line a {
+		color: inherit;
 	}
 	.btn-lg {
 		min-height: 48px;

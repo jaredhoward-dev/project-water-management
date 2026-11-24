@@ -1,0 +1,4 @@
+{
+	"addKb": 7,
+	"why": "Issue #641 Phase 4, the public pricing page /welcome/pricing (en + af): measured 2531 KB on round9/pricing against the 2524 ceiling (+7 KB): the page's own node chunk 4.2 KB gzip with its CSS, plus ~40 new messages in the af catalogue and the message id table. Headroom ~0 KB."
+}

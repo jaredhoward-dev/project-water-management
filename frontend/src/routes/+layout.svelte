@@ -10,7 +10,7 @@
 	import { isAccountPath, isFarmerOnly, provideFarmFrame } from '#lib/auth/frame.js';
 	import { loadMfaPrompt, mfaPrompt, noteMfaRefusal, promptKind, resetMfaPrompt } from '#lib/auth/mfaPrompt.svelte.js';
 	import { askForCode, freshCode } from '#lib/auth/freshCode.svelte.js';
-	import { isLandingRoot, isPublicPath, isTranslatedPath, LANDING_ROUTE, landingPath, routeAccess, session, STATIC_ROUTES, termsGateApplies } from '#lib/auth/session.svelte.js';
+	import { addressFor, isLandingRoot, isLandingRoute, isPublicPath, isTranslatedPath, routeAccess, session, STATIC_ROUTES, termsGateApplies } from '#lib/auth/session.svelte.js';
 	import { dropProjectPage, startProjectPage } from '#lib/workspace/firstLoad.js';
 	import { clearAllChatHistory } from '#lib/components/assistant/historyClear.js';
 	import ChunkFailed from '#lib/components/common/ChunkFailed.svelte';
@@ -63,7 +63,7 @@
 		session.checked = true;
 	}
 
-	// The landing page (/welcome, /welcome/<code>) is the same for everyone and
+	// The landing and pricing pages (/welcome, /welcome/<code>, /welcome/pricing[/<code>]) are the same for everyone and
 	// reads nothing of the session, so it doesn't ask: for a signed-out visitor
 	// GET /auth/me answers 401, which the browser logs as a failed request on a
 	// page that needs no API at all (Lighthouse's Best Practices, issue #92).
@@ -72,7 +72,7 @@
 	// is the address's, this device's choice or the browser's, never the
 	// account's (applyLocale), and its language links keep a choice on this
 	// device only (LanguageSwitch). Every other page asks as it loads.
-	const onLanding = $derived(page.route.id === LANDING_ROUTE);
+	const onLanding = $derived(isLandingRoute(page.route.id));
 	let sessionAsked = false;
 	$effect(() => {
 		if (onLanding || sessionAsked) return;
@@ -194,10 +194,10 @@
 			// on to that one's address; /welcome/<code> is kept
 			// as it is. Reading it there counts as this device's choice when it
 			// has none, so the sign-in pages it leads to carry on in it.
-			if (page.route.id === LANDING_ROUTE) {
+			if (isLandingRoute(page.route.id)) {
 				const choice = m.resolveLocale(chosen, m.readStoredLocale());
 				const here = page.params.lang;
-				if (!here && choice !== m.DEFAULT_LOCALE) await goto(`${basePath()}${landingPath(choice)}`, { replace: true });
+				if (!here && choice !== m.DEFAULT_LOCALE) await goto(`${basePath()}${addressFor(page.route.id, choice)}`, { replace: true });
 				else if (here && m.isLocale(here) && !m.readStoredLocale()) m.storeLocale(here);
 			} else await m.setLocale(m.resolveLocale(chosen, m.readStoredLocale()));
 			i18nReady = true;
@@ -219,7 +219,7 @@
 	// The landing page's prerendered HTML already says its own (hooks.server.ts),
 	// so it is left alone until the i18n module is here (issue #137).
 	$effect(() => {
-		if (page.route.id === LANDING_ROUTE && !i18nModule) return;
+		if (isLandingRoute(page.route.id) && !i18nModule) return;
 		document.documentElement.lang = translated && i18nModule ? i18nModule.wordsLang() : 'en';
 	});
 	const ready = $derived(session.checked && !bootError && access === 'show' && (!translated || i18nReady) && frameKnown);
