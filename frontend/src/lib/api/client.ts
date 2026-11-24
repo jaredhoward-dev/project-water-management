@@ -762,7 +762,9 @@ export function createApi(baseUrl: string, fetchFn: FetchFn = (...a) => fetch(..
 			/** Open the team's billing portal (team admin). */
 			portal: (id: string) => request<BillingRedirect>('POST', `${t(id)}/plan/portal`),
 			/** Change the Team subscription's editor seats (team admin; Phase 5, prorated by the provider). The seats land through the webhook. */
-			changeSeats: (id: string, seats: number) => request<{ seats: number }>('POST', `${t(id)}/plan/seats`, { seats })
+			changeSeats: (id: string, seats: number) => request<{ seats: number }>('POST', `${t(id)}/plan/seats`, { seats }),
+			/** Set the share (1–100 %) of the team's monthly assistant dollars one member may use (team admin; 339). */
+			setAssistantShare: (id: string, pct: number) => request<{ pct: number }>('POST', `${t(id)}/plan/assistant-share`, { pct })
 		},
 		/** Plans and usage (issue #641, Phase 1: counted, never charged or refused). */
 		billing: {

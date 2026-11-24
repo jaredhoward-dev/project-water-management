@@ -116,3 +116,54 @@ test('a refused seat change shows the refusal and keeps the count typed', async 
 	await expect(field).toHaveValue('4');
 	await expect(box.locator('[data-seat-change-done]')).toHaveText('');
 });
+
+// A team admin raises a member's share of the team's assistant dollars (issue #641, 339; docs/billing.md § Assistant
+// dollar caps): Assistant share sits in the Plan card on every team plan; on Free it says it applies on Team, and on
+// Team it says the share in the pooled dollars (3 seats × $15 = $45). Through the confirm dialog to 80%.
+test('a team admin raises the assistant share through the confirm dialog', async ({ page, owner }) => {
+	void owner;
+	const res = await page.context().request.post(`${API_URL}/teams`, { data: { name: 'Assistant share Team' } });
+	expect(res.status()).toBe(201);
+	const { team } = (await res.json()) as { team: { id: string } };
+	await page.goto(`/teams/${team.id}/plan`);
+	const plan = page.getByRole('region', { name: 'Plan', exact: true });
+	const freeBox = plan.getByRole('region', { name: 'Assistant share' });
+	await expect(freeBox.locator('[data-assistant-share-line]')).toHaveText(
+		'One member may use up to 50% of the team’s assistant dollars a month. This applies once the team is on the Team plan.'
+	);
+
+	// A second team, bought at Team's 3 included seats.
+	await teamOnTeamPlan(page, 'Assistant share Team, paid');
+	const box = plan.getByRole('region', { name: 'Assistant share' });
+	const field = box.getByRole('spinbutton', { name: 'Most one member may use (%)' });
+	const change = box.getByRole('button', { name: 'Change share' });
+	await expect(field).toHaveValue('50');
+	await expect(box.locator('[data-assistant-share-line]')).toHaveText('One member may use up to 50% of the team’s assistant dollars a month ($22.50 of $45.00).');
+	await expect(change).toHaveAttribute('aria-disabled', 'true');
+
+	// Past 100: the field says so.
+	await field.fill('101');
+	await expect(field).toHaveAttribute('aria-invalid', 'true');
+	await expect(change).toHaveAttribute('aria-disabled', 'true');
+
+	await field.fill('80');
+	await expect(change).toHaveAttribute('aria-disabled', 'false');
+	await change.click();
+	await expect(confirmBox(page)).toContainText('Change the assistant share?');
+	await expectNoViolations(page);
+	await answerConfirm(page, false);
+	await expect(change).toBeFocused();
+	await expect(box).toHaveAttribute('data-share', '50');
+
+	await change.click();
+	await answerConfirm(page, true, 'From 50% to 80%: one member may use up to $36.00 of the team’s $45.00 a month.');
+	await expect(box.locator('[data-assistant-share-done]')).toHaveText('Saved: one member may now use up to 80%.');
+	await expect(box).toHaveAttribute('data-share', '80');
+	await expect(box.locator('[data-assistant-share-line]')).toHaveText('One member may use up to 80% of the team’s assistant dollars a month ($36.00 of $45.00).');
+	await expect(change).toHaveAttribute('aria-disabled', 'true');
+	await expectNoViolations(page);
+
+	// Read back after a reload: the API kept it.
+	await page.reload();
+	await expect(plan.getByRole('region', { name: 'Assistant share' }).getByRole('spinbutton')).toHaveValue('80');
+});
