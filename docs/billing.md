@@ -124,6 +124,7 @@ turns run at once (begins are serialised by 264's deployment lock).
 | Day | A person on a Free account | `ASSISTANT_FREE_USD_PER_DAY` ($0.30) **or** `ASSISTANT_FREE_MESSAGES_PER_DAY` (20) a SAST day (00:00 to 24:00 South African time), whichever first | `assistant_daily_cap`, until 00:00 SAST (22:00 UTC) |
 | Month | The account | The plan's `assistant_usd_micros_per_month` (Free $1, Pro $15), or `assistant_usd_micros_per_seat_month` × seats (Team, $15 each, the live subscription's seats, never fewer than 3) | `assistant_monthly_cap`, until the UTC month ends |
 | Member | A person on a per-seat (Team) account | `billing_account.assistant_member_max_pct` of the account's month (50% unless a team admin changes it, below) | `assistant_member_cap`, until the month ends |
+| Trial, trial day | A person on a reverse trial (342) | $2 over the trial, $1 a SAST day ([§ The reverse trial](#the-reverse-trial-built-off)) | `assistant_trial_cap` (until the trial ends), `assistant_trial_daily_cap` (until 00:00 SAST) |
 | Pool | Free and trialing accounts together | `ASSISTANT_FREE_POOL_USD_PER_MONTH` ($30) a UTC month, and on any SAST day at most (pool left at the day's start ÷ SAST days left in the UTC month, today included, at least 1) × 2 | `assistant_free_pool_spent`, until 00:00 SAST (or the UTC month's end, when the month's pool is spent) |
 
 Checked in that order, the person's own caps first, so a refusal names the
@@ -248,7 +249,7 @@ spend keeps `assistant_usage`'s UTC month, as `app_account_plan` does.
 **Not yet measurable**, printed as such so a gap is never read as a zero
 (the app doesn't record what each needs): upgrade at the limit (no checkout,
 trial or limit-message events), churn after the limit (no record of hitting
-one), reverse trial to paid (no trials), the share at the assistant's daily
+one), reverse trial to paid (built in 342, off, and the report doesn't read it yet), the share at the assistant's daily
 cap and the Free pool's burn by day (`assistant_day_usage` keeps each day
 since 336, but the report doesn't read it yet), the share at the live-catchment limit (338 defines live,
 but the report doesn't read it yet), paid seats reaching $15 (spend isn't kept per paid seat), disposable
@@ -794,8 +795,8 @@ Team 30) is the length of the trials #641 grants another way:
   trial at checkout would be a second Pro trial for the same person, behind
   a card, which the decision doesn't have. A card-on-file trial is
   escalation (c), only on its trigger (> 10% of trials from clusters, or
-  trials using > 60% of the Free pool). The reverse trial is Phase 2 and not
-  built here.
+  trials using > 60% of the Free pool). The reverse trial is built, off by
+  default: [§ The reverse trial](#the-reverse-trial-built-off).
 - **Team: on request.** The "Recommended tiers" table's Trial row says
   "30-day Team trial on request": an operator decision per team, which is a
   staff plan grant (Phase 2, the staff grant), not a checkout option a team
@@ -804,6 +805,84 @@ Team 30) is the length of the trials #641 grants another way:
 So the checkout's subscription starts `active` and charges at once; the
 normaliser still reads `trialing` and `trial_end`, for a trial the operator
 sets in Stripe's dashboard by hand. Revisit when escalation (c) triggers.
+
+### The reverse trial (built, off)
+
+`342_reverse_trial.sql`, `billing/reverseTrial.ts` (round 9 of #641). #641:
+"Every newly verified person gets Pro for 14 days automatically, no card,
+then Free … AI during the trial: Sonnet, $2 in all, $1 a day. It draws on
+the Free pool … Once per canonical email."
+
+**What is gated by what.**
+
+| Piece | Gated by | Off (the default) |
+| --- | --- | --- |
+| Granting the trial on a first verification (`markVerified`, `auth/email-routes.ts`) | `REVERSE_TRIAL=true` **and** `BILLING_ENFORCED=true` (`reverseTrialOn`; only the exact string `true` for each) | Nothing is granted, and no claim is recorded, so turning it on later still gives each person their one trial |
+| The trial's assistant caps (`trial`, `trial_day` refusals) | `BILLING_ENFORCED=true` (`app.billing_enforced`), as every dollar cap | Never refuse; the trial's dollars are still reserved and recorded |
+| The expiry (the worker's tick, `app_reverse_trial_expire`) | Nothing: it ends any trial past its end | Finds none while none is granted |
+
+Why both settings: a Pro trial means nothing while no limit refuses, and
+granting it then would spend the person's once-per-email trial for nothing.
+
+**Granting.** When an address is verified for the first time (the
+verification link, a password reset that proves an unverified inbox, or a
+sign-up through an invite for that address), the backend hashes the
+address's canonical form (`canonicalEmail` in `billing/metrics.ts`:
+lower-cased, `+tag` dropped, Gmail's dots dropped, googlemail.com as
+gmail.com) with SHA-256 and calls `app_reverse_trial_start(hash)` as the
+person. It answers `unverified` (no verified address: nothing claimed),
+`live` (the account already has a live plan, a staff grant or a paid one:
+nothing claimed, so the trial stays for later), `claimed` (this canonical
+email had its trial, on this or any earlier account) or `started`. Started,
+the person's own account has Pro as `trialing` for `plan.trial_days` (14):
+a `subscription` with `provider = 'manual'`, `period_end = trial_end`,
+`cancel_at_period_end` true (so the renewal notice skips it), logged in
+`billing_grant_log` as a `grant` by `reverse trial`. A reverse trial is
+exactly a `manual` + `trialing` row (staff and invoice grants are `active`,
+Stripe trials are `stripe`). Only a verified address qualifies; the
+disposable-domain blocklist is another lane's and is not checked here.
+
+**Once per canonical email.** `reverse_trial_claim` keeps the SHA-256 of the
+canonical address and when, never the address and no link to the account,
+so it outlives the account's deletion: deleting the account and signing up
+again gets no second trial (`security.md` § Personal information says what
+the record is).
+
+**At the end.** The worker's tick moves each trial past its `trial_end` to
+`expired` and logs an `expire`; the account is then Free (no live
+subscription) and nothing is deleted. The Plan page already reads
+`subscription.trialEnd` and shows "Trial ends 7 Dec 2026" for a trialing
+subscription (`components/billing/plan.ts` `subscriptionLine`).
+
+**The trial's assistant.** Pro's month applies, and on top, during a reverse
+trial, `app_assistant_begin` refuses (enforced only):
+
+| Cap | Limit | Refusal (`429`, `Retry-After`) |
+| --- | --- | --- |
+| Trial | $2 over the whole trial (`assistant_trial_caps`, `TRIAL_CAPS`): the account's day rows from the trial's first SAST day on, plus its open reservations | `assistant_trial_cap`, until the trial ends |
+| Trial day | $1 a SAST day: the person's day on the account | `assistant_trial_daily_cap`, until 00:00 SAST, or the trial's end if sooner |
+
+The trial is checked before its day, so a spent trial never says "back
+tomorrow". A trialing account is in the Free pool (336's
+`assistant_pool_account`), so the pool's month and paced day bind it too and
+its spend counts toward the pool. The caps are fixed in SQL, not settings:
+#641 states them, and a DB test (`reverseTrial.db.test.ts`) pins the SQL pair to
+`TRIAL_CAPS`.
+
+**Not built yet** ([followups.md § Billing](./followups.md#billing-issue-641)):
+the banner 3 days before the end, the live-catchment picker and the 7-day
+stop of automatic runs after it, buying Pro during a trial (checkout answers
+`409` while any subscription is live, and the webhook's new row would meet the
+one-live index), and the assistant panel's own words for the two new codes.
+
+**Tests.** `billing/reverseTrial.db.test.ts` (off grants and claims nothing;
+on, a first verification starts 14 days of Pro, logged and on the plan page;
+a Gmail canonical duplicate and the same address after deletion get none; an
+unverified caller gets none and is granted once verified; a live plan keeps
+it; the tick ends it to Free with the project still there; the claim table
+closed to `water_app`; the trial caps refuse only enforced, wait to 00:00 SAST
+or the trial's end, ignore spend before the trial, and count in the pool),
+`billing/reverseTrial.test.ts` (the setting, the hash), `assistant/dollarCaps.test.ts`.
 
 ### Stripe
 

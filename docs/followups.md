@@ -935,9 +935,29 @@ are #641's checklist. Open items from building it:
       deployment-wide), and the plan refuses a pool past the budget or the
       deployment-wide cap (infra/tests/assistant.tftest.hcl); the
       assistant's production check now requires all three.*
-- [ ] **Trials have no caps of their own.** A trialing account draws on the
-      Free pool and its plan's month; #641's trial is $2 in all and $1 a day.
-      Trigger: the reverse trial (Phase 2).
+- [x] **Trials have no caps of their own.** Done (round 9, #641): 342's
+      `app_assistant_begin` gives a reverse trial $2 in all and $1 a SAST
+      day (`assistant_trial_cap`, `assistant_trial_daily_cap`), still in the
+      Free pool (billing.md § The reverse trial).
+- [ ] **The reverse trial: what 342 left** (round 9, #641). Built and off
+      (`REVERSE_TRIAL` and `BILLING_ENFORCED`). Still to do: (1) **buying Pro
+      during a trial**: checkout answers 409 while any subscription is live
+      (`billing/routes.ts`), and `app_billing_apply` would meet
+      `subscription_one_live_per_account` inserting the paid row; durable fix:
+      checkout accepts an account whose live row is a reverse trial, and the
+      webhook ends that trial (status `canceled`, logged) in the same
+      transaction it writes the paid row; trigger: before `REVERSE_TRIAL` goes
+      on; (2) the banner 3 days before the end and the end-of-trial email;
+      (3) the live-catchment picker at the end and stopping automatic runs on
+      the others 7 days later (the 338 item above); (4) the assistant panel's
+      words for `assistant_trial_cap` and `assistant_trial_daily_cap`
+      (`frontend/.../assistant/chat.svelte.ts` `DOLLAR_CAP_CODES` doesn't
+      list them, so they show as a plain error); (5) the abuse report's
+      "reverse trial → paid within 30 days" from `billing_grant_log`'s
+      `reverse trial` grants; (6) whether to key `reverse_trial_claim` with an
+      HMAC under a server secret rather than a bare SHA-256 (a bare hash can be
+      tested against a known address; an HMAC needs a secret kept for good, or
+      the claims stop matching); operator decision.
 - [ ] **Every turn's begin sums the month's dollars.** 336's
       `assistant_dollars_spent` scans the month's `assistant_usage`, today's
       `assistant_day_usage` and every reservation, and the pool calls
