@@ -206,8 +206,28 @@ and only on a per-seat plan; on Free or Pro it is kept for when the team
 moves to Team. Like the other caps, nothing refuses past it unless billing is
 enforced.
 
-**Not built yet** ([followups.md](./followups.md#billing-issue-641)): the
-"questions left today" meter, and Haiku on Free.
+**The questions-left meter** (`350_assistant_day_meter.sql`, `usage.ts`
+`dayMeter`). With billing enforced, the assistant's status (`GET
+/projects/:id/assistant`, [api.md § Assistant](./api.md#assistant)) carries
+`day` for a person on a capped account, Free or a reverse trial: the SAST
+day's dollars and what's left of them (the day row's cost plus every
+reservation begun today, as the begin counts them), Free's messages left, the
+trial's whole $2 left, and the account's median question: the median, over
+its day rows of the last 30 SAST days that recorded a priced turn, of the
+row's cost ÷ its messages, rounded up. The panel turns that into "About 6
+questions left today, at what your questions usually cost (an estimate)"
+([ui.md § Assistant](./ui.md#assistant)). Per-turn costs aren't kept (the
+month and day rows hold sums), so the median is of daily averages, and a
+turn still running when the status is read makes its day look cheaper (its
+message is counted at begin, its cost at the charge): an estimate, and worded
+as one. The Free pool isn't in it (not the person's allowance; its refusal
+says so). Off, a paid plan, or no billing account: `day` is null. It reads
+the person's own sums, not `assistant_dollars_spent` (which scans every pool
+account's month), since the status is read each time the panel loads and
+again after each turn.
+
+**Not built yet** ([followups.md](./followups.md#billing-issue-641)): Haiku
+on Free.
 
 ## Metrics and the abuse report
 
@@ -930,7 +950,10 @@ since every subscription write fires 341's sync, which takes it.
 **Not built yet** ([followups.md § Billing](./followups.md#billing-issue-641)):
 the banner 3 days before the end (on the Plan page and in the workspace), the
 Plan page's Upgrade button during a trial (it offers Manage billing while any subscription is live,
-`billingActions`), and the assistant panel's own words for the two new codes.
+`billingActions`). The assistant panel shows the two trial codes as caps,
+with the server's words and when they're back, never an upsell (the trial is
+Pro already), and its day meter counts the trial's day and its whole $2
+([§ Assistant dollar caps](#assistant-dollar-caps)).
 
 **Tests.** `billing/reverseTrial.db.test.ts` (off grants and claims nothing;
 on, a first verification starts 14 days of Pro, logged and on the plan page;

@@ -1,7 +1,7 @@
 // The assistant (issue #610; docs/api.md § Assistant, docs/architecture.md §
 // Assistant):
 //
-//   GET  /projects/:id/assistant            on or off, the budget left, whether the caller may Apply (viewer)
+//   GET  /projects/:id/assistant            on or off, the budget left, today's capped allowance, whether the caller may Apply (viewer)
 //   POST /projects/:id/assistant/messages   one turn: text/event-stream of AssistantStreamEvents (viewer)
 //
 // Viewers and above chat (requireRole 'viewer' also shuts out farmers and
@@ -31,7 +31,7 @@ import { turnCostUsdMicros, usdMicrosPerWeightedToken } from './pricing.js';
 import { sseBody } from './sse.js';
 import { ASSISTANT_TOOLS } from './tools/index.js';
 import type { AssistantProvider, AssistantStatus, AssistantTool, ChatMessage } from './types.js';
-import { beginTurn, bindingBudget, chargeTurn, monthResetsAt, tokensUsed } from './usage.js';
+import { beginTurn, bindingBudget, chargeTurn, dayMeter, monthResetsAt, tokensUsed } from './usage.js';
 
 /** Messages one request may carry; the character cap (maxInputChars) drops the oldest of them anyway. */
 export const MAX_MESSAGES = 200;
@@ -135,6 +135,7 @@ export const assistantRoutes = new Hono<AuthEnv>()
 					canApply: rank[role] >= rank.editor,
 					budget: { ...bindingBudget(cfg, await tokensUsed(db, id)), resetsAt: monthResetsAt() },
 					rate: { messagesPerHour: cfg.messagesPerHour },
+					day: await dayMeter(db, id, cfg),
 					disclaimer: ASSISTANT_DISCLAIMER
 				};
 			},

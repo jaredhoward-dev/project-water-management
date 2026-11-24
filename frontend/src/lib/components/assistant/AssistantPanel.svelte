@@ -320,7 +320,8 @@
 				</p>
 			{:else if chat.refusal?.kind === 'cap'}
 				<!-- A dollar cap (billing enforced): the server's words, then when it's back in the viewer's time. Free's day and
-				     month offer Compare plans (the month adds what Pro includes); the Free pool and a paid account's caps never upsell. -->
+				     month offer Compare plans (the month adds what Pro includes); the Free pool, a reverse trial's caps and a
+				     paid account's caps never upsell. -->
 				<p class="note warn" role="alert" data-testid="assistant-cap" data-code={chat.refusal.code}>
 					{chat.refusal.message}
 					Back {fmtWhen(chat.refusal.resetsAt)} your time.
@@ -371,6 +372,10 @@
 
 			{#if st || chat.turns.length}
 				<div class="meta">
+					{#if chat.dayMeter}
+						<!-- A capped account's day (Free, a reverse trial; billing enforced): an estimate from its median question. -->
+						<span class="day-meter" data-testid="assistant-day-meter">{chat.dayMeter}</span>
+					{/if}
 					{#if st}
 						<span class="budget" data-testid="assistant-budget">
 							{fmtPct(left, 0)} of this month’s budget left · starts again {fmtDay(st.budget.resetsAt)}
@@ -789,6 +794,10 @@
 	}
 	.meta button {
 		margin-left: auto;
+	}
+	/* Its own line above the month's budget: the day is what binds a capped account first. */
+	.day-meter {
+		flex-basis: 100%;
 	}
 	/* The disclaimer's line: what the answers are, in view; the report's paragraphs fold under it and scroll
 	   in their own box, so opening them never pushes the question box off a phone's screen. */

@@ -2,7 +2,8 @@
 // server renderer from a conversation in each state: the disclaimer and the
 // budget left; tool lines and the streamed text; a proposal's title, changes and
 // reasons, with Apply only for an editor; the hourly limit's wait; the month's
-// budget spent; a dollar cap's words and when it's back; Stop while a turn streams. The streaming itself is
+// budget spent; a dollar cap's words and when it's back (a reverse trial's two included); a capped account's
+// questions left today; Stop while a turn streams. The streaming itself is
 // chat.svelte.test.ts's; the panel in the browser is e2e/tests/assistant.spec.ts's.
 import { render } from 'svelte/server';
 import { describe, expect, it, vi } from 'vitest';
@@ -236,6 +237,31 @@ describe('AssistantPanel', () => {
 		expect(out).not.toContain('data-testid="assistant-budget-spent"');
 		expect(out).not.toMatch(/upgrade|Pro plan|pricing/i);
 		expect(out).not.toContain('assistant-compare-plans');
+	});
+
+	it('a reverse trial’s caps: their own words and when they’re back, the box closed, no upsell (342)', () => {
+		for (const [code, words] of [
+			['assistant_trial_cap', 'You’ve used the assistant allowance that comes with your trial. The free assistant is back on 8 December, when your trial ends.'],
+			['assistant_trial_daily_cap', 'That’s today’s assistant use on your trial. It’s back at midnight, South African time.']
+		] as const) {
+			const out = html(chat({ refusal: { kind: 'cap', code, seconds: 3600, resetsAt: '2026-11-25T22:00:00.000Z', message: words, plan: null } }));
+			expect(out).toContain(`data-code="${code}"`);
+			expect(out).toContain(words);
+			expect(out).toContain(`Back ${fmtWhen('2026-11-25T22:00:00.000Z')} your time.`);
+			expect(out).toMatch(/<textarea[^>]*disabled/);
+			// Not shown as a plain error, and no Compare plans: the trial is Pro already.
+			expect(out).not.toContain('The question wasn’t sent');
+			expect(out).not.toContain('assistant-compare-plans');
+		}
+	});
+
+	it('a capped account’s day meter: questions left today as an estimate, above the month’s budget; none without a day', () => {
+		const day = { kind: 'free' as const, usdMicrosPerDay: 300_000, usdMicrosLeft: 150_000, messagesLeft: 18, trialUsdMicrosLeft: null, medianTurnUsdMicros: 30_000, resetsAt: '2026-11-24T22:00:00.000Z' };
+		const out = html(chat({ status: { ...STATUS, day } }));
+		expect(out).toMatch(/data-testid="assistant-day-meter"[^>]*>About 5 questions left today, at what your questions usually cost \(an estimate\)\.</);
+		expect(out.indexOf('assistant-day-meter')).toBeLessThan(out.indexOf('data-testid="assistant-budget"'));
+		expect(html(chat({ status: { ...STATUS, day: null } }))).not.toContain('assistant-day-meter');
+		expect(html(chat())).not.toContain('assistant-day-meter');
 	});
 
 	it('Free’s verified-email gate: #641’s words with Resend when unverified, none when the address is temporary; the box stays open', () => {
