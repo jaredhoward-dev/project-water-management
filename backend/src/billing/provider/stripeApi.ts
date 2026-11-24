@@ -389,7 +389,8 @@ export async function createInvoice(o: StripeClientOptions, p: StripeInvoicePara
 	}
 	if (!reused) {
 		if (inv.status !== 'open') throw new StripeApiError(502, 'unexpected_response', 'status');
-		inv = await post(o, `/v1/invoices/${id}/send`, {}, `${k}-send`);
+		// Sending answers the invoice, but the metadata write below answers it again with wm_sent: that one is kept.
+		await post(o, `/v1/invoices/${id}/send`, {}, `${k}-send`);
 		inv = await post(o, `/v1/invoices/${id}`, { metadata: { wm_sent: 'true' } }, `${k}-sent`);
 	}
 	return {
