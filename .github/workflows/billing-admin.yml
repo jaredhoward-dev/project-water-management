@@ -18,10 +18,23 @@ name: Owner action (billing, authority)
 #              what it did to the job summary. The session is narrowed to
 #              invoking that one function (inline-session-policy).
 #
-# This log and its summary are public (the repo is). So:
+# Ids only, never an address or a name. This repo is public, and we can't
+# rule out GitHub showing a run's workflow_dispatch inputs to anyone (the run
+# page, the API, a later change), so a person's address in an input would be
+# personal information published (POPIA; docs/security.md § Public repo
+# hygiene). The inputs name a billing account, a person, a team or a project by
+# UUID, plus a plan, dates and the text a customer or the History reads; any
+# input containing `@` is refused (scripts/release/owner-action.mjs, in both
+# jobs: the preflight refuses it before anyone is asked to approve). The
+# payload is marked `via: "workflow"`, and the Lambda's schema refuses an
+# `email` field in such a payload, and the `billing-account` lookup outright.
+# To find an id from an address, invoke the function from your SSO session
+# (deployment.md § Owner actions: `billing-account`), which never touches
+# GitHub.
+#
+# The log and its summary are public too. So:
 #   - no input is spliced into a command or set in a step's environment
-#     (both print in the log): the payload is built by jq from the event file,
-#     and the address is masked before anything else runs;
+#     (both print in the log): the payload is built from the event file;
 #   - the Lambda's answer never carries an address or a name, and this
 #     summary prints less still: ids, plans, dates and counts, never a grant's
 #     reason or an email domain. For those, invoke the function from your SSO
@@ -29,11 +42,12 @@ name: Owner action (billing, authority)
 #     machine.
 # Who acts (billing_grant_log.granted_by) is the GitHub login that started the run.
 #
-#   gh workflow run billing-admin.yml -f action=billing-grant -f email=<address> -f plan=team -f until=2027-01-31 -f reason="Invoice INV-0042"
+#   gh workflow run billing-admin.yml -f action=billing-grant -f account_id=<uuid> -f plan=team -f until=2027-01-31 -f reason="Invoice INV-0042"
+#   gh workflow run billing-admin.yml -f action=billing-grant -f user_id=<uuid> -f plan=pro -f reason="Founding user"      (a person with no billing account yet)
 #   gh workflow run billing-admin.yml -f action=billing-revoke -f team_id=<uuid> -f reason="Pilot ended"
-#   gh workflow run billing-admin.yml -f action=billing-grants            (every live grant; give email or team_id for one account's log)
+#   gh workflow run billing-admin.yml -f action=billing-grants            (every live grant; give account_id, user_id or team_id for one account's log)
 #   gh workflow run billing-admin.yml -f action=billing-report -f month=2026-11
-#   gh workflow run billing-admin.yml -f action=authority-confirm -f project_id=<uuid> -f email=<address> -f reference="<the letter>"
+#   gh workflow run billing-admin.yml -f action=authority-confirm -f project_id=<uuid> -f user_id=<uuid> -f reference="<the letter>"
 
 on:
   workflow_dispatch:
@@ -48,8 +62,13 @@ on:
           - billing-revoke
           - billing-report
           - authority-confirm
-      email:
-        description: 'The person’s address (grant, revoke, grants, authority-confirm). Masked; never printed'
+      account_id:
+        description: 'Grant, revoke, grants: the billing account’s id. Ids only, never an address (find one: deployment.md § Owner actions)'
+        required: false
+        type: string
+        default: ''
+      user_id:
+        description: 'Or the person’s id (grant, revoke, grants; authority-confirm: required). Never their address'
         required: false
         type: string
         default: ''
@@ -78,7 +97,7 @@ on:
         type: boolean
         default: false
       reason:
-        description: 'Grant, revoke: the reason, 1–500 characters. The customer reads it (their plan page, Download my data)'
+        description: 'Grant, revoke: the reason, 1–500 characters, no address. The customer reads it (their plan page, Download my data)'
         required: false
         type: string
         default: ''
@@ -93,7 +112,7 @@ on:
         type: string
         default: ''
       reference:
-        description: 'Authority-confirm: the authority’s letter or request, 1–200 characters (in the project’s History)'
+        description: 'Authority-confirm: the authority’s letter or request, 1–200 characters, no address (in the project’s History)'
         required: false
         type: string
         default: ''
@@ -128,6 +147,10 @@ jobs:
           # (zizmor cache-poisoning).
           package-manager-cache: false
 
+      # Before anyone is asked to approve: ids only, never an address (any `@` is refused), each well formed.
+      - name: Check the inputs (ids only)
+        run: node scripts/release/owner-action.mjs check
+
       - name: Environment preflight
         env:
           GH_TOKEN: ${{ github.token }}
@@ -150,12 +173,23 @@ jobs:
       contents: read
       id-token: write # OIDC: assume AWS_DEPLOY_ROLE_ARN, no long-lived keys
     steps:
-      # First, before anything could print it: the address, read from the event file and masked.
-      - name: Mask the address
-        run: |
-          set -euo pipefail
-          email=$(jq -r '.inputs.email // ""' "$GITHUB_EVENT_PATH")
-          if [ -n "$email" ]; then echo "::add-mask::$email"; fi
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          # No cache in a workflow that acts with production credentials
+          # (zizmor cache-poisoning).
+          package-manager-cache: false
+
+      # Again, before any credentials: the payload from the event file, ids only
+      # (any `@` refused), marked via workflow (scripts/release/owner-action.mjs).
+      - name: Build the payload (ids only)
+        run: node scripts/release/owner-action.mjs payload "$RUNNER_TEMP/payload.json"
 
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
@@ -174,27 +208,14 @@ jobs:
         run: |
           set -euo pipefail
           [ -n "$MIGRATE_FUNCTION_NAME" ] || { echo "::error::The MIGRATE_FUNCTION_NAME variable is not set (docs/deployment.md § GitHub configuration)."; exit 1; }
-          # Only the fields the action takes; an empty input is left out. The
-          # Lambda's strict schema refuses anything else.
-          jq '.inputs as $i
-            | def opt(k; v): if (v // "") == "" then {} else {(k): v} end;
-              def who: opt("email"; $i.email) + opt("teamId"; $i.team_id);
-            {action: $i.action} + (
-              if $i.action == "billing-grant" then who + {plan: $i.plan, reason: $i.reason, by: env.GITHUB_ACTOR,
-                replace: ($i.replace == true or $i.replace == "true")} + opt("until"; $i.until)
-              elif $i.action == "billing-revoke" then who + {reason: $i.reason, by: env.GITHUB_ACTOR}
-              elif $i.action == "billing-grants" then who
-              elif $i.action == "billing-report" then opt("month"; $i.month)
-              elif $i.action == "authority-confirm" then {projectId: $i.project_id, email: $i.email, reference: $i.reference}
-              else {} end)' "$GITHUB_EVENT_PATH" > payload.json
-          # Synchronous. No --log-type Tail: the function's log can quote the address.
+          # Synchronous. No --log-type Tail: the function's log is for CloudWatch only.
           aws lambda invoke \
             --function-name "$MIGRATE_FUNCTION_NAME" \
             --cli-binary-format raw-in-base64-out \
-            --payload fileb://payload.json \
+            --payload "fileb://$RUNNER_TEMP/payload.json" \
             --cli-read-timeout 300 \
             result.json > meta.json
-          rm payload.json
+          rm "$RUNNER_TEMP/payload.json"
           # Every printed field is checked against the shape it must have and
           # replaced if it doesn't match, so nothing but ids, plans, dates and
           # counts reaches this public log.
