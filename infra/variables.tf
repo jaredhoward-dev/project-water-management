@@ -422,7 +422,7 @@ variable "login_failed_alarm_per_15min" {
 }
 
 variable "budget_monthly_usd" {
-  description = "Monthly AWS spend ceiling in USD. Notifications (to the us-east-1 alerts topic): ACTUAL 80%, ACTUAL 100% and FORECASTED 100%. The default 110 sits above af-south-1's ~$77 idle (infra/README.md § Cost), so ACTUAL 80% ($88) doesn't fire at idle; ~85 fits us-east-1 (~$63 idle), ~220 the full tier in af-south-1 and ~180 in us-east-1 (docs/deployment-tiers.md). With assistant_enabled, add assistant_budget_monthly_usd to it (~$160 on the defaults): the account total includes the model spend and the assistant's ~$11 of fixed cost, which would otherwise put af-south-1's idle (~$88) on the ACTUAL 80% line every month. Set to 0 to skip both budgets until billing access is enabled (NOT for prod)."
+  description = "Monthly AWS spend ceiling in USD. Notifications (to the us-east-1 alerts topic): ACTUAL 80%, ACTUAL 100% and FORECASTED 100%. The default 110 sits above af-south-1's ~$77 idle (infra/README.md § Cost), so ACTUAL 80% ($88) doesn't fire at idle; ~85 fits us-east-1 (~$63 idle), ~220 the full tier in af-south-1 and ~180 in us-east-1 (docs/deployment-tiers.md). With assistant_enabled, add assistant_budget_monthly_usd to it (~$210 on the defaults): the account total includes the model spend and the assistant's ~$11 of fixed cost, which would otherwise put af-south-1's idle (~$88) on the ACTUAL 80% line every month. Set to 0 to skip both budgets until billing access is enabled (NOT for prod)."
   type        = number
   default     = 110
 
@@ -1131,7 +1131,7 @@ variable "assistant_input_usd_per_million" {
 }
 
 variable "assistant_tokens_per_month_total" {
-  description = "Weighted tokens (input + 5 x output) the whole deployment may use in a calendar month (UTC), every project and person together (ASSISTANT_TOKENS_PER_MONTH_TOTAL, on the assistant and the API): the cap no number of projects or accounts gets past. null (the default) derives it from the assistant's budget: floor(assistant_budget_monthly_usd / assistant_input_usd_per_million x 1e6), 25 M at $50 and $2/M, so the app stops at about the budget plus the turns in flight, days before the budget's billing data would say so. Set it when assistant_budget_monthly_usd is 0 (nothing to derive from)."
+  description = "Weighted tokens (input + 5 x output) the whole deployment may use in a calendar month (UTC), every project and person together (ASSISTANT_TOKENS_PER_MONTH_TOTAL, on the assistant and the API): the cap no number of projects or accounts gets past. null (the default) derives it from the assistant's budget: floor(assistant_budget_monthly_usd / assistant_input_usd_per_million x 1e6), 50 M at $100 and $2/M, so the app stops at about the budget plus the turns in flight, days before the budget's billing data would say so. Set it when assistant_budget_monthly_usd is 0 (nothing to derive from)."
   type        = number
   default     = null
   validation {
@@ -1225,12 +1225,56 @@ variable "assistant_tokens_alarm_per_hour" {
 }
 
 variable "assistant_budget_monthly_usd" {
-  description = "The assistant's own AWS budget in USD a month (alarms.tf aws_budgets_budget.assistant), on the account's AWS Marketplace charges: Anthropic's models on Bedrock are billed through AWS Marketplace, and nothing else in this account is. 0 skips it; with budget_monthly_usd = 0 there are no budgets at all. It is a third budget, so it costs about $0.62 a month (AWS gives two free). It also sets the deployment-wide token cap unless assistant_tokens_per_month_total does (budget / assistant_input_usd_per_million). With the assistant on, raise budget_monthly_usd by this amount (the account total includes the model spend): ~$160 on the defaults."
+  description = "The assistant's own AWS budget in USD a month (alarms.tf aws_budgets_budget.assistant), on the account's AWS Marketplace charges: Anthropic's models on Bedrock are billed through AWS Marketplace, and nothing else in this account is. 0 skips it; with budget_monthly_usd = 0 there are no budgets at all. It is a third budget, so it costs about $0.62 a month (AWS gives two free). It also sets the deployment-wide token cap unless assistant_tokens_per_month_total does (budget / assistant_input_usd_per_million: 50 M weighted tokens at $100 and $2/M). Issue #641 (accepted 2026-10-29) sizes it as the Free pool (assistant_free_pool_usd_per_month, $30) + $15 for each paid seat + a margin, about $100 at launch: raise it by $15 a paid seat as subscriptions grow, and it must stay at least the Free pool (assistant_free_pool_usd_per_month's validation). With the assistant on, raise budget_monthly_usd by this amount (the account total includes the model spend): ~$210 on the defaults."
   type        = number
-  default     = 50
+  # Issue #641: $30 Free pool + $15 x paid seats + a margin, about $100 at
+  # launch (was issue #610's $50, before plans had an AI allowance).
+  default = 100
   validation {
     condition     = var.assistant_budget_monthly_usd >= 0
     error_message = "assistant_budget_monthly_usd must be 0 (no assistant budget) or a positive USD amount."
+  }
+}
+
+# The Free dollar caps (336_assistant_dollar_caps, issue #641; docs/billing.md
+# § Assistant dollar caps). They refuse a turn only while BILLING_ENFORCED is
+# on; off, they only record. Defaults are the code's (backend/src/assistant/
+# config.ts) and the bounds production.ts checks.
+variable "assistant_free_usd_per_day" {
+  description = "Dollars one person on a Free account may spend on the assistant a UTC day (ASSISTANT_FREE_USD_PER_DAY; assistant_daily_cap past it, or past assistant_free_messages_per_day, whichever comes first). Issue #641's figure, $0.30."
+  type        = number
+  default     = 0.3
+  validation {
+    condition     = var.assistant_free_usd_per_day >= 0 && var.assistant_free_usd_per_day <= 15
+    error_message = "A dollar amount from 0 to 15 (production.ts checks the same bounds)."
+  }
+}
+
+variable "assistant_free_messages_per_day" {
+  description = "Messages one person on a Free account may send the assistant a UTC day (ASSISTANT_FREE_MESSAGES_PER_DAY; assistant_daily_cap past it). Issue #641's figure, 20."
+  type        = number
+  default     = 20
+  validation {
+    condition     = var.assistant_free_messages_per_day >= 1 && var.assistant_free_messages_per_day <= 500 && floor(var.assistant_free_messages_per_day) == var.assistant_free_messages_per_day
+    error_message = "A whole number of messages from 1 to 500 (production.ts checks the same bounds)."
+  }
+}
+
+variable "assistant_free_pool_usd_per_month" {
+  description = "Dollars the Free and trialing accounts together may spend on the assistant a UTC month, paced so that no day takes more than twice the pool left / days left (ASSISTANT_FREE_POOL_USD_PER_MONTH; assistant_free_pool_spent past it; the 50% and 80% alarms in alarms.tf). Issue #641's launch figure, $30 (about 30% of the assistant budget). It must fit inside assistant_budget_monthly_usd and the deployment-wide token cap, so free use alone can't pass either."
+  type        = number
+  default     = 30
+  validation {
+    condition     = var.assistant_free_pool_usd_per_month >= 0 && var.assistant_free_pool_usd_per_month <= 10000
+    error_message = "A dollar amount from 0 to 10,000 (production.ts checks the same bounds)."
+  }
+  validation {
+    condition     = var.assistant_budget_monthly_usd == 0 || var.assistant_free_pool_usd_per_month <= var.assistant_budget_monthly_usd
+    error_message = "The Free pool can't be larger than the assistant's budget (assistant_budget_monthly_usd): issue #641 sizes the budget as the pool + $15 a paid seat + a margin, so raise the budget first."
+  }
+  validation {
+    condition     = var.assistant_tokens_per_month_total == null || var.assistant_free_pool_usd_per_month <= var.assistant_tokens_per_month_total * var.assistant_input_usd_per_million / 1000000
+    error_message = "The Free pool can't be more than the deployment-wide token cap is worth at the input price (assistant_tokens_per_month_total x assistant_input_usd_per_million / 1e6): the cap is the backstop above every other one, and free use alone would pass it."
   }
 }
 

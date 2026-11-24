@@ -229,7 +229,8 @@ resource "aws_budgets_budget" "daily" {
 # account is (the model card: "charges appear … under the model provider (not
 # under Amazon Bedrock)"), so the account's AWS Marketplace charges are the
 # assistant's model spend. ACTUAL 80% and 100% of
-# var.assistant_budget_monthly_usd (USD 50, issue #610's figure); no forecast,
+# var.assistant_budget_monthly_usd (USD 100: issue #641's $30 Free pool + $15
+# a paid seat + a margin; it was issue #610's 50); no forecast,
 # which a usage-driven line with a short history only makes noisy. Billing
 # data lags a day, and Marketplace charges up to a day more: the app's own
 # monthly caps in weighted tokens (input + 5 x output; per project, per

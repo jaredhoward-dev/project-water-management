@@ -810,11 +810,23 @@ run "on" {
     error_message = "The assistant calls Bedrock in its own region with the issue's limits (2 M weighted tokens a project a month, 1 M a person, 30 messages a user an hour, 6 hops, 150 K tokens and 4 tool calls a hop per turn, and the per-call caps pinned), a keepalive under the origin's read timeout, a turn 15 s inside the timeout and a pool of 1."
   }
 
-  # The deployment-wide cap: the assistant's $50 budget at $2 per million
+  # The deployment-wide cap: the assistant's $100 budget at $2 per million
   # input tokens (weighted tokens are dollars at the input price).
   assert {
-    condition     = aws_lambda_function.assistant[0].environment[0].variables.ASSISTANT_TOKENS_PER_MONTH_TOTAL == "25000000"
-    error_message = "Unset, the deployment-wide cap is assistant_budget_monthly_usd / assistant_input_usd_per_million x 1e6: 25 M weighted tokens for $50 at $2/M."
+    condition     = aws_lambda_function.assistant[0].environment[0].variables.ASSISTANT_TOKENS_PER_MONTH_TOTAL == "50000000"
+    error_message = "Unset, the deployment-wide cap is assistant_budget_monthly_usd / assistant_input_usd_per_million x 1e6: 50 M weighted tokens for $100 at $2/M."
+  }
+
+  # The Free dollar caps (issue #641), the code's defaults pinned so the plan
+  # shows them. Only the assistant begins a turn, so the API carries none.
+  assert {
+    condition = (
+      aws_lambda_function.assistant[0].environment[0].variables.ASSISTANT_FREE_USD_PER_DAY == "0.3" &&
+      aws_lambda_function.assistant[0].environment[0].variables.ASSISTANT_FREE_MESSAGES_PER_DAY == "20" &&
+      aws_lambda_function.assistant[0].environment[0].variables.ASSISTANT_FREE_POOL_USD_PER_MONTH == "30" &&
+      length([for k in keys(aws_lambda_function.backend.environment[0].variables) : k if startswith(k, "ASSISTANT_FREE_")]) == 0
+    )
+    error_message = "The assistant carries issue #641's Free caps ($0.30 or 20 messages a person a day, a $30 pool a month), and the API, which never begins a turn, none of them."
   }
 
   assert {
@@ -1064,12 +1076,12 @@ run "on" {
 
   assert {
     condition = (
-      aws_budgets_budget.assistant[0].limit_amount == "50" &&
+      aws_budgets_budget.assistant[0].limit_amount == "100" &&
       aws_budgets_budget.assistant[0].time_unit == "MONTHLY" &&
       length([for f in aws_budgets_budget.assistant[0].cost_filter : f if f.name == "BillingEntity" && toset(f.values) == toset(["AWS Marketplace"])]) == 1 &&
       length(aws_budgets_budget.assistant[0].notification) == 2
     )
-    error_message = "The assistant's budget: USD 50 a month on the account's AWS Marketplace charges (Anthropic's models on Bedrock), ACTUAL 80% and 100%."
+    error_message = "The assistant's budget: USD 100 a month (issue #641: the $30 Free pool + $15 a paid seat + a margin) on the account's AWS Marketplace charges (Anthropic's models on Bedrock), ACTUAL 80% and 100%."
   }
 
   assert {
@@ -1131,6 +1143,8 @@ run "an_explicit_deployment_wide_cap_needs_no_budget" {
     assistant_enabled                = true
     assistant_budget_monthly_usd     = 0
     assistant_tokens_per_month_total = 5000000
+    # $10 at $2/M: the Free pool must fit under it (the default $30 doesn't).
+    assistant_free_pool_usd_per_month = 10
   }
 
   assert {
@@ -1159,6 +1173,130 @@ run "refuses_a_derived_cap_past_its_bound" {
   }
 
   expect_failures = [var.assistant_tokens_per_month_total]
+}
+
+run "the_free_dollar_caps_can_be_set" {
+  command = plan
+
+  variables {
+    assistant_enabled                 = true
+    assistant_free_usd_per_day        = 0.5
+    assistant_free_messages_per_day   = 40
+    assistant_free_pool_usd_per_month = 45.5
+  }
+
+  assert {
+    condition = (
+      aws_lambda_function.assistant[0].environment[0].variables.ASSISTANT_FREE_USD_PER_DAY == "0.5" &&
+      aws_lambda_function.assistant[0].environment[0].variables.ASSISTANT_FREE_MESSAGES_PER_DAY == "40" &&
+      aws_lambda_function.assistant[0].environment[0].variables.ASSISTANT_FREE_POOL_USD_PER_MONTH == "45.5"
+    )
+    error_message = "Set, the Free caps reach the assistant's environment as written (dollars as decimals, messages whole)."
+  }
+}
+
+run "accepts_the_free_dollar_caps_at_their_bounds" {
+  command = plan
+
+  variables {
+    assistant_enabled                 = true
+    assistant_free_usd_per_day        = 15
+    assistant_free_messages_per_day   = 500
+    assistant_free_pool_usd_per_month = 100
+  }
+
+  assert {
+    condition = (
+      aws_lambda_function.assistant[0].environment[0].variables.ASSISTANT_FREE_USD_PER_DAY == "15" &&
+      aws_lambda_function.assistant[0].environment[0].variables.ASSISTANT_FREE_MESSAGES_PER_DAY == "500" &&
+      aws_lambda_function.assistant[0].environment[0].variables.ASSISTANT_FREE_POOL_USD_PER_MONTH == "100"
+    )
+    error_message = "$15 a day, 500 messages and a pool equal to the whole assistant budget ($100) are each accepted."
+  }
+}
+
+run "accepts_a_zero_free_allowance" {
+  command = plan
+
+  variables {
+    assistant_enabled                 = true
+    assistant_free_usd_per_day        = 0
+    assistant_free_pool_usd_per_month = 0
+  }
+
+  assert {
+    condition     = aws_lambda_function.assistant[0].environment[0].variables.ASSISTANT_FREE_POOL_USD_PER_MONTH == "0" && aws_lambda_function.assistant[0].environment[0].variables.ASSISTANT_FREE_USD_PER_DAY == "0"
+    error_message = "0 is a valid Free day and pool (no assistant on Free), as production.ts allows."
+  }
+}
+
+run "refuses_free_dollar_caps_past_their_bounds" {
+  command = plan
+
+  variables {
+    assistant_free_usd_per_day        = 15.01
+    assistant_free_messages_per_day   = 0
+    assistant_free_pool_usd_per_month = -1
+  }
+
+  expect_failures = [
+    var.assistant_free_usd_per_day,
+    var.assistant_free_messages_per_day,
+    var.assistant_free_pool_usd_per_month,
+  ]
+}
+
+run "refuses_fractional_free_messages" {
+  command = plan
+
+  variables {
+    assistant_free_messages_per_day = 20.5
+  }
+
+  expect_failures = [var.assistant_free_messages_per_day]
+}
+
+# Issue #641: the assistant budget is the pool + $15 a paid seat + a margin,
+# so a pool past the budget is a mistake in one or the other.
+run "refuses_a_free_pool_past_the_assistant_budget" {
+  command = plan
+
+  variables {
+    assistant_budget_monthly_usd      = 100
+    assistant_free_pool_usd_per_month = 100.01
+  }
+
+  expect_failures = [var.assistant_free_pool_usd_per_month]
+}
+
+# The deployment-wide token cap stays the backstop above the pool: an
+# explicit cap worth less than the pool at the input price is refused.
+run "refuses_a_free_pool_past_the_deployment_wide_cap" {
+  command = plan
+
+  variables {
+    assistant_tokens_per_month_total  = 10000000
+    assistant_input_usd_per_million   = 2
+    assistant_free_pool_usd_per_month = 25
+  }
+
+  expect_failures = [var.assistant_free_pool_usd_per_month]
+}
+
+run "a_free_pool_within_an_explicit_cap_and_no_budget_is_accepted" {
+  command = plan
+
+  variables {
+    assistant_enabled                 = true
+    assistant_budget_monthly_usd      = 0
+    assistant_tokens_per_month_total  = 15000000
+    assistant_free_pool_usd_per_month = 30
+  }
+
+  assert {
+    condition     = aws_lambda_function.assistant[0].environment[0].variables.ASSISTANT_FREE_POOL_USD_PER_MONTH == "30"
+    error_message = "With no assistant budget, a $30 pool is accepted under a 15 M cap ($30 at $2/M): the budget check applies only to a budget there is."
+  }
 }
 
 # The bounds production.ts checks too: one past each refuses the plan.
