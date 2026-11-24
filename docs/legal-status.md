@@ -73,6 +73,8 @@ client goes live. Not customer-facing.
   Act) and links to both pages; invitation emails link the privacy notice
   (POPIA s18, notice at collection).
 - **Fees:** none; Terms §8 commits to notice and agreement before any fee.
+  The proposed §8 for paid plans is a draft for counsel, not live
+  ([legal/billing-terms-draft.md](./legal/billing-terms-draft.md)).
 - **Liability cap:** greater of 12 months' fees or US $100 (estate standard),
   §12–13 in bold sentence case (not capitals). Indemnity one-way (user →
   operator).
@@ -175,6 +177,12 @@ A and C remain owed and should be done as soon as possible; setting
     notice](./billing.md#renewal-notice)); open for that opinion: whether a
     yearly renewal needs the person's express choice given s14(2)(d)'s
     month-to-month continuation, and the early-cancellation penalty.
+  - Terms §8 (fees), the privacy notice's billing parts (Stripe as a
+    sub-processor, billing retention, the s72 transfer), the checkout
+    disclosures and consent tick, and the `LEGAL_VERSION` re-acceptance
+    they need: **drafted for counsel, not live** (2026-11-24, #641 Phase 4),
+    clause by clause beside the current text with its questions:
+    [legal/billing-terms-draft.md](./legal/billing-terms-draft.md).
   - Jurisdiction and enforcement against a US sole proprietor.
   - Whether English-only Terms bind Afrikaans-reading farmers (the summary
     at sign-up is translated; the Terms are not).

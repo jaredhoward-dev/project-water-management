@@ -882,6 +882,17 @@ plan stays on the issue. Found while building:
 Phase 1 (shadow mode) is in [billing.md](./billing.md); the later phases
 are #641's checklist. Open items from building it:
 
+- [ ] **Phase 4 legal: drafted, not live** (#821's "Phase 4 legal").
+      [legal/billing-terms-draft.md](./legal/billing-terms-draft.md)
+      proposes Terms §8, the privacy notice's billing parts and the checkout
+      disclosures and consent tick, each beside the current text with its
+      counsel question (2026-11-24, docs only). Left: counsel's answers
+      (its § 6), then the live text, the consent tick and its record (a
+      migration), the `LEGAL_VERSION` bump with its re-acceptance entry and
+      translation (its § 5), and the gap it found: deleting an account
+      neither cancels a live Stripe subscription nor deals with the Stripe
+      customer (its § 3, §7). Trigger: before the first charge
+      (`BILLING_PROVIDER=stripe`), with Gates A, C and D.
 - [ ] **The Plan page's "Compare plans" could link the public pricing
       page.** `/welcome/pricing` (Phase 4) now shows the three plans side by
       side; the Plan page (`PlanUsage.svelte`) and its Compare plans links

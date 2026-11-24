@@ -1604,4 +1604,5 @@ none of this is built except where a bullet says so:
   migration that moves a price or limit updates that file in the same
   change. Still open in Phase 4: the checkout disclosures and consent tick,
   Terms §8, the privacy notice (Stripe), the `LEGAL_VERSION` bump and
-  Gate D.
+  Gate D. The legal text is drafted for counsel, not live:
+  [legal/billing-terms-draft.md](./legal/billing-terms-draft.md).
