@@ -1118,13 +1118,16 @@ are #641's checklist. Open items from building it:
       disposable has no way to fix it in the app (the refusal says only that
       the address is temporary); durable fix: refuse at sign-up with its own
       code, then an email change that re-verifies; ~~(2) the reverse trial calls `isDisposable` before granting~~ (done at
-      round 9's merge: `disposable`, nothing claimed); (3) the list's monthly refresh is by hand: a scheduled workflow
-      that fetches the pinned upstream file, refuses a size change past
-      ±20 % and opens a PR (#641: "refreshed monthly with a size-change
-      guard"); (4) the abuse report's "disposable rejections" count, which
-      needs the refusals logged (a `logEvent` with no address); (5) other
+      round 9's merge: `disposable`, nothing claimed); ~~(3) the list's monthly refresh is by hand~~ (done in round 10:
+      `.github/workflows/disposable-domains.yml` runs `pnpm
+      gen:disposable-domains` monthly, refuses a size change past ±20 %,
+      and opens a PR; data-sources.md § disposable-email-domains);
+      ~~(4) the abuse report's "disposable rejections" count~~ (done in
+      round 10: each refusal is logged with no address and counted per SAST
+      day in `email_gate_refusal`, 348; billing.md § Metrics and the abuse
+      report); (5) other
       live operations (alert rules, automatic runs, publishing) aren't gated:
-      #641 names the assistant and live feeds only. Trigger: (1) and (3)
+      #641 names the assistant and live feeds only. Trigger: (1)
       before `BILLING_ENFORCED` goes on in production.
 - [ ] **`billing-invoice` can't reach Stripe from the migrate Lambda.** The
       migrate Lambda has no `BILLING_PROVIDER=stripe`, no key and no route to
