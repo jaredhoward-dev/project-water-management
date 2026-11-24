@@ -9,11 +9,14 @@
 //  - app_free_email_gate answers a non-member NULL, and only ever the caller's own address;
 //  - 348: each refusal is logged with its code and feature, never the address or its domain, and counted in
 //    email_gate_refusal on today's SAST day, whatever the session's time zone (CLAUDE.md rule 7), although the route's
-//    transaction rolls back; an allowed turn counts nothing; water_app can't read or write the table directly.
+//    transaction rolls back; an allowed turn counts nothing; water_app can't read or write the table directly;
+//  - the count is written after the route's transaction has ended: with a pool of ONE connection (the assistant
+//    Lambda's, infra/assistant.tf) a refused turn and a refused feed answer 403 at once and are still counted.
 import pg from 'pg';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { app, asOwner, disableFeedsAfterFile, retirePendingJobs, signUp } from '../__tests__/helpers.js';
 import { APP_URL } from '../__tests__/test-db.js';
+import { closePool, getPool } from '../db/pool.js';
 import { withUser } from '../db/tx.js';
 import { cellCentre } from '../feeds/cellCache.js';
 
@@ -244,6 +247,31 @@ describe('348: the gate’s refusals are logged and counted, with no address', (
 		const before = await count('email_unverified', 'feeds');
 		expect((await u.call('POST', `/projects/${p}/feeds`, feedBody(true))).status).toBe(403);
 		expect(await count('email_unverified', 'feeds')).toBe(before + 1);
+	});
+
+	it('with a pool of one connection, a refusal answers 403 promptly and is counted once the route’s transaction ends', async () => {
+		const throwaway = await disposableUser('CountPoolOne');
+		const unverified = await signUp('CountPoolOneFeed', { verified: false });
+		const pT = await newProject(throwaway, 'Count pool T');
+		const pU = await newProject(unverified, 'Count pool U');
+		enforce();
+		const turnsBefore = await count('email_disposable', 'assistant');
+		const feedsBefore = await count('email_unverified', 'feeds');
+		await closePool();
+		vi.stubEnv('DB_POOL_MAX', '1');
+		try {
+			expect(getPool().options.max).toBe(1);
+			// Off Lambda the pool waits for ever for a connection (acquireTimeoutMs), so a count taken while the route
+			// still held the only one would never finish: the race fails instead of hanging the file.
+			const prompt = <T>(p: Promise<T>) =>
+				Promise.race([p, new Promise<never>((_, reject) => setTimeout(() => reject(new Error('waited for a second connection')), 5_000))]);
+			expect(await prompt(turn(throwaway, pT))).toMatchObject({ status: 403, code: 'email_disposable' });
+			expect((await prompt(unverified.call('POST', `/projects/${pU}/feeds`, feedBody(true)))).status).toBe(403);
+		} finally {
+			await closePool();
+		}
+		expect(await count('email_disposable', 'assistant')).toBe(turnsBefore + 1);
+		expect(await count('email_unverified', 'feeds')).toBe(feedsBefore + 1);
 	});
 
 	it('counts on the SAST day in any session time zone; water_app may call the function but not touch the table', async () => {

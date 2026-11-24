@@ -6,7 +6,7 @@ import { z } from 'zod';
 import type { AuthEnv } from '../auth/middleware.js';
 import { withUser } from '../db/tx.js';
 import { ApiError } from '../http/errors.js';
-import { requireFreeVerifiedEmail } from '../billing/emailGate.js';
+import { countGateRefusals, requireFreeVerifiedEmail } from '../billing/emailGate.js';
 import { readJson } from '../http/body.js';
 import { feedFetchDedupeKey } from '../jobs/handlers/feed-fetch.js';
 import { enqueueJob } from '../jobs/queue.js';
@@ -382,24 +382,26 @@ export const feedRoutes = new Hono<AuthEnv>()
 		refuseBoundaryMark((body as { config?: unknown } | null)?.config);
 		const input = FeedInput.parse(body);
 		const id = c.req.param('id');
-		const feed = await withUser(c.get('userId'), async (db) => {
-			await requireRole(db, id, 'owner');
-			if (input.source === 'station_api' && !stationApiFeedsOn()) throw new ApiError(400, STATION_API_OFF_MESSAGE);
-			// Free's verified-email gate (BILLING_ENFORCED only; billing/emailGate.ts): a feed attached switched on.
-			if (input.enabled) await requireFreeVerifiedEmail(db, id, 'feeds');
-			await attachSlot(db, id, input.source);
-			await refuseTakeOver(db, id, input);
-			const { input: checked, replaceFrom } = await versionCheck(db, id, input, true);
-			const fid = await createFeed(db, id, checked, replaceFrom ?? null).catch(conflict);
-			// Sealed to the fetcher with the new feed's id, in the same transaction (FeedInput refused it on any other source).
-			const credential = input.credential ? await saveKey(db, id, fid, input.credential, input.config as StationApiConfig) : undefined;
-			const feed = await getFeed(db, id, fid, new Date(), await rainCopy(db));
-			await recordAudit(db, id, 'feed.configured', {
-				...feedSubject(fid, 'created', input, credential),
-				...(replaceFrom !== undefined ? { replaceSeries: replaceFrom } : {})
-			});
-			return feed;
-		});
+		const feed = await countGateRefusals(() =>
+			withUser(c.get('userId'), async (db) => {
+				await requireRole(db, id, 'owner');
+				if (input.source === 'station_api' && !stationApiFeedsOn()) throw new ApiError(400, STATION_API_OFF_MESSAGE);
+				// Free's verified-email gate (BILLING_ENFORCED only; billing/emailGate.ts): a feed attached switched on.
+				if (input.enabled) await requireFreeVerifiedEmail(db, id, 'feeds');
+				await attachSlot(db, id, input.source);
+				await refuseTakeOver(db, id, input);
+				const { input: checked, replaceFrom } = await versionCheck(db, id, input, true);
+				const fid = await createFeed(db, id, checked, replaceFrom ?? null).catch(conflict);
+				// Sealed to the fetcher with the new feed's id, in the same transaction (FeedInput refused it on any other source).
+				const credential = input.credential ? await saveKey(db, id, fid, input.credential, input.config as StationApiConfig) : undefined;
+				const feed = await getFeed(db, id, fid, new Date(), await rainCopy(db));
+				await recordAudit(db, id, 'feed.configured', {
+					...feedSubject(fid, 'created', input, credential),
+					...(replaceFrom !== undefined ? { replaceSeries: replaceFrom } : {})
+				});
+				return feed;
+			})
+		);
 		const warning = credentialWarning(feed);
 		return c.json({ feed, ...(warning ? { warning } : {}) }, 201);
 	})
@@ -411,79 +413,81 @@ export const feedRoutes = new Hono<AuthEnv>()
 		refuseBoundaryMark(patch.config);
 		const id = c.req.param('id');
 		const fid = feedId(c.req.param('feedId'));
-		const feed = await withUser(c.get('userId'), async (db) => {
-			await requireRole(db, id, 'owner');
-			const cur = await getFeed(db, id, fid);
-			if (!cur) throw new ApiError(404, 'not found');
-			const sourceChanged = patch.source !== undefined && patch.source !== cur.source;
-			const input = FeedInput.parse({
-				source: patch.source ?? cur.source,
-				// A new source needs its own config and target.
-				config: patch.config ?? (sourceChanged ? undefined : cur.config),
-				targetKind: patch.targetKind ?? (sourceChanged ? undefined : cur.targetKind),
-				targetName: patch.targetName ?? cur.targetName,
-				schedule: patch.schedule ?? cur.schedule,
-				enabled: patch.enabled ?? cur.enabled,
-				replaceSeries: patch.replaceSeries ?? false,
-				// A new key is checked against the feed as saved (FeedInput: station API feeds that send one only).
-				...(patch.credential ? { credential: patch.credential } : {})
-			});
-			// Free's verified-email gate (BILLING_ENFORCED only): switching a feed on, not saving one already on or off.
-			if (input.enabled && !cur.enabled) await requireFreeVerifiedEmail(db, id, 'feeds');
-			// Moving a feed onto the source is attaching one: refused while the server has them off.
-			if (input.source === 'station_api' && cur.source !== 'station_api') {
-				if (!stationApiFeedsOn()) throw new ApiError(400, STATION_API_OFF_MESSAGE);
-				await attachSlot(db, id, 'station_api');
-			}
-			// Clearing a key is a station API feed's alone, as saving one is.
-			if (patch.credential === null && input.source !== 'station_api') throw new ApiError(400, credentialProblem(input.source, input.config)!);
-			// Asked when the save changes where the feed writes or what it writes (source, product, target).
-			const changed =
-				input.source !== cur.source ||
-				input.targetKind !== cur.targetKind ||
-				input.targetName !== cur.targetName ||
-				!sameProvenance(feedProvenance(input.source, input.config), cur.writes);
-			// A re-target to a new series that would sort ahead of the record runs read (issue #561).
-			if (input.targetKind !== cur.targetKind || input.targetName !== cur.targetName) await refuseTakeOver(db, id, input);
-			const version = await versionCheck(db, id, input, changed);
-			let checked = version.input;
-			let replaceFrom = version.replaceFrom;
-			// replaceSeries: false withdraws a pending replacement (the trigger discards its stage); absent keeps it.
-			let replace: string | null | undefined = patch.replaceSeries === false ? null : replaceFrom;
-			let configFrom: FeedConfig | null = null;
-			// New cells under a record the feed wrote over its old ones (296): refused, or its whole record re-read.
-			if (replaceFrom === undefined) {
-				const area = await areaCheck(db, id, cur, checked, patch.replaceSeries, patch.config !== undefined);
-				checked = area.input;
-				if (area.replaceFrom !== undefined) {
-					replace = area.replaceFrom;
-					replaceFrom = area.replaceFrom ?? undefined;
-					configFrom = area.replaceConfigFrom ?? null;
+		const feed = await countGateRefusals(() =>
+			withUser(c.get('userId'), async (db) => {
+				await requireRole(db, id, 'owner');
+				const cur = await getFeed(db, id, fid);
+				if (!cur) throw new ApiError(404, 'not found');
+				const sourceChanged = patch.source !== undefined && patch.source !== cur.source;
+				const input = FeedInput.parse({
+					source: patch.source ?? cur.source,
+					// A new source needs its own config and target.
+					config: patch.config ?? (sourceChanged ? undefined : cur.config),
+					targetKind: patch.targetKind ?? (sourceChanged ? undefined : cur.targetKind),
+					targetName: patch.targetName ?? cur.targetName,
+					schedule: patch.schedule ?? cur.schedule,
+					enabled: patch.enabled ?? cur.enabled,
+					replaceSeries: patch.replaceSeries ?? false,
+					// A new key is checked against the feed as saved (FeedInput: station API feeds that send one only).
+					...(patch.credential ? { credential: patch.credential } : {})
+				});
+				// Free's verified-email gate (BILLING_ENFORCED only): switching a feed on, not saving one already on or off.
+				if (input.enabled && !cur.enabled) await requireFreeVerifiedEmail(db, id, 'feeds');
+				// Moving a feed onto the source is attaching one: refused while the server has them off.
+				if (input.source === 'station_api' && cur.source !== 'station_api') {
+					if (!stationApiFeedsOn()) throw new ApiError(400, STATION_API_OFF_MESSAGE);
+					await attachSlot(db, id, 'station_api');
 				}
-			}
-			if (!(await updateFeed(db, id, fid, checked, replace, configFrom).catch(conflict))) throw new ApiError(404, 'not found');
-			// The key (issue #784), in its own table so that changing it keeps the feed's progress. A feed moved off the
-			// source, or onto sending no key, drops the one it had: nothing would send it.
-			// A feed re-pointed at another site, or told to send the key another way, drops it too unless the same save
-			// enters one: the key goes only where the owner who typed it said (it no longer opens there either,
-			// credentialBinding). Without this a second owner could point the feed at their own server and read the key.
-			let credential: CredentialChange | undefined;
-			const repointed =
-				cur.source === 'station_api' &&
-				checked.source === 'station_api' &&
-				credentialBinding(fid, cur.config as StationApiConfig) !== credentialBinding(fid, checked.config as StationApiConfig);
-			if (checked.credential) credential = await saveKey(db, id, fid, checked.credential, checked.config as StationApiConfig);
-			else if (patch.credential === null || repointed || (cur.source === 'station_api' && credentialProblem(checked.source, checked.config) !== null)) {
-				if (await clearFeedCredential(db, id, fid)) credential = 'cleared';
-			}
-			// Logged even when the settings come back unchanged: every save makes the saver the
-			// feed's acting user (the identity its scheduled fetches run as), which is itself a change.
-			await recordAudit(db, id, 'feed.configured', {
-				...feedSubject(fid, 'changed', checked, credential),
-				...(replaceFrom !== undefined ? { replaceSeries: replaceFrom } : {})
-			});
-			return getFeed(db, id, fid, new Date(), await rainCopy(db));
-		});
+				// Clearing a key is a station API feed's alone, as saving one is.
+				if (patch.credential === null && input.source !== 'station_api') throw new ApiError(400, credentialProblem(input.source, input.config)!);
+				// Asked when the save changes where the feed writes or what it writes (source, product, target).
+				const changed =
+					input.source !== cur.source ||
+					input.targetKind !== cur.targetKind ||
+					input.targetName !== cur.targetName ||
+					!sameProvenance(feedProvenance(input.source, input.config), cur.writes);
+				// A re-target to a new series that would sort ahead of the record runs read (issue #561).
+				if (input.targetKind !== cur.targetKind || input.targetName !== cur.targetName) await refuseTakeOver(db, id, input);
+				const version = await versionCheck(db, id, input, changed);
+				let checked = version.input;
+				let replaceFrom = version.replaceFrom;
+				// replaceSeries: false withdraws a pending replacement (the trigger discards its stage); absent keeps it.
+				let replace: string | null | undefined = patch.replaceSeries === false ? null : replaceFrom;
+				let configFrom: FeedConfig | null = null;
+				// New cells under a record the feed wrote over its old ones (296): refused, or its whole record re-read.
+				if (replaceFrom === undefined) {
+					const area = await areaCheck(db, id, cur, checked, patch.replaceSeries, patch.config !== undefined);
+					checked = area.input;
+					if (area.replaceFrom !== undefined) {
+						replace = area.replaceFrom;
+						replaceFrom = area.replaceFrom ?? undefined;
+						configFrom = area.replaceConfigFrom ?? null;
+					}
+				}
+				if (!(await updateFeed(db, id, fid, checked, replace, configFrom).catch(conflict))) throw new ApiError(404, 'not found');
+				// The key (issue #784), in its own table so that changing it keeps the feed's progress. A feed moved off the
+				// source, or onto sending no key, drops the one it had: nothing would send it.
+				// A feed re-pointed at another site, or told to send the key another way, drops it too unless the same save
+				// enters one: the key goes only where the owner who typed it said (it no longer opens there either,
+				// credentialBinding). Without this a second owner could point the feed at their own server and read the key.
+				let credential: CredentialChange | undefined;
+				const repointed =
+					cur.source === 'station_api' &&
+					checked.source === 'station_api' &&
+					credentialBinding(fid, cur.config as StationApiConfig) !== credentialBinding(fid, checked.config as StationApiConfig);
+				if (checked.credential) credential = await saveKey(db, id, fid, checked.credential, checked.config as StationApiConfig);
+				else if (patch.credential === null || repointed || (cur.source === 'station_api' && credentialProblem(checked.source, checked.config) !== null)) {
+					if (await clearFeedCredential(db, id, fid)) credential = 'cleared';
+				}
+				// Logged even when the settings come back unchanged: every save makes the saver the
+				// feed's acting user (the identity its scheduled fetches run as), which is itself a change.
+				await recordAudit(db, id, 'feed.configured', {
+					...feedSubject(fid, 'changed', checked, credential),
+					...(replaceFrom !== undefined ? { replaceSeries: replaceFrom } : {})
+				});
+				return getFeed(db, id, fid, new Date(), await rainCopy(db));
+			})
+		);
 		const warning = credentialWarning(feed);
 		return c.json({ feed, ...(warning ? { warning } : {}) });
 	})

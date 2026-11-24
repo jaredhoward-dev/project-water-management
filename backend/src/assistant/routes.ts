@@ -18,7 +18,7 @@ import type { AuthEnv } from '../auth/middleware.js';
 import { withUser, type Db } from '../db/tx.js';
 import { readJson } from '../http/body.js';
 import { ApiError } from '../http/errors.js';
-import { requireFreeVerifiedEmail } from '../billing/emailGate.js';
+import { countGateRefusals, requireFreeVerifiedEmail } from '../billing/emailGate.js';
 import { logEvent } from '../logging/logEvent.js';
 import { rank, requireRole, UUID } from '../projects/access.js';
 import { assistantConfig, weightedTokens, type AssistantConfig } from './config.js';
@@ -151,26 +151,29 @@ export const assistantRoutes = new Hono<AuthEnv>()
 
 		const turnTools = tools;
 		const system = systemPrompt();
-		const { provider, begun } = await withUser(userId, async (db) => {
-			await requireRole(db, id, 'viewer');
-			const provider = cfg.provider === 'off' ? null : providerFor(cfg);
-			if (!provider) throw off();
-			// Free's verified-email gate (BILLING_ENFORCED only; billing/emailGate.ts): refused before anything is counted.
-			await requireFreeVerifiedEmail(db, id, 'assistant');
-			// The turn's first call needs this much at most (input estimate + a whole call's output): a conversation
-			// it doesn't fit in one turn's budget is refused before anything is counted.
-			const floor = conversation ? turnFloor(cfg, system, turnTools, conversation) : Infinity;
-			if (!conversation || floor > cfg.maxTurnTokens) {
-				throw ApiError.coded(413, 'assistant_input_too_large', `The message is longer than the assistant takes (${cfg.maxInputChars} characters).`);
-			}
-			if (body.runId) {
-				const { rows } = await db.query('SELECT 1 FROM model_run WHERE id = $1 AND project_id = $2', [body.runId, id]);
-				if (!rows.length) throw new ApiError(404, 'run not found');
-			}
-			// Before the stream: the message counted and the turn's budget reserved, or a 429 (nothing counted).
-			// Last in the transaction, so nothing after it can roll the reservation back without the turn.
-			return { provider, begun: await beginTurn(c, db, id, cfg, floor, usdMicrosPerWeightedToken(provider.name, turnModel(cfg))) };
-		});
+		// The gate's refusal is counted after this transaction ends (countGateRefusals): the assistant's pool is one connection.
+		const { provider, begun } = await countGateRefusals(() =>
+			withUser(userId, async (db) => {
+				await requireRole(db, id, 'viewer');
+				const provider = cfg.provider === 'off' ? null : providerFor(cfg);
+				if (!provider) throw off();
+				// Free's verified-email gate (BILLING_ENFORCED only; billing/emailGate.ts): refused before anything is counted.
+				await requireFreeVerifiedEmail(db, id, 'assistant');
+				// The turn's first call needs this much at most (input estimate + a whole call's output): a conversation
+				// it doesn't fit in one turn's budget is refused before anything is counted.
+				const floor = conversation ? turnFloor(cfg, system, turnTools, conversation) : Infinity;
+				if (!conversation || floor > cfg.maxTurnTokens) {
+					throw ApiError.coded(413, 'assistant_input_too_large', `The message is longer than the assistant takes (${cfg.maxInputChars} characters).`);
+				}
+				if (body.runId) {
+					const { rows } = await db.query('SELECT 1 FROM model_run WHERE id = $1 AND project_id = $2', [body.runId, id]);
+					if (!rows.length) throw new ApiError(404, 'run not found');
+				}
+				// Before the stream: the message counted and the turn's budget reserved, or a 429 (nothing counted).
+				// Last in the transaction, so nothing after it can roll the reservation back without the turn.
+				return { provider, begun: await beginTurn(c, db, id, cfg, floor, usdMicrosPerWeightedToken(provider.name, turnModel(cfg))) };
+			})
+		);
 		const usedBefore = begun.used;
 
 		const ctx = { userId, projectId: id, runId: body.runId ?? null };

@@ -79,6 +79,9 @@ export async function withoutUser<T>(fn: (db: Db) => Promise<T>): Promise<T> {
  * lone statement is already atomic, so wrapping it in withoutUser only adds
  * the BEGIN and COMMIT round trips: 3 trips instead of 1, on every
  * authenticated request (issue #41). RLS sees no user, as in withoutUser.
+ * Also counts the verified-email gate's refusals (billing/emailGate.ts), only
+ * after the route's transaction has ended, since this takes a pooled
+ * connection of its own.
  */
 export async function queryWithoutUser<R extends pg.QueryResultRow>(text: string, values: unknown[]): Promise<R[]> {
 	return (await getPool().query<R>(text, values)).rows;
