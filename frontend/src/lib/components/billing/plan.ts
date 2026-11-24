@@ -57,8 +57,7 @@ export function subscriptionLine(s: Subscription | null): { text: string; warn: 
 /**
  * A team's subscription in editor seats: "5 editor seats (3 included, 2
  * extra)", or "3 editor seats (all included)"; null with no subscription or on
- * a personal account. No total is shown: the subscription doesn't record
- * whether it is billed monthly or yearly (docs/ui.md § Plan and usage).
+ * a personal account. What it costs is subscriptionTotalLine's.
  */
 export function subscriptionSeatsLine(p: Pick<AccountPlan, 'account' | 'plan' | 'subscription'>): string | null {
 	const s = p.subscription;
@@ -67,6 +66,25 @@ export function subscriptionSeatsLine(p: Pick<AccountPlan, 'account' | 'plan' | 
 	const extra = s.seats - included;
 	const seats = `${fmtNum(s.seats)} editor seat${s.seats === 1 ? '' : 's'}`;
 	return extra > 0 ? `${seats} (${fmtNum(included)} included, ${fmtNum(extra)} extra)` : `${seats} (all included)`;
+}
+
+/**
+ * What the subscription costs, from its interval, its seats and the plan's
+ * prices: "R 3 497.00 a month for 5 editor seats" on a team (Team's price plus
+ * each seat past the included ones), "R 8 990.00 a year" on a person's. Null
+ * with no subscription, or no interval recorded (a staff grant, a subscription
+ * from before 332), or a total of nothing: a guessed total would read as what
+ * the account is charged (docs/ui.md § Plan and usage).
+ */
+export function subscriptionTotalLine(p: Pick<AccountPlan, 'account' | 'plan' | 'subscription'>): string | null {
+	const s = p.subscription;
+	if (!s || (s.interval !== 'month' && s.interval !== 'year')) return null;
+	const team = p.account.kind === 'team';
+	const minor = checkoutTotalMinor(p.plan, s.interval, team ? s.seats : null);
+	if (!(minor > 0)) return null;
+	const per = s.interval === 'month' ? 'a month' : 'a year';
+	const forSeats = team ? ` for ${fmtNum(s.seats)} editor seat${s.seats === 1 ? '' : 's'}` : '';
+	return `${fmtPrice(minor, p.plan.currency)} ${per}${forSeats}`;
 }
 
 /** One usage bar: its label, the figures as words, and how full it is (null when there is no bar). */
@@ -194,6 +212,22 @@ export function checkoutTotalMinor(offer: Offer, interval: BillingInterval, seat
 	if (!so || seats === null) return base;
 	const extra = Math.max(0, seats - so.included);
 	return base + extra * (interval === 'month' ? so.extraMonthlyMinor : so.extraAnnualMinor);
+}
+
+/**
+ * Where Team's seat field starts: the team's editors when it has more than the
+ * included seats (so checkout doesn't sell fewer seats than it uses), else the
+ * included seats; never past the most one checkout sells.
+ */
+export function startingSeats(seats: SeatOffer, editorCount: number | null | undefined): number {
+	const n = typeof editorCount === 'number' && Number.isInteger(editorCount) ? editorCount : 0;
+	return Math.min(seats.max, Math.max(seats.included, n));
+}
+
+/** "This team has 4 editors", beside the seat field; null when the count isn't known (a person's account). */
+export function editorsHint(editorCount: number | null | undefined): string | null {
+	if (typeof editorCount !== 'number' || !Number.isInteger(editorCount) || editorCount < 0) return null;
+	return `This team has ${fmtNum(editorCount)} editor${editorCount === 1 ? '' : 's'}.`;
 }
 
 /** The line under the seat field: "3 editor seats included; each extra one is R 499.00 a month or R 4 990.00 a year." */

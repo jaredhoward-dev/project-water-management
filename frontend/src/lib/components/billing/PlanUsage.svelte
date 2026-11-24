@@ -12,7 +12,9 @@
 	// message), and its buttons price the seats chosen, or show no price while
 	// the count is invalid. A team's subscription says its seats. The workspace is English, so a refusal shows the API's own
 	// English message (the billing codes are machine-only); no farmer page shows
-	// any of it. The figures and words come from plan.ts.
+	// any of it. The figures and words come from plan.ts. Team's seat field starts at
+	// the team's editors when they pass the included seats, and says how many there
+	// are; a subscription with a recorded interval says what it costs (332).
 	import { onMount, untrack } from 'svelte';
 	import { replaceState } from '$app/navigation';
 	import { page } from '$app/state';
@@ -24,13 +26,16 @@
 		CONFIRM_DELAYS_MS,
 		billingActions,
 		checkoutNotice,
+		editorsHint,
 		monthName,
 		priceLine,
 		seatHint,
 		seatOffer,
 		shadowNote,
+		startingSeats,
 		subscriptionLine,
 		subscriptionSeatsLine,
+		subscriptionTotalLine,
 		upgradeLabel,
 		usageRows,
 		type ConfirmState
@@ -76,8 +81,8 @@
 			.catch(() => {});
 	});
 
-	// Team's seats: the count chosen (the included seats once the offer arrives,
-	// then only what the person types), whether the field holds text it can't
+	// Team's seats: the count chosen (once the offer arrives, the larger of the
+	// included seats and the team's editors, then only what the person types), whether the field holds text it can't
 	// take (its own registry, so it never counts as unsaved work elsewhere), and
 	// what the buttons price (null while invalid).
 	const seats = $derived(seatOffer(offer));
@@ -87,7 +92,7 @@
 	$effect(() => {
 		if (!seats || seatsFilled) return;
 		seatsFilled = true;
-		seatValue = seats.included;
+		seatValue = startingSeats(seats, plan.team?.editorCount);
 	});
 	const seatsInvalid = $derived(!!seats && (seatFields.count > 0 || seatValue === null));
 	const seatCount = $derived(seats && !seatsInvalid ? seatValue : null);
@@ -159,6 +164,8 @@
 
 	const sub = $derived(subscriptionLine(plan.subscription));
 	const seatsLine = $derived(subscriptionSeatsLine(plan));
+	const totalLine = $derived(subscriptionTotalLine(plan));
+	const editors = $derived(editorsHint(plan.team?.editorCount));
 	const rows = $derived(usageRows(plan));
 	const nothingUsed = $derived(rows.every((r) => r.used === 0));
 </script>
@@ -172,6 +179,7 @@
 		<p class="muted price" data-price>{priceLine(plan.plan)}</p>
 		{#if sub}
 			<p class="sub" class:warn={sub.warn} data-subscription={plan.subscription?.status}>{sub.text}</p>
+			{#if totalLine}<p class="muted sub" data-subscription-total>{totalLine}</p>{/if}
 			{#if seatsLine}<p class="muted sub" data-subscription-seats>{seatsLine}</p>{/if}
 		{:else}
 			<p class="muted sub" data-subscription="none">No subscription: {whose} is on {plan.plan.name}.</p>
@@ -199,9 +207,10 @@
 						step={1}
 						bind:value={seatValue}
 						invalidMessage="Choose a whole number of seats from {seats.included} to {seats.max}."
-						aria-describedby="checkout-seats-hint"
+						aria-describedby={editors ? 'checkout-seats-editors checkout-seats-hint' : 'checkout-seats-hint'}
 						data-seats-input
 					/>
+					{#if editors}<p class="muted seats-hint" id="checkout-seats-editors" data-seats-editors>{editors}</p>{/if}
 					<p class="muted seats-hint" id="checkout-seats-hint">{seatHint(seats, offer?.currency ?? 'ZAR')}</p>
 				</div>
 			{/if}
