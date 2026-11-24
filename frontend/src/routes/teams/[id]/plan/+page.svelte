@@ -83,8 +83,11 @@
 				portal={() => api.teams.portal(teamId)}
 				{reload}
 				returned={page.url.searchParams.get('checkout')}
-			/>
-			<SeatChange {plan} change={(n) => api.teams.changeSeats(teamId, n)} {reload} />
+			>
+				{#snippet seatChange()}
+					{#if plan}<SeatChange {plan} change={(n) => api.teams.changeSeats(teamId, n)} {reload} />{/if}
+				{/snippet}
+			</PlanUsage>
 		{/if}
 	</LoadState>
 </main>
