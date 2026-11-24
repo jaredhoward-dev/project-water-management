@@ -4469,7 +4469,8 @@ turn (up to 6 model calls with tool reads between) runs past the API's
   than `assistant_budget_monthly_usd` or than the deployment-wide token cap
   is worth at the input price, so free use alone passes neither. They are
   set on this Lambda only (it begins every turn; the status shows the token
-  caps), and refuse a turn only while `BILLING_ENFORCED` is on (billing.md §
+  caps), required there by the production check (`config/production.ts`),
+  and refuse a turn only while `BILLING_ENFORCED` is on (billing.md §
   Assistant dollar caps);
   The status (`GET /api/projects/:id/assistant`) stays on the API, which
   carries the same `ASSISTANT_*` values so it shows what the assistant

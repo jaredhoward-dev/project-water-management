@@ -1241,7 +1241,7 @@ variable "assistant_budget_monthly_usd" {
 # on; off, they only record. Defaults are the code's (backend/src/assistant/
 # config.ts) and the bounds production.ts checks.
 variable "assistant_free_usd_per_day" {
-  description = "Dollars one person on a Free account may spend on the assistant a UTC day (ASSISTANT_FREE_USD_PER_DAY; assistant_daily_cap past it, or past assistant_free_messages_per_day, whichever comes first). Issue #641's figure, $0.30."
+  description = "Dollars one person on a Free account may spend on the assistant a SAST day, 00:00 to 24:00 South African time (ASSISTANT_FREE_USD_PER_DAY; assistant_daily_cap past it, or past assistant_free_messages_per_day, whichever comes first). Issue #641's figure, $0.30."
   type        = number
   default     = 0.3
   validation {
@@ -1251,7 +1251,7 @@ variable "assistant_free_usd_per_day" {
 }
 
 variable "assistant_free_messages_per_day" {
-  description = "Messages one person on a Free account may send the assistant a UTC day (ASSISTANT_FREE_MESSAGES_PER_DAY; assistant_daily_cap past it). Issue #641's figure, 20."
+  description = "Messages one person on a Free account may send the assistant a SAST day (ASSISTANT_FREE_MESSAGES_PER_DAY; assistant_daily_cap past it). Issue #641's figure, 20."
   type        = number
   default     = 20
   validation {

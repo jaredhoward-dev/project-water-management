@@ -3801,7 +3801,7 @@ page holds the conversation and sends it with each turn.
   turn still running keeps counting with its `user_id` cleared, until it is
   charged or expires.
 
-### Billing (323_billing.sql, 331_billing_rls_order.sql)
+### Billing (323_billing.sql, 331_billing_rls_order.sql, 338_live_catchments.sql, 339_team_assistant_share.sql)
 
 Plans, who each project bills to, and monthly usage, in **shadow mode**
 (issue #641 Phase 1): everything is counted, nothing is refused, and no

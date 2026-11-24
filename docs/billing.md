@@ -1197,13 +1197,15 @@ control, a card subscription and an open-ended grant left alone, a renewal).
 ## Later phases
 
 Pointers to [issue #641](https://github.com/jaredhoward-dev/project-water-management/issues/641);
-none of this is built:
+none of this is built except where a bullet says so:
 
 - **Enforcement** ("Enforcement design"): each limit checked in the
   transaction of the action, under an advisory lock per account, answering
   `402 plan_limit` with `{ limit, used, plan }`; soft warnings at 80%;
   downgrade and lapse without data loss. (Staff grants are built: [§ Staff grants](#staff-grants);
-  so is the Team seat refusal, off until `BILLING_ENFORCED`: [§ Team seats](#team-seats).)
+  so is the Team seat refusal, off until `BILLING_ENFORCED`: [§ Team seats](#team-seats);
+  and Free's one live catchment, the same way, whose answer also carries
+  `key: 'live_catchments'`: [§ Live catchments (Free)](#live-catchments-free).)
 - **Billing provider** ("Billing provider"): dunning, refunds and invoices.
   The provider seam, the webhook, checkout and the portal are built
   ([§ Webhooks and providers](#webhooks-and-providers),

@@ -240,7 +240,8 @@ browser ──HTTPS──► CloudFront + WAF (us-east-1 ACL)      icwbt.jaredho
   `assistant_free_pool_usd_per_month` $30, the code's defaults) are set on
   the assistant only, which begins every turn; the plan refuses a pool
   larger than the assistant budget or than the deployment-wide token cap is
-  worth at the input price.
+  worth at the input price, and the assistant's production check requires
+  all three (`backend/src/config/production.ts`).
 - **TLS to RDS** is `sslmode=verify-full` (chain + hostname). Both zips carry
   `infra/certs/rds-global-bundle.pem` (the public AWS RDS CA bundle from
   `https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem`), and
