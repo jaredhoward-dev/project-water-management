@@ -238,6 +238,19 @@ describe('AssistantPanel', () => {
 		expect(out).not.toContain('assistant-compare-plans');
 	});
 
+	it('Free’s verified-email gate: #641’s words with Resend when unverified, none when the address is temporary; the box stays open', () => {
+		const out = html(chat({ refusal: { kind: 'email', code: 'email_unverified' } }));
+		expect(out).toContain('data-testid="email-gate"');
+		expect(out).toContain('data-code="email_unverified"');
+		expect(out).toContain('Verify your email to use the assistant. We sent a link to');
+		expect(out).toMatch(/<button[^>]*>Resend<\/button>/);
+		expect(out).not.toMatch(/<textarea[^>]*disabled/);
+		expect(out).not.toMatch(/quota|abuse|402/i);
+		const temp = html(chat({ refusal: { kind: 'email', code: 'email_disposable' } }));
+		expect(temp).toContain('you need a permanent email address');
+		expect(temp).not.toMatch(/>Resend</);
+	});
+
 	it('Free’s day and month offer Compare plans (the month says what Pro includes); a paid account’s caps don’t', () => {
 		const cap = (code: 'assistant_daily_cap' | 'assistant_monthly_cap' | 'assistant_member_cap', plan: string | null) =>
 			html(chat({ refusal: { kind: 'cap', code, seconds: 3600, resetsAt: '2026-12-01T00:00:00.000Z', message: 'Words.', plan } }));

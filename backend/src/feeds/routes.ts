@@ -6,6 +6,7 @@ import { z } from 'zod';
 import type { AuthEnv } from '../auth/middleware.js';
 import { withUser } from '../db/tx.js';
 import { ApiError } from '../http/errors.js';
+import { requireFreeVerifiedEmail } from '../billing/emailGate.js';
 import { readJson } from '../http/body.js';
 import { feedFetchDedupeKey } from '../jobs/handlers/feed-fetch.js';
 import { enqueueJob } from '../jobs/queue.js';
@@ -384,6 +385,8 @@ export const feedRoutes = new Hono<AuthEnv>()
 		const feed = await withUser(c.get('userId'), async (db) => {
 			await requireRole(db, id, 'owner');
 			if (input.source === 'station_api' && !stationApiFeedsOn()) throw new ApiError(400, STATION_API_OFF_MESSAGE);
+			// Free's verified-email gate (BILLING_ENFORCED only; billing/emailGate.ts): a feed attached switched on.
+			if (input.enabled) await requireFreeVerifiedEmail(db, id, 'feeds');
 			await attachSlot(db, id, input.source);
 			await refuseTakeOver(db, id, input);
 			const { input: checked, replaceFrom } = await versionCheck(db, id, input, true);
@@ -425,6 +428,8 @@ export const feedRoutes = new Hono<AuthEnv>()
 				// A new key is checked against the feed as saved (FeedInput: station API feeds that send one only).
 				...(patch.credential ? { credential: patch.credential } : {})
 			});
+			// Free's verified-email gate (BILLING_ENFORCED only): switching a feed on, not saving one already on or off.
+			if (input.enabled && !cur.enabled) await requireFreeVerifiedEmail(db, id, 'feeds');
 			// Moving a feed onto the source is attaching one: refused while the server has them off.
 			if (input.source === 'station_api' && cur.source !== 'station_api') {
 				if (!stationApiFeedsOn()) throw new ApiError(400, STATION_API_OFF_MESSAGE);

@@ -24,6 +24,7 @@
 	import Dialog from '#lib/components/common/Dialog.svelte';
 	import Fold from '#lib/components/common/Fold.svelte';
 	import AnswerText from './AnswerText.svelte';
+	import EmailGateNotice from '#lib/components/billing/EmailGateNotice.svelte';
 	import { tick } from 'svelte';
 	import type { AssistantProposal } from '#lib/api/types.js';
 	import { fmtDay, fmtPct, fmtWhen } from '#lib/format/number.js';
@@ -327,6 +328,9 @@
 				<p class="note warn" role="alert" data-testid="assistant-budget-spent">
 					{SPENT_WHOSE[chat.spentScope ?? 'project']} assistant budget for the month is used up. It starts again on {fmtDay(st.budget.resetsAt)}.
 				</p>
+			{:else if chat.refusal?.kind === 'email'}
+				<!-- Free's verified-email gate (billing enforced): #641's words and Resend; the box stays open for after. -->
+				<EmailGateNotice code={chat.refusal.code} feature="assistant" />
 			{:else if chat.refusal?.kind === 'error'}
 				<p class="note err" role="alert">The question wasn’t sent: {chat.refusal.message}</p>
 			{/if}

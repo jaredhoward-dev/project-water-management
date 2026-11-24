@@ -105,7 +105,9 @@ reports it**: `GET /account/plan` and `GET /teams/:id/plan` return it as
 `enforced`, so the UI can word the usage bars ("what you would hit"). The
 limits built to refuse on it are a Team's editor seats
 ([§ Team seats](#team-seats)) and the assistant's dollar caps
-([§ Assistant dollar caps](#assistant-dollar-caps)); everything else still only counts. Set it in
+([§ Assistant dollar caps](#assistant-dollar-caps)), Free's one live catchment
+([§ Live catchments (Free)](#live-catchments-free)) and Free's verified-email
+gate ([§ Verified email on Free](#verified-email-on-free)); everything else still only counts. Set it in
 `backend/.env.development.local` to see the enforced wording locally
 ([run-locally.md](./run-locally.md#one-time-setup)).
 
@@ -1053,6 +1055,61 @@ Built but off: nothing is paused unless `BILLING_ENFORCED` is on.
   (positive control); members read the marker, strangers don't; the owner's
   choice moves the pause and a stranger's is refused; an upgrade resumes
   everything; a never-paid account isn't paused; only the worker sweeps.
+
+## Verified email on Free
+
+Issue #641 § Free tier and abuse, items 1 and 4 (decided): "the assistant
+and live feeds need a verified email", and item 5, no disposable addresses.
+Built in round 9, **off unless `BILLING_ENFORCED` is on**: no setting of its
+own, since #641 makes it a Free limit like the rest, and Phase 2 switches
+them on together.
+
+- **What it refuses.** On a project whose billing account has no live
+  subscription (Free; trialing, active and past-due accounts are never
+  gated, as 338 counts them), the caller can't start an assistant turn
+  (`POST …/assistant/messages`) or switch a data feed on (`POST
+  …/feeds` with the feed enabled, or `PATCH …/feeds/:feedId` taking it from
+  off to on) while their email is unverified (`403 email_unverified`) or on
+  a disposable domain (`403 email_disposable`). The gate is the caller's,
+  whatever their role: an unverified viewer on a verified owner's Free
+  project is refused the assistant. Attaching a feed switched off, saving a
+  feed already on, a project with no billing account, and every route that
+  isn't one of those three are never refused. The refusal comes after the
+  role check (a non-member still gets 404) and before anything is counted
+  or reserved.
+- **Where.** `backend/src/billing/emailGate.ts` (`requireFreeVerifiedEmail`),
+  called from `assistant/routes.ts` before `beginTurn` and from
+  `feeds/routes.ts`; whether it applies comes from `app_free_email_gate`
+  (343_free_email_gate), a definer function run as the caller, since
+  `app_entitlements` hides the plan below editor. It answers NULL unless
+  billing is enforced and the caller is a member of a project on Free, and
+  then only the caller's own address and whether it is verified.
+- **Reachability.** An unconfirmed account can't sign in (issue #57), so
+  `email_unverified` is defence in depth for sessions made before that rule;
+  `email_disposable` is the one an ordinary account meets.
+- **The blocklist.** `backend/src/auth/disposable.ts` (`isDisposable(email)`,
+  `isDisposableDomain(domain)`): a domain or any parent of it on the
+  vendored CC0 `disposable-email-domains` list
+  (`backend/src/auth/disposableDomains.ts`, its source, commit, date,
+  licence and hash in the header; [data-sources.md §
+  disposable-email-domains](./data-sources.md#disposable-email-domains)).
+  Never fetched at runtime. Sign-up and an email change (#641 item 5) and
+  the reverse trial don't call it yet ([followups.md](./followups.md)).
+- **The words.** Workspace English, #641's copy: "Verify your email to use
+  the assistant. We sent a link to name@example.com." with *Resend* (the
+  feeds panel's says "switch on a live data feed"); a disposable address:
+  "To use the assistant on the Free plan, you need a permanent email
+  address. This one is from a temporary-mail service." An information note,
+  not an error colour (`EmailGateNotice.svelte`, `emailGate.ts` in
+  `frontend/src/lib/components/billing/`), in the assistant panel's foot and
+  the Data feeds panel. The API's own words carry no address; the panel
+  shows the signed-in person's.
+- **Tests.** `backend/src/billing/emailGate.db.test.ts` (off allowed; on,
+  unverified and disposable refused for the assistant and for attaching and
+  switching on a feed; verified, paid and attached-off allowed; a
+  non-member's 404; the function's answers), `backend/src/auth/disposable.test.ts`,
+  `frontend/src/lib/components/billing/emailGate.test.ts`, and the assistant
+  panel's and chat's tests.
 
 ## Staff grants
 
