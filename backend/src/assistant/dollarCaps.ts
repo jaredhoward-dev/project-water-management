@@ -1,23 +1,41 @@
 // The assistant's dollar caps and the paced Free pool (issue #641;
-// 336_assistant_dollar_caps.sql, docs/billing.md § Assistant dollar caps).
-// app_assistant_begin decides; this module holds the sums the backend shows
-// or logs beside it, and the refusals' wording. Every boundary is UTC.
+// 336_assistant_dollar_caps.sql, 337_assistant_sast_day.sql, docs/billing.md §
+// Assistant dollar caps). app_assistant_begin decides; this module holds the
+// sums the backend shows or logs beside it, and the refusals' wording. The Free
+// day is the South African day (00:00 SAST, 22:00 UTC; 337); every month is
+// UTC, as assistant_usage's.
 import type { ErrorCode } from '../http/errors.js';
 
-/** Days left in `day`'s UTC month, `day` included (1 on the last day). */
-export function daysLeftInMonth(day: Date): number {
-	const last = new Date(Date.UTC(day.getUTCFullYear(), day.getUTCMonth() + 1, 0)).getUTCDate();
-	return last - day.getUTCDate() + 1;
+const DAY_MS = 86_400_000;
+
+/** SAST is UTC+2 all year (Africa/Johannesburg has had no daylight saving since 1944). */
+const SAST_OFFSET_MS = 2 * 3_600_000;
+
+/** The SAST day `now` falls on, as a Date at that day's 00:00 UTC (SQL's assistant_day_of). */
+export function sastDay(now: Date): Date {
+	const local = new Date(now.getTime() + SAST_OFFSET_MS);
+	return new Date(Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate()));
 }
 
 /**
- * The Free pool's share for a UTC day: (pool left at the day's start ÷ days
- * left, the day included) × 2, in whole micro-USD, never below 0. The same sum
- * as SQL's assistant_pool_day_allowance (a DB test pins them together).
+ * SAST days left in `now`'s UTC month, `now`'s SAST day included, at least 1.
+ * Between 22:00 and 24:00 UTC on a month's last day the SAST day is already the
+ * next month's first, so none is left: 1.
  */
-export function poolDayAllowance(poolUsdMicros: number, spentBeforeTodayUsdMicros: number, day: Date): number {
+export function daysLeftInMonth(now: Date): number {
+	const monthEnd = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1);
+	return Math.max(1, Math.round((monthEnd - sastDay(now).getTime()) / DAY_MS));
+}
+
+/**
+ * The Free pool's share for the SAST day `now` falls on: (pool left at the
+ * day's start ÷ days left in the UTC month, the day included) × 2, in whole
+ * micro-USD, never below 0. The same sum as SQL's assistant_pool_day_allowance
+ * (a DB test pins them together).
+ */
+export function poolDayAllowance(poolUsdMicros: number, spentBeforeTodayUsdMicros: number, now: Date): number {
 	const left = Math.max(0, poolUsdMicros - spentBeforeTodayUsdMicros);
-	return Math.max(0, Math.floor((left / daysLeftInMonth(day)) * 2));
+	return Math.max(0, Math.floor((left / daysLeftInMonth(now)) * 2));
 }
 
 /** The pool's alarm thresholds, in percent of the month's pool (infra/alarms.tf). */
@@ -34,22 +52,21 @@ export function poolAlarmShare(usedUsdMicros: number | null, poolUsdMicros: numb
 	return pct >= 80 ? 80 : pct >= 50 ? 50 : null;
 }
 
-/** When the UTC day after `now` starts, ISO. */
+/** The next 00:00 SAST after `now` (22:00 UTC), ISO: when the Free day starts again. */
 export function dayResetsAt(now = new Date()): string {
-	return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1)).toISOString();
+	return new Date(sastDay(now).getTime() + DAY_MS - SAST_OFFSET_MS).toISOString();
 }
 
 /** app_assistant_begin's dollar outcomes. */
 export type DollarOutcome = 'day' | 'month' | 'member' | 'pool';
 
 /** Each dollar refusal's stable code (http/errors.ts ERROR_CODES) and the issue's words (#641 "Copy"; workspace, English). */
-const DAY_MS = 86_400_000;
 
 export const DOLLAR_REFUSAL: Record<DollarOutcome, { code: ErrorCode; message: (resetsAt: string, nowMs?: number) => string }> = {
 	day: {
 		code: 'assistant_daily_cap',
 		message: () =>
-			'That’s today’s free assistant use. It’s back at midnight (UTC). Everything else in your catchment keeps working: runs, calibration, scenarios and exports have no limit on Free.'
+			'That’s today’s free assistant use. It’s back at midnight, South African time. Everything else in your catchment keeps working: runs, calibration, scenarios and exports have no limit on Free.'
 	},
 	month: {
 		code: 'assistant_monthly_cap',
@@ -63,7 +80,7 @@ export const DOLLAR_REFUSAL: Record<DollarOutcome, { code: ErrorCode; message: (
 	},
 	pool: {
 		code: 'assistant_free_pool_spent',
-		// The day's paced share is back at the next midnight; when the month's whole pool is gone it is back at the
+		// The day's paced share is back at the next 00:00 SAST; when the month's whole pool is gone it is back at the
 		// month's start, which can be weeks away, so that case names the date rather than saying "tomorrow".
 		message: (resetsAt, nowMs = Date.now()) =>
 			Date.parse(resetsAt) - nowMs > DAY_MS

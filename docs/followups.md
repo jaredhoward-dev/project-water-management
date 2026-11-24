@@ -901,12 +901,12 @@ are #641's checklist. Open items from building it:
       migration that drops it once nothing calls it. Trigger: the
       `backend@` release carrying 336 is in production and no older
       backend can be rolled back to.
-- [ ] **The Free day resets at UTC midnight, not 00:00 SAST.** #641 states
-      SAST; 336 uses UTC like `assistant_usage`'s month, so the day and the
-      month turn over together (02:00 SAST). Durable fix, if the operator
-      wants SAST: key `assistant_day_usage.day` and the pool's pacing on
-      the SAST day in a forward migration, with tests under a skewed TZ.
-      Trigger: the operator's answer, before `BILLING_ENFORCED` is on.
+- [x] **The Free day resets at UTC midnight, not 00:00 SAST** (done 2026-11-24,
+      `337_assistant_sast_day.sql`). #641 states SAST; 336 had used the UTC
+      day. 337 keys `assistant_day_usage.day`, the reservation's `day` and
+      the pool's pacing on the SAST day and waits the day's refusals to
+      00:00 SAST; every month stays UTC, as `assistant_usage`'s
+      ([billing.md § Assistant dollar caps](./billing.md#assistant-dollar-caps)).
 - [ ] **A team admin can't raise the member share.** 336 adds
       `billing_account.assistant_member_max_pct` (50) but no route or page
       sets it. Durable fix: a team-admin route and a control on the team's

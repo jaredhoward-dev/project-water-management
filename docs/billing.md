@@ -112,7 +112,7 @@ limits built to refuse on it are a Team's editor seats
 ## Assistant dollar caps
 
 Built, **off unless `BILLING_ENFORCED`** (issue #641 "Free AI allowance" and
-"Free tier and abuse", accepted 2026-10-29; `336_assistant_dollar_caps.sql`,
+"Free tier and abuse", accepted 2026-10-29; `336_assistant_dollar_caps.sql`, `337_assistant_sast_day.sql`,
 `backend/src/assistant/dollarCaps.ts`). `app_assistant_begin` checks them
 after the token caps (264), against the project's billing account, and
 reserves the turn's dollars beside its tokens, so the month's (and day's)
@@ -121,10 +121,10 @@ turns run at once (begins are serialised by 264's deployment lock).
 
 | Cap | Who | Limit | Refusal (`429`, `Retry-After`) |
 | --- | --- | --- | --- |
-| Day | A person on a Free account | `ASSISTANT_FREE_USD_PER_DAY` ($0.30) **or** `ASSISTANT_FREE_MESSAGES_PER_DAY` (20) a UTC day, whichever first | `assistant_daily_cap`, until UTC midnight |
+| Day | A person on a Free account | `ASSISTANT_FREE_USD_PER_DAY` ($0.30) **or** `ASSISTANT_FREE_MESSAGES_PER_DAY` (20) a SAST day (00:00 to 24:00 South African time), whichever first | `assistant_daily_cap`, until 00:00 SAST (22:00 UTC) |
 | Month | The account | The plan's `assistant_usd_micros_per_month` (Free $1, Pro $15), or `assistant_usd_micros_per_seat_month` × seats (Team, $15 each, the live subscription's seats, never fewer than 3) | `assistant_monthly_cap`, until the UTC month ends |
 | Member | A person on a per-seat (Team) account | `billing_account.assistant_member_max_pct` of the account's month (50%) | `assistant_member_cap`, until the month ends |
-| Pool | Free and trialing accounts together | `ASSISTANT_FREE_POOL_USD_PER_MONTH` ($30) a UTC month, and on any day at most (pool left at the day's start ÷ days left, today included) × 2 | `assistant_free_pool_spent`, until UTC midnight (or the month's end, when the month's pool is spent) |
+| Pool | Free and trialing accounts together | `ASSISTANT_FREE_POOL_USD_PER_MONTH` ($30) a UTC month, and on any SAST day at most (pool left at the day's start ÷ SAST days left in the UTC month, today included, at least 1) × 2 | `assistant_free_pool_spent`, until 00:00 SAST (or the UTC month's end, when the month's pool is spent) |
 
 Checked in that order, the person's own caps first, so a refusal names the
 cap that is theirs when it binds; the pool's wording says it isn't something
@@ -148,9 +148,34 @@ charged its dollars in full.
 the dollars are still reserved and recorded and the day's messages counted
 (shadow mode), so the report can measure what enforcement would do.
 
-**Boundaries are UTC**, like `assistant_usage`'s month. #641 states the Free
-day resets at 00:00 SAST; moving it is an open question for the operator
-([followups.md](./followups.md#billing-issue-641)).
+**The day is South Africa's; the month is UTC.** The Free day, and the day
+the pool's share is paced on, run 00:00 to 24:00 SAST (Africa/Johannesburg,
+UTC+2 with no daylight saving), as #641 states (337; 336 had used the UTC
+day). Every month stays UTC: `assistant_usage` is keyed by the UTC month
+(262), and the token caps, the dollar month, a Team member's share, the
+pool's month and the Plan page's usage all read it. Moving the month too
+would re-key that table and every caller to shift the turnover by two hours,
+so the simplest consistent answer is one UTC month for everything and a SAST
+day only where a person meets a day. Where the two meet:
+
+- The pool's "days left" counts SAST days left in the UTC month. From 22:00
+  to 24:00 UTC on a month's last day the SAST day is already the next
+  month's first, so none is left and the count is 1: the share is what the
+  month's pool has left, × 2 (the month's own cap still binds).
+- From 00:00 UTC (02:00 SAST) on the 1st the month is new, but the SAST
+  day's spend still holds the two hours before it. The begin floors the
+  month's spend before today at 0, so those hours count against the new
+  month's first day's share: a little less, never more.
+- A refusal's `params.resetsAt` (and `Retry-After`) is the next 00:00 SAST
+  for the day and a pool day, the first instant of the next UTC month for
+  the month, a member's share and a spent pool month.
+
+Rows written before 337 hold a UTC day; they are kept and read as the SAST
+day of the same date. On deploy day D, before 22:00 UTC, D's row (spend
+since 02:00 SAST) is read as SAST day D's, so that one day misses at most
+the two hours from 00:00 to 02:00 SAST; between 22:00 and 24:00 UTC the SAST
+day is already D+1 and starts empty. Nothing is rewritten, and the purge is
+unchanged (it drops day rows before the kept months' first date).
 
 **The pool's alarms.** Each begun turn of a pool account logs
 `assistant_free_pool` (amounts only) once the pool's month has passed 50% or
