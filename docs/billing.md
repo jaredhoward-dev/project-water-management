@@ -103,10 +103,67 @@ The backend setting `BILLING_ENFORCED` (default `false`; only the exact string
 `true` turns it on) says whether plan limits refuse anything. **Phase 1 only
 reports it**: `GET /account/plan` and `GET /teams/:id/plan` return it as
 `enforced`, so the UI can word the usage bars ("what you would hit"). The
-one limit built to refuse on it is a Team's editor seats
-([§ Team seats](#team-seats)); everything else still only counts. Set it in
+limits built to refuse on it are a Team's editor seats
+([§ Team seats](#team-seats)) and the assistant's dollar caps
+([§ Assistant dollar caps](#assistant-dollar-caps)); everything else still only counts. Set it in
 `backend/.env.development.local` to see the enforced wording locally
 ([run-locally.md](./run-locally.md#one-time-setup)).
+
+## Assistant dollar caps
+
+Built, **off unless `BILLING_ENFORCED`** (issue #641 "Free AI allowance" and
+"Free tier and abuse", accepted 2026-10-29; `336_assistant_dollar_caps.sql`,
+`backend/src/assistant/dollarCaps.ts`). `app_assistant_begin` checks them
+after the token caps (264), against the project's billing account, and
+reserves the turn's dollars beside its tokens, so the month's (and day's)
+spend plus every running turn's reservation never passes a cap, however many
+turns run at once (begins are serialised by 264's deployment lock).
+
+| Cap | Who | Limit | Refusal (`429`, `Retry-After`) |
+| --- | --- | --- | --- |
+| Day | A person on a Free account | `ASSISTANT_FREE_USD_PER_DAY` ($0.30) **or** `ASSISTANT_FREE_MESSAGES_PER_DAY` (20) a UTC day, whichever first | `assistant_daily_cap`, until UTC midnight |
+| Month | The account | The plan's `assistant_usd_micros_per_month` (Free $1, Pro $15), or `assistant_usd_micros_per_seat_month` × seats (Team, $15 each, the live subscription's seats, never fewer than 3) | `assistant_monthly_cap`, until the UTC month ends |
+| Member | A person on a per-seat (Team) account | `billing_account.assistant_member_max_pct` of the account's month (50%) | `assistant_member_cap`, until the month ends |
+| Pool | Free and trialing accounts together | `ASSISTANT_FREE_POOL_USD_PER_MONTH` ($30) a UTC month, and on any day at most (pool left at the day's start ÷ days left, today included) × 2 | `assistant_free_pool_spent`, until UTC midnight (or the month's end, when the month's pool is spent) |
+
+Checked in that order, the person's own caps first, so a refusal names the
+cap that is theirs when it binds; the pool's wording says it isn't something
+they did and has no upgrade prompt (#641's copy). Each refusal is a stable
+code with `params.seconds` and `params.resetsAt` ([api.md §
+Assistant](./api.md#assistant)).
+
+**Reserving dollars.** A turn's dollars are its token budget × the model's
+dearest price per weighted token (`pricing.ts` `usdMicrosPerWeightedToken`:
+the greatest of input, cache write and output ÷ 5; Sonnet 5.5 2.5
+micro-USD), rounded up, so no turn within its budget can cost more. Enforced,
+the token budget is cut to what the tightest dollar cap has left at that
+price (a fresh Free person's turn: $0.30 ÷ 2.5 = 120 000 tokens), and a cap
+with less than the turn's floor left refuses. A model with no price reserves
+no dollars, and only a cap already spent refuses it. The charge moves the
+real cost onto the person's day row (`assistant_day_usage`) and the month's
+(`assistant_usage.cost_usd_micros`); a reservation that expires unsettled is
+charged its dollars in full.
+
+**Off** (the default), nothing new refuses and the budget is exactly 264's;
+the dollars are still reserved and recorded and the day's messages counted
+(shadow mode), so the report can measure what enforcement would do.
+
+**Boundaries are UTC**, like `assistant_usage`'s month. #641 states the Free
+day resets at 00:00 SAST; moving it is an open question for the operator
+([followups.md](./followups.md#billing-issue-641)).
+
+**The pool's alarms.** Each begun turn of a pool account logs
+`assistant_free_pool` (amounts only) once the pool's month has passed 50% or
+80%; two CloudWatch metric filters and alarms in `infra/alarms.tf`
+(`assistant-free-pool-50`, `-80`) page through the alerts topic. They run in
+shadow mode too. A log-metric alarm was chosen over a scheduled job because
+the assistant's other spend alarms already work that way and it needs no
+new job or table.
+
+**Not built yet** ([followups.md](./followups.md#billing-issue-641)): a
+team admin's control to raise the member share (the column is there, no
+route sets it), the trial's own $2 / $1-a-day caps (no trials yet; a trial
+draws on the pool), the "questions left today" meter, and Haiku on Free.
 
 ## Metrics and the abuse report
 
@@ -156,8 +213,8 @@ spend keeps `assistant_usage`'s UTC month, as `app_account_plan` does.
 (the app doesn't record what each needs): upgrade at the limit (no checkout,
 trial or limit-message events), churn after the limit (no record of hitting
 one), reverse trial to paid (no trials), the share at the assistant's daily
-cap and the Free pool's burn by day (`assistant_usage` is monthly; no daily
-cap or pool yet), the share at the live-catchment limit (nothing is marked
+cap and the Free pool's burn by day (`assistant_day_usage` keeps each day
+since 336, but the report doesn't read it yet), the share at the live-catchment limit (nothing is marked
 live), paid seats reaching $15 (spend isn't kept per paid seat), disposable
 rejections (no blocklist yet), sign-up throttle hits per address
 (`signup_throttle` keeps only an hour's hashed buckets) and suspensions (no

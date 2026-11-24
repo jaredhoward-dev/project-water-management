@@ -3716,7 +3716,7 @@ secret kept in `infra-secrets` (see [security.md](./security.md)).
 - Goes with the account (cascade) and is in the data-subject export
   (`preferences`).
 
-### Assistant usage (262_assistant_usage.sql, 324_assistant_turn_cost.sql)
+### Assistant usage (262_assistant_usage.sql, 324_assistant_turn_cost.sql, 336_assistant_dollar_caps.sql)
 
 What the assistant costs, counted, and each running turn's reserved budget (issue #610; 264 added the reservations, issues #640 and #641; [api.md §
 Assistant](./api.md#assistant), [security.md §
@@ -3727,7 +3727,8 @@ page holds the conversation and sends it with each turn.
 | --- | --- |
 | `assistant_usage` | One row per person per project per UTC month: `project_id` (cascade), `user_id` (set null), `month` (the month's first day), `input_tokens` (every input token, cache reads and writes included), `output_tokens`, `messages`, `updated_at`, and since 324 `cache_read_tokens` and `cache_write_tokens` (the part of `input_tokens` read from and written to the prompt cache), `cost_usd_micros` (the priced turns' cost in micro-USD) and `unpriced_turns` (turns not in it); unique on (`project_id`, `month`, `user_id`), which covers the project key, and indexes on `user_id` and `month` |
 | `assistant_rate` | The hourly message cap: `user_id` (primary key, cascade), `window_start`, `messages`, a fixed one-hour window as `map_compute_throttle` (186); a row goes once its hour is over, at the person's next turn or the job tick |
-| `assistant_reservation` | A running turn's reserved budget (264): `id`, `project_id` (cascade), `user_id` (set null), `month` (the UTC month it began in, which it counts against and is charged to), `reserved` (weighted tokens), `created_at`, `expires_at`; indexes on `project_id`, `user_id`, `month` and `expires_at`. Deleted when the turn is charged; converted into the usage row in full once expired. Owner-only: RLS on, no policy, no grant |
+| `assistant_reservation` | A running turn's reserved budget (264): `id`, `project_id` (cascade), `user_id` (set null), `month` (the UTC month it began in, which it counts against and is charged to), `reserved` (weighted tokens), `created_at`, `expires_at`; indexes on `project_id`, `user_id`, `month` and `expires_at`. Deleted when the turn is charged; converted into the usage row in full once expired. Owner-only: RLS on, no policy, no grant; since 336 `reserved_usd_micros` (the dollars its budget can cost at most; NULL for an unpriced model) and `day` (the UTC day it began, indexed) |
+| `assistant_day_usage` | Each person's assistant day per billing account (336, the dollar caps; [billing.md § Assistant dollar caps](./billing.md#assistant-dollar-caps)): `billing_account_id` (cascade), `user_id` (cascade), `day` (UTC), `messages` (counted at begin), `cost_usd_micros` (added at charge, or an expired reservation's dollars), `updated_at`; primary key (`billing_account_id`, `day`, `user_id`), which covers the account key, and indexes on `user_id` and `day`. A person reads their own rows (`assistant_day_usage_own`, SELECT only); only the definer functions write; purged with the usage rows (`app_purge_assistant`); in Download my data (`assistantDays`) |
 
 - Every cap counts weighted tokens, `input + 5 × output`
   (`assistant_weighted`; assistant/config.ts `OUTPUT_TOKEN_WEIGHT`: output
