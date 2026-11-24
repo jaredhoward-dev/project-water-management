@@ -760,7 +760,9 @@ export function createApi(baseUrl: string, fetchFn: FetchFn = (...a) => fetch(..
 			checkout: (id: string, interval: BillingInterval, seats?: number) =>
 				request<BillingRedirect>('POST', `${t(id)}/plan/checkout`, seats === undefined ? { plan: 'team', interval } : { plan: 'team', interval, seats }),
 			/** Open the team's billing portal (team admin). */
-			portal: (id: string) => request<BillingRedirect>('POST', `${t(id)}/plan/portal`)
+			portal: (id: string) => request<BillingRedirect>('POST', `${t(id)}/plan/portal`),
+			/** Change the Team subscription's editor seats (team admin; Phase 5, prorated by the provider). The seats land through the webhook. */
+			changeSeats: (id: string, seats: number) => request<{ seats: number }>('POST', `${t(id)}/plan/seats`, { seats })
 		},
 		/** Plans and usage (issue #641, Phase 1: counted, never charged or refused). */
 		billing: {

@@ -164,3 +164,24 @@ export function signedDelivery(secret: string, event: Record<string, unknown>, n
 	const body = JSON.stringify(event);
 	return { body, signature: signPayload(secret, body, Math.floor(nowMs / 1000)) };
 }
+
+/**
+ * The event Stripe sends after a seat change (POST /teams/:id/plan/seats): the
+ * subscription updated, its extra-seat item at the new quantity (none at the
+ * included seats), the period and status as they were.
+ */
+export function seatsChangedEvent(
+	accountId: string,
+	sub: { planCode: string; status: string; periodStart: string; periodEnd: string; cancelAtPeriodEnd: boolean },
+	seatsIncluded: number,
+	seats: number,
+	nowMs = Date.now()
+): Record<string, unknown> {
+	return {
+		id: eventId(),
+		object: 'event',
+		type: 'customer.subscription.updated',
+		created: secs(new Date(nowMs)),
+		data: { object: subscriptionObject(accountId, sub.planCode, sub.status, secs(sub.periodStart), secs(sub.periodEnd), sub.cancelAtPeriodEnd, seats, seatsIncluded) }
+	};
+}

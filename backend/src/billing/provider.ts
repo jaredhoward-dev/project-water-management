@@ -23,10 +23,10 @@
 // the API's runtime secret, from infra-secrets; docs/deployment.md). Unset or empty,
 // every signature fails.
 import { ApiError } from '../http/errors.js';
-import { MOCK_SESSION_TTL_SECONDS, signMockSession } from './provider/mock.js';
 import { SIGNATURE_HEADER, verifySignature } from './provider/signature.js';
 import { normaliseStripeEvent } from './provider/stripe.js';
-import { createCheckoutSession, createCustomer, createPortalSession, StripeApiError } from './provider/stripeApi.js';
+import { MOCK_SESSION_TTL_SECONDS, seatsChangedEvent, signMockSession } from './provider/mock.js';
+import { changeSeatItem, createCheckoutSession, createCustomer, createPortalSession, ensureExtraSeatProduct, getSubscriptionItems, StripeApiError } from './provider/stripeApi.js';
 
 export const BILLING_PROVIDERS = ['mock', 'manual', 'stripe'] as const;
 export type BillingProviderName = (typeof BILLING_PROVIDERS)[number];
@@ -148,6 +148,25 @@ export class BillingNoCustomerError extends ApiError {
 	}
 }
 
+/** A Team's seat change (POST /teams/:id/plan/seats): the live subscription, where the provider holds it, and the seats wanted. */
+export interface SeatChange {
+	accountId: string;
+	/** The provider's subscription id (Stripe's sub_…; the mock's sub_mock_…), from 333. */
+	externalRef: string;
+	plan: CheckoutPlan;
+	subscription: LiveSubscription & { periodStart: string; periodEnd: string };
+	/** Editor seats in all after the change (the route checked the range). */
+	seats: number;
+}
+
+/** A grant (provider 'manual') holds the subscription: its seats change by a new grant, never here. */
+export class BillingGrantSeatsError extends ApiError {
+	constructor() {
+		super(409, 'this plan was granted by the operator; ask them to change its seats with a new grant');
+		this.code = 'billing_grant_seats';
+	}
+}
+
 export interface BillingProvider {
 	name: BillingProviderName;
 	/** Whether POST /billing/webhook/<name> exists at all (404 when not). */
@@ -157,6 +176,12 @@ export interface BillingProvider {
 	createCheckout(account: CheckoutAccount, plan: CheckoutPlan, interval: BillingInterval, urls: ReturnUrls, seats?: number): Promise<CheckoutResult>;
 	/** Where to send the person to manage the account's billing (card, invoices, cancel). */
 	createPortal(account: CheckoutAccount, subscription: LiveSubscription | null, urls: ReturnUrls): Promise<CheckoutResult>;
+	/**
+	 * Change a Team's editor seats on its live subscription. Writes no seats itself: the
+	 * provider's customer.subscription.updated brings them back through the webhook
+	 * (app_billing_apply), as checkout's do.
+	 */
+	changeSeats(change: SeatChange): Promise<void>;
 }
 
 /** BILLING_PROVIDER as one of ours (unset is the mock, the code default), or null for a value that names none. */
@@ -223,12 +248,20 @@ function mockProvider(secret: string | undefined, now: () => number): BillingPro
 					: null;
 			const t = sign({ kind: 'portal', accountId: account.id, returnUrl: urls.successUrl, subscription: live, exp: exp(now()) });
 			return { url: `${urls.apiBase}/billing/mock/portal?t=${encodeURIComponent(t)}` };
+		},
+		// Stripe's answer to a quantity change, at once: the signed customer.subscription.updated with the
+		// new extra-seat item, posted to the real webhook route (billing/mockCheckout.ts), so app_billing_apply writes the seats.
+		async changeSeats(change) {
+			if (!secret) throw new BillingProviderError();
+			const { deliverMockEvent } = await import('./mockCheckout.js');
+			const event = seatsChangedEvent(change.accountId, change.subscription, change.plan.seatsIncluded, change.seats, now());
+			if (!(await deliverMockEvent(event))) throw new BillingProviderError();
 		}
 	};
 }
 
 /** Stripe: webhooks checked with the endpoint's secret, checkout and the portal through its API with STRIPE_SECRET_KEY. */
-function stripeProvider(webhookSecret: string | undefined, secretKey: string | undefined, fetchImpl?: typeof fetch): BillingProvider {
+function stripeProvider(webhookSecret: string | undefined, secretKey: string | undefined, fetchImpl: typeof fetch | undefined, now: () => number): BillingProvider {
 	const client = () => {
 		if (!secretKey) throw new BillingProviderError();
 		return { secretKey, fetch: fetchImpl };
@@ -273,6 +306,34 @@ function stripeProvider(webhookSecret: string | undefined, secretKey: string | u
 			if (!account.customerRef) throw new BillingNoCustomerError();
 			const o = client();
 			return call(async () => ({ url: await createPortalSession(o, account.customerRef!, urls.successUrl) }));
+		},
+		async changeSeats(change) {
+			const o = client();
+			const extraSeats = Math.max(0, change.seats - change.plan.seatsIncluded);
+			return call(async () => {
+				const items = await getSubscriptionItems(o, change.externalRef, change.plan.code);
+				const extras = items.filter((i) => i.extraSeat);
+				const base = items.find((i) => !i.extraSeat);
+				// Two extra-seat items, or an item we can't place: someone edited it in the dashboard. Change nothing.
+				if (extras.length > 1 || !base || items.length - extras.length !== 1) throw new StripeApiError(502, 'unexpected_response', 'items');
+				const extra = extras[0] ?? null;
+				const interval = base.interval;
+				const extraSeatMinor = interval === 'year' ? change.plan.extraSeatAnnualMinor : change.plan.extraSeatMonthlyMinor;
+				if (!interval || extraSeatMinor === null) throw new StripeApiError(502, 'unexpected_response', 'interval');
+				const productId = extra === null && extraSeats > 0 ? await ensureExtraSeatProduct(o, change.plan.code, change.plan.name) : undefined;
+				// Same change in the same minute (a double click, a retried request): one change at Stripe.
+				const minute = Math.floor(now() / 60_000);
+				await changeSeatItem(o, {
+					subscriptionId: change.externalRef,
+					itemId: extra?.id ?? null,
+					extraSeats,
+					productId,
+					extraSeatMinor,
+					currency: base.currency ?? change.plan.currency,
+					interval,
+					idempotencyKey: `wm-seats-${change.externalRef}-${extra?.id ?? 'none'}-${extra?.quantity ?? 0}-${extraSeats}-${minute}`
+				});
+			});
 		}
 	};
 }
@@ -285,6 +346,9 @@ const manual: BillingProvider = {
 		throw new BillingUnavailableError();
 	},
 	createPortal: async () => {
+		throw new BillingUnavailableError();
+	},
+	changeSeats: async () => {
 		throw new BillingUnavailableError();
 	}
 };
@@ -299,5 +363,5 @@ export function billingProvider(
 	if (name === 'manual') return manual;
 	const webhookSecret = env.BILLING_WEBHOOK_SECRET?.trim() || undefined;
 	if (name === 'mock') return mockProvider(webhookSecret, deps.now ?? Date.now);
-	return stripeProvider(webhookSecret, env.STRIPE_SECRET_KEY?.trim() || undefined, deps.fetch);
+	return stripeProvider(webhookSecret, env.STRIPE_SECRET_KEY?.trim() || undefined, deps.fetch, deps.now ?? Date.now);
 }

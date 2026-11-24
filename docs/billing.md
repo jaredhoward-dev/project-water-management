@@ -505,11 +505,81 @@ Checkout sells them:
 - **Where it lands.** `subscription.seats` (326/327 store the payload's
   `seats` as given), which 324's assistant allowance already multiplies
   ($15 × seats, never fewer than the included 3).
-- **Changing seats later** is the portal's (Stripe's quantity on the extra
-  item), not built here: the portal can't add the second item to a
-  subscription that has none, so until then the operator changes a Team's
-  seats in Stripe's dashboard (the webhook syncs them). A follow-up item in
-  [followups.md](./followups.md) (§ Billing) tracks it.
+- **Changing seats later** is `POST /teams/:id/plan/seats`
+  ([§ Changing a Team's seats](#changing-a-teams-seats)): the portal can
+  change an existing item's quantity but can't add the second item to a
+  subscription bought at the included seats, since our prices are inline.
+
+### Changing a Team's seats
+
+Phase 5 ("per-seat quantity sync to Stripe (prorated)"). `POST
+/teams/:id/plan/seats` with `{ seats }`, the editor seats in all
+([api.md § Billing](./api.md#billing)), from the team plan page's *Change
+seats* control ([ui.md § Plan and usage](./ui.md#plan-and-usage)):
+
+1. **Access.** The team's admins only, through 323's functions as for
+   checkout: `404` to anyone else, before any provider call.
+2. **The body**, strict: `{ seats }` a whole number from 1 to 50, else
+   `400`, before any subscription check.
+3. **A live Team subscription.** `409` without one (none, ended, or a plan
+   other than Team). The subscription's provider and id come from
+   `app_billing_live_subscription_ref` (333), which answers the same people.
+   A **staff grant** (provider `manual`) is `409 billing_grant_seats`: a
+   grant's seats are changed by a new grant (`grant:plan --replace`, § Staff
+   grants), never here. The `manual` provider, or none, is `409
+   billing_unavailable`; a subscription another provider holds (a mock one
+   after the switch to Stripe) is `409`.
+4. **The seats.** A whole number from the plan's included seats to 50
+   (`MAX_CHECKOUT_SEATS`), different from the current count; `400`
+   otherwise, and for any other field.
+5. **The provider** changes the subscription, outside any transaction. The
+   route writes **no seats**: the provider's `customer.subscription.updated`
+   brings them back through the webhook and `app_billing_apply`, as
+   checkout's do, so `subscription.seats` keeps one writer per provider.
+
+**Stripe** (`provider/stripeApi.ts`, `Stripe-Version: 2026-10-28.endive`):
+
+- `GET /v1/subscriptions/:id?expand[]=items.data.price.product` reads the
+  items. The extra-seat item is the one whose product is named `IC-WBT
+  <plan>: extra editor seat` (checkout's `product_data`) or is ours by id;
+  the other is the plan. Two extra-seat items, or an item neither, means
+  someone edited the subscription in the dashboard: nothing is changed and
+  the answer is `503 billing_provider_error`.
+- **Update**: `POST /v1/subscription_items/:id` with the new extra
+  `quantity`.
+- **Add** (no extra-seat item yet): a subscription item's `price_data`
+  takes a product id, not `product_data`, so the product is made once under
+  a fixed id (`POST /v1/products`, id `wm_team_extra_seat`; Stripe's
+  `resource_already_exists` means it is there), then `POST
+  /v1/subscription_items` with the subscription, the extra quantity and
+  `price_data` (currency, that product, the extra-seat price for the
+  subscription's interval, read from the plan item's `recurring.interval`).
+- **Remove** (back to the included seats): `DELETE
+  /v1/subscription_items/:id`.
+- Each change sends `proration_behavior=create_prorations` and an
+  `Idempotency-Key` of the subscription, the item and its quantity, the new
+  quantity and the minute, so a double click is one change at Stripe while
+  the same change asked again later is a new one.
+
+**Proration: a decision for the operator to confirm.** The code uses
+`create_prorations`, Stripe's default, written out so a change of default
+never changes ours: adding a seat mid-period creates a proration item for
+the rest of the period, charged on the **next** invoice (not at once);
+removing one credits the unused part on the next invoice. The alternatives
+are `always_invoice` (invoice the proration at once) and `none` (the new
+quantity from the next period only, no charge or credit now). Stripe's own
+sources: the API reference for [updating a subscription item](https://docs.stripe.com/api/subscription_items/update),
+[creating one](https://docs.stripe.com/api/subscription_items/create) and
+[deleting one](https://docs.stripe.com/api/subscription_items/delete)
+(`proration_behavior`: `always_invoice`, `create_prorations`, `none`;
+default `create_prorations`), and [Prorations](https://docs.stripe.com/billing/subscriptions/prorations)
+(read 2026-11-23; their examples name a newer version than ours, and the
+parameters read the same). Changing it is the one constant `SEAT_PRORATION`.
+
+**The mock** posts the signed `customer.subscription.updated` with the
+extra-seat item at the new quantity (none at the included seats), the period
+and status as they were (`seatsChangedEvent`), to the real webhook route in
+process, so the plan page shows the new seats on its next read.
 
 ### Billing interval and editor count
 
@@ -706,6 +776,16 @@ invoices, usage records), where the SDK's coverage would outweigh its size.
   328's functions.
 - `frontend/src/lib/components/billing/plan.test.ts`: the seat field's
   range and the buttons' price for the seats chosen.
+- `billing/seats.test.ts` (the route: 401, 404 before any provider call,
+  the 409s with a grant's and manual's codes, the seat range and strict
+  body), `billing/provider/seats.test.ts` (Stripe's requests to update, add
+  and remove the extra-seat item, with the proration and idempotency key;
+  the mock's event read back as the seats; manual refused) and
+  `billing/seats.db.test.ts` (a mock Team at 3 seats changed to 5 ends with
+  5 through the webhook, and back; 404 to a member and a stranger; 333's
+  access). `frontend/src/lib/components/billing/seatChange.test.ts` (the
+  confirm step's words) and `e2e/tests/billing-seats.spec.ts` (the control,
+  its confirm step, and the new count on the page).
 - `e2e/tests/billing-checkout.spec.ts`: the plan page's buttons, Team's seat
   field, and the mock checkout and portal in a browser.
 
@@ -791,6 +871,7 @@ none of this is built:
 - **Billing provider** ("Billing provider"): dunning, refunds and invoices.
   The provider seam, the webhook, checkout and the portal are built
   ([§ Webhooks and providers](#webhooks-and-providers),
-  [§ Checkout and portal](#checkout-and-portal)).
+  [§ Checkout and portal](#checkout-and-portal)), and so is Phase 5's
+  per-seat sync ([§ Changing a Team's seats](#changing-a-teams-seats)).
 - **Legal and tax prerequisites**: the Terms' fees section, CPA and ECTA
   positions, VAT; all before the first charge.

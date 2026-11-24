@@ -24,7 +24,7 @@ import { logEvent } from '../logging/logEvent.js';
 import { UUID } from '../projects/access.js';
 import { accountPlan, listPlans, myAccountId, teamAccountId } from './entitlements.js';
 import type { PublicPlan } from './entitlements.js';
-import { BILLING_INTERVALS, BillingUnavailableError, billingProvider, MAX_CHECKOUT_SEATS, type CheckoutPlan, type LiveSubscription, type ReturnUrls } from './provider.js';
+import { BILLING_INTERVALS, BillingGrantSeatsError, BillingUnavailableError, billingProvider, MAX_CHECKOUT_SEATS, type CheckoutPlan, type LiveSubscription, type ReturnUrls } from './provider.js';
 
 /** GET /billing/plans: anyone, signed in or not. The plans are public prices, not anyone's data. */
 export const billingPublicRoutes = new Hono().get('/plans', async (c) => {
@@ -159,6 +159,67 @@ async function portal(c: Context<AuthEnv>, resolve: (db: Db) => Promise<string |
 	return c.json({ url: result.url });
 }
 
+const seatsBody = z.object({ seats: z.number().int().min(1).max(MAX_CHECKOUT_SEATS) }).strict();
+
+const LIVE = new Set(['trialing', 'active', 'past_due']);
+
+/**
+ * POST /teams/:id/plan/seats (Phase 5, docs/billing.md § Changing a Team's seats):
+ * the team's editor seats on its live Team subscription. 404 to anyone but the
+ * team's admins, before any provider call; 400 for a body other than
+ * `{ seats: <whole number 1…50> }`; 409 without a live Team subscription,
+ * for a grant (its seats change by a new grant) or a provider that takes no
+ * changes (manual); 400 for seats outside the included ones…50 or equal to the
+ * current count. The provider changes the subscription; the seats come back
+ * through the webhook (app_billing_apply), never written here.
+ */
+async function changeSeats(c: Context<AuthEnv>, teamId: string) {
+	if (!UUID.test(teamId)) throw new ApiError(404, 'not found');
+	const found = await withUser(c.get('userId'), async (db) => {
+		const accountId = await teamAccountId(db, teamId);
+		const state = await accountState(db, accountId);
+		if (!state || !accountId) return null;
+		const { rows } = await db.query<{ ref: { provider?: string; externalRef?: string | null } | null }>('SELECT app_billing_live_subscription_ref($1) AS ref', [accountId]);
+		return { state, ref: rows[0]?.ref ?? null };
+	});
+	if (!found) throw new ApiError(404, 'not found');
+	const { state, ref } = found;
+	// The body next, so a bad one is 400 whatever the subscription (the mass-assignment sweep's "refused past validation").
+	const body = seatsBody.parse(await readJson(c));
+	const sub = state.plan.subscription;
+	if (!sub || !LIVE.has(sub.status) || state.plan.plan?.code !== 'team' || !ref) throw new ApiError(409, 'only a live Team subscription has seats to change');
+	if (ref.provider === 'manual') throw new BillingGrantSeatsError();
+	const provider = billingProvider();
+	if (!provider || provider.name === 'manual') throw new BillingUnavailableError();
+	// A subscription another provider holds (a mock one after switching to Stripe): this provider can't change it.
+	if (ref.provider !== provider.name || !ref.externalRef || !sub.periodStart || !sub.periodEnd) throw new ApiError(409, 'this subscription can’t be changed here; ask the operator');
+	const plans = await withoutUser((db) => listPlans(db));
+	const teamPlan = plans.find((p) => p.code === 'team');
+	if (!teamPlan) throw new ApiError(409, 'the Team plan isn’t on sale');
+	const plan = checkoutPlanOf(teamPlan);
+	if (plan.extraSeatMonthlyMinor === null && plan.extraSeatAnnualMinor === null) throw new ApiError(400, `the ${plan.name} plan sells no extra seats`);
+	if (body.seats < plan.seatsIncluded) throw new ApiError(400, `the ${plan.name} plan includes ${plan.seatsIncluded} seats; choose at least that many`);
+	if (body.seats === sub.seats) throw new ApiError(400, `the team already has ${sub.seats} seats`);
+	await provider.changeSeats({
+		accountId: state.id,
+		externalRef: ref.externalRef,
+		plan,
+		subscription: {
+			planCode: 'team',
+			status: sub.status,
+			periodStart: sub.periodStart,
+			periodEnd: sub.periodEnd,
+			cancelAtPeriodEnd: sub.cancelAtPeriodEnd,
+			seats: sub.seats,
+			seatsIncluded: plan.seatsIncluded
+		},
+		seats: body.seats
+	});
+	logEvent('info', { event: 'billing_seats', provider: provider.name, from: sub.seats, to: body.seats });
+	c.header('Cache-Control', 'no-store');
+	return c.json({ seats: body.seats });
+}
+
 /** GET /account/plan: the caller's own billing account, created on first ask (app_my_billing_account); POST …/checkout and …/portal for it. */
 export const accountPlanRoutes = new Hono<AuthEnv>()
 	.post('/plan/checkout', (c) => checkout(c, myAccountId, '/account/plan'))
@@ -176,10 +237,11 @@ const teamResolver = (id: string) => {
 	return (db: Db) => teamAccountId(db, id);
 };
 
-/** GET /teams/:id/plan: the team's billing account, for its admins only; POST …/checkout and …/portal for it. */
+/** GET /teams/:id/plan: the team's billing account, for its admins only; POST …/checkout, …/portal and …/seats for it. */
 export const teamPlanRoutes = new Hono<AuthEnv>()
 	.post('/:id/plan/checkout', async (c) => checkout(c, teamResolver(c.req.param('id')), `/teams/${c.req.param('id')}/plan`))
 	.post('/:id/plan/portal', async (c) => portal(c, teamResolver(c.req.param('id')), `/teams/${c.req.param('id')}/plan`))
+	.post('/:id/plan/seats', async (c) => changeSeats(c, c.req.param('id')))
 	.get('/:id/plan', async (c) => {
 		const id = c.req.param('id');
 		if (!UUID.test(id)) throw new ApiError(404, 'not found');

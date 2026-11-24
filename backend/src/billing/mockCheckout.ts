@@ -74,8 +74,8 @@ function session<K extends MockSession['kind']>(c: Context, kind: K): Extract<Mo
 	return s as Extract<MockSession, { kind: K }>;
 }
 
-/** Post one event to the real webhook route, signed with the dev key; whether it was taken (200). */
-async function deliver(event: Record<string, unknown>): Promise<boolean> {
+/** Post one event to the real webhook route, signed with the dev key; whether it was taken (200). Also the mock's seat change (provider.ts). */
+export async function deliverMockEvent(event: Record<string, unknown>): Promise<boolean> {
 	const secret = process.env.BILLING_WEBHOOK_SECRET?.trim();
 	if (!secret) return false;
 	const { body, signature } = signedDelivery(secret, event);
@@ -127,7 +127,7 @@ export const mockCheckoutRoutes = new Hono()
 		if (outcome === 'cancels') return c.redirect(s.cancelUrl, 303);
 		if (outcome === 'declines') return c.html(checkoutPage(c, s, true), 402);
 		if (outcome !== 'pays') return c.json({ error: 'unknown outcome' }, 400);
-		for (const event of paidEvents(s)) if (!(await deliver(event))) return failed(c, pageOf(s.successUrl));
+		for (const event of paidEvents(s)) if (!(await deliverMockEvent(event))) return failed(c, pageOf(s.successUrl));
 		logEvent('info', { event: 'billing_mock_checkout', outcome, plan: s.planCode });
 		return c.redirect(s.successUrl, 303);
 	})
@@ -152,7 +152,7 @@ export const mockCheckoutRoutes = new Hono()
 		if (s instanceof Response) return s;
 		if (c.req.query('action') !== 'cancel') return c.json({ error: 'unknown action' }, 400);
 		const event = cancelAtPeriodEndEvent(s);
-		if (event && !(await deliver(event))) return failed(c, s.returnUrl);
+		if (event && !(await deliverMockEvent(event))) return failed(c, s.returnUrl);
 		logEvent('info', { event: 'billing_mock_portal', action: 'cancel' });
 		c.header('Cache-Control', 'no-store');
 		return c.redirect(s.returnUrl, 303);
