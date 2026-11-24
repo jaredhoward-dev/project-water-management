@@ -930,7 +930,12 @@ are #641's checklist. Open items from building it:
       `subscription.seats`; checkout sells no trial, by decision (Pro's is
       the Phase 2 reverse trial, Team's a staff grant on request;
       billing.md § Team seats at checkout, § Trials).
-- [ ] **Team can't change its seats after checkout.** The Customer Portal
+- [x] **Team can't change its seats after checkout.** Done (round 5,
+      #641 Phase 5): `POST /teams/:id/plan/seats` and the team plan page's
+      *Change seats* control; Stripe updates, adds or removes the
+      extra-seat item with `create_prorations` (Stripe's default, for the
+      operator to confirm), and the webhook brings the seats back
+      (billing.md § Changing a Team's seats). Was: The Customer Portal
       can change an existing item's quantity, but a Team bought at the 3
       included seats has no extra-seat item to change, and the portal can't
       add one (it adds only dashboard Prices, and ours are inline). Durable

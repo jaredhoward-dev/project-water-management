@@ -3146,7 +3146,23 @@ The page is two cards, side by side where they fit and stacked on a phone:
   Once a team has a subscription, a line under it says its seats: *5 editor
   seats (3 included, 2 extra)*, or *3 editor seats (all included)*
   (`subscriptionSeatsLine`). It shows no total, since `Subscription` doesn't
-  record whether it is billed monthly or yearly. While `enforced` is false, a note says nothing is refused:
+  record whether it is billed monthly or yearly. Below the plan card, a
+  team's page has **Change seats** (`SeatChange.svelte`, mounted by the team
+  plan route only, for a live Team subscription under `mock` or `stripe`):
+  a NumberInput (`whole`, the included 3 to 50, *Choose a whole number of
+  seats from 3 to 50.* for anything else) and a *Change seats* button,
+  `aria-disabled` while the count is invalid or the current one. It opens a
+  confirm step that says the change, *From 3 to 5 editor seats: R 998.00
+  more a month.* when the plan carries the subscription's interval, else
+  only *From 3 to 5 editor seats.*, and that the rest of the period is
+  prorated on the next invoice (`seatChange.ts` `seatChangeLine`), with
+  *Confirm the change* and *Cancel*, both `aria-disabled` while the request
+  runs. Confirmed, it calls `POST /teams/:id/plan/seats`, re-reads the plan
+  in place, and says in a live region either *The team now has 5 editor
+  seats.* or, when the provider's webhook hasn't landed yet, to reload in a
+  minute. A refusal shows inline in English, as the buttons above do
+  ([billing.md § Changing a Team's seats](./billing.md#changing-a-teams-seats);
+  `e2e/tests/billing-seats.spec.ts`). While `enforced` is false, a note says nothing is refused:
   with no buttons, that plans aren't charged yet; beside them (which can
   charge), only that limits aren't enforced yet (`plan.ts` `shadowNote`). Each
   button asks the API for a URL (`POST …/plan/checkout` or `…/plan/portal`)

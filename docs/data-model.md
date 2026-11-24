@@ -3842,6 +3842,11 @@ never to a farmer, contributor or viewer.
     customer only while none is stored (the first wins) and answers the
     stored one; NULL for anyone else. Checkout calls it after Stripe makes the
     customer.
+  - `app_billing_live_subscription_ref(account) → jsonb` (333):
+    `{ provider, externalRef }` of the account's live subscription, NULL with
+    none or unless the caller is its person or an admin of its team. The
+    seat change reads it to reach the provider's subscription and to refuse
+    a staff grant (billing.md § Changing a Team's seats).
   - `app_my_billing_account() → uuid`: the caller's own account, made if
     missing; NULL with no signed-in user.
   - `app_team_billing_account(team) → uuid`: the team's account, made if
