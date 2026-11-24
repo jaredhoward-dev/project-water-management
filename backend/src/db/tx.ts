@@ -1,4 +1,5 @@
 import type pg from 'pg';
+import { BILLING_ENFORCED_GUC, billingEnforced } from '../billing/enforced.js';
 import { logEvent } from '../logging/logEvent.js';
 import { safeError } from '../logging/safeError.js';
 import { getPool } from './pool.js';
@@ -104,6 +105,9 @@ async function inTransaction<T>(fn: (db: Db) => Promise<T>, begin = 'BEGIN'): Pr
 	client.on('error', onError);
 	try {
 		await client.query(begin);
+		// Plan limits refuse only when BILLING_ENFORCED is on (334_team_seats reads it). Transaction-local, set from
+		// the environment alone; off (the default) costs no round trip, since an unset setting reads as off.
+		if (billingEnforced()) await client.query('SELECT set_config($1, $2, true)', [BILLING_ENFORCED_GUC, 'on']);
 		const result = await fn(client);
 		await client.query('COMMIT');
 		return result;
