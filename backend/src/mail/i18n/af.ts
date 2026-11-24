@@ -373,4 +373,48 @@ export const af: Partial<Record<MailKey, string>> = {
 	'mail.renewal.action': 'Maak jou plan oop',
 	// We send this once a year, between 40 and 80 business days before a yearly plan ends, as the Consumer Protection Act asks.
 	'mail.renewal.why': 'Ons stuur dit een keer per jaar, tussen 40 en 80 werksdae voordat ’n jaarlikse plan eindig, soos die Wet op Verbruikersbeskerming vra.',
+	// your {product} account ({email})
+	'mail.plan.account.personal': 'jou {product}-rekening ({email})',
+	// the team “{team}”
+	'mail.plan.account.team': 'die span “{team}”',
+	// Some catchments’ automatic updates pause on {date} — {product}
+	'mail.plan.grace.subject': 'Sommige opvanggebiede se outomatiese bywerkings word op {date} onderbreek — {product}',
+	// Your plan has ended
+	'mail.plan.grace.heading': 'Jou plan het geëindig',
+	// The paid plan for {account} has ended, and it is now on Free, which includes fewer catchments with automatic updates. Unless you choose otherwise, on {date} the data feeds, alerts and automatic runs of these catchments pause:
+	'mail.plan.grace.body': 'Die betaalde plan vir {account} het geëindig, en die rekening is nou op Free, wat minder opvanggebiede met outomatiese bywerkings insluit. Tensy jy anders kies, word die datavoere, waarskuwings en outomatiese lopies van hierdie opvanggebiede op {date} onderbreek:',
+	// Some catchments’ automatic updates have paused — {product}
+	'mail.plan.paused.subject': 'Sommige opvanggebiede se outomatiese bywerkings is onderbreek — {product}',
+	// Automatic updates have paused
+	'mail.plan.paused.heading': 'Outomatiese bywerkings is onderbreek',
+	// The paid plan for {account} ended 14 days ago, and it is on Free, which includes fewer catchments with automatic updates. The data feeds, alerts and automatic runs of these catchments have paused:
+	'mail.plan.paused.body': 'Die betaalde plan vir {account} het 14 dae gelede geëindig, en die rekening is op Free, wat minder opvanggebiede met outomatiese bywerkings insluit. Die datavoere, waarskuwings en outomatiese lopies van hierdie opvanggebiede is onderbreek:',
+	// and {n} more catchment of the account that you are not a member of.
+	'mail.plan.others.one': 'en nog {n} opvanggebied van die rekening waarvan jy nie ’n lid is nie.',
+	// and {n} more catchments of the account that you are not a member of.
+	'mail.plan.others.other': 'en nog {n} opvanggebiede van die rekening waarvan jy nie ’n lid is nie.',
+	// These stay on: {list}.
+	'mail.plan.keeps': 'Hierdie bly aangeskakel: {list}.',
+	// Nothing is deleted. Everyone can still open, edit, run and download every catchment. Only the automatic updates stop, and they start again as they were when the account is back on a paid plan.
+	'mail.plan.nothingDeleted': 'Niks word uitgevee nie. Almal kan steeds elke opvanggebied oopmaak, wysig, laat loop en aflaai. Net die outomatiese bywerkings stop, en hulle begin weer soos voorheen sodra die rekening weer op ’n betaalde plan is.',
+	// To keep a different catchment on, choose it on the plan page. To keep them all on, choose a paid plan there.
+	'mail.plan.choose': 'Om ’n ander opvanggebied aangeskakel te hou, kies dit op die planbladsy. Om hulle almal aangeskakel te hou, kies daar ’n betaalde plan.',
+	// Open the plan page
+	'mail.plan.action': 'Maak die planbladsy oop',
+	// We send this once, when a paid plan ends with more catchments updating automatically than Free includes, to the account’s owners.
+	'mail.plan.grace.why': 'Ons stuur dit een keer aan die rekening se eienaars, wanneer ’n betaalde plan eindig met meer opvanggebiede wat outomaties bygewerk word as wat Free insluit.',
+	// We send this once, when the 14 days after a paid plan ended are over, to the account’s owners.
+	'mail.plan.paused.why': 'Ons stuur dit een keer aan die rekening se eienaars, wanneer die 14 dae ná die einde van ’n betaalde plan verby is.',
+	// Your {plan} trial ends on {date} — {product}
+	'mail.plan.trial.subject': 'Jou {plan}-proeftydperk eindig op {date} — {product}',
+	// Your trial ends soon
+	'mail.plan.trial.heading': 'Jou proeftydperk eindig binnekort',
+	// Your free {plan} trial for {email} ends on {date}. After that your account is on Free. No card was taken, so nothing is charged.
+	'mail.plan.trial.body': 'Jou gratis {plan}-proeftydperk vir {email} eindig op {date}. Daarna is jou rekening op Free. Ons het geen kaartbesonderhede gevra nie, dus word niks gehef nie.',
+	// Nothing is deleted when the trial ends. If more of your catchments update automatically than Free includes, you have 14 days to choose the one to keep on before the others’ data feeds, alerts and automatic runs pause.
+	'mail.plan.trial.after': 'Niks word uitgevee wanneer die proeftydperk eindig nie. As meer van jou opvanggebiede outomaties bygewerk word as wat Free insluit, het jy 14 dae om die een te kies wat aangeskakel moet bly voordat die ander se datavoere, waarskuwings en outomatiese lopies onderbreek word.',
+	// To keep {plan}, choose a plan on the plan page.
+	'mail.plan.trial.keep': 'Om {plan} te behou, kies ’n plan op die planbladsy.',
+	// We send this once, 3 days before a trial ends.
+	'mail.plan.trial.why': 'Ons stuur dit een keer, 3 dae voordat ’n proeftydperk eindig.',
 };

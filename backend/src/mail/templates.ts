@@ -748,3 +748,79 @@ export function renewalNoticeMail(to: string, f: RenewalNoticeFacts, locale?: st
 		tr
 	);
 }
+
+/** Whose plan a plan email is about: the recipient's own account, or a team they administer. */
+export type PlanAccount = { kind: 'personal' } | { kind: 'team'; team: string };
+
+export type PlanNoticeFacts =
+	| {
+			/** The grace started (346 'grace') or the pause landed ('paused'). */
+			kind: 'grace' | 'paused';
+			account: PlanAccount;
+			/** When the grace ends and the pause lands (over_free_since + 14 days). */
+			pausesAt: Date;
+			/** The paused (or to-be-paused) catchments the recipient can read, by name. */
+			pausing: readonly string[];
+			/** The others past the limit they can't read: counted, never named. */
+			othersPausing: number;
+			/** The catchments that stay on that the recipient can read. */
+			keeps: readonly string[];
+	  }
+	| {
+			/** A reverse trial ends in 3 days (346 'trial_ending'). */
+			kind: 'trial_ending';
+			/** The plan's name (plan.name: "Pro"). */
+			plan: string;
+			trialEnd: Date;
+	  };
+
+/**
+ * The owners' plan emails (346_billing_notices, billing/planNotices.ts;
+ * docs/billing.md § Plan emails): the 14-day grace after a paid plan ends
+ * started, with what will pause and when; the pause landed; a reverse trial
+ * ends in 3 days. Each says nothing is deleted and links the plan page, where
+ * the owner keeps another catchment on or chooses a plan. Catchment names are
+ * only those the recipient can read (built as them under RLS); the rest are a
+ * count.
+ */
+export function planNoticeMail(to: string, f: PlanNoticeFacts, locale?: string | null): Mail {
+	const tr = mailT(locale);
+	const action = { label: tr.t('mail.plan.action'), url: sitePage('/account/plan') };
+	if (f.kind === 'trial_ending') {
+		const v = { email: to, product: PRODUCT, plan: f.plan, date: resetWhen(f.trialEnd, locale).date };
+		return render(
+			'plan_notice',
+			to,
+			tr.t('mail.plan.trial.subject', v),
+			{
+				heading: tr.t('mail.plan.trial.heading'),
+				paragraphs: [tr.t('mail.plan.trial.body', v), tr.t('mail.plan.trial.after'), tr.t('mail.plan.trial.keep', v)],
+				action,
+				footer: [tr.t('mail.plan.trial.why')]
+			},
+			tr
+		);
+	}
+	const account = f.account.kind === 'team' ? tr.t('mail.plan.account.team', { team: f.account.team }) : tr.t('mail.plan.account.personal', { email: to, product: PRODUCT });
+	const v = { product: PRODUCT, account, date: resetWhen(f.pausesAt, locale).date };
+	const k = f.kind;
+	return render(
+		'plan_notice',
+		to,
+		tr.t(`mail.plan.${k}.subject`, v),
+		{
+			heading: tr.t(`mail.plan.${k}.heading`),
+			paragraphs: [
+				tr.t(`mail.plan.${k}.body`, v),
+				...f.pausing,
+				...(f.othersPausing > 0 ? [tr.tn('mail.plan.others', f.othersPausing)] : []),
+				...(f.keeps.length ? [tr.t('mail.plan.keeps', { list: listText(f.keeps, tr.t('mail.farmer.and')) })] : []),
+				tr.t('mail.plan.nothingDeleted'),
+				tr.t('mail.plan.choose')
+			],
+			action,
+			footer: [tr.t(`mail.plan.${k}.why`)]
+		},
+		tr
+	);
+}

@@ -297,6 +297,8 @@ const READ_ONLY = new Set([
 	'usage_counter',
 	// The annual renewal notice's sent-log (329, CPA s14): written only by the worker's definer functions; own rows read.
 	'renewal_notice',
+	// The owners' plan emails' sent-log (346): written only by the worker's definer functions; own rows read.
+	'billing_notice',
 	// The staff grant's log (330): written only by the owner's grant and revoke and the worker's expiry; the account's rows read.
 	'billing_grant_log'
 ]);
@@ -363,6 +365,8 @@ const APP_USER_ON_DELETE: Record<string, 'cascade' | 'set null' | 'restrict'> = 
 	'billing_account.user_id': 'cascade',
 	// A person's renewal notices go with them (329); they go with the subscription anyway.
 	'renewal_notice.user_id': 'cascade',
+	// A person's plan emails go with them (346); a team's with its account.
+	'billing_notice.user_id': 'cascade',
 	// Who acts for the authority (229): the delegation goes with the account; who proposed or confirmed it is cleared.
 	'authority_delegate.confirmed_by': 'set null',
 	'authority_delegate.proposed_by': 'set null',
