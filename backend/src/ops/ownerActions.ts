@@ -14,6 +14,7 @@
 //   billing-report     src/billing/gatherReport.ts, redacted  (pnpm dev:billing:report; never --show-emails)
 //   authority-confirm  src/projects/authorityConfirm.ts       (pnpm dev:authority:confirm)
 //   billing-account    src/billing/staffGrant.ts lookupAccount (the ids the workflow takes; direct invoke only)
+//   billing-invoice    src/billing/invoice.ts issueInvoice     (pnpm dev:billing:invoice; direct invoke only: a PO number may identify a client)
 //
 // Ids, never addresses, from the workflow. Its runs are in a public repo, and
 // we can't rule out GitHub showing a run's workflow_dispatch inputs (its page,
@@ -37,9 +38,11 @@ import { gatherReportOn } from '../billing/gatherReport.js';
 import { redact, type Report } from '../billing/metrics.js';
 import { grantLog, grantPlan, isCalendarDate, liveGrants, lookupAccount, revokeGrant, StaffGrantError, type LiveGrant, type LogRow, type Owner, type Target } from '../billing/staffGrant.js';
 import { confirmAuthorityDelegate, NoPersonError } from '../projects/authorityConfirm.js';
+import { InvoiceError, issueInvoice, MAX_INVOICE_SEATS, PO_NUMBER } from '../billing/invoice.js';
+import { BillingUnavailableError, BillingProviderError, type BillingProvider } from '../billing/provider.js';
 
-export const OWNER_ACTIONS = ['billing-grant', 'billing-revoke', 'billing-grants', 'billing-report', 'authority-confirm', 'billing-account'] as const;
-/** What the billing-admin workflow may send (scripts/release/owner-action.mjs WORKFLOW_ACTIONS): every action but the address lookup. */
+export const OWNER_ACTIONS = ['billing-grant', 'billing-revoke', 'billing-grants', 'billing-report', 'authority-confirm', 'billing-account', 'billing-invoice'] as const;
+/** What the billing-admin workflow may send (scripts/release/owner-action.mjs WORKFLOW_ACTIONS): every action but the address lookup and the invoice (its PO number may identify a client). */
 export const WORKFLOW_ACTIONS = ['billing-grants', 'billing-grant', 'billing-revoke', 'billing-report', 'authority-confirm'] as const;
 export type OwnerActionName = (typeof OWNER_ACTIONS)[number];
 
@@ -95,7 +98,19 @@ export const ownerActionSchema = z.discriminatedUnion('action', [
 	// The lookup is the operator's alone, from their SSO session: no `via`, so the workflow can't send it.
 	z
 		.strictObject({ action: z.literal('billing-account'), email: email.optional(), userId: uuid.optional(), teamId: uuid.optional() })
-		.refine((v) => [v.email, v.userId, v.teamId].filter((x) => x !== undefined).length === 1)
+		.refine((v) => [v.email, v.userId, v.teamId].filter((x) => x !== undefined).length === 1),
+	// The invoice is the operator's alone too: no `via`. A PO number may identify the client, and the workflow's inputs may be public.
+	z
+		.strictObject({
+			action: z.literal('billing-invoice'),
+			...target,
+			plan: z.enum(['pro', 'team']),
+			interval: z.enum(['month', 'year']),
+			seats: z.number().int().min(1).max(MAX_INVOICE_SEATS).optional(),
+			from: day.nullable().optional(),
+			poNumber: z.string().trim().regex(PO_NUMBER)
+		})
+		.refine(oneTarget)
 ]).refine((v) => !('via' in v && v.via === 'workflow' && 'email' in v && v.email !== undefined), { message: 'the workflow names people by id, never by address' });
 export type OwnerAction = z.output<typeof ownerActionSchema>;
 
@@ -108,6 +123,8 @@ export type OwnerActionErrorCode =
 	| 'no_live_grant'
 	| 'invalid'
 	| 'not_editor'
+	| 'billing_unavailable'
+	| 'billing_provider_error'
 	| 'action_failed';
 
 const REASONS: Record<OwnerActionErrorCode, string> = {
@@ -119,6 +136,8 @@ const REASONS: Record<OwnerActionErrorCode, string> = {
 	no_live_grant: 'the account has no live staff grant',
 	invalid: 'the database refused a value (the plan, the end date, the reason or who acts)',
 	not_editor: 'the person is not an editor or owner of the project, or the reference is empty',
+	billing_unavailable: 'this function has no billing provider that sends invoices (BILLING_PROVIDER=stripe with its key; docs/deployment.md § Owner actions)',
+	billing_provider_error: 'the billing provider failed or refused the invoice; the detail is in CloudWatch',
 	action_failed: 'the action failed; the detail is in CloudWatch'
 };
 
@@ -148,6 +167,9 @@ export function ownerActionCode(err: unknown): OwnerActionErrorCode {
 	if (err instanceof OwnerActionError) return err.code;
 	if (err instanceof StaffGrantError) return err.code;
 	if (err instanceof NoPersonError) return 'no_person';
+	if (err instanceof InvoiceError) return err.code;
+	if (err instanceof BillingUnavailableError) return 'billing_unavailable';
+	if (err instanceof BillingProviderError) return 'billing_provider_error';
 	switch ((err as { code?: string })?.code) {
 		case '23505':
 			return 'live_subscription';
@@ -180,10 +202,31 @@ export type OwnerActionResult =
 	| { action: 'billing-grants'; kind: 'all'; grants: LiveGrant[] }
 	| { action: 'billing-report'; report: Report }
 	| { action: 'authority-confirm'; projectId: string; userId: string; confirmed: true }
-	| { action: 'billing-account'; kind: Owner['kind']; ownerId: string; accountId: string | null; planNow: string };
+	| { action: 'billing-account'; kind: Owner['kind']; ownerId: string; accountId: string | null; planNow: string }
+	| {
+			action: 'billing-invoice';
+			accountId: string;
+			kind: Owner['kind'];
+			plan: string;
+			seats: number;
+			interval: 'month' | 'year';
+			from: string;
+			until: string;
+			invoiceId: string;
+			number: string | null;
+			status: string;
+			totalMinor: number;
+			dueAt: string | null;
+			reused: boolean;
+	  };
+
+/** What an action may need beyond the database: the provider that sends invoices (null: none here, so billing-invoice is refused). */
+export interface OwnerActionDeps {
+	invoiceProvider?: BillingProvider | null;
+}
 
 /** Run one parsed action on the schema owner's connection. */
-export async function runOwnerAction(client: pg.ClientBase, a: OwnerAction): Promise<OwnerActionResult> {
+export async function runOwnerAction(client: pg.ClientBase, a: OwnerAction, deps: OwnerActionDeps = {}): Promise<OwnerActionResult> {
 	switch (a.action) {
 		case 'billing-grant': {
 			const t = targetOf(a);
@@ -210,6 +253,14 @@ export async function runOwnerAction(client: pg.ClientBase, a: OwnerAction): Pro
 		case 'billing-account': {
 			const { kind, ownerId, accountId, planNow } = await lookupAccount(client, targetOf(a));
 			return { action: a.action, kind, ownerId, accountId, planNow };
+		}
+		case 'billing-invoice': {
+			const provider = deps.invoiceProvider ?? null;
+			if (!provider) throw new OwnerActionError('billing_unavailable');
+			// The PO number goes to the provider only; the answer leaves it out (the operator has it).
+			const r = await issueInvoice(client, provider, { target: targetOf(a), plan: a.plan, interval: a.interval, seats: a.seats, from: a.from ?? null, poNumber: a.poNumber });
+			const { invoiceId, number, status, totalMinor, dueAt, reused } = r.invoice;
+			return { action: a.action, accountId: r.accountId, kind: r.kind, plan: r.plan, seats: r.seats, interval: r.interval, from: r.from, until: r.until, invoiceId, number, status, totalMinor, dueAt, reused };
 		}
 	}
 }

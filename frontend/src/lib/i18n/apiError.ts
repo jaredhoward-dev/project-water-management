@@ -60,6 +60,8 @@ const CODES: Record<string, Msg> = {
 	mfa_email_wait: msg('We just emailed you a code. You can ask for another in {wait}.'),
 	mfa_email_failed: msg('We couldn’t send the email. Try again in a minute.'),
 	comment_throttled: msg('You have posted 10 comments in the last hour. Wait a while, then try again.'),
+	// Accepting an invite to a team whose paid editor seats are all in use (334_team_seats; never a farmer's role).
+	plan_limit: msg('Every editor seat on this team’s plan is in use. Ask a team admin to add a seat, then accept the invitation again.'),
 	// Not from the API: the WAF's sign-in CAPTCHA (client.ts CAPTCHA_REQUIRED), on a page that can't show the puzzle.
 	captcha_required: msg('Too many sign-in attempts from your network. Wait a few minutes, then try again.')
 };

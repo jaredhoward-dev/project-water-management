@@ -102,8 +102,9 @@ would stand.
 The backend setting `BILLING_ENFORCED` (default `false`; only the exact string
 `true` turns it on) says whether plan limits refuse anything. **Phase 1 only
 reports it**: `GET /account/plan` and `GET /teams/:id/plan` return it as
-`enforced`, so the UI can word the usage bars ("what you would hit") and
-nothing in the code refuses on it yet. Set it in
+`enforced`, so the UI can word the usage bars ("what you would hit"). The
+one limit built to refuse on it is a Team's editor seats
+([§ Team seats](#team-seats)); everything else still only counts. Set it in
 `backend/.env.development.local` to see the enforced wording locally
 ([run-locally.md](./run-locally.md#one-time-setup)).
 
@@ -621,6 +622,71 @@ seat field can start at what the team uses.
   (the interval read and sent), `plan.test.ts` (the total and the starting
   count), and `billing-checkout.spec.ts` (the totals, the starting count).
 
+### Team seats
+
+Migration 334 (#641 Phase 5, "seats over the limit refused under parallel
+invites"; Enforcement design, "Editors per catchment / Team seats").
+
+- **One definition.** `app_team_seats_in_use(team)` is a team's editor
+  seats in use: the distinct people who are its members or admins, or
+  direct editors or owners of its projects. Its projects are those whose
+  `team_id` is the team and those billed to the team's account; the
+  `project_billing_account_set` trigger keeps the two the same (a project
+  can't bill to a team account with `team_id` null), and the function takes
+  both, so the count stays right if they ever part. Viewers, contributors
+  and farmers hold no seat. `app_account_plan`'s `team.editorCount` is this
+  number (334 redefines it from 332).
+- **Paid seats.** The live subscription's `seats`, never fewer than the
+  plan's `seats_included` (Team: 3), as the assistant allowance counts them.
+  **A team with no live subscription (Free), or a live one on another plan,
+  has no seat cap**: Team seats are the Team plan's limit; Free's editor
+  limit is per catchment (`editors_per_project`, a later slice), and capping
+  a Free team at Free's one included seat would lock every existing team.
+- **The refusal.** Any change that gives someone a seat they don't already
+  hold: adding a team member or admin or promoting a viewer, adding a
+  project editor or owner or promoting one on a team's project, accepting
+  an invite (each of these is a row in `team_member` or `project_member`),
+  and moving a project into a team (its direct editors join the team's
+  seats). Triggers on those tables check after the row is written, so every
+  path (routes, `app_accept_invites`, `app_accept_invite`, the owner's own
+  SQL) goes through one check, and an `INSERT … ON CONFLICT DO NOTHING` that
+  inserts nothing is never refused. Someone already holding a seat (a member
+  made admin, an editor made owner or added to another of the team's
+  projects) costs none, so is never refused, even on a team over its seats
+  after they were reduced. The API answers `402 plan_limit` with `{ limit,
+  used, plan }` ([api.md § Billing](./api.md#billing)).
+- **Parallel invites.** The check takes
+  `pg_advisory_xact_lock(hashtext('billing:' || account))` and only then
+  counts, in a fresh statement: two transactions granting the last seat
+  wait for each other, the second counts the first's committed seat, and
+  exactly one passes. Every write runs at READ COMMITTED (withUser's
+  REPEATABLE READ transactions are READ ONLY), which this relies on.
+- **Built but off.** It refuses only when `BILLING_ENFORCED=true`: `db/tx.ts`
+  then sets the transaction-local `app.billing_enforced` to `on` at the start
+  of every transaction (and sets nothing when off, so off costs no round
+  trip). Nothing from a request reaches the setting. The committed dev and
+  e2e env files leave it off.
+- **Confirming an address.** `markVerified` accepts the person's pending
+  invites inside a savepoint: if one would pass a Team's seats, they all stay
+  pending and the address is still confirmed. Accepting on the invitations
+  page then answers `402 plan_limit` until a team admin adds a seat
+  ([§ Changing a Team's seats](#changing-a-teams-seats)) or makes someone a
+  viewer.
+- **Who sees it.** Only seat roles meet it, which a farmer never holds. The
+  team and project member pages (workspace) show the server's English text;
+  the Invitations page (`/account/invitations`), a translated page, words it
+  from its code, so `plan_limit` is in `ERROR_CODES` with words in
+  `frontend/src/lib/i18n/apiError.ts` (English and Afrikaans).
+- **Tests.** `billing/teamSeats.db.test.ts` (the count and its exclusions,
+  the app role refused the functions, off by default, refused on and passed
+  after a seat is added, existing seat holders, a project moving in, a Free
+  team, the invite left pending, any other refusal on confirming rethrown,
+  a project billed to the team's account with no `team_id`, two parallel
+  grants of the last seat), `auth/email-routes.test.ts` (`isPlanLimit`
+  matches only the seat guard), `db/tx.db.test.ts` (the flag set only for
+  `BILLING_ENFORCED=true`) and `http/errors.test.ts` (402 with only the
+  numbers).
+
 ### Trials (decided 2026-11-23)
 
 **Checkout sells no trial**: no `trial_period_days` and no
@@ -796,10 +862,10 @@ invoices, usage records), where the SDK's coverage would outweigh its size.
 `backend/migrations/330_staff_grant.sql`, `backend/scripts/billing-grant.ts`
 (issue #641, "Staff overrides"). The operator's tool for manual plans: the
 first client's deal, founding users (Q4's grandfathering), and **v1 B2B
-invoices**. A business that pays by invoice gets a manual Stripe invoice (sent
-from the Stripe dashboard, outside the app), and once it is paid the operator
-grants the plan until the end of the invoiced period. It works with
-`BILLING_PROVIDER` unset.
+invoices**. A business that pays by invoice gets a Stripe invoice ([§ B2B
+invoices](#b2b-invoices), or one sent from the Stripe dashboard), and once it
+is paid the operator grants the plan until the end of the invoiced period. It
+works with `BILLING_PROVIDER` unset.
 
 ```bash
 pnpm dev:billing:grant <email|team-id> <plan> [--until YYYY-MM-DD] --reason "…" [--replace] [--by <name>]
@@ -867,6 +933,72 @@ SAST end under a skewed `TZ`, expiry, a lapsed grant, Stripe refused even
 with `--replace`, mock replaced, revoke, a team's grant and who reads it,
 owner-only) and `backend/scripts/billing-grant.test.ts` (arguments).
 
+## B2B invoices
+
+`backend/src/billing/invoice.ts`, `backend/scripts/billing-invoice.ts`
+(issue #641 Phase 5: "a Stripe Invoice from the staff tool, net 30, and a PO
+number on the invoice"). The operator invoices a person's account for Pro or
+a team's for Team:
+
+```bash
+pnpm dev:billing:invoice <email|team-id> <plan> --interval month|year --po "<PO number>" [--seats n] [--from YYYY-MM-DD]
+```
+
+- **What it sends** (`provider/stripeApi.ts` `createInvoice`, API reference
+  checked 2026-11-24 at the pinned `Stripe-Version`): `POST /v1/invoices`
+  with `collection_method=send_invoice`, `days_until_due=30`,
+  `custom_fields[0]` = `PO number` / the PO, `auto_advance=false`,
+  `pending_invoice_items_behavior=exclude` and metadata
+  (`billing_account_id`, `plan_code`, `seats`, `interval`, the period, our
+  key `wm_invoice_key`); its lines as `POST /v1/invoiceitems` (`invoice`,
+  `amount`, `description`, `period`): the plan at its included seats and,
+  on Team past them, the extra seats, each at the plan table's price for
+  the interval (`checkoutPrices`, the same as checkout); then
+  `/finalize`, `/send` (Stripe emails it), and metadata `wm_sent=true`. The
+  customer is the account's (328), made as checkout makes it when it has
+  none, and stored first-writer-wins.
+- **Once only.** The key is the account, plan, seats, interval, start day
+  and PO number. Every POST carries an idempotency key from it, and before
+  making anything the customer's invoices are searched for its
+  `wm_invoice_key`: a draft is completed, an open one not yet sent is sent,
+  a sent one is answered as it is (`reused`). A voided one is ignored, so a
+  wrong invoice is voided in Stripe and issued again.
+- **The period** runs from `--from` (a SAST day; default today) for one
+  month or year, through the day before the same date (31 January + 1 month
+  clamps to 28 February, so through 27 February). The answer's `until` is
+  the `--until` of the grant once it is paid.
+- **Refused before Stripe is asked:** a PO number that isn't 1–64 letters,
+  digits, spaces and `. / _ # : ( ) -` starting with a letter or digit
+  (Stripe takes 140; it is printed on the PDF); seats outside 1–50 or below
+  the plan's included ones, or extra seats on Pro; the plan that isn't the
+  kind's (Pro for a person, Team for a team); and an account with a live
+  Stripe subscription, which already pays by card. `manual` refuses
+  (`billing_unavailable`); the mock makes `in_mock_…` from the key with no
+  network.
+- **When it is paid** nothing changes by itself yet: `invoice.paid` is
+  recorded (`billing_event`; the normaliser reads the account from the
+  invoice's own metadata when it has no subscription), and the operator
+  grants the plan through `until` ([§ Staff grants](#staff-grants);
+  deployment.md runbook 23). Turning a paid invoice into the grant
+  automatically is a follow-up.
+- **Production** runs the same function as the migrate Lambda's
+  `billing-invoice` owner action, **direct invoke only** (never the
+  billing-admin workflow: a PO number and who is invoiced may identify a
+  client, and the workflow's inputs may be public; its answer leaves the PO
+  out). That function has no Stripe yet (no key, no route to
+  `api.stripe.com`), so it answers `billing_unavailable` until the operator
+  decides to give it one; the restricted key then also needs **Invoices:
+  Write** and **Invoice items: Write** beside § Stripe's three ([deployment.md § Owner
+  actions](./deployment.md#owner-actions)).
+
+Tests: `billing/invoice.test.ts` (PO number, seats, the SAST period, lines,
+key), `provider/stripeApi.test.ts` (the form fields of each request, a
+retry, a voided invoice, a draft with its lines), `provider/stripe.test.ts`
+(a standalone invoice's `invoice.paid`), `ops/ownerActions.test.ts` (the
+schema, refused from the workflow) and `billing/invoice.db.test.ts` (the
+plan table's price, the stored customer, the refusals, the script, the
+Lambda's `billing_unavailable`).
+
 ## Later phases
 
 Pointers to [issue #641](https://github.com/jaredhoward-dev/project-water-management/issues/641);
@@ -875,7 +1007,8 @@ none of this is built:
 - **Enforcement** ("Enforcement design"): each limit checked in the
   transaction of the action, under an advisory lock per account, answering
   `402 plan_limit` with `{ limit, used, plan }`; soft warnings at 80%;
-  downgrade and lapse without data loss. (Staff grants are built: [§ Staff grants](#staff-grants).)
+  downgrade and lapse without data loss. (Staff grants are built: [§ Staff grants](#staff-grants);
+  so is the Team seat refusal, off until `BILLING_ENFORCED`: [§ Team seats](#team-seats).)
 - **Billing provider** ("Billing provider"): dunning, refunds and invoices.
   The provider seam, the webhook, checkout and the portal are built
   ([§ Webhooks and providers](#webhooks-and-providers),

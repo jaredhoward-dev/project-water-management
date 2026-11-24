@@ -58,7 +58,8 @@ describe('errorText', () => {
 		mfa_reset_admin: 'A team admin can’t remove another admin’s two-step sign-in. They can remove it themselves when they sign in, after a 3-day wait.',
 		mfa_email_wait: 'We just emailed you a code. You can ask for another in 1 minute.',
 		mfa_email_failed: 'We couldn’t send the email. Try again in a minute.',
-		comment_throttled: 'You have posted 10 comments in the last hour. Wait a while, then try again.'
+		comment_throttled: 'You have posted 10 comments in the last hour. Wait a while, then try again.',
+		plan_limit: 'Every editor seat on this team’s plan is in use. Ask a team admin to add a seat, then accept the invitation again.'
 	};
 
 	it('has its own words for every code the API sends', () => {
@@ -73,6 +74,11 @@ describe('errorText', () => {
 		expect(errorText(new ApiError(405, 'solve the puzzle to continue', undefined, 'captcha_required'))).toBe(
 			'Too many sign-in attempts from your network. Wait a few minutes, then try again.'
 		);
+	});
+
+	it('words a full team’s 402 plan_limit (accepting an invite) from its code, not the server’s English or the bare status', () => {
+		const full = new ApiError(402, 'every editor seat on this team’s plan is in use', undefined, 'plan_limit', { limit: 3, used: 4, plan: 'team' });
+		expect(errorText(full)).toBe('Every editor seat on this team’s plan is in use. Ask a team admin to add a seat, then accept the invitation again.');
 	});
 
 	it('words a coded error from the catalogue, not the server’s English', () => {

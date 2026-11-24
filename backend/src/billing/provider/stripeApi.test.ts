@@ -2,7 +2,7 @@
 // live call. What each request sends (path, headers, form body) and how each
 // answer is read or refused.
 import { describe, expect, it, vi } from 'vitest';
-import { createCheckoutSession, createCustomer, createPortalSession, formEncode, STRIPE_API_VERSION, StripeApiError } from './stripeApi.js';
+import { createCheckoutSession, createCustomer, createInvoice, createPortalSession, formEncode, STRIPE_API_VERSION, StripeApiError } from './stripeApi.js';
 
 const KEY = 'test-only-not-a-stripe-key';
 const ACCOUNT = '22222222-2222-4222-8222-222222222222';
@@ -140,5 +140,133 @@ describe('createPortalSession', () => {
 		expect(calls[0]!.url).toBe('https://api.stripe.com/v1/billing_portal/sessions');
 		expect(form(calls[0]!.init)).toEqual({ customer: 'cus_Test123', return_url: 'https://site.example/account/plan' });
 		expect(headers(calls[0]!.init)['Idempotency-Key']).toBeUndefined();
+	});
+});
+
+describe('createInvoice (B2B, from the staff tool)', () => {
+	const params = {
+		customer: 'cus_Test123',
+		accountId: ACCOUNT,
+		planCode: 'team',
+		seats: 5,
+		interval: 'year' as const,
+		currency: 'ZAR',
+		poNumber: 'PO-2026/0042',
+		periodStart: 1798754400,
+		periodEnd: 1830290400,
+		lines: [
+			{ amountMinor: 2499000, description: 'IC-WBT Team (3 editor seats), 1 year' },
+			{ amountMinor: 998000, description: 'IC-WBT Team: 2 extra editor seats, 1 year' }
+		],
+		key: `${ACCOUNT}-abc`
+	};
+	/** A scripted Stripe: each request answered in turn by path. */
+	function scripted(answers: Record<string, unknown[]>) {
+		const calls: { method: string; url: string; init: RequestInit }[] = [];
+		const f = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+			const u = new URL(String(url));
+			calls.push({ method: init!.method!, url: String(url), init: init! });
+			const key = `${init!.method} ${u.pathname}`;
+			const queue = answers[key];
+			if (!queue?.length) return new Response(JSON.stringify({ error: { type: 'invalid_request_error' } }), { status: 400 });
+			return new Response(JSON.stringify(queue.shift()), { status: 200 });
+		});
+		return { f: f as unknown as typeof fetch, calls };
+	}
+	const draft = { id: 'in_New1', status: 'draft', total: 0, metadata: { wm_invoice_key: params.key } };
+	const open = { id: 'in_New1', status: 'open', total: 3497000, number: 'ABCD-0001', due_date: 1801346400, metadata: { wm_invoice_key: params.key } };
+
+	it('makes a send_invoice draft due in 30 days with the PO number as a custom field, adds its lines, finalizes, sends, and marks it sent', async () => {
+		const { f, calls } = scripted({
+			'GET /v1/invoices': [{ object: 'list', data: [] }],
+			'POST /v1/invoices': [draft],
+			'POST /v1/invoiceitems': [{ id: 'ii_1' }, { id: 'ii_2' }],
+			'POST /v1/invoices/in_New1/finalize': [open],
+			'POST /v1/invoices/in_New1/send': [open],
+			'POST /v1/invoices/in_New1': [{ ...open, metadata: { ...open.metadata, wm_sent: 'true' } }]
+		});
+		const r = await createInvoice({ secretKey: KEY, fetch: f }, params);
+		expect(r).toEqual({ invoiceId: 'in_New1', number: 'ABCD-0001', status: 'open', totalMinor: 3497000, dueDate: 1801346400, reused: false });
+		expect(calls.map((c) => `${c.method} ${new URL(c.url).pathname}`)).toEqual([
+			'GET /v1/invoices',
+			'POST /v1/invoices',
+			'POST /v1/invoiceitems',
+			'POST /v1/invoiceitems',
+			'POST /v1/invoices/in_New1/finalize',
+			'POST /v1/invoices/in_New1/send',
+			'POST /v1/invoices/in_New1'
+		]);
+		expect(new URL(calls[0]!.url).searchParams.get('customer')).toBe('cus_Test123');
+		expect(form(calls[1]!.init)).toEqual({
+			customer: 'cus_Test123',
+			collection_method: 'send_invoice',
+			days_until_due: '30',
+			currency: 'zar',
+			'custom_fields[0][name]': 'PO number',
+			'custom_fields[0][value]': 'PO-2026/0042',
+			pending_invoice_items_behavior: 'exclude',
+			auto_advance: 'false',
+			'metadata[billing_account_id]': ACCOUNT,
+			'metadata[plan_code]': 'team',
+			'metadata[seats]': '5',
+			'metadata[interval]': 'year',
+			'metadata[period_start]': '1798754400',
+			'metadata[period_end]': '1830290400',
+			'metadata[wm_invoice_key]': params.key
+		});
+		expect(form(calls[2]!.init)).toEqual({
+			customer: 'cus_Test123',
+			invoice: 'in_New1',
+			currency: 'zar',
+			amount: '2499000',
+			description: 'IC-WBT Team (3 editor seats), 1 year',
+			'period[start]': '1798754400',
+			'period[end]': '1830290400',
+			'metadata[billing_account_id]': ACCOUNT,
+			'metadata[wm_invoice_key]': params.key
+		});
+		expect(form(calls[3]!.init).amount).toBe('998000');
+		expect(form(calls[4]!.init)).toEqual({ auto_advance: 'false' });
+		expect(form(calls[6]!.init)).toEqual({ 'metadata[wm_sent]': 'true' });
+		// Every write pinned and idempotent, each with its own key from the invoice's.
+		const keys = calls.slice(1).map((c) => headers(c.init)['Idempotency-Key']);
+		expect(new Set(keys).size).toBe(keys.length);
+		for (const c of calls) expect(headers(c.init)['Stripe-Version']).toBe(STRIPE_API_VERSION);
+		for (const k of keys) expect(k).toMatch(new RegExp(`^wm-invoice-${params.key}`));
+	});
+
+	it('answers an invoice this key already made and sent as it is: nothing new made, nothing emailed twice', async () => {
+		const sent = { ...open, metadata: { ...open.metadata, wm_sent: 'true' } };
+		const { f, calls } = scripted({ 'GET /v1/invoices': [{ object: 'list', data: [{ id: 'in_Other', status: 'open', metadata: {} }, sent] }] });
+		expect(await createInvoice({ secretKey: KEY, fetch: f }, params)).toMatchObject({ invoiceId: 'in_New1', reused: true });
+		expect(calls).toHaveLength(1);
+	});
+
+	it('completes a draft this key left with its lines already on it: finalizes and sends without adding lines again', async () => {
+		const { f, calls } = scripted({
+			'GET /v1/invoices': [{ object: 'list', data: [{ ...draft, total: 3497000 }] }],
+			'POST /v1/invoices/in_New1/finalize': [open],
+			'POST /v1/invoices/in_New1/send': [open],
+			'POST /v1/invoices/in_New1': [open]
+		});
+		expect(await createInvoice({ secretKey: KEY, fetch: f }, params)).toMatchObject({ invoiceId: 'in_New1', reused: false });
+		expect(calls.some((c) => c.url.includes('invoiceitems'))).toBe(false);
+	});
+
+	it('makes a new one when the key’s earlier invoice was voided, and refuses a draft whose total isn’t ours', async () => {
+		const voided = { ...open, id: 'in_Void', status: 'void' };
+		const a = scripted({ 'GET /v1/invoices': [{ data: [voided] }], 'POST /v1/invoices': [] });
+		await expect(createInvoice({ secretKey: KEY, fetch: a.f }, params)).rejects.toBeInstanceOf(StripeApiError);
+		expect(a.calls.map((c) => c.method)).toEqual(['GET', 'POST']);
+		const b = scripted({ 'GET /v1/invoices': [{ data: [{ ...draft, total: 1 }] }] });
+		await expect(createInvoice({ secretKey: KEY, fetch: b.f }, params)).rejects.toMatchObject({ code: 'total' });
+	});
+
+	it('refuses a malformed customer or an empty or non-positive line before any request', async () => {
+		const { f, calls } = scripted({});
+		await expect(createInvoice({ secretKey: KEY, fetch: f }, { ...params, customer: 'cus_x/../y' })).rejects.toMatchObject({ code: 'customer' });
+		await expect(createInvoice({ secretKey: KEY, fetch: f }, { ...params, lines: [] })).rejects.toMatchObject({ code: 'lines' });
+		await expect(createInvoice({ secretKey: KEY, fetch: f }, { ...params, lines: [{ amountMinor: 0, description: 'x' }] })).rejects.toMatchObject({ code: 'lines' });
+		expect(calls).toHaveLength(0);
 	});
 });

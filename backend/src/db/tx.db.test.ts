@@ -49,3 +49,21 @@ describe('withUser when the session is ended mid-transaction', () => {
 		expect(again).not.toBe(pid);
 	});
 });
+
+describe('withUser and BILLING_ENFORCED (334_team_seats)', () => {
+	const setting = () =>
+		withUser(USER, async (db) => (await db.query<{ v: string | null }>(`SELECT current_setting('app.billing_enforced', true) AS v`)).rows[0]!.v);
+	afterEach(() => {
+		delete process.env.BILLING_ENFORCED;
+	});
+
+	it('sets app.billing_enforced to on only when BILLING_ENFORCED is exactly true', async () => {
+		process.env.BILLING_ENFORCED = 'true';
+		expect(await setting()).toBe('on');
+		for (const off of [undefined, 'false', 'TRUE', '1', 'on']) {
+			if (off === undefined) delete process.env.BILLING_ENFORCED;
+			else process.env.BILLING_ENFORCED = off;
+			expect(['', null], String(off)).toContain(await setting());
+		}
+	});
+});

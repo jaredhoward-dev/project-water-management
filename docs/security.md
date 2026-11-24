@@ -1963,7 +1963,17 @@ In short:
   changes never write `subscription.seats` (the webhook brings them back
   through `app_billing_apply`; `seats.db.test.ts`, 333's
   `app_billing_live_subscription_ref` answers only the account's person or
-  team admins).
+  team admins). The Team seat guard (334, [billing.md § Team seats](./billing.md#team-seats))
+  is a set of triggers on `team_member`, `project_member` and `project`
+  calling owner-only functions (`app_team_seats_in_use`,
+  `app_team_seat_guard`: `water_app` can't execute either), so no path that
+  gives someone a seat skips it. It refuses only when the transaction's
+  `app.billing_enforced` is `on`, which `db/tx.ts` sets from
+  `BILLING_ENFORCED` alone; no request value reaches it, and the default is
+  off. Its refusal reaches the client as `402 plan_limit` with fixed words
+  and only the whole numbers it put in its `DETAIL` (`http/errors.ts`
+  `planLimitParams`), never the database's text (`teamSeats.db.test.ts`,
+  `errors.test.ts`).
 - **Accounts under RLS** (`068_app_user_rls.sql`). `app_user` had no RLS
   (sign-in reads it before anyone is signed in), so any `water_app`
   transaction, an API key's or the job tick's included, could read every
@@ -4839,7 +4849,8 @@ key there would let any read-only principal forge any user's session.
   domains too. Its **inputs are ids only** (§ Public repo hygiene, "No
   personal information in Actions inputs"): the address forms and the
   `billing-account` lookup run only through the operator's own `aws lambda
-  invoke`.
+  invoke`, and so does `billing-invoice`, whose PO number may identify a
+  client (its answer leaves the PO out).
 - **Reference loads run as the schema owner**, so they are gated like a
   deploy: `load-reference.yml` reaches AWS only in the `production`
   environment (a required reviewer, then OIDC), from `main` only, after a

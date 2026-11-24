@@ -1809,6 +1809,8 @@ export const af: Catalogue = {
 	'74fb1c93': 'Ons kon nie die e-pos stuur nie. Probeer oor ’n minuut weer.',
 	// You have posted 10 comments in the last hour. Wait a while, then try again.
 	'2ae5aea1': 'Jy het die afgelope uur 10 kommentare geplaas. Wag ’n rukkie en probeer dan weer.',
+	// Every editor seat on this team’s plan is in use. Ask a team admin to add a seat, then accept the invitation again.
+	'c08acfa2': 'Al die redigeerderplekke in hierdie span se plan is in gebruik. Vra ’n spanadministrateur om ’n plek by te voeg, en aanvaar dan die uitnodiging weer.',
 	// Too many sign-in attempts from your network. Wait a few minutes, then try again.
 	'3c2a05a7': 'Te veel pogings om van jou netwerk af in te teken. Wag ’n paar minute en probeer dan weer.',
 	// {n} minute / {n} minutes

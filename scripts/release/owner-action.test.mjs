@@ -67,6 +67,8 @@ test('refuses malformed ids, dates and text, and inputs the action doesn’t rea
 	assert.match(errors({ action: 'authority-confirm', user_id: PERSON, reference: 'r' }), /project_id is required/);
 	assert.match(errors({ action: 'authority-confirm', project_id: PROJECT, user_id: PERSON, team_id: TEAM, reference: 'r' }), /team_id is not used/);
 	assert.match(errors({ action: 'billing-account', user_id: PERSON }), /not one the workflow offers/);
+	// A PO number may identify a client, and the repo is public: billing-invoice is a direct invoke only.
+	assert.match(errors({ action: 'billing-invoice', account_id: ACCOUNT, plan: 'team' }), /not one the workflow offers/);
 	assert.match(errors({ action: 'billing-delete' }), /not one the workflow offers/);
 });
 
@@ -77,6 +79,8 @@ test('the workflow offers exactly these actions and no address input', () => {
 	// The action's choices come first; the plan's (none, pro, team) after.
 	assert.deepEqual(options.slice(0, WORKFLOW_ACTIONS.length + 1), [...WORKFLOW_ACTIONS, 'none']);
 	assert.doesNotMatch(inputs, /billing-account/);
+	assert.doesNotMatch(inputs, /billing-invoice/);
+	assert.doesNotMatch(inputs, /^ {6}po:/m);
 	assert.doesNotMatch(inputs, /^ {6}email:/m);
 	// Both jobs run the check: preflight before anyone approves, act before it invokes.
 	assert.equal(yml.match(/scripts\/release\/owner-action\.mjs check/g)?.length, 1);

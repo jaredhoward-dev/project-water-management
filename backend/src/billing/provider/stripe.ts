@@ -194,11 +194,12 @@ function normalise(body: unknown): NormaliseResult {
 	}
 
 	// invoice.paid, invoice.payment_failed: the account from the invoice's subscription metadata
-	// (parent.subscription_details since API 2025-03-31.basil, subscription_details before).
+	// (parent.subscription_details since API 2025-03-31.basil, subscription_details before), or, for a
+	// B2B invoice from the staff tool (billing/invoice.ts), which has no subscription, the invoice's own.
 	const parent = isObj(object.parent) && isObj(object.parent.subscription_details) ? object.parent.subscription_details : null;
 	const details = parent ?? (isObj(object.subscription_details) ? object.subscription_details : null);
-	const accountId = accountOf(details?.metadata);
-	if (!accountId) return { kind: 'invalid', why: 'no billing_account_id in the invoice’s subscription metadata' };
+	const accountId = accountOf(details?.metadata) ?? accountOf(object.metadata);
+	if (!accountId) return { kind: 'invalid', why: 'no billing_account_id in the invoice’s subscription or invoice metadata' };
 	const sub = details?.subscription ?? object.subscription;
 	return {
 		kind: 'event',

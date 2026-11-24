@@ -5,13 +5,15 @@
 // the account's person or an admin of its team, and app_entitlements to
 // anyone below editor on the project, so a farmer or viewer never sees it.
 import type { Db } from '../db/tx.js';
+import { billingEnforced } from './enforced.js';
 import { billingProviderName, type BillingProviderName } from './provider.js';
 
 /**
- * BILLING_ENFORCED: whether plan limits refuse anything. Phase 1 only reports
- * it (the default, false); only the exact string `true` turns it on.
+ * BILLING_ENFORCED: whether plan limits refuse anything (billing/enforced.ts).
+ * Off by default; when on, the database refuses a Team's editor past its paid
+ * seats (334_team_seats) and the rest still only reports.
  */
-export const billingEnforced = (env: NodeJS.ProcessEnv = process.env): boolean => env.BILLING_ENFORCED === 'true';
+export { billingEnforced };
 
 /** What usage_counter counts (its kind CHECK, 323_billing). */
 export const USAGE_KINDS = ['reports', 'packs_issued'] as const;

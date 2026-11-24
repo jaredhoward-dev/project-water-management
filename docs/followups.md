@@ -988,6 +988,51 @@ are #641's checklist. Open items from building it:
       keep the SQL as a fallback). The workflow takes ids only (the repo is
       public); `billing-account`, the address lookup, is the operator's
       direct invoke only.
+- [x] **No seat limit and no invoices for a business.** **Done (round 6,
+      issue #641):** a Team's editor seats are enforced by `334_team_seats`
+      (`402 plan_limit`, off unless `BILLING_ENFORCED=true`; billing.md §
+      Team seats), and the operator issues a B2B Stripe invoice with a PO
+      number (`pnpm dev:billing:invoice`, the `billing-invoice` owner action,
+      direct invoke only; billing.md § B2B invoices).
+- [ ] **`billing-invoice` can't reach Stripe from the migrate Lambda.** The
+      migrate Lambda has no `BILLING_PROVIDER=stripe`, no key and no route to
+      Stripe, so the action answers `billing_unavailable`
+      (`backend/src/lambda-migrate.ts`). Durable fix: give the function the
+      provider's settings and a route out (the same choice as the next
+      item). Trigger: the first B2B order.
+- [ ] **The API Lambda can't reach api.stripe.com.** It runs in the private
+      VPC, which has no internet gateway and no NAT (`infra/network.tf`,
+      the API function's `vpc_config` in `infra/lambda.tf`), so once
+      `billing_provider = "stripe"` checkout, the portal and seat changes
+      fail with `billing_provider_error`. Durable fix, the operator's
+      choice: run the Stripe calls through the fixed-egress VPC the fetcher
+      and mirror-ingest use (`fixed_egress_enabled`, `infra/egress.tf`), or
+      a NAT for the API's subnets (a monthly cost), or a Lambda outside the
+      VPC that makes only the provider calls. Trigger: before Stripe is
+      turned on (deployment.md § Turning on Stripe).
+- [ ] **Paying a B2B invoice doesn't grant the plan.** `invoice.paid` for a
+      standalone invoice changes nothing yet: the operator grants the plan
+      through the invoice's period by hand (deployment.md runbook 23,
+      billing.md § B2B invoices). Durable fix: the webhook turns a paid
+      invoice that carries our account and plan metadata into the staff
+      grant, idempotently. Trigger: the second B2B customer, or a missed
+      grant.
+- [ ] **One refused invite leaves all of a person's invites pending.**
+      `markVerified` (`backend/src/auth/email-routes.ts`) runs
+      `app_accept_invites` in one savepoint, so when one invite would pass a
+      Team's seats the others (to other teams or projects) stay pending too.
+      They can still accept each on the Invitations page. Durable fix: a
+      savepoint (or an exception block) per invite inside
+      `app_accept_invites`, a forward migration, so only the refused one
+      stays pending. Trigger: `BILLING_ENFORCED` turned on.
+- [ ] **`findInvoice` reads only the newest 100 invoices.** It lists a
+      customer's invoices with `limit: 100` and no paging
+      (`backend/src/billing/provider/stripeApi.ts`), so an older invoice made
+      under the same key isn't found and a retry past Stripe's 24-hour
+      idempotency window could issue a second one.
+      Durable fix: page with `starting_after` until found or exhausted, or
+      search by metadata (Stripe's invoice search). Trigger: a customer
+      with near 100 invoices.
 
 ## DB tests share the mail outbox (2026-10-02, PR #360)
 - [x] **Guard pending notices as db-setup.ts guards pending jobs.** The
@@ -3706,6 +3751,12 @@ The plumbing is built (catalogues, switch, `app_user.locale` /
       whether "nagetrek **van**" reads more naturally than "uit"; "gewysig"
       must stay (the licence asks for the modified note). Do it with the
       catalogue review.
+- [ ] **A native speaker's look at row `c08acfa2`** (issue #641 round 6,
+      2026-11-24): the Invitations page's `plan_limit` error, the
+      catalogue's first word for a plan's seat, "redigeerderplek(ke)" for
+      "editor seat(s)" and "plek" for a bare "seat". The i18n-checker kept
+      it; later strings about seats should use the same words. Do it with
+      the catalogue review.
 - [x] **Translation turnaround.** All 607 rows of
       `docs/i18n/af-translation-sheet.md` (505 site messages, some with a
       row per plural form; 70 email strings; 8 glossary entries of three
