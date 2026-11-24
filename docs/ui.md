@@ -13947,9 +13947,19 @@ with read-only tools over the project's data. It never changes anything.
   end. With billing enforced, a dollar cap (`assistant_daily_cap`,
   `assistant_monthly_cap`, `assistant_member_cap`,
   `assistant_free_pool_spent`; billing.md § Assistant dollar caps) shows the
-  server's words and "Back … your time." from `params.resetsAt`, with no
-  upgrade prompt, and the box takes nothing until then
-  (`data-testid="assistant-cap"`). Any other refusal shows its message.
+  server's words and "Back … your time." from `params.resetsAt`, and the box
+  takes nothing until then (`data-testid="assistant-cap"`). On Free's day and
+  month (`params.plan` is `free`, which the API sends on those two) the note
+  ends with a **Compare plans** link to the Plan page (`/account/plan`,
+  `data-testid="assistant-compare-plans"`), the month's after "Pro includes
+  about 15 times as much." (Free $1, Pro $15 a month, 323's plan limits).
+  The Free pool never upsells (it isn't the person's doing), nor does a paid
+  account's month or a Team member's share, whose words say a team admin
+  can raise it; an editor who can't read the owner's account gets no plan,
+  so no link (`chat.svelte.ts` `capOffersPlans`). The issue's *OK* button is
+  left out: the note stays until the cap lifts, as the box does. Tests:
+  `AssistantPanel.test.ts`, `chat.svelte.test.ts`, `assistant.spec.ts` (the
+  POST answered 429 by `page.route`). Any other refusal shows its message.
 - **A recommended change** (the `propose_settings` tool) is a card in the
   answer, **Recommended change**. Its title is the server's, never the
   model's words (issue #640): what kind of change it is (**Management

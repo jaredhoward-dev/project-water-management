@@ -226,7 +226,7 @@ describe('AssistantPanel', () => {
 
 	it('a dollar cap: the server’s words, when it’s back in the viewer’s time, and the box takes nothing', () => {
 		const words = 'The free assistant has reached its shared limit for today. It’s back tomorrow. This isn’t something you did, and your work isn’t affected.';
-		const out = html(chat({ refusal: { kind: 'cap', code: 'assistant_free_pool_spent', seconds: 3600, resetsAt: '2026-11-25T00:00:00.000Z', message: words } }));
+		const out = html(chat({ refusal: { kind: 'cap', code: 'assistant_free_pool_spent', seconds: 3600, resetsAt: '2026-11-25T00:00:00.000Z', message: words, plan: 'free' } }));
 		expect(out).toContain('data-testid="assistant-cap"');
 		expect(out).toContain('data-code="assistant_free_pool_spent"');
 		expect(out).toContain(words);
@@ -235,6 +235,26 @@ describe('AssistantPanel', () => {
 		// Not the token budget's note, and the pool's refusal never prompts an upgrade.
 		expect(out).not.toContain('data-testid="assistant-budget-spent"');
 		expect(out).not.toMatch(/upgrade|Pro plan|pricing/i);
+		expect(out).not.toContain('assistant-compare-plans');
+	});
+
+	it('Free’s day and month offer Compare plans (the month says what Pro includes); a paid account’s caps don’t', () => {
+		const cap = (code: 'assistant_daily_cap' | 'assistant_monthly_cap' | 'assistant_member_cap', plan: string | null) =>
+			html(chat({ refusal: { kind: 'cap', code, seconds: 3600, resetsAt: '2026-12-01T00:00:00.000Z', message: 'Words.', plan } }));
+		const day = cap('assistant_daily_cap', 'free');
+		expect(day).toMatch(/<a [^>]*href="\/account\/plan"[^>]*data-testid="assistant-compare-plans"[^>]*>Compare plans<\/a>/);
+		expect(day).not.toContain('Pro includes');
+		expect(day).toMatch(/<textarea[^>]*disabled/);
+		const month = cap('assistant_monthly_cap', 'free');
+		expect(month).toContain('Pro includes about 15 times as much.');
+		expect(month).toContain('data-testid="assistant-compare-plans"');
+		for (const out of [cap('assistant_monthly_cap', 'pro'), cap('assistant_monthly_cap', null), cap('assistant_member_cap', 'team')]) {
+			expect(out).toContain('data-testid="assistant-cap"');
+			expect(out).not.toContain('assistant-compare-plans');
+			expect(out).not.toContain('Pro includes');
+		}
+		// The workspace's words: never "quota", "abuse" or "402".
+		expect(day + month).not.toMatch(/quota|abuse|402/i);
 	});
 
 	it('says chats are kept only in this browser, and offers Past chats with their count once read', () => {

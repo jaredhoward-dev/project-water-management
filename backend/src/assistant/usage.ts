@@ -102,8 +102,19 @@ export interface BegunTurn {
  * account's month (`assistant_monthly_cap`), a Team member's share
  * (`assistant_member_cap`), a Free person's day (`assistant_daily_cap`) and
  * the paced Free pool (`assistant_free_pool_spent`) refuse too, and cut the
- * budget to what they have left; off, they only record.
+ * budget to what they have left; off, they only record. The day's and the
+ * month's 429 carry `params.plan` (the refusing account's plan code) for the
+ * panel's Compare plans, shown on Free only.
  */
+/** The plan code of the project's billing account as the caller may read it (app_account_plan); null when they may not. */
+async function accountPlanCode(db: Db, projectId: string): Promise<string | null> {
+	const { rows } = await db.query<{ code: string | null }>(
+		`SELECT app_account_plan(p.billing_account_id) -> 'plan' ->> 'code' AS code FROM project p WHERE p.id = $1`,
+		[projectId]
+	);
+	return rows[0]?.code ?? null;
+}
+
 export async function beginTurn(
 	c: Context,
 	db: Db,
@@ -161,7 +172,12 @@ export async function beginTurn(
 		const refusal = DOLLAR_REFUSAL[r.outcome];
 		const resetsAt = new Date(Date.now() + r.wait_seconds * 1000).toISOString();
 		c.header('Retry-After', String(r.wait_seconds));
-		throw ApiError.coded(429, refusal.code, refusal.message(resetsAt), { seconds: r.wait_seconds, resetsAt });
+		// The plan whose allowance refused (`params.plan`), so the panel can offer Compare plans on Free's day and month
+		// only: the day refuses a Free person only; the month is the project's account's, read as app_account_plan
+		// answers the caller (null, so left out, when they may not read that account). The member share and the pool
+		// never upsell, so they carry none.
+		const plan = r.outcome === 'day' ? 'free' : r.outcome === 'month' ? await accountPlanCode(db, projectId) : null;
+		throw ApiError.coded(429, refusal.code, refusal.message(resetsAt), { seconds: r.wait_seconds, resetsAt, ...(plan ? { plan } : {}) });
 	}
 	if (r.outcome !== 'ok') {
 		const scope: BudgetScope = r.outcome === 'budget' ? 'project' : r.outcome === 'user_budget' ? 'user' : 'total';

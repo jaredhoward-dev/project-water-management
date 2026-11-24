@@ -69,7 +69,8 @@ export type Refusal =
 	| { kind: 'rate'; seconds: number; message: string }
 	| { kind: 'budget'; scope: AssistantBudgetScope; message: string }
 	/** A dollar cap (enforced billing only): the server's words say whose and when it's back; `resetsAt` (ISO) is when. */
-	| { kind: 'cap'; code: DollarCapCode; seconds: number; resetsAt: string; message: string }
+	/** `plan` is the refusing account's plan code (`params.plan`, sent on the day and the month), else null. */
+	| { kind: 'cap'; code: DollarCapCode; seconds: number; resetsAt: string; message: string; plan: string | null }
 	| { kind: 'error'; message: string };
 
 export interface AssistantDeps {
@@ -102,6 +103,14 @@ const RATE_LIMITED = 'assistant_rate_limited';
 export const DOLLAR_CAP_CODES = ['assistant_daily_cap', 'assistant_monthly_cap', 'assistant_member_cap', 'assistant_free_pool_spent'] as const;
 export type DollarCapCode = (typeof DOLLAR_CAP_CODES)[number];
 const isDollarCap = (code: string | null | undefined): code is DollarCapCode => (DOLLAR_CAP_CODES as readonly (string | null | undefined)[]).includes(code);
+
+/**
+ * Whether a dollar cap's refusal offers Compare plans (issue #641's copy): Free's day and month only. The Free pool
+ * never upsells (it isn't the person's doing), and a paid account's month or a Team member's share doesn't either.
+ */
+export function capOffersPlans(r: Refusal | null): boolean {
+	return r?.kind === 'cap' && r.plan === 'free' && (r.code === 'assistant_daily_cap' || r.code === 'assistant_monthly_cap');
+}
 /** setTimeout's longest wait (2^31 − 1 ms, about 24.8 days); a longer one would fire at once. */
 const MAX_TIMER_MS = 2_147_483_647;
 const budgetScopeOf = (code: string | null | undefined): AssistantBudgetScope | null => (code && Object.hasOwn(BUDGET_SPENT, code) ? BUDGET_SPENT[code]! : null);
@@ -422,7 +431,8 @@ export class AssistantChat {
 				const seconds = Number.isFinite(at) ? Math.max(1, Math.ceil((at - Date.now()) / 1000)) : Number(e.params.seconds) || 60;
 				const resetsAt = Number.isFinite(at) ? new Date(at).toISOString() : new Date(Date.now() + seconds * 1000).toISOString();
 				this.#liftAfter(seconds, 'cap');
-				return { kind: 'cap', code: e.code, seconds, resetsAt, message: e.message || 'The assistant isn’t available to you until its allowance is back.' };
+				const plan = typeof e.params.plan === 'string' ? e.params.plan : null;
+				return { kind: 'cap', code: e.code, seconds, resetsAt, message: e.message || 'The assistant isn’t available to you until its allowance is back.', plan };
 			}
 			return { kind: 'error', message: e.message };
 		}

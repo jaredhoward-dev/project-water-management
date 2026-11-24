@@ -10,6 +10,9 @@
 // above it, the disclaimer's first line in view and the rest folded, one way
 // out (the ✕), at 1440×960 and on a phone. What a run needs: the Run model
 // button's own check (get_run_readiness), shown as paragraphs, a list and bold.
+// A dollar cap's refusal (issue #641, the POST answered 429 by page.route, since
+// the e2e API runs without billing enforced): the server's words, the box
+// closed, and Compare plans to the Plan page on Free's day; none on the Free pool.
 // Invented data only.
 import type { Page } from '@playwright/test';
 import { createProject, createRun, seedRunnableProject } from '../support/api.ts';
@@ -192,3 +195,57 @@ for (const size of [
 		await expect(sheet).toBeHidden();
 	});
 }
+
+/** Answers the assistant's POST with a dollar cap's 429, as usage.ts beginTurn sends it (with billing enforced). */
+async function refuseWith(page: Page, code: string, error: string, plan?: string) {
+	const resetsAt = new Date(Date.now() + 3 * 3600_000).toISOString();
+	await page.route(/\/projects\/[^/]+\/assistant\/messages$/, (route) =>
+		route.request().method() === 'POST'
+			? route.fulfill({
+					status: 429,
+					contentType: 'application/json',
+					headers: { 'retry-after': '10800' },
+					body: JSON.stringify({ error, code, params: { seconds: 10800, resetsAt, ...(plan ? { plan } : {}) } })
+				})
+			: route.fallback()
+	);
+}
+
+test('a dollar cap: Free’s day shows the server’s words, closes the box and offers Compare plans; the Free pool doesn’t', async ({ page, owner }) => {
+	void owner;
+	const project = await createProject(page.request, 'Assistant capped farm');
+	const day = 'That’s today’s free assistant use. It’s back at midnight (UTC). Everything else in your catchment keeps working: runs, calibration, scenarios and exports have no limit on Free.';
+	await refuseWith(page, 'assistant_daily_cap', day, 'free');
+	await page.goto(`/projects/${project.id}`);
+	const sheet = await openAssistant(page);
+	const box = sheet.getByRole('textbox', { name: 'Your question' });
+	await box.fill('How full is the dam?');
+	await sheet.getByRole('button', { name: 'Send' }).click();
+	const cap = sheet.getByTestId('assistant-cap');
+	await expect(cap).toHaveAttribute('data-code', 'assistant_daily_cap');
+	await expect(cap).toContainText(day);
+	await expect(cap).toContainText(/Back .+ your time\./);
+	await expect(box).toBeDisabled();
+	// Not taken: the question goes back in the box.
+	await expect(box).toHaveValue('How full is the dam?');
+	const plans = cap.getByRole('link', { name: 'Compare plans' });
+	await expect(plans).toHaveAttribute('href', /\/account\/plan$/);
+	await expectNoViolations(page);
+	await plans.click();
+	await expect(page).toHaveURL(/\/account\/plan$/);
+
+	// The Free pool: the same closed box, never an upgrade prompt.
+	await page.unrouteAll({ behavior: 'wait' });
+	const pool = 'The free assistant has reached its shared limit for today. It’s back tomorrow. This isn’t something you did, and your work isn’t affected.';
+	await refuseWith(page, 'assistant_free_pool_spent', pool, 'free');
+	await page.goto(`/projects/${project.id}`);
+	const again = await openAssistant(page);
+	await again.getByRole('textbox', { name: 'Your question' }).fill('How full is the dam?');
+	await again.getByRole('button', { name: 'Send' }).click();
+	const poolCap = again.getByTestId('assistant-cap');
+	await expect(poolCap).toHaveAttribute('data-code', 'assistant_free_pool_spent');
+	await expect(poolCap).toContainText(pool);
+	await expect(again.getByRole('textbox', { name: 'Your question' })).toBeDisabled();
+	await expect(poolCap.getByRole('link', { name: 'Compare plans' })).toHaveCount(0);
+	await expect(poolCap).not.toContainText('Pro includes');
+});

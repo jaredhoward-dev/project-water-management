@@ -5,7 +5,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ApiError } from '#lib/api/client.js';
 import type { AssistantProposal, AssistantRequest, AssistantStatus, AssistantStreamEvent } from '#lib/api/types.js';
-import { AssistantChat, DOLLAR_CAP_CODES, MAX_SENT_MESSAGES, applicable, capMessages, waitText, type AssistantTurn, type Refusal } from './chat.svelte';
+import { AssistantChat, DOLLAR_CAP_CODES, MAX_SENT_MESSAGES, applicable, capMessages, capOffersPlans, waitText, type AssistantTurn, type Refusal } from './chat.svelte';
 import { ChatHistory, type ChatRecord, type HistoryBackend } from './history';
 
 const STATUS: AssistantStatus = {
@@ -195,7 +195,7 @@ describe('AssistantChat', () => {
 				await c.load();
 				expect(await c.ask('Q')).toBe(false);
 				expect(c.turns).toEqual([]);
-				expect(c.refusal).toEqual({ kind: 'cap', code, seconds: expect.any(Number), resetsAt, message: `Words for ${code}` });
+				expect(c.refusal).toEqual({ kind: 'cap', code, seconds: expect.any(Number), resetsAt, message: `Words for ${code}`, plan: null });
 				expect(c.capped).toBe(true);
 				// Not the token budget's refusal: no budget scope is named.
 				expect(c.spentScope).toBeNull();
@@ -236,6 +236,26 @@ describe('AssistantChat', () => {
 			expect(c.refusal).toMatchObject({ kind: 'cap', code: 'assistant_monthly_cap', resetsAt });
 			expect(timers).toEqual([]);
 			expect(c.capped).toBe(true);
+		});
+
+		it('keeps params.plan, and offers Compare plans on Free’s day and month only', async () => {
+			const refusalFor = async (code: string, plan?: string) => {
+				const c = chatWith(async () => Promise.reject(new ApiError(429, 'Words', undefined, code, { seconds: 60, resetsAt: resetsIn(60), ...(plan ? { plan } : {}) })), STATUS, () => {});
+				await c.load();
+				await c.ask('Q');
+				return c.refusal;
+			};
+			const day = await refusalFor('assistant_daily_cap', 'free');
+			expect(day).toMatchObject({ kind: 'cap', plan: 'free' });
+			expect(capOffersPlans(day)).toBe(true);
+			expect(capOffersPlans(await refusalFor('assistant_monthly_cap', 'free'))).toBe(true);
+			// A paid account's month, a month whose plan the caller can't read, a member's share, the pool: none.
+			expect(capOffersPlans(await refusalFor('assistant_monthly_cap', 'pro'))).toBe(false);
+			expect(capOffersPlans(await refusalFor('assistant_monthly_cap'))).toBe(false);
+			expect(capOffersPlans(await refusalFor('assistant_member_cap', 'team'))).toBe(false);
+			expect(capOffersPlans(await refusalFor('assistant_free_pool_spent', 'free'))).toBe(false);
+			expect(capOffersPlans({ kind: 'rate', seconds: 60, message: 'x' })).toBe(false);
+			expect(capOffersPlans(null)).toBe(false);
 		});
 
 		it('a newer refusal’s timer isn’t cleared by an older one', async () => {
