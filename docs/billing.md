@@ -813,10 +813,16 @@ actions `billing-grant`, `billing-revoke` and `billing-grants`
 environment, with the run's GitHub login as `--by`; [deployment.md § Owner
 actions](./deployment.md#owner-actions)), or, as a fallback, the functions
 in SQL step by step in [deployment.md § Runbooks](./deployment.md#runbooks)
-21. The Lambda's answer carries ids, never the address, and the workflow's
-public summary leaves out the reasons. An address is used only to find the person's account and
-is printed only as the operator typed it. `--by` defaults to the operator's
-login.
+21. The workflow takes ids only (a billing account's, a person's or a
+team's), never an address: its runs are in a public repo, where a run's
+inputs may be visible ([security.md § Public repo
+hygiene](./security.md#public-repo-hygiene)). The operator finds the id
+through the `billing-account` lookup, invoked from their own SSO session
+(deployment.md § Owner actions). The Lambda's answer carries ids, never the
+address, and the workflow's public summary leaves out the reasons. An
+address is used only to find the person's account (the local script and
+that direct invoke) and is printed only as the operator typed it. `--by`
+defaults to the operator's login.
 
 - **What a grant is.** `app_staff_grant_plan(account, plan, until, reason,
   by, replace)` writes a `provider = 'manual'`, `status = 'active'`

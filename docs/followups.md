@@ -984,7 +984,9 @@ are #641's checklist. Open items from building it:
       and `authority-confirm` (`backend/src/ops/ownerActions.ts`), run
       through `.github/workflows/billing-admin.yml` in the `production`
       environment (deployment.md § Owner actions; runbooks 17, 21 and 22
-      keep the SQL as a fallback).
+      keep the SQL as a fallback). The workflow takes ids only (the repo is
+      public); `billing-account`, the address lookup, is the operator's
+      direct invoke only.
 
 ## DB tests share the mail outbox (2026-10-02, PR #360)
       **Decided (round 3, N):** a bounded whole-file pass (data-sources.md § ssebop-eta); the build is its own item below.

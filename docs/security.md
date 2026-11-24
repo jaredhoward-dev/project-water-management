@@ -4375,6 +4375,20 @@ readable by anyone. The rules:
   invented catchment (NATO-alphabet farm names, seeded random series), and only
   its layout follows b023. Regenerate it; never edit it by hand or paste client
   values into it ([scripts/wbt-import/README.md](../scripts/wbt-import/README.md#the-synthetic-workbook)).
+- **No personal information in Actions inputs.** A `workflow_dispatch`
+  run's inputs are submitted to GitHub, and in a public repo we can't rule
+  out GitHub showing them to anyone (the run page, the API, a run name, a
+  later change), so a person's address or name there would be personal
+  information published (POPIA). Masking hides it from the log only. So a
+  workflow names people, teams, billing accounts and projects by UUID, never
+  by address or name: `billing-admin.yml` refuses any input containing `@`
+  before anyone is asked to approve (`scripts/release/owner-action.mjs`), and
+  the migrate Lambda refuses an `email` field in a payload marked `via:
+  "workflow"` (`backend/src/ops/ownerActions.ts`). Turning an address into an
+  id is the operator's own `aws lambda invoke` from their SSO session, which
+  never touches GitHub ([deployment.md § Owner
+  actions](./deployment.md#owner-actions)). The same goes for free-text
+  inputs (a grant's reason, a letter's reference): no address in them.
 - **Client terms guard.** The client's catchment, farm and workbook names
   (and the gauge and quaternary codes that pinpoint it) are listed in
   `../infra-secrets/water-management/client-terms.txt`, outside this repo,
@@ -4812,10 +4826,14 @@ key there would let any read-only principal forge any user's session.
   named action whose every field a strict schema checks before anything
   connects (`backend/src/ops/ownerActions.ts`); it never carries SQL. The
   run's log is public, so no input is put in a step's environment or a
-  command (the payload is built by `jq` from the event file, the address
-  masked first), and the job summary prints ids, plans, dates and counts
-  only: the Lambda's answer carries no address or name, and the workflow
-  leaves out grants' reasons and the report's email domains too.
+  command (the payload is built from the event file by
+  `scripts/release/owner-action.mjs`), and the job summary prints ids,
+  plans, dates and counts only: the Lambda's answer carries no address or
+  name, and the workflow leaves out grants' reasons and the report's email
+  domains too. Its **inputs are ids only** (§ Public repo hygiene, "No
+  personal information in Actions inputs"): the address forms and the
+  `billing-account` lookup run only through the operator's own `aws lambda
+  invoke`.
 - **Reference loads run as the schema owner**, so they are gated like a
   deploy: `load-reference.yml` reaches AWS only in the `production`
   environment (a required reviewer, then OIDC), from `main` only, after a
