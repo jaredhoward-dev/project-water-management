@@ -7,5 +7,5 @@
 
 <div class="alert alert-info" role="status" data-testid="live-limit">
 	<p>{LIVE_LIMIT_TEXT}</p>
-	<p><a href={resolve('/account/plan')}>Compare plans</a></p>
+	<p><a href={resolve('account/plan')}>Compare plans</a></p>
 </div>
