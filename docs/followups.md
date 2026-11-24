@@ -984,9 +984,10 @@ are #641's checklist. Open items from building it:
       end starts like any lapse); (4) the assistant panel's
       words for `assistant_trial_cap` and `assistant_trial_daily_cap`
       (`frontend/.../assistant/chat.svelte.ts` `DOLLAR_CAP_CODES` doesn't
-      list them, so they show as a plain error); (5) the abuse report's
+      list them, so they show as a plain error); ~~(5) the abuse report's
       "reverse trial → paid within 30 days" from `billing_grant_log`'s
-      `reverse trial` grants; (6) whether to key `reverse_trial_claim` with an
+      `reverse trial` grants~~ (done: `reverseTrialToPaid` in
+      `billing/metrics.ts`, billing.md § Metrics and the abuse report); (6) whether to key `reverse_trial_claim` with an
       HMAC under a server secret rather than a bare SHA-256 (a bare hash can be
       tested against a known address; an HMAC needs a secret kept for good, or
       the claims stop matching); operator decision.
@@ -1114,8 +1115,9 @@ are #641's checklist. Open items from building it:
       a paused catchment~~ (`project.planPausedAt`, the header's notice) and
       ~~the owners' email when the grace starts and when the pause lands~~
       (346, billing.md § Plan emails). Still to do:
-      (4) the abuse report's "share at the live-catchment limit" can now be
-      measured from 338's count; (6) *Compare plans* always opens the
+      ~~(4) the abuse report's "share at the live-catchment limit"~~ (done:
+      `live_catchments` in the report's Free limit shares, from 338's
+      count); (6) *Compare plans* always opens the
       person's own Plan page, not a team's for a team catchment billed to a
       Free team; (8) the copy and import dialogs don't yet show the API's
       `autoRunsOff` (the new project opens with automatic runs off and its

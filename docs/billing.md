@@ -223,8 +223,9 @@ pnpm dev:billing:report --show-emails       # operator only: prints the addresse
 ```
 
 It reads two owner-only functions (`325_billing_metrics.sql`; never granted
-to `water_app`, [data-model.md](./data-model.md)) and the owner-only
-`email_gate_refusal` table (348) on this checkout's
+to `water_app`, [data-model.md](./data-model.md)), 338's owner-only
+`app_live_catchments_in_use`, `billing_grant_log` and `subscription` (the
+reverse trials) and the owner-only `email_gate_refusal` table (348) on this checkout's
 database (`MIGRATION_DATABASE_URL`); in production the operator runs the
 same code through the migrate Lambda's `billing-report` owner action
 (`.github/workflows/billing-admin.yml`, approved in the `production`
@@ -242,7 +243,8 @@ output never goes into an issue, a PR, a chat or an agent's transcript.
 | Metric | How it is worked out | Threshold (the issue's) |
 | --- | --- | --- |
 | Activation | Verified sign-ups of the month (SAST) with a model run within 7 days of signing up. Sign-ups under 7 days old are left out and counted as pending | < 30% → fix onboarding first |
-| Active Free accounts near / at each limit | Active = a run, a server report or assistant use this month on the account's projects. Near ≥ 80% of the limit, at ≥ 100%, for reports (5), the assistant's dollars ($1) and catchments (Free has no limit, so none) | > 15% at reports → 10 a month; < 3% at the monthly assistant cap → room to raise |
+| Active Free accounts near / at each limit | Active = a run, a server report or assistant use this month on the account's projects. Near ≥ 80% of the limit, at ≥ 100%, for reports (5), the assistant's dollars ($1), catchments (Free has no limit, so none) and live catchments (1: the share at the live-catchment limit). Catchments and live catchments are counted **today**; live is 338's count (`app_live_catchments_in_use`: an enabled feed or alert rule, automatic runs on, or a publication; [§ Live catchments](#live-catchments-free)), so an account past its limit from before enforcement counts as at it, and an idle account with a live catchment isn't in the share | > 15% at reports → 10 a month; < 3% at the monthly assistant cap → room to raise |
+| Reverse trial → paid within 30 days | The reverse trials (342) that **began in the report's SAST month**: `billing_grant_log` `grant` rows by `reverse trial`, one per account (one trial per canonical email). Paid = the account's first paid plan at or after the trial's start: a subscription from a payment provider (`stripe`, or `mock` locally) that isn't itself `trialing` (whatever its status now, so a plan bought and later cancelled counts), or a paid B2B invoice's grant (`billing_grant_log` `grant` by `invoice`, 335); a staff grant is not paid. Converted when it came at most 30 days after the start. A trial under 30 days old is left out and counted as pending (with how many of those already pay). A deleted account's trial goes with it (`billing_grant_log` cascades) | |
 | Assistant spend per account | p50 and p90 (nearest rank) per plan over the accounts that spent this month, with the total and any unpriced turns (then a floor) | Paid: > 20% at $15 → top-up packs sooner |
 | Free spend by accounts under 7 days old | Its share of the month's Free assistant spend. `assistant_usage` is monthly, so an account counts as new when its latest spend of the month came under 7 days after it started: **an upper bound** | > 50% → escalation (b) |
 | Heaviest Free accounts | The five with the most assistant spend, by account id | |
@@ -258,10 +260,9 @@ spend keeps `assistant_usage`'s UTC month, as `app_account_plan` does.
 **Not yet measurable**, printed as such so a gap is never read as a zero
 (the app doesn't record what each needs): upgrade at the limit (no checkout,
 trial or limit-message events), churn after the limit (no record of hitting
-one), reverse trial to paid (built in 342, off, and the report doesn't read it yet), the share at the assistant's daily
+one), the share at the assistant's daily
 cap and the Free pool's burn by day (`assistant_day_usage` keeps each day
-since 336, but the report doesn't read it yet), the share at the live-catchment limit (338 defines live,
-but the report doesn't read it yet), paid seats reaching $15 (spend isn't kept per paid seat), sign-up throttle hits per address
+since 336, but the report doesn't read it yet), paid seats reaching $15 (spend isn't kept per paid seat), sign-up throttle hits per address
 (`signup_throttle` keeps only an hour's hashed buckets) and suspensions (no
 suspend action yet).
 
