@@ -129,6 +129,9 @@ CREATE FUNCTION app_reverse_trial_start(p_email_hash text) RETURNS text
 		END IF;
 		v_account := billing_account_ensure('user', v_user);
 		-- One start at a time per account, against a concurrent grant or webhook (the one-live index is the backstop).
+		-- 334's lock first, before the row lock: the subscription INSERT below fires 341's sync, which takes it,
+		-- and taking it after FOR UPDATE would deadlock against a sync that holds it and writes the row.
+		PERFORM pg_advisory_xact_lock(hashtext('billing:' || v_account::text));
 		PERFORM 1 FROM billing_account WHERE id = v_account FOR UPDATE;
 		IF EXISTS (SELECT 1 FROM subscription WHERE billing_account_id = v_account AND status IN ('trialing', 'active', 'past_due')) THEN
 			RETURN 'live';

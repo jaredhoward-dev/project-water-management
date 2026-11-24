@@ -181,6 +181,9 @@ CREATE FUNCTION app_billing_keep_catchment(p_project uuid) RETURNS void
 		IF v_account IS NULL OR NOT app_billing_account_readable(v_account) THEN
 			RAISE EXCEPTION 'not a catchment of your billing account' USING ERRCODE = 'no_data_found';
 		END IF;
+		-- 334's lock before the write, as app_plan_pause_sync takes it: the UPDATE's row lock first would
+		-- deadlock against a sync (the tick, a subscription change) that holds the advisory lock and writes the row.
+		PERFORM pg_advisory_xact_lock(hashtext('billing:' || v_account::text));
 		UPDATE billing_account SET kept_project_id = p_project WHERE id = v_account;
 		PERFORM app_plan_pause_sync(v_account);
 	END

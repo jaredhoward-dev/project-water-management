@@ -7,7 +7,9 @@
 //    (positive control: the kept one still schedules all three);
 //  - the owner's choice moves the pause at once; a stranger can't choose;
 //  - an upgrade resumes everything; members read the pause, strangers don't (positive control);
-//  - the app role can't run the sweep outside the worker.
+//  - the app role can't run the sweep outside the worker;
+//  - the owner's choice racing a sync on the same account waits for it rather than deadlocking (334's lock order).
+import pg from 'pg';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { asOwner, disableFeedsAfterFile, retirePendingJobs, signUp } from '../__tests__/helpers.js';
 import { alertsOn } from '../alerts/evaluate.js';
@@ -179,5 +181,57 @@ describe('341: pausing past Free’s limit after a downgrade', () => {
 	it('only the worker runs the sweep', async () => {
 		expect(await failure(withUser(owner.id, (db) => db.query('SELECT app_plan_pause_tick()')))).toBe('42501');
 		expect(await failure(withUser(owner.id, (db) => db.query('SELECT app_plan_pause_sync($1)', [account])))).toBe('42501');
+	});
+});
+
+describe('341: lock order on one account', () => {
+	it('keeping a catchment while a sync holds the account’s billing lock waits for it, and both finish (no 40P01)', async () => {
+		const owner = await signUp('PauseRace');
+		const [x, y] = [await newProject(owner, 'Race X'), await newProject(owner, 'Race Y')];
+		for (const p of [x, y]) expect((await owner.call('PUT', `/projects/${p}/alert-rules`, alertBody)).status).toBe(200);
+		const acct = await accountOf(x);
+		// A lapsed plan with both catchments live; the grace cleared, so the next sync writes the account row again.
+		await asOwner(`INSERT INTO subscription (billing_account_id, plan_code, status, provider) VALUES ($1, 'pro', 'canceled', 'mock')`, [acct]);
+		await asOwner('UPDATE billing_account SET over_free_since = NULL WHERE id = $1', [acct]);
+		const connect = async () => {
+			const c = new pg.Client({ connectionString: process.env.TEST_MIGRATION_DATABASE_URL });
+			await c.connect();
+			return c;
+		};
+		const syncer = await connect();
+		const keeper = await connect();
+		try {
+			// The sync (the tick, a subscription change) has taken 334's lock and not yet written the row.
+			await syncer.query('BEGIN');
+			await syncer.query(`SELECT pg_advisory_xact_lock(hashtext('billing:' || $1::text))`, [acct]);
+			const keeperPid = (await keeper.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0]!.pid;
+			await keeper.query('BEGIN');
+			await keeper.query(`SELECT set_config('app.current_user_id', $1, true)`, [owner.id]);
+			const keeping = keeper.query('SELECT app_billing_keep_catchment($1)', [x]).then(
+				async () => (await keeper.query('COMMIT'), 'ok'),
+				(e: { code?: string }) => String(e.code)
+			);
+			// The owner's choice waits on the account's billing lock (an advisory lock, before any write to the row).
+			await expect
+				.poll(async () =>
+					(await syncer.query<{ w: string | null }>('SELECT wait_event_type AS w FROM pg_stat_activity WHERE pid = $1', [keeperPid])).rows[0]!.w
+				)
+				.toBe('Lock');
+			// The sync goes on to write the account row (the grace starts again), and commits.
+			await syncer.query('SELECT app_plan_pause_sync($1)', [acct]);
+			await syncer.query('COMMIT');
+			expect(await keeping).toBe('ok');
+		} finally {
+			await syncer.query('ROLLBACK').catch(() => {});
+			await keeper.query('ROLLBACK').catch(() => {});
+			await syncer.end();
+			await keeper.end();
+		}
+		const [row] = (await asOwner('SELECT kept_project_id AS kept, over_free_since AS since FROM billing_account WHERE id = $1', [acct])) as {
+			kept: string;
+			since: Date | null;
+		}[];
+		expect(row!.kept).toBe(x);
+		expect(row!.since).toBeInstanceOf(Date);
 	});
 });
