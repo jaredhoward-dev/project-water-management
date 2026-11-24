@@ -23,7 +23,7 @@ import { runEnsemble, type ModelInput, type ResolvedEnsembleOptions } from '@wat
 import pg from 'pg';
 import { replaceEvaporationDataset } from '../geo/evaporationGrid.js';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { anon, app, asOwner, confirmAsOperator, lastMailTo, signUp, tokenIn } from '../__tests__/helpers.js';
+import { anon, app, asOwner, confirmAsOperator, lastMailTo, retirePendingJobs, signUp, tokenIn } from '../__tests__/helpers.js';
 import { loadSyntheticEvaporation } from '../../scripts/import-evaporation.js';
 import { loadSyntheticEvaporationStations } from '../../scripts/import-evaporation-stations.js';
 import { loadSyntheticQuaternaries } from '../../scripts/import-quaternaries.js';
@@ -97,6 +97,8 @@ function deep(b: unknown, depth = 0): unknown {
 	return addMissing(Object.fromEntries(Object.entries(b).map(([k, v]) => [k, deep(v, depth + 1)])));
 }
 
+/** The live catchments the keep recipes made (their alert rules queue alert_eval jobs, retired in afterAll). */
+const keepProjects: string[] = [];
 const freshUser = (n: string, verified = true) => signUp(n, { verified });
 /** A fresh account with an authenticator confirmed (two-step sign-in), and its TOTP key. */
 async function enrolledUser(n: string) {
@@ -438,6 +440,21 @@ const RECIPE: Record<string, () => Promise<Req> | Req> = {
 	'POST /teams/:id/plan/assistant-share': async () => {
 		await ok(ctx.owner.call('GET', `/teams/${ctx.teamId}/plan`));
 		return { params: { id: ctx.teamId }, body: { pct: 60 } };
+	},
+	// The kept live catchment (341/345): a live one of the account (an alert rule on, whose alert_eval jobs afterAll
+	// retires), so the legitimate body answers 200.
+	'POST /account/plan/keep': async () => {
+		const u = await freshUser('Mkeep');
+		const pid = (await ok(u.call('POST', '/projects', { name: 'Mass keep' }))).project.id as string;
+		keepProjects.push(pid);
+		await ok(u.call('PUT', `/projects/${pid}/alert-rules`, { rules: [{ kind: 'ewr_forecast_fail', threshold: 5, enabled: true }] }));
+		return { as: u, body: { projectId: pid } };
+	},
+	'POST /teams/:id/plan/keep': async () => {
+		const pid = (await ok(ctx.owner.call('POST', '/projects', { name: 'Mass team keep', teamId: ctx.teamId }))).project.id as string;
+		keepProjects.push(pid);
+		await ok(ctx.owner.call('PUT', `/projects/${pid}/alert-rules`, { rules: [{ kind: 'ewr_forecast_fail', threshold: 5, enabled: true }] }));
+		return { params: { id: ctx.teamId }, body: { projectId: pid } };
 	},
 	// The mock's pages: a token for the owner's account (signed with the dev key the sweep stubs), and a choice that
 	// writes nothing (cancels; the portal's cancel with no subscription). Their bodies are never read.
@@ -878,6 +895,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
 	vi.unstubAllEnvs();
+	await retirePendingJobs(...keepProjects);
 	// The ladder's yield job and what the sweep's POSTs queued (the rules' run …/auto-calibrations queues among them).
 	await clearLadderJobs(ctx);
 	// The invented A-pan grid the unit-apan recipe loaded: no other file should find an A-pan grid it didn't load.

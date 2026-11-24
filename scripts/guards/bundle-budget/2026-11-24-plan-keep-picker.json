@@ -1,0 +1,4 @@
+{
+	"addKb": 2,
+	"why": "The Plan page's live-catchment picker (KeepLive.svelte, plan.ts helpers) and the workspace's paused notice (planPause.ts): build:frontend measured 2535 KB against the 2534 KB ceiling, the picker's PlanUsage chunk 6.8 KB gzipped; 2 KB covers both with rounding"
+}

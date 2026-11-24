@@ -16,14 +16,17 @@
 	// any of it. The figures and words come from plan.ts. Team's seat field starts at
 	// the team's editors when they pass the included seats, and says how many there
 	// are; a subscription with a recorded interval says what it costs (332).
+	// Past Free's live catchments after a plan ended (341), a third card lists
+	// them and lets the person choose the one that stays live (KeepLive.svelte, 345).
 	import { onMount, untrack, type Snippet } from 'svelte';
 	import { replaceState } from '$app/navigation';
 	import { page } from '$app/state';
 	import { PUBLIC_API_URL } from '$app/env/public';
 	import { api } from '#lib/api/index.js';
 	import NumberInput from '#lib/components/common/NumberInput.svelte';
+	import KeepLive from './KeepLive.svelte';
 	import { provideInvalidFields } from '#lib/components/common/invalidFields.svelte.js';
-	import type { AccountPlan, BillingInterval, BillingRedirect, PlanOffer } from '#lib/api/types.js';
+	import type { AccountPlan, BillingInterval, BillingRedirect, LiveCatchments, PlanOffer } from '#lib/api/types.js';
 	import {
 		CONFIRM_DELAYS_MS,
 		billingActions,
@@ -41,6 +44,7 @@
 		subscriptionTotalLine,
 		upgradeLabel,
 		usageRows,
+		wantsKeepPicker,
 		type ConfirmState
 	} from './plan';
 
@@ -52,7 +56,9 @@
 		reload,
 		returned = null,
 		seatChange,
-		assistantShare
+		assistantShare,
+		liveCatchments,
+		keepCatchment
 	}: {
 		plan: AccountPlan;
 		whose: 'your account' | 'this team';
@@ -68,6 +74,10 @@
 		seatChange?: Snippet;
 		/** Shown after the subscription lines (a team's Assistant share, AssistantShare.svelte; the team plan route passes it). */
 		assistantShare?: Snippet;
+		/** GET …/plan/live-catchments, for the picker past Free's live catchments (345). */
+		liveCatchments?: () => Promise<LiveCatchments>;
+		/** POST …/plan/keep: the catchment that stays live. */
+		keepCatchment?: (projectId: string) => Promise<LiveCatchments>;
 	} = $props();
 
 	const actions = $derived(billingActions(plan));
@@ -284,6 +294,10 @@
 			{/each}
 		</ul>
 	</section>
+
+	{#if liveCatchments && keepCatchment && wantsKeepPicker(plan)}
+		<KeepLive {whose} enforced={plan.enforced} load={liveCatchments} keep={keepCatchment} />
+	{/if}
 </div>
 
 <style>

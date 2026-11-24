@@ -1097,12 +1097,11 @@ are #641's checklist. Open items from building it:
       to farmers show the refusal as an error~~ (`LiveLimitNotice` in both);
       ~~(7) a copy or import with automatic runs on makes another live
       catchment~~ (it starts with them off, `autoRunsOff` in the answer).
-      Still to do: (2) the picker at the end of the reverse trial (341
-      pauses the other catchments' operations after the 14-day grace and
-      keeps `app_billing_keep_catchment`'s choice, but no route or Plan page
-      control calls it yet; ~~the owners' email when the grace starts and
-      when the pause lands~~, done in 346, billing.md § Plan emails), and a workspace banner on a paused catchment
-      linking to Plan and usage (billing.md § Pausing after a downgrade);
+      Done in round 10: ~~the picker on the Plan page~~ (345, `POST
+      …/plan/keep`, the *Live catchments* card), ~~a workspace banner on
+      a paused catchment~~ (`project.planPausedAt`, the header's notice) and
+      ~~the owners' email when the grace starts and when the pause lands~~
+      (346, billing.md § Plan emails). Still to do:
       (4) the abuse report's "share at the live-catchment limit" can now be
       measured from 338's count; (6) *Compare plans* always opens the
       person's own Plan page, not a team's for a team catchment billed to a

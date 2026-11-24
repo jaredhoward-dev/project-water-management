@@ -248,10 +248,55 @@ async function setAssistantShare(c: Context<AuthEnv>, teamId: string) {
 	return c.json({ pct });
 }
 
-/** GET /account/plan: the caller's own billing account, created on first ask (app_my_billing_account); POST …/checkout and …/portal for it. */
+const keepBody = z.object({ projectId: z.string().regex(UUID) }).strict();
+
+/** The account's live catchments for the Plan page's picker (345 app_billing_live_catchments); null when the caller may not read the account. */
+async function liveCatchments(db: Db, accountId: string | null): Promise<Record<string, unknown> | null> {
+	if (!accountId) return null;
+	const { rows } = await db.query<{ list: Record<string, unknown> | null }>('SELECT app_billing_live_catchments($1) AS list', [accountId]);
+	return rows[0]?.list ?? null;
+}
+
+/** GET …/plan/live-catchments: 404 to anyone but the account's person or a team admin. */
+async function getLiveCatchments(c: Context<AuthEnv>, resolve: (db: Db) => Promise<string | null>) {
+	const list = await withUser(c.get('userId'), async (db) => liveCatchments(db, await resolve(db)));
+	if (!list) throw new ApiError(404, 'not found');
+	c.header('Cache-Control', 'no-store');
+	return c.json(list);
+}
+
+/**
+ * POST …/plan/keep (docs/billing.md § Choosing the catchment to keep): the
+ * live catchment that stays live past Free's limit, `{ projectId }`. 404 to
+ * anyone but the account's person or a team admin, before the body is read;
+ * 400 for any other body; 404 too when the project isn't one of the account's
+ * live catchments (the same answer, so it says nothing about the project).
+ * The pause moves at once (341); answers the list as it now stands.
+ */
+async function keepCatchment(c: Context<AuthEnv>, resolve: (db: Db) => Promise<string | null>) {
+	// Access first, so a stranger meets 404 whatever the body.
+	const accountId = await withUser(c.get('userId'), async (db) => {
+		const id = await resolve(db);
+		return id && (await liveCatchments(db, id)) ? id : null;
+	});
+	if (!accountId) throw new ApiError(404, 'not found');
+	const body = keepBody.parse(await readJson(c));
+	const list = await withUser(c.get('userId'), async (db) => {
+		const { rows } = await db.query<{ ok: boolean }>('SELECT app_billing_keep_live($1, $2) AS ok', [accountId, body.projectId]);
+		return rows[0]?.ok ? liveCatchments(db, accountId) : null;
+	});
+	if (!list) throw new ApiError(404, 'not found');
+	logEvent('info', { event: 'billing_keep_catchment' });
+	c.header('Cache-Control', 'no-store');
+	return c.json(list);
+}
+
+/** GET /account/plan: the caller's own billing account, created on first ask (app_my_billing_account); POST …/checkout, …/portal and …/keep, and GET …/live-catchments, for it. */
 export const accountPlanRoutes = new Hono<AuthEnv>()
 	.post('/plan/checkout', (c) => checkout(c, myAccountId, '/account/plan'))
 	.post('/plan/portal', (c) => portal(c, myAccountId, '/account/plan'))
+	.post('/plan/keep', (c) => keepCatchment(c, myAccountId))
+	.get('/plan/live-catchments', (c) => getLiveCatchments(c, myAccountId))
 	.get('/plan', async (c) => {
 		const plan = await withUser(c.get('userId'), async (db) => accountPlan(db, await myAccountId(db)));
 		// app_my_billing_account always gives the caller an account they may read: a null here is a broken function, not a 404.
@@ -265,12 +310,14 @@ const teamResolver = (id: string) => {
 	return (db: Db) => teamAccountId(db, id);
 };
 
-/** GET /teams/:id/plan: the team's billing account, for its admins only; POST …/checkout, …/portal, …/seats and …/assistant-share for it. */
+/** GET /teams/:id/plan: the team's billing account, for its admins only; POST …/checkout, …/portal, …/seats, …/assistant-share and …/keep, and GET …/live-catchments, for it. */
 export const teamPlanRoutes = new Hono<AuthEnv>()
 	.post('/:id/plan/checkout', async (c) => checkout(c, teamResolver(c.req.param('id')), `/teams/${c.req.param('id')}/plan`))
 	.post('/:id/plan/portal', async (c) => portal(c, teamResolver(c.req.param('id')), `/teams/${c.req.param('id')}/plan`))
 	.post('/:id/plan/seats', async (c) => changeSeats(c, c.req.param('id')))
 	.post('/:id/plan/assistant-share', async (c) => setAssistantShare(c, c.req.param('id')))
+	.post('/:id/plan/keep', async (c) => keepCatchment(c, teamResolver(c.req.param('id'))))
+	.get('/:id/plan/live-catchments', async (c) => getLiveCatchments(c, teamResolver(c.req.param('id'))))
 	.get('/:id/plan', async (c) => {
 		const id = c.req.param('id');
 		if (!UUID.test(id)) throw new ApiError(404, 'not found');

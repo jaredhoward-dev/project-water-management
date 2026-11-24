@@ -1403,7 +1403,11 @@ role, freshness, Add data) and each tab's own header:
   banners: the viewer's **View only** note (every section), the upload
   result with **Re-run model** / **Dismiss**, **New data since the last
   run** with **Re-run model** (not on Runs or Data, which say it in their
-  own way), and a run that didn't start. Every message and action of the
+  own way), a run that didn't start, and on a catchment paused past Free's
+  live catchments (341) a note that its feeds, alerts and automatic runs are
+  paused because the plan it is billed to ended, that nothing is lost, with
+  a link to the plan (`billing/planPause.ts`; billing.md § Pausing after a
+  downgrade). Every message and action of the
   old banners is kept. The model save bar stays the dock at the bottom
   (Save changes, Discard, the reason), and the grid modal and sheets keep
   their own `ModelSaveRow`.
@@ -3302,6 +3306,19 @@ frontend calls `GET /billing/plans` only for the Upgrade buttons' prices
 (the public pricing page doesn't: it is prerendered, and its figures are
 `PLAN_FIGURES` in `packages/engine/src/plans.ts`, pinned to the plan table by
 `planFigures.db.test.ts`).
+
+
+**Live catchments (341, 345).** On Free past its live catchments after a plan
+ended, a third card, *Live catchments* (`billing/KeepLive.svelte`, words from
+`plan.ts` `keepPickerIntro`, `keepRowState`, `keepQuestion`), lists them (`GET
+…/plan/live-catchments`): what Free keeps live, when the others pause (or that
+they are paused), that nothing is lost, each one's state (*Stays live*, *Stays
+live (your choice)*, *Pauses from …*, *Paused since …*), and *Keep live* on
+each other one, through the app's confirm dialog (`POST …/plan/keep`; a status
+line says which stays live). An information note in #641's tone, never the
+error colour; the page asks only when `usage.liveCatchments` is over its limit
+with no live subscription, and shows nothing for an account that never had a
+plan ([billing.md § Choosing the catchment to keep](./billing.md#choosing-the-catchment-to-keep)).
 
 ## Network
 
