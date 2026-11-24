@@ -9,10 +9,11 @@
 // Fetched: 2026-11-24. 10455 domains, sha256 of the upstream file
 //          00c87dbccd3c77e54d37d6d8e133e97647d98e60f37038c70ad6f9673de3a575.
 //
-// Never fetched at runtime (local-first): a refresh replaces this file by
-// hand in a PR (docs/followups.md has the monthly refresh with a size-change
-// guard). One lower-case domain a line, as upstream ships it. Read only by
-// disposable.ts.
+// Never fetched at runtime (local-first). Generated: `pnpm
+// gen:disposable-domains` (scripts/guards/disposable_domains.mjs) rewrites
+// it, refusing a size change beyond ±20 %; the monthly workflow
+// .github/workflows/disposable-domains.yml opens the pull request. One
+// lower-case domain a line, as upstream ships it. Read only by disposable.ts.
 export const DISPOSABLE_DOMAINS_TEXT = `
 0-mail.com
 0-mailer.dynv6.net

@@ -1,0 +1,96 @@
+name: Disposable domains refresh
+
+# The vendored disposable-email domain list (backend/src/auth/disposableDomains.ts,
+# CC0; docs/data-sources.md § disposable-email-domains) is refreshed monthly
+# with a size-change guard (issue #641 § Free tier and abuse). This job runs
+# scripts/guards/disposable_domains.mjs refresh: upstream's newest commit (or
+# the `ref` given), its list at that exact commit, refused past ±20 % (or
+# `max_change`). When the list moved it opens one pull request on
+# chore/disposable-domains-<sha7>, and starts CI on it by dispatch: a pull
+# request opened with GITHUB_TOKEN starts no pull_request run, and ci.yml's
+# workflow_dispatch runs every job on the branch's head (the CI gate check
+# lands on the commit the PR shows). A refusal fails the run, red in Actions,
+# for the operator to read upstream's history and rerun with `max_change`.
+#
+# Owner step (repo settings, not this file): Settings → Actions → General →
+# "Allow GitHub Actions to create and approve pull requests" must be on, or
+# `gh pr create` is refused.
+#
+# The logic and the pull request's text: scripts/guards/disposable_domains.mjs
+# (tests: disposable_domains.test.mjs, run by `pnpm test:guards` and CI's
+# workflow-lint job). By hand: `pnpm gen:disposable-domains`.
+
+on:
+  schedule:
+    # 06:00 UTC on the 1st of each month.
+    - cron: '0 6 1 * *'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Upstream branch, tag or full commit sha to vendor
+        required: false
+        default: main
+      max_change:
+        description: Largest change in the number of domains, as a share (0.2 is ±20 %)
+        required: false
+        default: '0.2'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: disposable-domains
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    name: Refresh the disposable-domain list
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
+      - name: Refresh the list
+        id: refresh
+        env:
+          REF: ${{ inputs.ref || 'main' }}
+          MAX_CHANGE: ${{ inputs.max_change || '0.2' }}
+        run: node scripts/guards/disposable_domains.mjs refresh --ref "$REF" --max-change "$MAX_CHANGE" --body-file "$RUNNER_TEMP/body.md"
+
+      - name: Open the pull request
+        if: steps.refresh.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          COMMIT: ${{ steps.refresh.outputs.commit }}
+          OLD_COUNT: ${{ steps.refresh.outputs.old_count }}
+          NEW_COUNT: ${{ steps.refresh.outputs.new_count }}
+        run: |
+          set -euo pipefail
+          branch="chore/disposable-domains-${COMMIT:0:7}"
+          if gh pr list --repo "$REPO" --state open --head "$branch" --json number --jq '.[0].number // empty' | grep -q .; then
+            echo "A pull request for $branch is already open; nothing to do."
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch -c "$branch"
+          git commit -m "chore(auth): refresh the disposable-domain list to ${COMMIT:0:7}" -- backend/src/auth/disposableDomains.ts
+          auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          echo "::add-mask::$auth"
+          # No force: a branch left from a closed pull request fails the run for a human to read.
+          git -c http.extraheader="AUTHORIZATION: basic $auth" push origin "HEAD:refs/heads/$branch"
+          gh pr create --repo "$REPO" --base main --head "$branch" \
+            --title "chore(auth): refresh the disposable-domain list ($OLD_COUNT → $NEW_COUNT domains)" \
+            --body-file "$RUNNER_TEMP/body.md"
+          gh workflow run ci.yml --repo "$REPO" --ref "$branch"
