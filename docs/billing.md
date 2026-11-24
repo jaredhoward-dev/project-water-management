@@ -855,10 +855,10 @@ invoices, usage records), where the SDK's coverage would outweigh its size.
 `backend/migrations/330_staff_grant.sql`, `backend/scripts/billing-grant.ts`
 (issue #641, "Staff overrides"). The operator's tool for manual plans: the
 first client's deal, founding users (Q4's grandfathering), and **v1 B2B
-invoices**. A business that pays by invoice gets a manual Stripe invoice (sent
-from the Stripe dashboard, outside the app), and once it is paid the operator
-grants the plan until the end of the invoiced period. It works with
-`BILLING_PROVIDER` unset.
+invoices**. A business that pays by invoice gets a Stripe invoice ([§ B2B
+invoices](#b2b-invoices), or one sent from the Stripe dashboard), and once it
+is paid the operator grants the plan until the end of the invoiced period. It
+works with `BILLING_PROVIDER` unset.
 
 ```bash
 pnpm dev:billing:grant <email|team-id> <plan> [--until YYYY-MM-DD] --reason "…" [--replace] [--by <name>]
@@ -925,6 +925,72 @@ Tests: `backend/src/billing/grant.db.test.ts` (grant and the plan page, the
 SAST end under a skewed `TZ`, expiry, a lapsed grant, Stripe refused even
 with `--replace`, mock replaced, revoke, a team's grant and who reads it,
 owner-only) and `backend/scripts/billing-grant.test.ts` (arguments).
+
+## B2B invoices
+
+`backend/src/billing/invoice.ts`, `backend/scripts/billing-invoice.ts`
+(issue #641 Phase 5: "a Stripe Invoice from the staff tool, net 30, and a PO
+number on the invoice"). The operator invoices a person's account for Pro or
+a team's for Team:
+
+```bash
+pnpm dev:billing:invoice <email|team-id> <plan> --interval month|year --po "<PO number>" [--seats n] [--from YYYY-MM-DD]
+```
+
+- **What it sends** (`provider/stripeApi.ts` `createInvoice`, API reference
+  checked 2026-11-24 at the pinned `Stripe-Version`): `POST /v1/invoices`
+  with `collection_method=send_invoice`, `days_until_due=30`,
+  `custom_fields[0]` = `PO number` / the PO, `auto_advance=false`,
+  `pending_invoice_items_behavior=exclude` and metadata
+  (`billing_account_id`, `plan_code`, `seats`, `interval`, the period, our
+  key `wm_invoice_key`); its lines as `POST /v1/invoiceitems` (`invoice`,
+  `amount`, `description`, `period`): the plan at its included seats and,
+  on Team past them, the extra seats, each at the plan table's price for
+  the interval (`checkoutPrices`, the same as checkout); then
+  `/finalize`, `/send` (Stripe emails it), and metadata `wm_sent=true`. The
+  customer is the account's (328), made as checkout makes it when it has
+  none, and stored first-writer-wins.
+- **Once only.** The key is the account, plan, seats, interval, start day
+  and PO number. Every POST carries an idempotency key from it, and before
+  making anything the customer's invoices are searched for its
+  `wm_invoice_key`: a draft is completed, an open one not yet sent is sent,
+  a sent one is answered as it is (`reused`). A voided one is ignored, so a
+  wrong invoice is voided in Stripe and issued again.
+- **The period** runs from `--from` (a SAST day; default today) for one
+  month or year, through the day before the same date (31 January + 1 month
+  clamps to 28 February, so through 27 February). The answer's `until` is
+  the `--until` of the grant once it is paid.
+- **Refused before Stripe is asked:** a PO number that isn't 1–64 letters,
+  digits, spaces and `. / _ # : ( ) -` starting with a letter or digit
+  (Stripe takes 140; it is printed on the PDF); seats outside 1–50 or below
+  the plan's included ones, or extra seats on Pro; the plan that isn't the
+  kind's (Pro for a person, Team for a team); and an account with a live
+  Stripe subscription, which already pays by card. `manual` refuses
+  (`billing_unavailable`); the mock makes `in_mock_…` from the key with no
+  network.
+- **When it is paid** nothing changes by itself yet: `invoice.paid` is
+  recorded (`billing_event`; the normaliser reads the account from the
+  invoice's own metadata when it has no subscription), and the operator
+  grants the plan through `until` ([§ Staff grants](#staff-grants);
+  deployment.md runbook 23). Turning a paid invoice into the grant
+  automatically is a follow-up.
+- **Production** runs the same function as the migrate Lambda's
+  `billing-invoice` owner action, **direct invoke only** (never the
+  billing-admin workflow: a PO number and who is invoiced may identify a
+  client, and the workflow's inputs may be public; its answer leaves the PO
+  out). That function has no Stripe yet (no key, no route to
+  `api.stripe.com`), so it answers `billing_unavailable` until the operator
+  decides to give it one; the restricted key then also needs **Invoices:
+  Write** and **Invoice items: Write** beside § Stripe's three ([deployment.md § Owner
+  actions](./deployment.md#owner-actions)).
+
+Tests: `billing/invoice.test.ts` (PO number, seats, the SAST period, lines,
+key), `provider/stripeApi.test.ts` (the form fields of each request, a
+retry, a voided invoice, a draft with its lines), `provider/stripe.test.ts`
+(a standalone invoice's `invoice.paid`), `ops/ownerActions.test.ts` (the
+schema, refused from the workflow) and `billing/invoice.db.test.ts` (the
+plan table's price, the stored customer, the refusals, the script, the
+Lambda's `billing_unavailable`).
 
 ## Later phases
 

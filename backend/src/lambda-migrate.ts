@@ -40,7 +40,7 @@
 // (billing-grant, billing-revoke, billing-grants, billing-report,
 // authority-confirm from .github/workflows/billing-admin.yml, which names
 // people by id only, or the operator's SSO session; billing-account, the
-// address lookup, from the SSO session only) runs no migration and no role sync; it checks the
+// address lookup, and billing-invoice, from the SSO session only) runs no migration and no role sync; it checks the
 // event against that action's strict schema before anything connects, runs
 // the same function the local script does as the owner, and answers with ids,
 // plans, dates and counts, never an address or a name.
@@ -57,6 +57,7 @@ import { loadRuntimeSecrets } from './config/runtimeSecrets.js';
 import { getSecretString } from './config/secretsManager.js';
 import { migrate, MigrateError, type MigrateErrorCode } from '../scripts/migrate.js';
 import { CheckError, parseCheckRequest, runCheck, type CheckErrorCode, type CheckResult } from './checks/readOnlyChecks.js';
+import { billingProvider } from './billing/provider.js';
 import { ownerActionCode, ownerActionReason, parseOwnerAction, runOwnerAction, type OwnerActionErrorCode, type OwnerActionResult } from './ops/ownerActions.js';
 import { LoadError, loadReferenceText, parseLoadRequest, readReferenceText, type LoadErrorCode, type LoadResult, type ReadObject } from './geo/referenceLoad.js';
 
@@ -341,7 +342,12 @@ export async function ownerAction(event: unknown, context?: LogContext, connecti
 		const client = new pg.Client({ connectionString: await connection() });
 		await client.connect();
 		try {
-			const result = await runOwnerAction(client, action);
+			// billing-invoice needs a provider that sends invoices: Stripe only, never the mock (the code
+			// default when BILLING_PROVIDER is unset, as it is on this function today). Until this function
+			// has BILLING_PROVIDER=stripe, its key and a route to Stripe, the action answers billing_unavailable
+			// (docs/deployment.md § Owner actions; docs/billing.md § B2B invoices).
+			const invoiceProvider = process.env.BILLING_PROVIDER?.trim() === 'stripe' ? billingProvider(process.env) : null;
+			const result = await runOwnerAction(client, action, { invoiceProvider });
 			console.log(`owner action ${action.action}: done`);
 			return result;
 		} finally {

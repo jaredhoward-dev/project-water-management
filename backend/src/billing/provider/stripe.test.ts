@@ -170,3 +170,13 @@ describe('normaliseStripeEvent', () => {
 		for (const [why, body] of bad) expect(normaliseStripeEvent(body).kind, why).toBe('invalid');
 	});
 });
+
+describe('a B2B invoice from the staff tool (no subscription)', () => {
+	it('reads the account from the invoice’s own metadata, with no subscription; still invalid with neither', () => {
+		const e = fixture('invoice-paid');
+		e.data.object = { id: 'in_b2b', object: 'invoice', parent: null, metadata: { billing_account_id: ACCOUNT, wm_invoice_key: 'k' } };
+		expect(normaliseStripeEvent(e)).toMatchObject({ kind: 'event', event: { type: 'invoice.paid', payload: { accountId: ACCOUNT, externalRef: null } } });
+		e.data.object = { id: 'in_b2b', object: 'invoice', parent: null, metadata: {} };
+		expect(normaliseStripeEvent(e)).toMatchObject({ kind: 'invalid' });
+	});
+});

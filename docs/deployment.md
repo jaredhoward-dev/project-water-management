@@ -4765,10 +4765,21 @@ function as the local script, so production and `pnpm dev:billing:grant`,
 | `billing-report` | `month` (YYYY-MM, optional: this SAST month) | `dev:billing:report --month …` (never `--show-emails`) | `report`, redacted as the script prints it |
 | `authority-confirm` | `projectId`; `userId` (or `email`, direct invoke only); `reference` (1–200) | `dev:authority:confirm` | `projectId`, `userId`, `confirmed` |
 | `billing-account` | one of `email`, `userId`, `teamId`. **Direct invoke only**: the workflow doesn't offer it | (the lookup behind the ids the workflow takes; writes nothing) | `kind`, `ownerId` (the person's or team's id), `accountId` (`null`: none yet), `planNow` |
+| `billing-invoice` | one of `accountId`, `userId`, `teamId`, `email`; `plan` (`pro` for a person, `team` for a team); `interval` (`month`, `year`); `seats` (optional, 1–50: default the plan's included seats); `from` (YYYY-MM-DD, SAST, optional: today); `poNumber` (1–64 letters, digits, spaces and `. / _ # : ( ) -`). **Direct invoke only**: a PO number may identify the client | `dev:billing:invoice <who> <plan> --interval … --po …` ([billing.md § B2B invoices](./billing.md#b2b-invoices)) | `accountId`, `kind`, `plan`, `seats`, `interval`, `from`, `until` (the grant's `until` once it is paid), `invoiceId`, `number`, `status`, `totalMinor`, `dueAt`, `reused` (never the PO number) |
 
 Every action takes an optional `via: "workflow"`, which the workflow sets.
 A payload so marked is refused (`refused`) if it carries `email`, and the
-`billing-account` lookup refuses the mark outright.
+`billing-account` lookup and `billing-invoice` refuse the mark outright.
+
+**`billing-invoice` needs Stripe on this function, which it doesn't have
+yet.** The invoice is made at the billing provider, and the migrate Lambda
+holds neither `BILLING_PROVIDER=stripe` nor `STRIPE_SECRET_KEY`, and its
+security group reaches only Postgres and the VPC endpoints, not
+`api.stripe.com`. Until it does it answers `billing_unavailable` (it never
+falls back to the mock, the code default) and writes nothing; send the
+invoice from Stripe's dashboard as runbook 21 says. Giving it Stripe is an
+infra change for the operator to decide ([billing.md § B2B
+invoices](./billing.md#b2b-invoices)).
 
 No answer carries an address or a person's name. A failure is an
 `OwnerActionFailed` error whose message is `{ code, reason, logGroup,
@@ -4777,7 +4788,9 @@ account has that address), `no_team`, `no_billing_account`,
 `live_subscription` (a Stripe one: cancel it in Stripe first; a manual or
 mock one: `replace`), `no_live_grant`, `invalid` (the database refused a
 value: a plan, an end in the past), `not_editor` (authority-confirm: not an
-editor or owner of the project), `refused`, `action_failed`. The database's
+editor or owner of the project), `billing_unavailable` (billing-invoice: no
+Stripe on this function), `billing_provider_error` (billing-invoice: Stripe
+failed or refused it), `refused`, `action_failed`. The database's
 own words go to the function's CloudWatch log only (`no_person` also covers
 an unknown person id, `no_billing_account` an unknown account id). Nothing
 changes on a failure: each action is one transaction.
@@ -5274,8 +5287,8 @@ Every step is an ordinary app action by an owner unless it says "operator".
 21. **Granting a plan by hand** (operator; 330_staff_grant, issue #641;
     [billing.md § Staff grants](./billing.md#staff-grants)). For a plan
     nobody buys through checkout: a business paying by purchase order (a
-    manual Stripe invoice sent from the Stripe dashboard; grant once it is
-    paid, until the end of the invoiced period), the first client's deal,
+    Stripe invoice, runbook 23, or one sent from the Stripe dashboard; grant
+    once it is paid, until the end of the invoiced period), the first client's deal,
     founding users (no end), and Team's 30-day trial on request
     (billing.md § Trials). It works whatever `billing_provider` is.
 
@@ -5386,6 +5399,35 @@ Every step is an ordinary app action by an owner unless it says "operator".
       sum(assistant_usd_micros) / 1e6 AS assistant_usd FROM
       billing_metrics_accounts('<YYYY-MM-01>') GROUP BY plan_code;` gives
       the month's totals by plan without any address.
+
+23. **Invoicing a business against its PO** (operator; issue #641 Phase 5;
+    [billing.md § B2B invoices](./billing.md#b2b-invoices)). A Stripe
+    invoice for the plan × seats × interval at the plan table's price, net
+    30, with the customer's PO number on it. **Never through the
+    workflow**: the PO number and who is invoiced may identify a client, and
+    the workflow's inputs may be public. From your SSO session, once the
+    migrate function has Stripe (§ Owner actions; until then send the
+    invoice from Stripe's dashboard with the PO number as a custom field
+    "PO number", net 30). Get the team's id from `/teams/<id>` (a person's
+    account: the `billing-account` lookup), then write `invoice.json` in
+    your editor, `{"action":"billing-invoice","teamId":"<team
+    id>","plan":"team","interval":"year","seats":5,"poNumber":"<PO>"}`, and:
+
+    ```bash
+    aws lambda invoke --function-name water-management-migrate --cli-binary-format raw-in-base64-out --payload fileb://invoice.json --cli-read-timeout 300 --region af-south-1 --profile water-management invoice-out.json && jq . invoice-out.json && rm invoice.json invoice-out.json
+    ```
+
+    The answer names the invoice (`invoiceId`, `number`), its total in
+    minor units, when it is due and the period (`from`, `until`). Stripe
+    emails it to the customer's billing address. A retry of the same
+    payload is the same invoice (`reused: true` once sent): nothing new is
+    made or emailed. A changed field (seats, `from`, the PO number) is a
+    new invoice, so void a wrong one in Stripe before sending the right
+    one. **When it is paid** (Stripe's dashboard, or the `invoice.paid`
+    row in `billing_event`), grant the plan for the period (runbook 21):
+    `billing-grant` with `until` the answer's `until` and the reason
+    `Invoice <number>, PO <PO>` (the customer reads it). Record the invoice
+    and the PO in the operator log.
 
 ## Rollback
 

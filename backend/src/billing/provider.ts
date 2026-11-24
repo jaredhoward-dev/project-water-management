@@ -23,10 +23,12 @@
 // the API's runtime secret, from infra-secrets; docs/deployment.md). Unset or empty,
 // every signature fails.
 import { ApiError } from '../http/errors.js';
+import type { PublicPlan } from './entitlements.js';
 import { SIGNATURE_HEADER, verifySignature } from './provider/signature.js';
 import { normaliseStripeEvent } from './provider/stripe.js';
 import { MOCK_SESSION_TTL_SECONDS, seatsChangedEvent, signMockSession } from './provider/mock.js';
-import { changeSeatItem, createCheckoutSession, createCustomer, createPortalSession, ensureExtraSeatProduct, getSubscriptionItems, StripeApiError } from './provider/stripeApi.js';
+import { createHash } from 'node:crypto';
+import { changeSeatItem, createCheckoutSession, createCustomer, createInvoice as createStripeInvoice, createPortalSession, ensureExtraSeatProduct, getSubscriptionItems, StripeApiError, type InvoiceLine } from './provider/stripeApi.js';
 
 export const BILLING_PROVIDERS = ['mock', 'manual', 'stripe'] as const;
 export type BillingProviderName = (typeof BILLING_PROVIDERS)[number];
@@ -86,6 +88,26 @@ export interface CheckoutPlan {
 	/** The price of each seat past seatsIncluded (features.extra_seat_*_minor), or null when the plan sells no extra seats (Pro). */
 	extraSeatMonthlyMinor: number | null;
 	extraSeatAnnualMinor: number | null;
+}
+
+/** Which plan each kind of account can buy: Pro is a person's, Team a team's (docs/billing.md § Who the plan belongs to). */
+export const PURCHASABLE: Record<'user' | 'team', string> = { user: 'pro', team: 'team' };
+
+const minor = (v: unknown): number | null => (typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : null);
+
+/** A public plan as checkout prices it: its included seats (limits.seats_included) and extra-seat prices (features.extra_seat_*_minor). */
+export function checkoutPlanOf(p: PublicPlan): CheckoutPlan {
+	const included = p.limits.seats_included;
+	return {
+		code: p.code,
+		name: p.name,
+		priceMonthlyMinor: p.priceMonthlyMinor,
+		priceAnnualMinor: p.priceAnnualMinor,
+		currency: p.currency,
+		seatsIncluded: typeof included === 'number' && Number.isInteger(included) && included >= 1 ? included : 1,
+		extraSeatMonthlyMinor: minor(p.features.extra_seat_monthly_minor),
+		extraSeatAnnualMinor: minor(p.features.extra_seat_annual_minor)
+	};
 }
 
 /** The most editor seats one checkout sells (Team; docs/billing.md § Team seats at checkout). Past it is Agency, a contract. */
@@ -167,6 +189,33 @@ export class BillingGrantSeatsError extends ApiError {
 	}
 }
 
+/** A B2B invoice the operator issues from the staff tool (billing/invoice.ts; docs/billing.md § B2B invoices). */
+export interface InvoiceRequest {
+	account: CheckoutAccount;
+	planCode: string;
+	seats: number;
+	interval: BillingInterval;
+	currency: string;
+	poNumber: string;
+	/** Unix seconds: the period paid for (start inclusive, end exclusive). */
+	periodStart: number;
+	periodEnd: number;
+	lines: InvoiceLine[];
+	/** Our key for this invoice (billing/invoice.ts invoiceKey): the same request gives the same key, so a retry never invoices twice. */
+	key: string;
+}
+export interface InvoiceResult {
+	invoiceId: string;
+	number: string | null;
+	status: string;
+	totalMinor: number;
+	/** ISO, or null when the provider gave none. */
+	dueAt: string | null;
+	reused: boolean;
+	/** The customer the provider made for the account when it had none (the caller stores it, 328). */
+	newCustomerRef?: string;
+}
+
 export interface BillingProvider {
 	name: BillingProviderName;
 	/** Whether POST /billing/webhook/<name> exists at all (404 when not). */
@@ -182,6 +231,8 @@ export interface BillingProvider {
 	 * (app_billing_apply), as checkout's do.
 	 */
 	changeSeats(change: SeatChange): Promise<void>;
+	/** Issue a B2B invoice (net 30, the PO number on it) and send it to the customer, once per key. */
+	createInvoice(req: InvoiceRequest): Promise<InvoiceResult>;
 }
 
 /** BILLING_PROVIDER as one of ours (unset is the mock, the code default), or null for a value that names none. */
@@ -256,6 +307,13 @@ function mockProvider(secret: string | undefined, now: () => number): BillingPro
 			const { deliverMockEvent } = await import('./mockCheckout.js');
 			const event = seatsChangedEvent(change.accountId, change.subscription, change.plan.seatsIncluded, change.seats, now());
 			if (!(await deliverMockEvent(event))) throw new BillingProviderError();
+		},
+		// No network: an invoice id from the key, so the same request answers the same invoice (as Stripe's would).
+		async createInvoice(req) {
+			const id = `in_mock_${createHash('sha256').update(req.key).digest('hex').slice(0, 24)}`;
+			const totalMinor = req.lines.reduce((a, l) => a + l.amountMinor, 0);
+			const dueAt = new Date(now() + 30 * 86_400_000).toISOString();
+			return { invoiceId: id, number: `MOCK-${id.slice(8, 16).toUpperCase()}`, status: 'open', totalMinor, dueAt, reused: false };
 		}
 	};
 }
@@ -337,6 +395,34 @@ function stripeProvider(webhookSecret: string | undefined, secretKey: string | u
 					idempotencyKey: `wm-seats-${change.externalRef}-${extra?.id ?? 'none'}-${extra?.quantity ?? 0}-${extraSeats}-${minute}`
 				});
 			});
+		},
+		async createInvoice(req) {
+			const o = client();
+			return call(async () => {
+				const made = req.account.customerRef ? undefined : await createCustomer(o, req.account.id);
+				const r = await createStripeInvoice(o, {
+					customer: req.account.customerRef ?? made!,
+					accountId: req.account.id,
+					planCode: req.planCode,
+					seats: req.seats,
+					interval: req.interval,
+					currency: req.currency,
+					poNumber: req.poNumber,
+					periodStart: req.periodStart,
+					periodEnd: req.periodEnd,
+					lines: req.lines,
+					key: req.key
+				});
+				const out: InvoiceResult = {
+					invoiceId: r.invoiceId,
+					number: r.number,
+					status: r.status,
+					totalMinor: r.totalMinor,
+					dueAt: r.dueDate === null ? null : new Date(r.dueDate * 1000).toISOString(),
+					reused: r.reused
+				};
+				return made ? { ...out, newCustomerRef: made } : out;
+			});
 		}
 	};
 }
@@ -352,6 +438,10 @@ const manual: BillingProvider = {
 		throw new BillingUnavailableError();
 	},
 	changeSeats: async () => {
+		throw new BillingUnavailableError();
+	},
+	// manual is "the operator records it by hand": the invoice is sent from Stripe's dashboard (docs/billing.md § Staff grants).
+	createInvoice: async () => {
 		throw new BillingUnavailableError();
 	}
 };
