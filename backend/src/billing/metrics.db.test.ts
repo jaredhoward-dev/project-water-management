@@ -136,17 +136,23 @@ describe('the reverse trial and the live catchments (342, 338)', () => {
 		// paid invoice after them; and a second trial row at 00:30 SAST on 1 April (April's).
 		await grant(lateAccount, '2001-03-31T21:30:00Z', 'reverse trial');
 		await grant(lateAccount, '2001-04-05T00:00:00Z', 'operator');
+		// …and a card checkout whose first payment never went through (Stripe's incomplete_expired, stored as expired):
+		// not paid either.
+		await asOwner(
+			`INSERT INTO subscription (billing_account_id, plan_code, status, provider, external_ref, created_at) VALUES ($1, 'pro', 'expired', 'mock', 'metrics-late-unpaid', '2001-04-08T00:00:00Z')`,
+			[lateAccount]
+		);
 		await grant(lateAccount, '2001-05-15T00:00:00Z', 'invoice');
 		await grant(lateAccount, '2001-03-31T22:30:00Z', 'reverse trial');
 	});
 
 	afterAll(async () => {
 		await asOwner(`DELETE FROM billing_grant_log WHERE reason = 'metrics test'`);
-		await asOwner(`DELETE FROM subscription WHERE external_ref IN ('metrics-early-before', 'metrics-early-paid')`);
+		await asOwner(`DELETE FROM subscription WHERE external_ref IN ('metrics-early-before', 'metrics-early-paid', 'metrics-late-unpaid')`);
 		await asOwner(`UPDATE project SET settings = settings - 'autoRun' WHERE id = $1`, [projectId]);
 	});
 
-	it('counts the SAST month’s reverse trials and those paid within 30 days, by a card plan or an invoice, not a staff grant', async () => {
+	it('counts the SAST month’s reverse trials and those paid within 30 days, by a card plan or an invoice, not a staff grant or an unpaid checkout', async () => {
 		expect((await report('2001-03')).reverseTrial).toEqual({ cohort: 2, paid: 1, share: 0.5, pending: 0, pendingPaid: 0 });
 		// April's trial: its invoice came 44 days on, so it isn't counted either.
 		expect((await report('2001-04')).reverseTrial).toEqual({ cohort: 1, paid: 0, share: 0, pending: 0, pendingPaid: 0 });

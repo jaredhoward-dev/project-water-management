@@ -46,14 +46,15 @@ export async function gatherReportOn(client: pg.ClientBase, month: string | null
 		)
 	).rows.map((r): GateRefusalRow => ({ code: r.code, feature: r.feature, refusals: Number(r.refusals) }));
 	// The reverse trials (342) that began in the SAST month, from billing_grant_log, and each account's first paid plan
-	// from the trial's start on: a payment provider's subscription that isn't a trial (Stripe, or the local mock), or a
-	// paid invoice's grant (335). Staff grants are not paid. Dates only: no account id leaves this query.
+	// from the trial's start on: a payment provider's subscription whose first payment was taken (Stripe, or the local mock:
+	// active, past_due or canceled; not trialing, and not expired, which is Stripe's incomplete_expired, a first payment
+	// never made), or a paid invoice's grant (335). Staff grants are not paid. Dates only: no account id leaves this query.
 	const trials = (
 		await client.query<{ started_at: Date; first_paid_at: Date | null }>(
 			`SELECT g.created_at AS started_at,
 			        least(
 			          (SELECT min(s.created_at) FROM subscription s
-			           WHERE s.billing_account_id = g.billing_account_id AND s.provider IN ('stripe', 'mock') AND s.status <> 'trialing'
+			           WHERE s.billing_account_id = g.billing_account_id AND s.provider IN ('stripe', 'mock') AND s.status IN ('active', 'past_due', 'canceled')
 			             AND s.created_at >= g.created_at),
 			          (SELECT min(l.created_at) FROM billing_grant_log l
 			           WHERE l.billing_account_id = g.billing_account_id AND l.action = 'grant' AND l.granted_by = 'invoice'
