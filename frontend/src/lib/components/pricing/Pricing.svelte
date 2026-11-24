@@ -7,8 +7,11 @@
 	// server reports and issued evidence packs. Every figure comes from the
 	// plan figures (pricing.ts), never typed here. Farmers, viewers and
 	// assessors are always free, and said so first. Checkout's disclosures and
-	// consent are not on this page (#641 Phase 4, later).
+	// consent are not on this page (#641 Phase 4, later). Pro's reverse-trial
+	// line shows only in a build with PUBLIC_REVERSE_TRIAL=true (pricing.ts
+	// reverseTrialDays), its length from the plan figures' trialDays.
 	import { resolve } from '$app/paths';
+	import { PUBLIC_REVERSE_TRIAL } from '$app/env/public';
 	import { APP_NAME, APP_SHORT_NAME } from '#lib/brand.js';
 	import { basePath } from '#lib/nav/base.js';
 	import { page } from '$app/state';
@@ -16,13 +19,14 @@
 	import LanguageSwitch from '#lib/i18n/LanguageSwitch.svelte';
 	import { language, LANGUAGES, plural, t, tn, wordsLang, type Locale } from '#lib/i18n/locale.svelte.js';
 	import { landingPath, PRICING_PATH, pricingPath } from '#lib/auth/session.svelte.js';
-	import { assistantTimesFree, monthsFreeYearly, planFigures, rand } from './pricing';
+	import { assistantTimesFree, monthsFreeYearly, planFigures, rand, reverseTrialDays } from './pricing';
 
 	let { lang }: { lang: Locale } = $props();
 
 	const free = planFigures('free');
 	const pro = planFigures('pro');
 	const team = planFigures('team');
+	const trialDays = reverseTrialDays(PUBLIC_REVERSE_TRIAL, pro);
 
 	const LIVE = plural({
 		one: 'Live data feeds, automatic runs, alerts and published farm views on {n} catchment',
@@ -30,6 +34,10 @@
 	});
 	const REPORTS = plural({ one: '{n} server PDF report a month', other: '{n} server PDF reports a month' });
 	const MONTHS_FREE = plural({ one: 'or {price} a year ({n} month free)', other: 'or {price} a year ({n} months free)' });
+	const TRIAL = plural({
+		one: '{n} day of Pro free when you sign up, no card needed. Then Free, unless you choose a plan.',
+		other: '{n} days of Pro free when you sign up, no card needed. Then Free, unless you choose a plan.'
+	});
 	const EDITORS = plural({ one: '{n} editor included', other: '{n} editors included' });
 	const PACKS = plural({
 		one: '{n} issued evidence pack a month included, then {price} each',
@@ -106,6 +114,9 @@
 						<span class="amount" data-testid="price-pro">{rand(pro.priceMonthlyMinor)}</span> <span class="per">{t('a month')}</span>
 					</p>
 					<p class="yearly">{tn(MONTHS_FREE, monthsFreeYearly(pro), { price: rand(pro.priceAnnualMinor) })}</p>
+					{#if trialDays !== null}
+						<p class="trial" data-testid="pro-trial">{tn(TRIAL, trialDays)}</p>
+					{/if}
 					<p class="who">{t('For one hydrologist, including work for clients.')}</p>
 					<ul class="includes">
 						<li>{t('Everything in Free, for commercial work')}</li>
@@ -284,6 +295,10 @@
 	}
 	.yearly {
 		margin: 0.25rem 0 0;
+	}
+	.trial {
+		margin: 0.75rem 0 0;
+		font-weight: 600;
 	}
 	.who {
 		margin: 0.75rem 0 1rem;

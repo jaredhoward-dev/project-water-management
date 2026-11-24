@@ -559,9 +559,15 @@ address (`LANDING_ROUTES`, `addressFor` in `lib/auth/session.svelte.ts`).
   "Farmers and viewers are always free" and "Assessors verify evidence
   packs free" come first; "No VAT is charged", Free's non-commercial rule,
   and that data is never held back by a plan close it. Never "quota",
-  "abuse" or "402". It says nothing about the reverse trial on purpose: the
-  trial is off (`REVERSE_TRIAL`), and a page offering what isn't on would
-  mislead ([followups.md](./followups.md)).
+  "abuse" or "402".
+- **The reverse trial.** Pro says "14 days of Pro free when you sign up, no
+  card needed. Then Free, unless you choose a plan." (`data-testid="pro-trial"`),
+  its number from `PLAN_FIGURES`' `trialDays` (`plan.trial_days`), but only
+  in a build with `PUBLIC_REVERSE_TRIAL=true`: the page is prerendered and
+  can't ask the API whether `REVERSE_TRIAL` is on, so the build flag mirrors
+  it, and a page offering a trial that isn't on would mislead. Empty (off)
+  by default, so today it shows nothing
+  ([billing.md § The pricing page and the trial](./billing.md#the-pricing-page-and-the-trial)).
 - **Figures from one place.** Every price and limit comes from
   `@water-management/engine/plans` (`PLAN_FIGURES`), since a static page
   can't read the `plan` table; `backend/src/billing/planFigures.db.test.ts`

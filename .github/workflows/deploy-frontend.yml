@@ -173,6 +173,8 @@ jobs:
           PUBLIC_TILES_GLYPHS_URL: ${{ vars.PUBLIC_TILES_GLYPHS_URL }}
           PUBLIC_TERRAIN_URL: ${{ vars.PUBLIC_TERRAIN_URL }}
           PUBLIC_CHANNELS_URL: ${{ vars.PUBLIC_CHANNELS_URL }}
+          # The pricing page's reverse-trial line: unset (off) until REVERSE_TRIAL and BILLING_ENFORCED are on (docs/billing.md § The reverse trial).
+          PUBLIC_REVERSE_TRIAL: ${{ vars.PUBLIC_REVERSE_TRIAL }}
         run: pnpm build:frontend
 
       # The CloudFront CSP header allows inline scripts only because SvelteKit's

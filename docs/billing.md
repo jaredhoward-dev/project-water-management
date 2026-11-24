@@ -870,6 +870,28 @@ subscription) and nothing is deleted. The Plan page already reads
 `subscription.trialEnd` and shows "Trial ends 7 Dec 2026" for a trialing
 subscription (`components/billing/plan.ts` `subscriptionLine`).
 
+**The pricing page and the trial** (decided 2026-11-24). The public
+pricing page ([ui.md § Pricing page](./ui.md#pricing-page)) says "14 days
+of Pro free when you sign up, no card needed. Then Free, unless you choose
+a plan." on Pro, the number from `PLAN_FIGURES`' `trialDays`
+(`packages/engine/src/plans.ts`, pinned to `plan.trial_days` by
+`planFigures.db.test.ts`). The page is prerendered, so it can't ask the API
+whether the trial is on: a build-time flag, `PUBLIC_REVERSE_TRIAL`
+(`frontend/src/env.ts`, read by `reverseTrialDays` in
+`components/pricing/pricing.ts`), shows the line only when it is exactly
+`true`, as `REVERSE_TRIAL` reads. Empty in both committed env files, so the
+page offers nothing today. The operator sets the repository variable
+`PUBLIC_REVERSE_TRIAL=true` and releases the web in the same change that
+turns on `REVERSE_TRIAL` and `BILLING_ENFORCED`, and unsets it (and
+releases again) when turning them off ([deployment.md](./deployment.md)).
+Rejected: reading `/billing/plans` from the page at load (the page would
+show the line only after a request, flash on every visit and need the API
+up for a static page), and leaving it off the page (the first thing a
+visitor learns about the trial would be its end notice). The cost of the
+flag: the two settings can disagree, so turning one on without the other
+either offers a trial nobody gets or grants one the page doesn't mention;
+the variable's row in deployment.md says to move them together.
+
 **The trial's assistant.** Pro's month applies, and on top, during a reverse
 trial, `app_assistant_begin` refuses (enforced only):
 
@@ -1600,8 +1622,10 @@ none of this is built except where a bullet says so:
   `/welcome/pricing/af`, prerendered (docs/ui.md § Pricing page). A static
   page can't read `plan`, so its figures are
   `packages/engine/src/plans.ts` (`PLAN_FIGURES`), which
-  `backend/src/billing/planFigures.db.test.ts` pins to the table: a
-  migration that moves a price or limit updates that file in the same
-  change. Still open in Phase 4: the checkout disclosures and consent tick,
+  `backend/src/billing/planFigures.db.test.ts` pins to the table (prices,
+  limits and `trial_days`): a migration that moves a price, limit or
+  trial length updates that file in the same change. Pro's reverse-trial
+  line shows only in a build with `PUBLIC_REVERSE_TRIAL=true`
+  ([§ The pricing page and the trial](#the-pricing-page-and-the-trial)). Still open in Phase 4: the checkout disclosures and consent tick,
   Terms §8, the privacy notice (Stripe), the `LEGAL_VERSION` bump and
   Gate D.
