@@ -12,12 +12,13 @@ interface PlanRow {
 	price_annual_minor: number;
 	limits: Record<string, number | null>;
 	features: Record<string, unknown>;
+	trial_days: number;
 }
 
 describe('the pricing page figures', () => {
 	it('match the plan table, plan by plan, and name every active plan', async () => {
 		const rows = (await asOwner(
-			`SELECT code, price_monthly_minor, price_annual_minor, limits, features FROM plan WHERE active ORDER BY price_monthly_minor, code`
+			`SELECT code, price_monthly_minor, price_annual_minor, limits, features, trial_days FROM plan WHERE active ORDER BY price_monthly_minor, code`
 		)) as PlanRow[];
 		expect(rows.map((r) => r.code)).toEqual(PLAN_FIGURES.map((p) => p.code));
 		for (const row of rows) {
@@ -35,7 +36,8 @@ describe('the pricing page figures', () => {
 				packsIncludedPerMonth: row.limits.packs_included_per_month,
 				packPriceMinor: num(row.features.pack_price_minor),
 				assistantUsdPerMonth: usdMicros === null || usdMicros === undefined ? null : usdMicros / 1_000_000,
-				scheduledReports: row.features.scheduled_reports
+				scheduledReports: row.features.scheduled_reports,
+				trialDays: row.trial_days
 			}).toEqual(PLAN_FIGURES.find((p) => p.code === row.code));
 		}
 	});

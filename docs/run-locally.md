@@ -70,6 +70,7 @@ In a git worktree both URLs point at that worktree's own dev database,
 | `BILLING_WEBHOOK_SECRET` | `dev-only-billing-webhook-secret-…` (committed, `.env.development`) | Signs and checks billing webhook events. The committed value is a public dev-only key; production refuses the mock, and Stripe's real secret lives in infra-secrets ([deployment.md § 2. Secrets](./deployment.md#2-secrets-one-time-then-as-needed)) |
 | `STRIPE_SECRET_KEY` | unset (never set locally) | Stripe's API key, for checkout and the Customer Portal with `BILLING_PROVIDER=stripe` only. The mock needs none: its checkout and portal are pages on the local API ([billing.md § The mock](./billing.md#the-mock)). Production requires a live key (`sk_live_…` or `rk_live_…`) from infra-secrets; never put a real key in an env file here |
 | `PUBLIC_API_URL` (frontend) | `http://localhost:3001` | `/api` in production |
+| `PUBLIC_REVERSE_TRIAL` (frontend) | empty (off) | The pricing page's "14 days of Pro free" line; only `true` shows it. A build-time mirror of `REVERSE_TRIAL`, since the prerendered page can't ask the API: set it with `REVERSE_TRIAL` and `BILLING_ENFORCED` ([billing.md § The pricing page and the trial](./billing.md#the-pricing-page-and-the-trial)) |
 | `PUBLIC_WAF_CAPTCHA_SCRIPT_URL`, `PUBLIC_WAF_CAPTCHA_API_KEY` (frontend) | empty (no sign-in CAPTCHA: there is no WAF locally) | set by `deploy-frontend.yml` from Terraform outputs (security.md § Sign-in CAPTCHA) |
 
 To override something on your machine, create a gitignored

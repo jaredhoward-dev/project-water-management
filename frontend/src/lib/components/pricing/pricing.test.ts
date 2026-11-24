@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { setLocale } from '#lib/i18n/locale.svelte.js';
-import { assistantTimesFree, monthsFreeYearly, planFigures, rand } from './pricing';
+import { assistantTimesFree, monthsFreeYearly, planFigures, rand, reverseTrialDays } from './pricing';
 
 afterEach(() => setLocale('en'));
 
@@ -18,5 +18,12 @@ describe('the pricing page figures', () => {
 		expect(monthsFreeYearly(planFigures('free'))).toBe(0);
 		expect(assistantTimesFree(planFigures('pro'))).toBe(15);
 		expect(assistantTimesFree(planFigures('free'))).toBe(1);
+	});
+
+	it('offers Pro’s trial days only for the exact flag `true` and a Pro with trial days', () => {
+		expect(reverseTrialDays('true')).toBe(planFigures('pro').trialDays);
+		expect(planFigures('pro').trialDays).toBe(14);
+		for (const flag of [undefined, '', 'false', '1', 'TRUE', ' true']) expect(reverseTrialDays(flag)).toBeNull();
+		expect(reverseTrialDays('true', { ...planFigures('pro'), trialDays: 0 })).toBeNull();
 	});
 });

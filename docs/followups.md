@@ -905,11 +905,12 @@ are #641's checklist. Open items from building it:
       put to the client's reviewer: "lewendig" for live, "gepubliseerde
       bladsye vir boere" for published farm views, "assistenttoelaag".
       Trigger: the next Afrikaans review round.
-- [ ] **The pricing page doesn't mention the reverse trial.** Deliberate
-      while `REVERSE_TRIAL` is off (ui.md § Pricing page). Durable fix: a
-      "14 days of Pro, no card" line from `plan.trial_days` added to
-      `PLAN_FIGURES`, through the i18n flow (English and Afrikaans).
-      Trigger: before `REVERSE_TRIAL` goes on.
+- [x] **The pricing page doesn't mention the reverse trial.** Done
+      2026-11-24: Pro's "14 days of Pro free … no card needed" line, its
+      number from `PLAN_FIGURES`' `trialDays` (pinned to `plan.trial_days`),
+      shown only in a build with `PUBLIC_REVERSE_TRIAL=true`, which the
+      operator sets with `REVERSE_TRIAL` (billing.md § The pricing page and
+      the trial).
 - [ ] **Drop the 4-argument `app_assistant_charge`.** Migration 324 keeps
       it as a wrapper (charged as unpriced) so a backend released before
       324 keeps charging during the rollout. Durable fix: a forward

@@ -33,6 +33,9 @@ test('/welcome/pricing is English in its HTML, with Free, Pro and Team at their 
 	expect(await price(page, 'pro')).toBe('R 899');
 	expect(await price(page, 'team')).toBe('R 2 499');
 	await expect(page.getByTestId('pricing-always-free')).toContainText('Farmers and viewers are always free.');
+	// The reverse trial is off in this build (PUBLIC_REVERSE_TRIAL empty, the committed default), so Pro offers none.
+	expect(html).not.toContain('data-testid="pro-trial"');
+	await expect(page.getByTestId('pro-trial')).toHaveCount(0);
 });
 
 test('the landing page links to the pricing page in its own language', async ({ page }) => {

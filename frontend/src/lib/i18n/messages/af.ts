@@ -1367,6 +1367,8 @@ export const af: Catalogue = {
 	'37fcd51e': { one: '{n} PDF-verslag van die bediener per maand', other: '{n} PDF-verslae van die bediener per maand' },
 	// or {price} a year ({n} month free) / or {price} a year ({n} months free)
 	'554d08da': { one: 'of {price} per jaar ({n} maand gratis)', other: 'of {price} per jaar ({n} maande gratis)' },
+	// {n} day of Pro free when you sign up, no card needed. Then Free, unless you choose a plan. / {n} days of Pro free when you sign up, no card needed. Then Free, unless you choose a plan.
+	'ff7c542c': { one: '{n} dag Pro gratis wanneer jy ’n rekening skep, geen bankkaart nodig nie. Daarna Free, tensy jy ’n plan kies.', other: '{n} dae Pro gratis wanneer jy ’n rekening skep, geen bankkaart nodig nie. Daarna Free, tensy jy ’n plan kies.' },
 	// {n} editor included / {n} editors included
 	'874216a6': { one: '{n} redigeerder ingesluit', other: '{n} redigeerders ingesluit' },
 	// {n} issued evidence pack a month included, then {price} each / {n} issued evidence packs a month included, then {price} each

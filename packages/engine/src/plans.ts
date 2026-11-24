@@ -29,6 +29,12 @@ export interface PlanFigures {
 	/** The assistant's allowance a month in US dollars, per person (Free, Pro) or per editor seat, pooled (Team). */
 	readonly assistantUsdPerMonth: number;
 	readonly scheduledReports: boolean;
+	/**
+	 * `plan.trial_days`: Pro's is the reverse trial's length (billing.md § The reverse trial), which the
+	 * pricing page shows only while the build's PUBLIC_REVERSE_TRIAL is on; Team's is the trial staff grant
+	 * on request, which the page doesn't offer; 0: none.
+	 */
+	readonly trialDays: number;
 }
 
 export const PLAN_FIGURES: readonly PlanFigures[] = [
@@ -44,7 +50,8 @@ export const PLAN_FIGURES: readonly PlanFigures[] = [
 		packsIncludedPerMonth: 0,
 		packPriceMinor: 149900,
 		assistantUsdPerMonth: 1,
-		scheduledReports: false
+		scheduledReports: false,
+		trialDays: 0
 	},
 	{
 		code: 'pro',
@@ -58,7 +65,8 @@ export const PLAN_FIGURES: readonly PlanFigures[] = [
 		packsIncludedPerMonth: 0,
 		packPriceMinor: 99900,
 		assistantUsdPerMonth: 15,
-		scheduledReports: true
+		scheduledReports: true,
+		trialDays: 14
 	},
 	{
 		code: 'team',
@@ -72,7 +80,8 @@ export const PLAN_FIGURES: readonly PlanFigures[] = [
 		packsIncludedPerMonth: 3,
 		packPriceMinor: 99900,
 		assistantUsdPerMonth: 15,
-		scheduledReports: true
+		scheduledReports: true,
+		trialDays: 30
 	}
 ];
 
