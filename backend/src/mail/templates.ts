@@ -110,6 +110,44 @@ export function verifyEmailMail(to: string, url: string, locale?: string | null)
 }
 
 /**
+ * To the NEW address of a change of email address (auth/email-change-routes.ts,
+ * 347): the account switches to it only when this link is used.
+ */
+export function emailChangeMail(to: string, url: string, locale?: string | null): Mail {
+	const tr = mailT(locale);
+	const v = { email: to, product: PRODUCT };
+	return render(
+		'email_change',
+		to,
+		tr.t('mail.change.subject', v),
+		{
+			heading: tr.t('mail.change.heading'),
+			paragraphs: [tr.t('mail.change.body', v)],
+			action: { label: tr.t('mail.change.action'), url },
+			footer: [tr.t('mail.change.expires'), tr.t('mail.change.ignore')]
+		},
+		tr
+	);
+}
+
+/** To the OLD address once a change of email address is confirmed: its holder learns of it. */
+export function emailChangedMail(to: string, newEmail: string, locale?: string | null): Mail {
+	const tr = mailT(locale);
+	const v = { newEmail, product: PRODUCT };
+	return render(
+		'email_changed',
+		to,
+		tr.t('mail.changed.subject', v),
+		{
+			heading: tr.t('mail.changed.heading'),
+			paragraphs: [tr.t('mail.changed.body', v)],
+			footer: [tr.t('mail.changed.notYou')]
+		},
+		tr
+	);
+}
+
+/**
  * To the owner of an address someone signed up with again (auth/routes.ts
  * /register): the sign-up page answers the same for a new and a taken
  * address, so the owner learns it here, with a password-reset link in case

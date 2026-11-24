@@ -24,6 +24,7 @@ export const SECTIONS: Record<string, string> = {
 	'mfa-reset':
 		'The pages opened from the emails about removing two-step sign-in (a code from an authenticator app on the phone or sent by email, asked for after the password) when someone can’t get a code and has lost the recovery codes: one starts a 3-day wait, the other cancels it. {when} is a time and date like “07:42 on 19 Jan 2024”.',
 	verify: 'The confirm-your-email page (opened from the confirmation email).',
+	'verify.change': 'The confirm-your-new-address page, opened from the email sent to a new address after a change of email address on the Account page. Opening it switches the account to that address.',
 	banner: 'The strips at the top of every page: until the email address is confirmed, and while an invitation to a catchment or team waits to be accepted.',
 	account: 'The account page: name, language and units, password.',
 	'account.two-step':

@@ -283,6 +283,14 @@ const RECIPE: Record<string, () => Promise<Req> | Req> = {
 	'POST /auth/me/accept-terms': async () => ({ as: await freshUser('Mterms'), body: { version: LEGAL_VERSION } }),
 	'POST /auth/change-password': async () => ({ as: await freshUser('Mpassword'), body: { currentPassword: 'correct horse', newPassword: 'correct horse battery' } }),
 	'POST /auth/forgot-password': () => ({ as: null, body: { email: ctx.owner.email } }),
+	// Changing the email address (347): a fresh account each time (one pending change, a cooldown, per account).
+	'POST /auth/change-email': async () => ({ as: await freshUser('Mchange'), body: { newEmail: `mass-${crypto.randomUUID()}@example.com`, currentPassword: 'correct horse' } }),
+	'POST /auth/confirm-email-change': async () => {
+		const u = await freshUser('Mchanged');
+		const to = `mass-${crypto.randomUUID()}@example.com`;
+		await u.call('POST', '/auth/change-email', { newEmail: to, currentPassword: 'correct horse' });
+		return { as: null, body: { token: tokenIn(lastMailTo(to)) } };
+	},
 	'POST /auth/reset-password': async () => {
 		const u = await freshUser('Mreset');
 		await app.request('/auth/forgot-password', { method: 'POST', headers: { 'content-type': 'application/json', origin: ORIGIN }, body: JSON.stringify({ email: u.email }) });

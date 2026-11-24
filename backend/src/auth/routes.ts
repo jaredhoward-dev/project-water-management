@@ -24,6 +24,8 @@ import { LOCALES, type Locale } from '../mail/i18n/index.js';
 import { clientKey } from '../http/clientAddress.js';
 import { countSignup } from './signupThrottle.js';
 import { signupOpen } from './signupOpen.js';
+import { isDisposable } from './disposable.js';
+import { billingEnforced } from '../billing/enforced.js';
 import { logLoginFailed, type LoginFailureRoute } from './loginFailed.js';
 import { PREFERENCES_COL, PreferencesPatch, savePreferences, toPreferences } from './preferences.js';
 import { FARMER_NOTICE_VERSION, LEGAL_VERSION } from '@water-management/engine/legal';
@@ -85,7 +87,7 @@ const isCheckViolation = (err: unknown) => (err as { code?: string } | null)?.co
  * sign-in form can). Returns the account's email, language and the hash
  * just checked (change-password writes only if it is still the one).
  */
-async function checkPasswordAgain(c: Context<AuthEnv>, route: LoginFailureRoute, typed: string): Promise<{ email: string; locale: Locale | null; passwordHash: string }> {
+export async function checkPasswordAgain(c: Context<AuthEnv>, route: LoginFailureRoute, typed: string): Promise<{ email: string; locale: Locale | null; passwordHash: string }> {
 	const userId = c.get('userId');
 	// Counted in its own transaction before the password check, as in login.
 	const { lockedSeconds, row } = await withUser(userId, async (db) => {
@@ -257,6 +259,12 @@ export const authRoutes = new Hono<AuthEnv>()
 		if (wait > 0) {
 			c.header('Retry-After', String(wait));
 			throw ApiError.coded(429, 'signup_throttled', 'too many sign-ups from your network — try again later', { seconds: wait });
+		}
+		// A disposable address (auth/disposable.ts, issue #641 item 5 "block disposable domains"), only with
+		// BILLING_ENFORCED on, like every other Free-tier rule (docs/billing.md § Verified email on Free). After the
+		// throttle, before the address is looked up: it depends on the domain alone, so it tells nothing about accounts.
+		if (billingEnforced() && isDisposable(body.email)) {
+			throw ApiError.coded(400, 'signup_disposable', 'use a permanent email address: this one is from a temporary-mail service');
 		}
 		const inviteHash = body.inviteToken ? parseToken(body.inviteToken) : null;
 		// Sign-up by invitation (auth/signupOpen.ts, docs/security.md § Sign-up

@@ -78,7 +78,7 @@ header (issue #17): **Account**, then who you are as its summary line, the
 initials avatar, display name, email and a Confirmed / Not confirmed badge
 (a region named by the heading). Below it the cards sit in **two columns**
 once the page itself is 52rem wide (a container query, so the 240 px
-sidebar counts): Profile, Password, Two-step sign-in and Delete my account on the left; Language and units,
+sidebar counts): Profile, Password, Email address, Two-step sign-in and Delete my account on the left; Language and units,
 Alert emails and Your data on the right; one column below that. The page is
 capped at 92rem from the sidebar's edge, and at 1440 × 960 it fits the
 window without scrolling (`account.spec.ts` › layout pins both widths). Form
@@ -96,7 +96,13 @@ language switch and the farm view's m³ / ML, [§ Language](#language)), a
 data-subject export (`GET /auth/me/export`, a JSON file; the download
 helpers load on click, and a second click within the minute shows the
 server's `429` message in an alert; under it, outside the farm frame, a
-**Plan and usage** link to `/account/plan`, [§ Plan and usage](#plan-and-usage)) and a
+**Plan and usage** link to `/account/plan`, [§ Plan and usage](#plan-and-usage)), an
+**Email address** card (`components/account/ChangeEmail.svelte`, 347: the new
+address and the current password; it says only that a link is on its way to
+the new address if it can take the change, since the server answers the same
+for a taken one; the link opens `/verify-email/change`, which switches the
+account and says the new address, signed in or out, [security.md § Changing
+the email address](./security.md#changing-the-email-address)) and a
 **Password** form
 (current, new, repeat; `POST /auth/change-password`). Changing the password
 signs out every other device while this browser stays signed in. Errors show

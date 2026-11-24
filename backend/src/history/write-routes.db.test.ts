@@ -1316,6 +1316,8 @@ const OTHER_WRITE_ROUTES: OtherEntry[] = [
 	{ route: 'POST /auth/me/farm-notice', exempt: 'records the caller’s own acknowledgement of the farm view notice on their account (093); changes no project' },
 	{ route: 'POST /auth/me/accept-terms', exempt: 'records which terms the caller’s own account accepted (app_user.terms_version, stamped by the database); changes no project' },
 	{ route: 'POST /auth/change-password', exempt: 'the caller’s own credential; changes no project, and the password is never logged' },
+	{ route: 'POST /auth/change-email', exempt: 'the caller’s own address: stores a pending change and mails a link; changes no project (347)' },
+	{ route: 'POST /auth/confirm-email-change', exempt: 'switches the link’s account to its new address and mails the old one; changes no project (347)' },
 	// Two-step sign-in (issue #282): the account's own factor. No project is touched, so no project history; each
 	// change the account would want to see is in its own append-only log, account_security_event (auth/mfa.db.test.ts).
 	{ route: 'POST /auth/mfa/totp/enrol', exempt: 'starts adding the caller’s own authenticator (unconfirmed); no project, and nothing to log until it is confirmed' },

@@ -51,6 +51,12 @@ export const ERROR_CODES = [
 	'signin_locked',
 	'signup_throttled',
 	'signup_closed',
+	// Sign-up with an address on a disposable domain, with BILLING_ENFORCED on (auth/disposable.ts, #641 item 5).
+	'signup_disposable',
+	// Changing the email address (347, auth/email-change-routes.ts).
+	'email_change_same',
+	'email_change_disposable',
+	'email_change_taken',
 	'terms_not_accepted',
 	'farm_notice_changed',
 	'wrong_current_password',

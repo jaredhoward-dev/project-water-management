@@ -9,6 +9,7 @@ import { allocationRoutes } from './allocations/routes.js';
 import { assistantRoutes } from './assistant/routes.js';
 import { requireUser, type AuthEnv } from './auth/middleware.js';
 import { emailAuthRoutes } from './auth/email-routes.js';
+import { emailChangeRoutes } from './auth/email-change-routes.js';
 import { authRoutes } from './auth/routes.js';
 import { mfaRoutes } from './auth/mfa-routes.js';
 import { mfaResetRoutes } from './auth/mfa-reset-routes.js';
@@ -182,6 +183,8 @@ export function createApp() {
 	// Recovering a lost second factor (205): the challenge cookie or an emailed token is the credential.
 	app.route('/auth', mfaResetRoutes);
 	app.route('/auth', emailAuthRoutes);
+	// Changing the email address (347): signed in to ask, the emailed token to confirm.
+	app.route('/auth', emailChangeRoutes);
 	// The headless report renderer's sign-in: the render token is the credential.
 	app.route('/auth', renderSessionRoutes);
 
