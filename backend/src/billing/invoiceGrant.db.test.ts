@@ -83,6 +83,7 @@ function paid(account: string, over: Record<string, unknown> = {}, opts: { plan?
 			interval,
 			...period(opts.startMs ?? Date.now() - DAY, interval),
 			totalMinor: total,
+			issuedMinor: total,
 			currency: plan.currency.toLowerCase(),
 			...over
 		}
@@ -165,7 +166,10 @@ describe('a paid B2B invoice (335)', () => {
 			['Team on a person', paid(account, {}, { plan: team, planCode: 'team' })],
 			['Pro on a team', paid(teamAcct)],
 			['another currency', paid(account, { currency: 'usd' })],
-			['a total below the price', paid(account, { totalMinor: pro.price_monthly_minor - 1 })],
+			['a total below the amount issued', paid(account, { totalMinor: pro.price_monthly_minor - 1 })],
+			['no amount issued and a total below the price', paid(account, { issuedMinor: null, totalMinor: pro.price_monthly_minor - 1 })],
+			['an amount issued as text', paid(account, { issuedMinor: String(pro.price_monthly_minor) })],
+			['an amount issued of zero', paid(account, { issuedMinor: 0, totalMinor: 0 })],
 			['a total as text', paid(account, { totalMinor: String(pro.price_monthly_minor) })],
 			['a period already over', paid(account, {}, { startMs: longAgo })],
 			['a period longer than its interval', paid(account, { periodEnd: new Date(start + 40 * DAY).toISOString() })],
@@ -183,6 +187,21 @@ describe('a paid B2B invoice (335)', () => {
 		expect(await log(account)).toEqual([]);
 		// Positive control: the same invoice, as issued, grants; a total above the price is fine (the grant reads no amount).
 		expect(await apply('invoice.paid', paid(account, { totalMinor: pro.price_monthly_minor + 100 }))).toBe('applied');
+	});
+
+	it('checks the total against the amount issued, so a price change between issue and payment never refuses it', async () => {
+		const { account: rose } = await personAccount('InvoiceGrantPriceRose');
+		// Issued before a price rise: the plan table now asks more than the invoice's total, which still covers what was issued.
+		const issued = pro.price_monthly_minor - 500;
+		expect(await apply('invoice.paid', paid(rose, { issuedMinor: issued, totalMinor: issued }))).toBe('applied');
+		expect(await subs(rose)).toHaveLength(1);
+		// An invoice cut below what was issued (a line removed in the dashboard) grants nothing.
+		const { account: cut } = await personAccount('InvoiceGrantCut');
+		expect(await apply('invoice.paid', paid(cut, { issuedMinor: issued, totalMinor: issued - 1 }))).toBe('conflict');
+		expect(await subs(cut)).toEqual([]);
+		// Without an amount issued (an older invoice), the plan table's price is the floor, as before.
+		const { account: older } = await personAccount('InvoiceGrantNoIssued');
+		expect(await apply('invoice.paid', paid(older, { issuedMinor: null }))).toBe('applied');
 	});
 
 	it('never ends a live card subscription or an open-ended grant', async () => {

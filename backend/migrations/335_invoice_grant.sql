@@ -14,8 +14,11 @@
 --   - refused as 'conflict' (recorded, 200, logged: a retry wouldn't change
 --     it) when it doesn't check out, when the plan isn't the account's kind's
 --     (Pro a person's, Team a team's), the currency isn't the plan's, the
---     invoice's total is below the plan table's price for those seats and
---     that interval (the grant never reads an amount; the total only has to
+--     invoice's total is below the amount the staff tool issued it for
+--     (metadata amount_minor, the normaliser's issuedMinor; so a price change
+--     between issue and payment never refuses a paid invoice), or, for an
+--     invoice without it, the plan table's price for those seats and that
+--     interval (the grant never reads an amount; the total only has to
 --     cover it), the period has already ended, or the account has a live
 --     card subscription, an open-ended grant, or a grant reaching as far;
 --   - else written as 330's staff grant writes one: provider 'manual',
@@ -60,6 +63,7 @@ CREATE OR REPLACE FUNCTION app_billing_apply(p_provider text, p_event_id text, p
 		v_inv jsonb;
 		v_inv_ref text;
 		v_inv_total numeric;
+		v_issued numeric;
 		v_inv_plan plan;
 		v_kind text;
 		v_expected bigint;
@@ -177,8 +181,12 @@ CREATE OR REPLACE FUNCTION app_billing_apply(p_provider text, p_event_id text, p
 					v_plan := v_inv ->> 'planCode';
 					v_interval := v_inv ->> 'interval';
 					v_inv_total := (v_inv ->> 'totalMinor')::numeric;
+					-- The amount issued, when the metadata carries one (a positive whole number, else no grant).
+					v_issued := CASE WHEN jsonb_typeof(v_inv -> 'issuedMinor') = 'number' THEN (v_inv ->> 'issuedMinor')::numeric END;
 					IF (v_inv ->> 'seats')::numeric = trunc((v_inv ->> 'seats')::numeric) AND (v_inv ->> 'seats')::numeric BETWEEN 1 AND 100000
-					   AND v_inv_total = trunc(v_inv_total) AND v_inv_total >= 0 THEN
+					   AND v_inv_total = trunc(v_inv_total) AND v_inv_total >= 0
+					   AND (v_issued IS NULL OR (v_issued = trunc(v_issued) AND v_issued > 0))
+					   AND (jsonb_typeof(v_inv -> 'issuedMinor') IN ('number', 'null') OR NOT v_inv ? 'issuedMinor') THEN
 						v_seats := (v_inv ->> 'seats')::integer;
 						v_start := (v_inv ->> 'periodStart')::timestamptz;
 						v_end := (v_inv ->> 'periodEnd')::timestamptz;
@@ -262,8 +270,9 @@ CREATE OR REPLACE FUNCTION app_billing_apply(p_provider text, p_event_id text, p
 			ELSE
 				SELECT kind INTO v_kind FROM billing_account WHERE id = v_account;
 				SELECT * INTO v_inv_plan FROM plan WHERE code = v_plan AND active;
-				-- The price the plan table sets for these seats and this interval: the invoice's total must cover it
-				-- (an invoice cut in the dashboard grants nothing). The grant itself never reads an amount.
+				-- The invoice's total must cover the amount issued, or, without one, the price the plan table sets for
+				-- these seats and this interval (an invoice cut in the dashboard grants nothing; a price change after
+				-- issue doesn't refuse a paid invoice). The grant itself never reads an amount.
 				v_extra := CASE v_interval WHEN 'year' THEN (v_inv_plan.features ->> 'extra_seat_annual_minor')::bigint
 				                           ELSE (v_inv_plan.features ->> 'extra_seat_monthly_minor')::bigint END;
 				v_expected := CASE v_interval WHEN 'year' THEN v_inv_plan.price_annual_minor ELSE v_inv_plan.price_monthly_minor END
@@ -272,7 +281,7 @@ CREATE OR REPLACE FUNCTION app_billing_apply(p_provider text, p_event_id text, p
 				IF v_inv_plan.code IS NULL
 				   OR v_plan <> (CASE v_kind WHEN 'team' THEN 'team' ELSE 'pro' END)
 				   OR lower(v_inv ->> 'currency') <> lower(v_inv_plan.currency)
-				   OR v_expected IS NULL OR v_inv_total < v_expected
+				   OR coalesce(v_issued, v_expected) IS NULL OR v_inv_total < coalesce(v_issued, v_expected)
 				   OR v_end <= now() THEN
 					v_outcome := 'conflict';
 				ELSE

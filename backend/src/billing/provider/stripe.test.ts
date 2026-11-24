@@ -188,7 +188,7 @@ describe('a B2B invoice from the staff tool (no subscription)', () => {
 			parent: null,
 			total: 1078800,
 			currency: 'zar',
-			metadata: { billing_account_id: ACCOUNT, plan_code: 'pro', seats: '1', interval: 'year', period_start: '1798754400', period_end: '1830290400', wm_invoice_key: 'k', ...metadata },
+			metadata: { billing_account_id: ACCOUNT, plan_code: 'pro', seats: '1', interval: 'year', period_start: '1798754400', period_end: '1830290400', amount_minor: '1078800', wm_invoice_key: 'k', ...metadata },
 			...over
 		};
 		return e;
@@ -204,15 +204,15 @@ describe('a B2B invoice from the staff tool (no subscription)', () => {
 					accountId: ACCOUNT,
 					externalRef: null,
 					eventCreated: iso(1796209800),
-					invoice: { ref: 'in_b2b', planCode: 'pro', seats: 1, interval: 'year', periodStart: iso(1798754400), periodEnd: iso(1830290400), totalMinor: 1078800, currency: 'zar' }
+					invoice: { ref: 'in_b2b', planCode: 'pro', seats: 1, interval: 'year', periodStart: iso(1798754400), periodEnd: iso(1830290400), totalMinor: 1078800, issuedMinor: 1078800, currency: 'zar' }
 				}
 			}
 		});
 	});
 
 	it('a field that doesn’t parse is null, for the SQL to refuse; the event still names its account', () => {
-		const r = normaliseStripeEvent(b2b({ seats: '2.5', period_start: 'soon', interval: 7 }, { total: '1078800' }));
-		expect(r).toMatchObject({ kind: 'event', event: { payload: { accountId: ACCOUNT, invoice: { seats: null, periodStart: null, interval: null, totalMinor: null, planCode: 'pro' } } } });
+		const r = normaliseStripeEvent(b2b({ seats: '2.5', period_start: 'soon', interval: 7, amount_minor: '-5' }, { total: '1078800' }));
+		expect(r).toMatchObject({ kind: 'event', event: { payload: { accountId: ACCOUNT, invoice: { seats: null, periodStart: null, interval: null, totalMinor: null, issuedMinor: null, planCode: 'pro' } } } });
 	});
 
 	it('no grant on a subscription’s invoice, one without our key (a dashboard invoice), or a failed payment', () => {

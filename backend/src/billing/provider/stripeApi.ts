@@ -324,7 +324,7 @@ async function findInvoice(o: StripeClientOptions, customer: string, key: string
  * What a B2B invoice's metadata carries: everything its invoice.paid needs to grant the plan
  * (provider/stripe.ts invoiceGrantOf, app_billing_apply 335), and our key. Stripe keeps metadata values as strings.
  */
-export function invoiceMetadata(p: Pick<StripeInvoiceParams, 'accountId' | 'planCode' | 'seats' | 'interval' | 'periodStart' | 'periodEnd' | 'key'>): Record<string, string> {
+export function invoiceMetadata(p: Pick<StripeInvoiceParams, 'accountId' | 'planCode' | 'seats' | 'interval' | 'periodStart' | 'periodEnd' | 'key' | 'lines'>): Record<string, string> {
 	return {
 		billing_account_id: p.accountId,
 		plan_code: p.planCode,
@@ -332,6 +332,8 @@ export function invoiceMetadata(p: Pick<StripeInvoiceParams, 'accountId' | 'plan
 		interval: p.interval,
 		period_start: String(p.periodStart),
 		period_end: String(p.periodEnd),
+		// The total as issued: the paid invoice must cover it (335), so a price change after issue never refuses a paid invoice.
+		amount_minor: String(p.lines.reduce((a, l) => a + l.amountMinor, 0)),
 		wm_invoice_key: p.key
 	};
 }

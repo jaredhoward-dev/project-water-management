@@ -160,7 +160,7 @@ describe('invoicePaidEvent', () => {
 				payload: {
 					accountId: ACCOUNT,
 					externalRef: null,
-					invoice: { ref: 'in_mock_abc', planCode: 'team', seats: 5, interval: 'year', periodStart: new Date(1798754400_000).toISOString(), periodEnd: new Date(1830290400_000).toISOString(), totalMinor: 140, currency: 'zar' }
+					invoice: { ref: 'in_mock_abc', planCode: 'team', seats: 5, interval: 'year', periodStart: new Date(1798754400_000).toISOString(), periodEnd: new Date(1830290400_000).toISOString(), totalMinor: 140, issuedMinor: 140, currency: 'zar' }
 				}
 			}
 		});

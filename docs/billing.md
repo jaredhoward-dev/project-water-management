@@ -982,7 +982,7 @@ pnpm dev:billing:invoice <email|team-id> <plan> --interval month|year --po "<PO 
   band"; both send `invoice.paid`). For an invoice with no subscription and
   our `wm_invoice_key`, the normaliser (`provider/stripe.ts`
   `invoiceGrantOf`) adds `invoice: { ref, planCode, seats, interval,
-  periodStart, periodEnd, totalMinor, currency }` from its metadata
+  periodStart, periodEnd, totalMinor, issuedMinor, currency }` from its metadata
   (`stripeApi.ts` `invoiceMetadata`, written when it was issued) and its own
   total and currency; a field that doesn't parse is null. `app_billing_apply`
   then writes the grant as [§ Staff grants](#staff-grants) does: a
@@ -1000,10 +1000,12 @@ pnpm dev:billing:invoice <email|team-id> <plan> --interval month|year --po "<PO 
     warning, since a retry wouldn't change it; the operator reads the log
     and grants by hand if it is right): a field missing or malformed; a plan
     that isn't the account's kind's; a currency that isn't the plan's; a
-    total below the plan table's price for those seats and that interval
-    (so an invoice cut in the dashboard grants nothing; the grant itself
-    never reads an amount, and a price raised between issue and payment
-    refuses too); a period that has ended or is longer than one interval;
+    total below the amount the invoice was issued for (metadata
+    `amount_minor`, `issuedMinor`), or, for an invoice without it, below the
+    plan table's price for those seats and that interval (so an invoice cut
+    in the dashboard grants nothing, while a price raised between issue and
+    payment doesn't refuse one the customer paid as invoiced; the grant
+    itself never reads an amount); a period that has ended or is longer than one interval;
     and an account with a live card subscription, an open-ended grant, or a
     grant reaching as far. A live grant ending sooner (the previous
     period's: a renewal paid early) is replaced, logged as a `revoke`, so

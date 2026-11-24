@@ -70,8 +70,10 @@ export interface InvoiceGrantPayload {
 	/** ISO: the period paid for (start inclusive, end exclusive). */
 	periodStart: string | null;
 	periodEnd: string | null;
-	/** The invoice's total and currency, checked against the plan table's price; the grant never reads an amount. */
+	/** The invoice's total and currency: the total must cover the amount issued (else the plan table's price); the grant never reads an amount. */
 	totalMinor: number | null;
+	/** The total the staff tool issued the invoice for (metadata amount_minor), or null when absent or unparsable. */
+	issuedMinor: number | null;
 	currency: string | null;
 }
 export type NormalisedEvent =

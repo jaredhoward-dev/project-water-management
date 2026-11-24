@@ -214,8 +214,8 @@ function normalise(body: unknown): NormaliseResult {
 /**
  * The grant a staff-tool invoice's metadata names (billing/invoice.ts wrote it, provider/stripeApi.ts
  * invoiceMetadata): each field as app_billing_apply takes it, or null when it doesn't parse, which the
- * SQL refuses (recorded as a conflict, 335). The total and currency are the invoice's own, for the
- * SQL's check against the plan table's price; the grant never reads an amount.
+ * SQL refuses (recorded as a conflict, 335). The total and currency are the invoice's own; the SQL checks
+ * the total covers the amount issued (metadata amount_minor), else the plan table's price. The grant never reads an amount.
  */
 export function invoiceGrantOf(invoice: Obj): InvoiceGrantPayload {
 	const m = isObj(invoice.metadata) ? invoice.metadata : {};
@@ -232,6 +232,7 @@ export function invoiceGrantOf(invoice: Obj): InvoiceGrantPayload {
 		periodStart: at(m.period_start),
 		periodEnd: at(m.period_end),
 		totalMinor: typeof invoice.total === 'number' && Number.isInteger(invoice.total) ? invoice.total : null,
+		issuedMinor: whole(m.amount_minor),
 		currency: str(invoice.currency)
 	};
 }
