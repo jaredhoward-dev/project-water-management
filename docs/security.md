@@ -814,8 +814,10 @@ sign-up ([billing.md § Verified email on Free](./billing.md#verified-email-on-f
   verified; the error text never carries the address. The disposable list
   is vendored (CC0, `backend/src/auth/disposableDomains.ts`), never fetched
   at runtime ([billing.md § Verified email on
-  Free](./billing.md#verified-email-on-free)). Sign-up doesn't check it yet
-  ([followups.md](./followups.md)).
+  Free](./billing.md#verified-email-on-free)), and refreshed by a monthly PR
+  (data-sources.md § disposable-email-domains). With `BILLING_ENFORCED` on,
+  sign-up (`400 signup_disposable`) and an email change (`400
+  email_change_disposable`) refuse it too.
 
 ### Throttles that don't depend on the WAF
 

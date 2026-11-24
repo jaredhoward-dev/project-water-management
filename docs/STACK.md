@@ -295,6 +295,7 @@ pnpm gen:example            # rewrite the example catchment the empty project li
 pnpm gen:help-art           # re-render the help pictures, by day and at dusk for dark mode (optional: Blender 5 + ImageMagick 7; HELP_ART_ONLY, HELP_ART_LIGHT, HELP_ART_DEVICE; output is committed)
 pnpm gen:landing-art        # regenerate the landing page's art, screens and figures (optional tooling; docs/design/landing-art.md)
 pnpm gen:e2e:timings       # refresh e2e/shard-timings.json (CI's e2e shards are packed by it) from the newest green main run; needs gh (e2e/README.md § CI)
+pnpm gen:disposable-domains [--ref <sha>] [--max-change 0.2]  # refresh the vendored disposable-email domain list (backend/src/auth/disposableDomains.ts) from upstream, refusing a size change past ±20 % (the monthly disposable-domains.yml runs it; data-sources.md § disposable-email-domains)
 pnpm gen:liability          # regenerate the known limitations, the engine errata and the methodology hashes from engine-audit.md, engine-errata.md and docs/methodology/ (after changing any)
 pnpm gen:assistant:help     # rewrite backend/src/assistant/helpIndex.json, the help guides and glossary the assistant's search_help reads (after changing any; a guard in test:guards fails until you do)
 pnpm gen:i18n:sheet [lang…]        # rewrite a language's translation sheet (default: every non-English language in

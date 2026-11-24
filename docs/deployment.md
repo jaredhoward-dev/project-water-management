@@ -824,7 +824,10 @@ issue when it fails), `renderer-apt-snapshot.yml` (weekly age check of the
 renderer image's apt snapshot; opens a `renderer-apt-snapshot` issue past 90
 days, § Reports), `disposable-domains.yml` (monthly refresh of the vendored
 disposable-email domain list; opens a PR when it moved, refuses a size change
-past ±20 %; data-sources.md § disposable-email-domains), `fresh-clone.yml` (weekly `pnpm run setup && pnpm dev` on a
+past ±20 %; data-sources.md § disposable-email-domains; it opens its PR with
+`GITHUB_TOKEN`, so it fails until the operator turns on the repo setting
+Settings → Actions → General → "Allow GitHub Actions to create and approve
+pull requests"), `fresh-clone.yml` (weekly `pnpm run setup && pnpm dev` on a
 clean checkout, also on PRs that touch setup; testing.md § Fresh clone), and
 weekly runs of `security.yml` and `scorecard.yml`.
 Also present: `claude.yml` (Claude Code on issue and PR comments, for the

@@ -905,9 +905,8 @@ since every subscription write fires 341's sync, which takes it.
 **3 days before the end** the person gets an email ([§ Plan emails](#plan-emails)).
 
 **Not built yet** ([followups.md § Billing](./followups.md#billing-issue-641)):
-the banner 3 days before the end, the live-catchment picker and the 7-day
-stop of automatic runs after it, the Plan page's Upgrade button during a
-trial (it offers Manage billing while any subscription is live,
+the banner 3 days before the end (on the Plan page and in the workspace), the
+Plan page's Upgrade button during a trial (it offers Manage billing while any subscription is live,
 `billingActions`), and the assistant panel's own words for the two new codes.
 
 **Tests.** `billing/reverseTrial.db.test.ts` (off grants and claims nothing;
@@ -1086,7 +1085,8 @@ a second one when `BILLING_ENFORCED` is on.
   already what switching those on does, and a separate flag could disagree
   with what is actually running (a feed fetching in a catchment marked not
   live). The owner moves the live catchment by switching its feeds, alerts
-  and automatic runs off there; a publication can't be taken back, so a
+  and automatic runs off there (or, after a lapse, by choosing the one to
+  keep: [§ Choosing the catchment to keep](#choosing-the-catchment-to-keep)); a publication can't be taken back, so a
   catchment that published stays the live one. After a downgrade, or a
   reverse trial's end (a lapse like any other), 341 pauses the others'
   operations after a 14-day grace, deleting nothing ([§ Pausing after a
@@ -1348,9 +1348,8 @@ them on together.
   disposable-email-domains](./data-sources.md#disposable-email-domains)).
   Never fetched at runtime; refreshed monthly by a PR from
   `.github/workflows/disposable-domains.yml` (`pnpm gen:disposable-domains`,
-  a ±20 % size-change guard). The reverse trial calls it (a disposable address
-  gets no trial); sign-up and an email change (#641 item 5) don't yet
-  ([followups.md](./followups.md)).
+  a ±20 % size-change guard). The reverse trial (a disposable address gets no
+  trial), sign-up and an email change all call it (the round 10 bullet below).
 - **The words.** Workspace English, #641's copy: "Verify your email to use
   the assistant. We sent a link to name@example.com." with *Resend* (the
   feeds panel's says "switch on a live data feed"); a disposable address:

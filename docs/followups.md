@@ -968,8 +968,9 @@ are #641's checklist. Open items from building it:
       `REVERSE_TRIAL` goes on. Still to do: (2) the banner 3 days before the end (the email 3 days before is
       done: 346, billing.md § Plan emails; the banner belongs on the Plan
       page and the workspace);
-      (3) the live-catchment picker at the end and stopping automatic runs on
-      the others 7 days later (the 338 item below); (4) the assistant panel's
+      ~~(3) the live-catchment picker at the end and pausing the others~~
+      (345's picker and 341's pause after the 14-day grace, which a trial's
+      end starts like any lapse); (4) the assistant panel's
       words for `assistant_trial_cap` and `assistant_trial_daily_cap`
       (`frontend/.../assistant/chat.svelte.ts` `DOLLAR_CAP_CODES` doesn't
       list them, so they show as a plain error); (5) the abuse report's
