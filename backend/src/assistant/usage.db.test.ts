@@ -15,7 +15,8 @@ let account: string;
 
 const DAY_MSGS = 20;
 
-const utcDay = async () => (await asOwner(`SELECT (now() AT TIME ZONE 'UTC')::date::text AS d`))[0]!.d as string;
+// The Free day is the SAST day (337, assistant_day_of), not the UTC one: from 22:00 to 24:00 UTC they differ.
+const sastDay = async () => (await asOwner(`SELECT (now() AT TIME ZONE 'Africa/Johannesburg')::date::text AS d`))[0]!.d as string;
 const utcMonth = async () => (await asOwner(`SELECT date_trunc('month', now() AT TIME ZONE 'UTC')::date::text AS m`))[0]!.m as string;
 const spend = async (u: User, usd: number) =>
 	asOwner(
@@ -66,7 +67,7 @@ describe('params.plan on the dollar caps’ 429', () => {
 	it('the Free day: plan free', async () => {
 		await asOwner(
 			`INSERT INTO assistant_day_usage (billing_account_id, user_id, day, messages, cost_usd_micros) VALUES ($1, $2, $3, $4, 0)`,
-			[account, owner.id, await utcDay(), DAY_MSGS]
+			[account, owner.id, await sastDay(), DAY_MSGS]
 		);
 		vi.stubEnv('ASSISTANT_FREE_MESSAGES_PER_DAY', String(DAY_MSGS));
 		const r = await post(owner);
