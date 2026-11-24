@@ -147,7 +147,8 @@ async function portal(c: Context<AuthEnv>, resolve: (db: Db) => Promise<string |
 				periodEnd: sub.periodEnd,
 				cancelAtPeriodEnd: sub.cancelAtPeriodEnd,
 				seats: sub.seats,
-				seatsIncluded: includedSeats(state.plan)
+				seatsIncluded: includedSeats(state.plan),
+				interval: sub.interval ?? null
 			}
 		: null;
 	const result = await provider.createPortal({ id: state.id, customerRef: state.customerRef }, live, returnUrls(c, pagePath, false));

@@ -49,6 +49,8 @@ export type MockSession =
 				cancelAtPeriodEnd: boolean;
 				seats: number;
 				seatsIncluded?: number;
+				/** How often it bills; absent on a token signed before 332, or null when not recorded: the event's items then carry no price. */
+				interval?: 'month' | 'year' | null;
 			} | null;
 			exp: number;
 	  };
@@ -98,7 +100,8 @@ const secs = (d: Date | string) => Math.floor(new Date(d).getTime() / 1000);
 /**
  * A subscription as Stripe sends it, with its items as checkout makes them
  * (provider/stripeApi.ts): the plan at quantity 1 and, past the included
- * seats, a second item of the extra seats; seats_included in the metadata.
+ * seats, a second item of the extra seats; seats_included in the metadata;
+ * each item's price recurring at the interval, when there is one.
  */
 function subscriptionObject(
 	accountId: string,
@@ -108,9 +111,12 @@ function subscriptionObject(
 	end: number,
 	cancelAtPeriodEnd: boolean,
 	seats: number,
-	seatsIncluded = 1
+	seatsIncluded = 1,
+	interval: 'month' | 'year' | null = null
 ): Record<string, unknown> {
-	const item = (quantity: number) => ({ object: 'subscription_item', quantity, current_period_start: start, current_period_end: end });
+	// Each item's price carries the interval, as Stripe's does (the normaliser reads price.recurring.interval).
+	const price = interval ? { price: { object: 'price', recurring: { interval, interval_count: 1 } } } : {};
+	const item = (quantity: number) => ({ object: 'subscription_item', quantity, ...price, current_period_start: start, current_period_end: end });
 	const extra = Math.max(0, seats - seatsIncluded);
 	return {
 		id: mockSubscriptionRef(accountId),
@@ -127,7 +133,7 @@ function subscriptionObject(
 export function paidEvents(s: Extract<MockSession, { kind: 'checkout' }>, nowMs = Date.now()): Record<string, unknown>[] {
 	const now = new Date(nowMs);
 	const created = secs(now);
-	const sub = subscriptionObject(s.accountId, s.planCode, 'active', created, secs(addInterval(now, s.interval)), false, s.seats ?? 1, s.seatsIncluded ?? 1);
+	const sub = subscriptionObject(s.accountId, s.planCode, 'active', created, secs(addInterval(now, s.interval)), false, s.seats ?? 1, s.seatsIncluded ?? 1, s.interval);
 	return [
 		{
 			id: eventId(),
@@ -149,7 +155,7 @@ export function cancelAtPeriodEndEvent(s: Extract<MockSession, { kind: 'portal' 
 		object: 'event',
 		type: 'customer.subscription.updated',
 		created: secs(new Date(nowMs)),
-		data: { object: subscriptionObject(s.accountId, sub.planCode, sub.status, secs(sub.periodStart), secs(sub.periodEnd), true, sub.seats, Math.min(sub.seats, sub.seatsIncluded ?? 1)) }
+		data: { object: subscriptionObject(s.accountId, sub.planCode, sub.status, secs(sub.periodStart), secs(sub.periodEnd), true, sub.seats, Math.min(sub.seats, sub.seatsIncluded ?? 1), sub.interval ?? null) }
 	};
 }
 

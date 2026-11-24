@@ -45,6 +45,8 @@ export interface SubscriptionPayload {
 	trialEnd: string | null;
 	cancelAtPeriodEnd: boolean;
 	externalRef: string;
+	/** How often it bills (332): month or year, null when the provider's interval is neither (an interval_count past 1, or no price); absent from an older sender, which keeps the stored one. */
+	interval?: BillingInterval | null;
 	/** When the provider created the event (ISO): app_billing_apply skips an update older than the last one applied as `stale` (327); absent or null applies in arrival order. */
 	eventCreated?: string | null;
 }
@@ -108,6 +110,8 @@ export interface LiveSubscription {
 	seats: number;
 	/** The plan's included seats, so the mock's portal event carries the subscription's items as checkout made them. */
 	seatsIncluded?: number;
+	/** How often it bills (332), so the mock's portal event carries it as Stripe would; null when not recorded. */
+	interval?: BillingInterval | null;
 }
 export interface ReturnUrls {
 	/** Where the provider sends the person back to: the plan page, with `?checkout=done` or `?checkout=cancelled` for checkout. */

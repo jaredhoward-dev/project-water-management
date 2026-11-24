@@ -6,6 +6,7 @@ import {
 	billingActions,
 	checkoutNotice,
 	checkoutTotalMinor,
+	editorsHint,
 	fmtPrice,
 	fmtUsdMicros,
 	monthName,
@@ -13,8 +14,10 @@ import {
 	seatHint,
 	seatOffer,
 	shadowNote,
+	startingSeats,
 	subscriptionLine,
 	subscriptionSeatsLine,
+	subscriptionTotalLine,
 	upgradeLabel,
 	usageRows
 } from './plan';
@@ -35,6 +38,7 @@ function plan(over: Partial<AccountPlan> = {}): AccountPlan {
 			features: {}
 		},
 		subscription: null,
+		team: null,
 		usage: {
 			month: '2026-11',
 			catchments: { used: 3, limit: null },
@@ -56,6 +60,7 @@ const sub = (s: Partial<Subscription>): Subscription => ({
 	periodEnd: '2026-12-01',
 	trialEnd: null,
 	cancelAtPeriodEnd: false,
+	interval: null,
 	...s
 });
 
@@ -126,6 +131,37 @@ describe('subscriptionSeatsLine', () => {
 	it('is nothing with no subscription, or on a personal account', () => {
 		expect(subscriptionSeatsLine(team(null))).toBeNull();
 		expect(subscriptionSeatsLine(plan({ subscription: sub({ seats: 1 }) }))).toBeNull();
+	});
+});
+
+describe('subscriptionTotalLine', () => {
+	const teamPlan = {
+		...plan().plan,
+		code: 'team' as const,
+		name: 'Team',
+		priceMonthlyMinor: 249_900,
+		priceAnnualMinor: 2_499_000,
+		limits: { seats_included: 3 },
+		features: { extra_seat_monthly_minor: 49_900, extra_seat_annual_minor: 499_000 }
+	};
+	const team = (s: Partial<Subscription> | null) => plan({ account: { id: 't1', kind: 'team' }, plan: teamPlan, subscription: s === null ? null : sub(s), team: { editorCount: 5 } });
+	const pro = (s: Partial<Subscription>) =>
+		plan({ plan: { ...plan().plan, code: 'pro', name: 'Pro', priceMonthlyMinor: 89_900, priceAnnualMinor: 899_000, limits: { seats_included: 1 } }, subscription: sub(s) });
+
+	it('works out a Team’s total from its interval, seats and the plan’s prices', () => {
+		expect(subscriptionTotalLine(team({ seats: 5, interval: 'month' }))).toBe(`R${NB}3${TS}497.00 a month for 5 editor seats`);
+		expect(subscriptionTotalLine(team({ seats: 5, interval: 'year' }))).toBe(`R${NB}34${TS}970.00 a year for 5 editor seats`);
+		expect(subscriptionTotalLine(team({ seats: 3, interval: 'month' }))).toBe(`R${NB}2${TS}499.00 a month for 3 editor seats`);
+	});
+	it('a person’s subscription is the plan’s price at its interval, with no seats', () => {
+		expect(subscriptionTotalLine(pro({ interval: 'month' }))).toBe(`R${NB}899.00 a month`);
+		expect(subscriptionTotalLine(pro({ interval: 'year' }))).toBe(`R${NB}8${TS}990.00 a year`);
+	});
+	it('guesses nothing: no interval (a grant, a subscription from before it was kept), no subscription, or nothing to pay', () => {
+		expect(subscriptionTotalLine(team({ seats: 5, interval: null }))).toBeNull();
+		expect(subscriptionTotalLine(pro({ interval: null }))).toBeNull();
+		expect(subscriptionTotalLine(team(null))).toBeNull();
+		expect(subscriptionTotalLine(plan({ subscription: sub({ interval: 'month' }) }))).toBeNull();
 	});
 });
 
@@ -270,6 +306,23 @@ describe('Team seats at checkout', () => {
 		// No valid count chosen (the field is blank or wrong): no price, rather than one for some other count.
 		expect(upgradeLabel('Team', 'month', team, null)).toBe('Upgrade to Team, monthly');
 		expect(upgradeLabel('Team', 'year', team)).toBe('Upgrade to Team, yearly');
+	});
+
+	it('startingSeats: the team’s editors when they pass the included seats, else the included ones, never past the maximum', () => {
+		const offer = seatOffer(team)!;
+		expect(startingSeats(offer, 5)).toBe(5);
+		expect(startingSeats(offer, 2)).toBe(3);
+		expect(startingSeats(offer, 0)).toBe(3);
+		expect(startingSeats(offer, null)).toBe(3);
+		expect(startingSeats(offer, undefined)).toBe(3);
+		expect(startingSeats(offer, MAX_CHECKOUT_SEATS + 10)).toBe(MAX_CHECKOUT_SEATS);
+	});
+
+	it('editorsHint says how many editors the team has; nothing when unknown', () => {
+		expect(editorsHint(4)).toBe('This team has 4 editors.');
+		expect(editorsHint(1)).toBe('This team has 1 editor.');
+		expect(editorsHint(null)).toBeNull();
+		expect(editorsHint(undefined)).toBeNull();
 	});
 
 	it('seatHint names the included seats, each extra one’s prices and the maximum', () => {

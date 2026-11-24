@@ -11,8 +11,13 @@
 // with 5 editor seats: the seat field prices the buttons, and the
 // subscription comes back with 5 seats, which the plan card then says. The
 // seat field keeps what is typed (blank, 1e1, 4,5 stay, with the message).
+// The seat field starts at the team's editors when they pass the included
+// seats, saying how many there are, and a paid subscription says its total
+// from its interval and seats (332).
+import { request as apiRequest } from '@playwright/test';
 import { API_URL } from '../support/env.ts';
 import { expectNoViolations } from '../support/a11y.ts';
+import { acceptInvites, register } from '../support/api.ts';
 import { expect, test } from '../support/fixtures.ts';
 
 // The buttons carry their prices from GET /billing/plans (migration 323's Pro: R 899.00 a month, R 8 990.00 a year).
@@ -59,6 +64,7 @@ test('upgrade through the mock checkout, then cancel from the mock portal', asyn
 	await expect(page).toHaveURL(/\/account\/plan$/);
 	await expect(plan.locator('[data-plan-name]')).toHaveText('Pro');
 	await expect(plan.locator('[data-subscription="active"]')).toContainText('Renews');
+	await expect(plan.locator('[data-subscription-total]')).toHaveText(/^R.899\.00 a month$/);
 	await expect(plan.getByRole('button', { name: /^Upgrade/ })).toHaveCount(0);
 	await expectNoViolations(page);
 
@@ -81,6 +87,8 @@ test('a team buys Team with 5 editor seats: the field prices the buttons, the mo
 	const plan = page.getByRole('region', { name: 'Plan', exact: true });
 	const seats = plan.getByRole('spinbutton', { name: 'Editor seats' });
 	await expect(seats).toHaveValue('3');
+	// One editor (the admin who made it): the field starts at the 3 included seats, and says so.
+	await expect(plan.locator('[data-seats-editors]')).toHaveText('This team has 1 editor.');
 	await expect(seats).toHaveAccessibleDescription(/3 editor seats included; each extra one is R.499\.00 a month or R.4.990\.00 a year\. Up to 50\./);
 
 	// Under the included seats: said under the field, the buttons show no price, and they do nothing.
@@ -134,8 +142,48 @@ test('a team buys Team with 5 editor seats: the field prices the buttons, the mo
 	await expect(page).toHaveURL(new RegExp(`/teams/${team.id}/plan$`));
 	await expect(plan.locator('[data-plan-name]')).toHaveText('Team');
 	await expect(plan.locator('[data-subscription-seats]')).toHaveText('5 editor seats (3 included, 2 extra)');
+	await expect(plan.locator('[data-subscription-total]')).toHaveText(/^R.3.497\.00 a month for 5 editor seats$/);
 	const after = await page.context().request.get(`${API_URL}/teams/${team.id}/plan`);
-	expect(((await after.json()) as { subscription: { seats: number } }).subscription.seats).toBe(5);
+	expect(((await after.json()) as { subscription: { seats: number; interval: string } }).subscription).toMatchObject({ seats: 5, interval: 'month' });
+});
+
+test('a team with more editors than the included seats: the seat field starts at its editors, and a yearly Team says its total', async ({ page, owner }) => {
+	void owner;
+	const res = await page.context().request.post(`${API_URL}/teams`, { data: { name: 'Editors Team' } });
+	expect(res.status()).toBe(201);
+	const { team } = (await res.json()) as { team: { id: string } };
+	// Three members (editors) and a viewer, who holds no seat: with the admin, 4 editors.
+	const others = await apiRequest.newContext();
+	try {
+		for (const [name, role] of [
+			['Seat member one', 'member'],
+			['Seat member two', 'member'],
+			['Seat member three', 'member'],
+			['Seat viewer', 'viewer']
+		] as const) {
+			const u = await register(others, name);
+			expect((await page.request.post(`${API_URL}/teams/${team.id}/members`, { data: { email: u.email, role } })).status()).toBe(201);
+			expect(await acceptInvites(u.email, team.id)).toBe(1);
+		}
+	} finally {
+		await others.dispose();
+	}
+
+	await page.goto(`/teams/${team.id}/plan`);
+	const plan = page.getByRole('region', { name: 'Plan', exact: true });
+	const seats = plan.getByRole('spinbutton', { name: 'Editor seats' });
+	await expect(seats).toHaveValue('4');
+	await expect(plan.locator('[data-seats-editors]')).toHaveText('This team has 4 editors.');
+	await expect(seats).toHaveAccessibleDescription(/^This team has 4 editors\. 3 editor seats included/);
+	await expect(plan.getByRole('button', { name: /^Upgrade to Team, yearly \(R.29.980\.00 a year for 4 editor seats\)$/ })).toBeVisible();
+	await expectNoViolations(page);
+
+	await plan.getByRole('button', { name: /^Upgrade to Team, yearly/ }).click();
+	await expect(page.locator('[data-mock-seats]')).toHaveText('4 editor seats: 3 included and 1 extra at ZAR 4990.00 each.');
+	await page.getByRole('button', { name: 'Pays' }).click();
+	await expect(page).toHaveURL(new RegExp(`/teams/${team.id}/plan$`));
+	// R 24 990 + 1 × R 4 990 = R 29 980 a year.
+	await expect(plan.locator('[data-subscription-total]')).toHaveText(/^R.29.980\.00 a year for 4 editor seats$/);
 });
 
 test('Back from the mock checkout leaves the Upgrade buttons usable', async ({ page, owner }) => {

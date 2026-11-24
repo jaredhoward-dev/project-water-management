@@ -939,15 +939,19 @@ are #641's checklist. Open items from building it:
       `proration_behavior` decided with the operator), and the plan page's
       seat field kept for a live Team. Trigger: a paying Team asks for
       another editor seat.
-- [ ] **Team's seat field starts at the included seats.** The team plan
+- [x] **Team's seat field starts at the included seats.** The team plan
       page's seat field opens at Team's 3 included seats, not at the team's
       current editor count, so a team with more editors than that checks out
       fewer seats than it uses unless the admin raises the number.
       Durable fix: `AccountPlan` (`GET /teams/:id/plan`) carries the team's
       member or editor count, and the field starts at the larger of that and
       the included seats. Trigger: a team with more editors than included
-      seats checks out.
-- [ ] **`subscription` records no billing interval.** Neither the
+      seats checks out. Done (round 5, 332): `app_account_plan` returns
+      `team.editorCount` (distinct editors and owners, team and direct), and
+      the field starts at the larger of it and the included seats, with
+      *This team has N editors.* (billing.md § Billing interval and editor
+      count; `interval.db.test.ts`, `plan.test.ts`).
+- [x] **`subscription` records no billing interval.** Neither the
       webhook's normalised event nor `app_billing_apply` keeps whether a
       subscription is monthly or annual, so the plan page can't show
       what a Team with extra seats pays. Durable fix: an interval column on
@@ -956,7 +960,11 @@ are #641's checklist. Open items from building it:
       it from the subscription item's price, `recurring.interval`, and the
       mock sends it), and the plan page's total worked out from it and
       `seats`. Trigger: the plan page needs to show a subscription's
-      total.
+      total. Done (round 5, 332): `subscription.billing_interval`, written
+      by `app_billing_apply` from the normaliser's `interval` (the items'
+      `recurring.interval`; the mock sends it), and the plan page's total
+      (*R 3 497.00 a month for 5 editor seats*; none without an interval)
+      (billing.md § Billing interval and editor count).
 - [x] **No Lambda route for the operator's billing commands.** The staff
       grant and the abuse report run as the schema owner, which production
       reaches only from a temporary instance inside the VPC

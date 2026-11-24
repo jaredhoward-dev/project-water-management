@@ -4701,6 +4701,8 @@ export interface Subscription {
 	periodEnd: string | null;
 	trialEnd: string | null;
 	cancelAtPeriodEnd: boolean;
+	/** How often it bills (332): null when not recorded (a staff grant, a subscription from before 332, an interval that isn't a plain month or year). */
+	interval: BillingInterval | null;
 }
 
 /** One counted thing this month; `limit: null` is unlimited. */
@@ -4728,6 +4730,8 @@ export interface AccountPlan {
 	plan: Plan;
 	/** No live subscription: the account is on Free. */
 	subscription: Subscription | null;
+	/** A team account's editor seats in use (332): the distinct people with editor or owner on its projects; null on a person's account. */
+	team: { editorCount: number } | null;
 	usage: {
 		/** "YYYY-MM", the month in Africa/Johannesburg. */
 		month: string;
