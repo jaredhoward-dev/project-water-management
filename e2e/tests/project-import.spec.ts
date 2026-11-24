@@ -94,6 +94,28 @@ test('imports an example catchment into a team and runs it', async ({ page, owne
 	await expect(page.getByRole('region', { name: 'Summary', exact: true })).toBeVisible();
 });
 
+// Free's live limit (338; docs/billing.md § Live catchments (Free)): an import made with automatic runs off says why in
+// the done state, with Compare plans. Billing isn't enforced in e2e, so the real answer is given `autoRunsOff` here.
+test('an import Free’s live limit started with automatic runs off says why, with Compare plans for your own plan', async ({ page, owner }) => {
+	void owner;
+	await page.route(`${API_URL}/projects/import*`, async (route) => {
+		const res = await route.fetch();
+		await route.fulfill({ response: res, json: { ...((await res.json()) as object), autoRunsOff: 'live_catchments' } });
+	});
+	await page.goto('/');
+	const dialog = await openImport(page);
+	await dialog.getByLabel('Project file (.json)').setInputFiles(asFile(example));
+	await dialog.getByLabel('Name').fill('Droëvlei — not live');
+	await dialog.getByRole('button', { name: 'Import', exact: true }).click();
+
+	const done = page.getByRole('dialog', { name: 'Project imported' });
+	await expect(done.getByRole('status')).toHaveText(/Imported Droëvlei — not live\./);
+	const note = done.getByTestId('auto-runs-off');
+	await expect(note).toContainText('The new project starts with automatic runs off');
+	await expect(note.getByRole('link', { name: 'Compare plans' })).toHaveAttribute('href', '/account/plan');
+	await expectNoViolations(page);
+});
+
 test('an imported project exports back to the same file', async ({ page, owner }) => {
 	void owner;
 	await page.goto('/');

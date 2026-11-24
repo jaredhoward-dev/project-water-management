@@ -2855,6 +2855,17 @@ moves ⋯ (not the one that brought an off-screen ⋯ into view: its event
 arrives a frame after the menu opened) or a resize. One menu is open at a
 time.
 
+**Copy…** opens the copy dialog (`lib/components/projects/CopyProjectDialog.svelte`,
+`POST /projects/:id/copy`): the copy's name, prefilled "*name* (copy)", and
+where it goes (it stays in the team, or is personal when you only view
+it). A copy closes the dialog and reloads the list. When Free's live limit
+made the copy with automatic runs off (the answer's `autoRunsOff:
+"live_catchments"`; billing.md § Live catchments (Free)), the dialog stays
+open on a done state instead: "Copied to *name*", then one information line
+saying the new project starts with automatic runs off because another
+catchment on the plan is live, with **Compare plans** to the plan that bills
+the copy (`billing/AutoRunsOffNotice.svelte`), and *Close* or *Open project*.
+
 **Delete** asks for confirmation, then deletes. A project that has nominated
 an evidence run is kept for good (issue #43, [data-model.md](./data-model.md)
 § Evidence nomination), so the server answers `409`; instead of the raw error
@@ -2896,8 +2907,10 @@ turns a project document into a new project through `POST /projects/import`:
    list still takes the project.
 4. **Done:** "Imported *name*", plus "Its first run is ready on the Runs tab"
    after a run, or a warning with the reason when the run failed (the project
-   is still imported). *Open project* goes to it; the list behind has already
-   reloaded.
+   is still imported). When Free's live limit made it with automatic runs
+   off (`autoRunsOff: "live_catchments"`), the copy dialog's line follows:
+   why, with **Compare plans** (`billing/AutoRunsOffNotice.svelte`). *Open
+   project* goes to it; the list behind has already reloaded.
 5. **Failed:** the server's message (zod or model problems are listed) and
    "Nothing was created." When the server couldn't be reached, it says the
    import may or may not have gone through and to check the list first. *Back
@@ -14034,7 +14047,9 @@ with read-only tools over the project's data. It never changes anything.
   server's words and "Back … your time." from `params.resetsAt`, and the box
   takes nothing until then (`data-testid="assistant-cap"`). On Free's day and
   month (`params.plan` is `free`, which the API sends on those two) the note
-  ends with a **Compare plans** link to the Plan page (`/account/plan`,
+  ends with a **Compare plans** link to the Plan page of the account that
+  bills the catchment (the team's, `/teams/:id/plan`, for a team catchment,
+  else `/account/plan`; `billing/planLink.ts`;
   `data-testid="assistant-compare-plans"`), the month's after "Pro includes
   about 15 times as much." (Free $1, Pro $15 a month, 323's plan limits).
   The Free pool never upsells (it isn't the person's doing), nor does a paid

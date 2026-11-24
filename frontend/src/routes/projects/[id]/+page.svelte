@@ -50,6 +50,7 @@
 	import { resolve } from '$app/paths';
 	import { basePath } from '#lib/nav/base.js';
 	import { pausedNotice } from '#lib/components/billing/planPause.js';
+	import { provideBillingTeam } from '#lib/components/billing/planLink.js';
 	import { page } from '$app/state';
 	import type { SeriesMeta } from '@water-management/engine';
 	import { headlineView } from '#lib/calibration/zones.js';
@@ -196,6 +197,9 @@
 	// The number fields on this page holding text they can't take (common/invalidFields): this page's
 	// own registry, which a scenario's override mode (with its own) keeps out of the save bar.
 	const invalidFields = provideInvalidFields();
+	// Compare plans anywhere in the workspace (the live-limit note, the assistant's cap) opens the plan that bills this
+	// catchment: its team's, else your own (billing/planLink.ts; docs/billing.md § Who the plan belongs to).
+	provideBillingTeam(() => project?.team?.id);
 	// A model tab with problems in unsaved edits stays in the strip though hidden, so its link and dot can be reached.
 	const problemTabs = $derived(hasRole(project?.role, 'editor') && editor.dirty ? MODEL_TABS.filter((id) => editor.issues.some((x) => x.area === id)) : []);
 	const stripIds = $derived(stripTabs(shownIds, tab, TAB_IDS, problemTabs));

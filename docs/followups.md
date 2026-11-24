@@ -1100,7 +1100,7 @@ are #641's checklist. Open items from building it:
       Team seats), and the operator issues a B2B Stripe invoice with a PO
       number (`pnpm dev:billing:invoice`, the `billing-invoice` owner action,
       direct invoke only; billing.md § B2B invoices).
-- [ ] **Free's live catchment: what 338 left** (issue #641 round 8,
+- [x] **Free's live catchment: what 338 left** (issue #641 round 8,
       2026-11-24). `338_live_catchments` refuses a second live catchment on
       Free when `BILLING_ENFORCED=true` (billing.md § Live catchments
       (Free)). Done in round 9 (340_live_catchment_gaps): ~~(1) the Plan
@@ -1114,16 +1114,15 @@ are #641's checklist. Open items from building it:
       …/plan/keep`, the *Live catchments* card), ~~a workspace banner on
       a paused catchment~~ (`project.planPausedAt`, the header's notice) and
       ~~the owners' email when the grace starts and when the pause lands~~
-      (346, billing.md § Plan emails). Still to do:
-      ~~(4) the abuse report's "share at the live-catchment limit"~~ (done:
-      `live_catchments` in the report's Free limit shares, from 338's
-      count); (6) *Compare plans* always opens the
-      person's own Plan page, not a team's for a team catchment billed to a
-      Free team; (8) the copy and import dialogs don't yet show the API's
-      `autoRunsOff` (the new project opens with automatic runs off and its
-      Model settings say so, but nothing says why); durable fix: a line in
-      the copy dialog's and ImportProjectDialog's done state with *Compare
-      plans*. Trigger: before `BILLING_ENFORCED` goes on in production.
+      (346, billing.md § Plan emails). Done in the 2026-11-24 round:
+      ~~(4) the abuse report's "share at the live-catchment limit"~~
+      (`live_catchments` in the report's Free limit shares, from 338's
+      count); ~~(6) *Compare plans* always opens the person's own Plan
+      page~~ (every link goes through `billing/planLink.ts` `planHref`: a
+      team catchment's team plan, else the person's own); ~~(8) the copy and
+      import dialogs don't show the API's `autoRunsOff`~~
+      (`AutoRunsOffNotice` in both done states, with *Compare plans*;
+      billing.md § Live catchments (Free)). Nothing left.
 - [ ] **Free's verified-email gate: what 343 left** (issue #641 round 9,
       2026-11-24). `343_free_email_gate` refuses the assistant and switching
       a feed on, on Free, to an unverified or disposable-domain address when

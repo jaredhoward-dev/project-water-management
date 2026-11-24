@@ -745,6 +745,19 @@ describe('teams client', () => {
 			runError: 'model run failed: no A-pan'
 		});
 		expect(call(h, 0).url).toBe('/projects/import?run=1');
+
+		// Free's live limit made it with automatic runs off: the answer says so (338).
+		const k = mockFetch(201, { project, autoRunsOff: 'live_catchments' });
+		await expect(createApi('', k).projects.importProject(file)).resolves.toEqual({ project, autoRunsOff: 'live_catchments' });
+	});
+
+	it('copies a project, passing on autoRunsOff when Free’s live limit made the copy with automatic runs off', async () => {
+		const project = { id: 'p2', name: 'P (copy)' };
+		const f = mockFetch(201, { project });
+		await expect(createApi('', f).projects.copy('p/1', 'P (copy)')).resolves.toEqual({ project });
+		expect(call(f, 0)).toEqual({ url: '/projects/p%2F1/copy', method: 'POST', body: { name: 'P (copy)' } });
+		const g = mockFetch(201, { project, autoRunsOff: 'live_catchments' });
+		await expect(createApi('', g).projects.copy('p1', 'P (copy)')).resolves.toEqual({ project, autoRunsOff: 'live_catchments' });
 	});
 
 	it('sends the import report beside the document, replacing any the file carries', async () => {

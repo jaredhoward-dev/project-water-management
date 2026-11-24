@@ -1119,6 +1119,9 @@ a second one when `BILLING_ENFORCED` is on.
   trigger on `project` that fires after `project_billing_account_set`, under
   the same account lock), its other automatic-run fields kept, and the
   answer says so (`autoRunsOff: "live_catchments"`, [api.md](./api.md)).
+  The copy dialog and the import dialog show it in their done state: one
+  information line saying why, with *Compare plans*
+  (`AutoRunsOffNotice.svelte`; [ui.md § Project list](./ui.md#project-list)).
   Automatic runs are the only way a new project is live: a copy leaves feeds
   with the original and copies no alert rules or publications, and an import
   has none. Below the limit, or with enforcement off, the copy keeps them on.
@@ -1139,8 +1142,14 @@ a second one when `BILLING_ENFORCED` is on.
   on) and the alert rules editor show it as an information note, not an
   error (`LiveLimitNotice.svelte`, `liveLimit.ts` in
   `frontend/src/lib/components/billing/`), in #641's tone (no "quota" or
-  "402"), with *Compare plans* linking to Plan and usage. So do the
-  settings save bar (automatic runs; `SaveBar.svelte`, from the settings
+  "402"), with *Compare plans* linking to the Plan page of the account that
+  bills the catchment: a team catchment's team (`/teams/:id/plan`), any
+  other the person's own (`/account/plan`; [§ Who the plan belongs
+  to](#who-the-plan-belongs-to)). Every Compare plans link (this note, the
+  copy and import dialogs' line, the assistant's cap) builds it with
+  `planHref` (`planLink.ts`), the team from `project.team`, which the
+  workspace provides to the components below it. The note also shows in
+  the settings save bar (automatic runs; `SaveBar.svelte`, from the settings
   draft's `liveLimit`, the edit kept unsaved) and the Publish this run
   dialog (`PublicationPanel.svelte`, the dialog kept open), each in place of
   the error line (340's round, issue #641 round 9).

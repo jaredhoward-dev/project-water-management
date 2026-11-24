@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { pausedNotice, planHref } from './planPause';
+import { pausedNotice } from './planPause';
 
 describe('pausedNotice (341: the workspace notice on a paused catchment)', () => {
 	it('says nothing on a catchment that isn’t paused, or from an older API', () => {
@@ -31,16 +31,7 @@ describe('pausedNotice (341: the workspace notice on a paused catchment)', () =>
 	});
 });
 
-describe('planHref (the paused notice’s link)', () => {
-	it('encodes the team id, so a hostile one stays a path segment on the app’s origin', () => {
-		expect(planHref('a/b?c#d')).toBe('/teams/a%2Fb%3Fc%23d/plan');
-		for (const id of ['javascript:alert(1)', '//evil.example', '/\\evil.example', '..']) {
-			const href = planHref(id);
-			expect(href.startsWith('/teams/')).toBe(true);
-			expect(new URL(href, 'https://app.example/projects/p1').origin).toBe('https://app.example');
-		}
-	});
-
+describe('the paused notice’s words', () => {
 	it('never uses the words #641 rules out', () => {
 		const n = pausedNotice({ planPausedAt: '2026-12-03T08:00:00.000Z', team: null })!;
 		expect(n.text).not.toMatch(/quota|abuse|402|error/i);

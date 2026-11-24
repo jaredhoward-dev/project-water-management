@@ -331,9 +331,17 @@ export interface ProjectFileSeries {
 /** POST /projects/import. `runId` / `runError` only when a run was asked for. */
 export interface ImportResult {
 	project: Project;
+	/** Free's live limit made it with automatic runs off (338; docs/billing.md § Live catchments (Free)). */
+	autoRunsOff?: 'live_catchments';
 	runId?: string;
 	/** Why the requested run failed; the project was still imported. */
 	runError?: string;
+}
+
+/** POST /projects/:id/copy's 201: the copy, and `autoRunsOff` as for an import. */
+export interface CopyResult {
+	project: Project;
+	autoRunsOff?: 'live_catchments';
 }
 
 /**
