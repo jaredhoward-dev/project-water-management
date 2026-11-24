@@ -3152,7 +3152,12 @@ The page is two cards, side by side where they fit and stacked on a phone:
   button asks the API for a URL (`POST …/plan/checkout` or `…/plan/portal`)
   and sends the person there: Stripe's hosted page, or the mock's local page
   on the API ([billing.md § Checkout and portal](./billing.md#checkout-and-portal)).
-  While it asks, the buttons are `aria-disabled` (never `disabled`, which
+  Only those: `plan.ts` `billingRedirect` takes https on `checkout.stripe.com`
+  or `billing.stripe.com`, or `/billing/mock/checkout|portal` on the API's
+  own origin, and refuses any other answer with the page's error (the
+  `location.assign` is on the URL-sink allowlist of
+  `urlAttributes.security.test.ts` for that reason). The priced labels wrap
+  inside their buttons on a phone. While it asks, the buttons are `aria-disabled` (never `disabled`, which
   would throw the focus to the page; ui-playbook § 4) and the card
   `aria-busy`; a press then is ignored. A refusal shows inline as the API's
   own English message ("Couldn't open billing: …"), as the other workspace
@@ -3194,7 +3199,7 @@ Loading, a failed load (with Try again) and the not-found go through
 `common/LoadState.svelte`. A failed load reads "Couldn't look up your plan:"
 (or "this team's plan:") and the error from its code (`errorText`), never the
 server's own text. Tests: `billing/plan.test.ts` (prices, the
-subscription line, the rows, Team's seat range and price), `api/client.test.ts` (the two calls), and
+subscription line, the rows, Team's seat range and price, the redirect check), `api/client.test.ts` (the two calls), and
 `e2e/tests/billing-plan.spec.ts` (both pages, the not-found for a stranger
 and for a team member who isn't an admin, a farmer-only user sent back to
 `/account`, no way to pay, a 360 px phone without sideways scroll, axe at

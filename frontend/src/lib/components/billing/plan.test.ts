@@ -4,6 +4,7 @@ import {
 	CONFIRM_DELAYS_MS,
 	MAX_CHECKOUT_SEATS,
 	billingActions,
+	billingRedirect,
 	checkoutNotice,
 	checkoutTotalMinor,
 	fmtPrice,
@@ -291,5 +292,41 @@ describe('shadowNote', () => {
 	it('is gone once limits are enforced', () => {
 		expect(shadowNote(true, false, 'your account')).toBeNull();
 		expect(shadowNote(true, true, 'your account')).toBeNull();
+	});
+});
+
+describe('billingRedirect', () => {
+	const page = 'https://app.example/account/plan';
+	it('opens Stripe’s Checkout and billing portal on https', () => {
+		expect(billingRedirect('https://checkout.stripe.com/c/pay/cs_test_a1#fid', '/api', page)).toBe('https://checkout.stripe.com/c/pay/cs_test_a1#fid');
+		expect(billingRedirect('https://billing.stripe.com/p/session/test_1', '/api', page)).toBe('https://billing.stripe.com/p/session/test_1');
+	});
+	it('opens the mock’s checkout and portal on the API’s own origin, absolute or relative', () => {
+		expect(billingRedirect('http://localhost:3001/billing/mock/checkout?t=a.b', 'http://localhost:3001', 'http://localhost:7777/account/plan')).toBe(
+			'http://localhost:3001/billing/mock/checkout?t=a.b'
+		);
+		expect(billingRedirect('https://app.example/billing/mock/portal?t=x', '/api', page)).toBe('https://app.example/billing/mock/portal?t=x');
+	});
+	it('refuses anything else', () => {
+		const api = 'http://localhost:3001';
+		for (const bad of [
+			'javascript:alert(1)',
+			'data:text/html,<script>alert(1)</script>',
+			'http://checkout.stripe.com/c/pay/cs_1',
+			'https://checkout.stripe.com:8443/c/pay/cs_1',
+			'https://checkout.stripe.com.evil.example/c/pay',
+			'https://evil.example/billing/mock/checkout?t=x',
+			'https://user:pw@checkout.stripe.com/c/pay',
+			'https://stripe.com/',
+			'http://localhost:3001/auth/me',
+			'http://localhost:3002/billing/mock/checkout',
+			'/billing/mock/checkout',
+			'//evil.example/billing/mock/checkout',
+			'',
+			null,
+			42
+		]) {
+			expect(billingRedirect(bad, api, 'http://localhost:7777/account/plan'), String(bad)).toBeNull();
+		}
 	});
 });

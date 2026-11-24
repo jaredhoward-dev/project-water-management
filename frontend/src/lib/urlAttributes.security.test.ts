@@ -226,7 +226,9 @@ const TS_URL_SINKS =
 	/\.(href|src|action|formAction|srcdoc)\s*=(?!=)|\.setAttribute\(\s*['"`](href|src|action|formaction|srcdoc|xlink:href)['"`]|\blocation\s*=(?!=)|\blocation\.(assign|replace)\s*\(|\bwindow\.open\s*\(|['"`]\s*(javascript|vbscript)\s*:/gi;
 const TS_URL_SINKS_ALLOWED: Record<string, string> = {
 	'lib/export/download.ts': 'saveBlob: a.href = URL.createObjectURL(blob), a blob: URL for a download',
-	'lib/auth/wafCaptcha.ts': 'loadCaptchaSdk: script.src = the build-time CAPTCHA SDK URL, refused unless it matches CAPTCHA_SCRIPT (https, *.captcha-sdk.awswaf.com/<id>/jsapi.js), the one origin the CSP allows'
+	'lib/auth/wafCaptcha.ts': 'loadCaptchaSdk: script.src = the build-time CAPTCHA SDK URL, refused unless it matches CAPTCHA_SCRIPT (https, *.captcha-sdk.awswaf.com/<id>/jsapi.js), the one origin the CSP allows',
+	'lib/components/billing/PlanUsage.svelte':
+		'go: location.assign(the URL the API answered for checkout or the billing portal), refused unless billingRedirect (billing/plan.ts) passes it: https on checkout.stripe.com or billing.stripe.com, or the mock provider’s /billing/mock/(checkout|portal) page on the API’s own origin'
 };
 
 function sourceFiles(dir: string, ext: RegExp): string[] {

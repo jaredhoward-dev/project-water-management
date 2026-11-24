@@ -256,3 +256,32 @@ export function checkoutNotice(q: string | null, confirm: ConfirmState = 'confir
 
 /** How long the plan page waits before each re-read while a paid checkout is unconfirmed (ms; bounded: about 15 s in all). */
 export const CONFIRM_DELAYS_MS = [1000, 2000, 3000, 4000, 5000];
+
+/** Stripe's hosted pages: Checkout and the customer (billing) portal. */
+export const STRIPE_BILLING_HOSTS = ['checkout.stripe.com', 'billing.stripe.com'] as const;
+
+/**
+ * Where the Upgrade and Manage billing buttons may send the page: the URL the
+ * API answered (`{ url }` from checkout or the portal), as an absolute href,
+ * or null to refuse it. Only Stripe's Checkout or billing host on https (no
+ * credentials, default port), or the mock provider's checkout or portal page
+ * on the API's own origin (`apiBase`, PUBLIC_API_URL, read against the page
+ * so "/api" works), http or https. Anything else (javascript:, data:, another
+ * host, a lookalike such as checkout.stripe.com.evil.example) is refused.
+ */
+export function billingRedirect(url: unknown, apiBase: string, pageHref: string): string | null {
+	if (typeof url !== 'string' || !url) return null;
+	let u: URL;
+	let api: URL;
+	try {
+		u = new URL(url);
+		api = new URL(apiBase, pageHref);
+	} catch {
+		return null;
+	}
+	if (u.username || u.password) return null;
+	if (u.protocol === 'https:' && u.port === '' && (STRIPE_BILLING_HOSTS as readonly string[]).includes(u.hostname)) return u.href;
+	const mockPage = /\/billing\/mock\/(checkout|portal)$/.test(u.pathname);
+	if ((u.protocol === 'http:' || u.protocol === 'https:') && u.origin === api.origin && mockPage) return u.href;
+	return null;
+}
