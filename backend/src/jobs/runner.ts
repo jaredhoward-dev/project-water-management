@@ -248,6 +248,8 @@ export interface TickResult {
 	billingEventsPurged: number;
 	/** Staff grants past their end moved to expired, the account back to Free (330_staff_grant). */
 	staffGrantsExpired: number;
+	/** Live catchments newly paused past Free's limit after the grace (341 app_plan_pause_tick; 0 unless billing is enforced). */
+	catchmentsPaused: number;
 	claimed: number;
 	done: number;
 	failed: number;
@@ -327,6 +329,7 @@ export async function runTick(o: TickOptions = {}): Promise<TickResult> {
 		assistantPurged: 0,
 		billingEventsPurged: 0,
 		staffGrantsExpired: 0,
+		catchmentsPaused: 0,
 		claimed: 0,
 		done: 0,
 		failed: 0,
@@ -360,6 +363,9 @@ export async function runTick(o: TickOptions = {}): Promise<TickResult> {
 	);
 	// A staff grant past its end: expired (never deleted), the account back to Free.
 	result.staffGrantsExpired = await withoutUser(async (db) => (await db.query<{ n: number }>('SELECT app_staff_grant_expire() AS n')).rows[0]?.n ?? 0);
+	// After the expiry: an account that lost its paid plan starts its 14-day grace, and past it (billing enforced) its live
+	// catchments beyond Free's are paused, or resumed once it is back on a plan or within Free (341).
+	result.catchmentsPaused = await withoutUser(async (db) => (await db.query<{ n: number }>('SELECT app_plan_pause_tick() AS n')).rows[0]?.n ?? 0);
 	const noticesPurged = await purgePackNotices();
 	const erratumPurged = await purgeErratumNotices();
 	if (o.feeds !== false) {

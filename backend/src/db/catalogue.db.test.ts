@@ -211,6 +211,8 @@ const NO_INSERT = new Set(['series_blob', 'note_revision']);
  */
 const READ_ONLY = new Set([
 	'language',
+	// The pause past Free's limit (341): members read the marker, only app_plan_pause_sync writes it.
+	'project_plan_pause',
 	'pack_notice',
 	'alert_feedback',
 	'erratum_notice',

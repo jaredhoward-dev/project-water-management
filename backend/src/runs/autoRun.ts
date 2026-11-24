@@ -142,9 +142,13 @@ export const FORECAST_DEDUPE_KEY = 'forecast';
  * user, an editor (the feed's acting user; RLS on job and project).
  */
 export async function enqueueForecastRun(db: Db, projectId: string): Promise<QueuedRerun | null> {
-	const { rows } = await db.query<{ settings: unknown }>('SELECT settings FROM project WHERE id = $1', [projectId]);
+	const { rows } = await db.query<{ settings: unknown; paused: boolean }>(
+		'SELECT settings, app_project_plan_paused(id) IS NOT NULL AS paused FROM project WHERE id = $1',
+		[projectId]
+	);
 	const auto = resolveAutoRun(rows[0]?.settings);
-	if (!auto.enabled) return null;
+	// Paused past Free's limit (341): the setting stays on, the runs wait for the resume.
+	if (!auto.enabled || rows[0]?.paused) return null;
 	const { job, created } = await enqueueJob(db, {
 		projectId,
 		kind: 'rerun',
