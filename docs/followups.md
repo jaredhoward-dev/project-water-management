@@ -1050,25 +1050,24 @@ are #641's checklist. Open items from building it:
 - [ ] **Free's live catchment: what 338 left** (issue #641 round 8,
       2026-11-24). `338_live_catchments` refuses a second live catchment on
       Free when `BILLING_ENFORCED=true` (billing.md § Live catchments
-      (Free)). Still to do: (1) the Plan page's usage bar "live catchments
-      1/1" (`app_account_plan` doesn't return the count yet; add it from
-      `app_live_catchments_in_use` in the migration that next redefines it);
-      (2) the picker at the end of the reverse trial, and stopping automatic
-      runs and alerts on the other catchments after the 14-day grace
-      (#641 § Downgrade; the job tick doesn't check live yet); (3) a project
-      moved to another billing account (a team move) isn't checked against
-      the new account's limit; (4) the abuse report's "share at the
-      live-catchment limit" can now be measured from 338's count; (5) the
-      settings save bar (automatic runs on) and Publish to farmers show the
-      refusal as an error with the server's words, not `LiveLimitNotice`
-      (the Data feeds panel and alert rules editor do); (6) *Compare plans*
-      always opens the person's own Plan page, not a team's for a team
-      catchment billed to a Free team; (7) a copy or import of a catchment
-      with automatic runs on makes another live catchment unrefused (338
-      guards only an update of settings, since refusing the copy would
-      ration modelling); durable fix: on Free past the limit, the copy or
-      import starts with automatic runs off and its response says so. Trigger:
-      before `BILLING_ENFORCED` goes on in production.
+      (Free)). Done in round 9 (340_live_catchment_gaps): ~~(1) the Plan
+      page's "live catchments 1/1"~~ (`usage.liveCatchments`); ~~(3) a
+      project moved to another billing account isn't checked~~
+      (`project_move_live_guard`); ~~(5) the settings save bar and Publish
+      to farmers show the refusal as an error~~ (`LiveLimitNotice` in both);
+      ~~(7) a copy or import with automatic runs on makes another live
+      catchment~~ (it starts with them off, `autoRunsOff` in the answer).
+      Still to do: (2) the picker at the end of the reverse trial, and
+      stopping automatic runs and alerts on the other catchments after the
+      14-day grace (#641 § Downgrade; the job tick doesn't check live yet);
+      (4) the abuse report's "share at the live-catchment limit" can now be
+      measured from 338's count; (6) *Compare plans* always opens the
+      person's own Plan page, not a team's for a team catchment billed to a
+      Free team; (8) the copy and import dialogs don't yet show the API's
+      `autoRunsOff` (the new project opens with automatic runs off and its
+      Model settings say so, but nothing says why); durable fix: a line in
+      the copy dialog's and ImportProjectDialog's done state with *Compare
+      plans*. Trigger: before `BILLING_ENFORCED` goes on in production.
 - [ ] **`billing-invoice` can't reach Stripe from the migrate Lambda.** The
       migrate Lambda has no `BILLING_PROVIDER=stripe`, no key and no route to
       Stripe, so the action answers `billing_unavailable`
