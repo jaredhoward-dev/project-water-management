@@ -6,19 +6,30 @@
 // Lambda bundles this module.
 import type pg from 'pg';
 
-/** Nobody has the address. `message` quotes it (the local script's terminal); a public answer says only the code. */
+/** Nobody has the address (or id). `message` quotes it (the local script's terminal); a public answer says only the code. */
 export class NoPersonError extends Error {
 	readonly code = 'no_person';
-	constructor(email: string) {
-		super(`no account with the address ${email}`);
+	constructor(who: string) {
+		super(who.includes('@') ? `no account with the address ${who}` : `no person ${who}`);
 		this.name = 'NoPersonError';
 	}
 }
 
-/** Confirm the person with `email` (lowercased) for the project; returns their id and display name. */
-export async function confirmAuthorityDelegate(client: pg.ClientBase, projectId: string, email: string, reference: string): Promise<{ userId: string; name: string }> {
-	const { rows } = await client.query<{ id: string; name: string }>('SELECT id, display_name AS name FROM app_user WHERE lower(email::text) = $1', [email]);
-	if (!rows[0]) throw new NoPersonError(email);
+/**
+ * Who to confirm: an address (lowercased; the local script and the operator's
+ * direct invoke) or the person's id (the billing-admin workflow, whose public
+ * run never carries an address).
+ */
+export type Person = string | { email: string } | { userId: string };
+
+/** Confirm the person for the project; returns their id and display name. */
+export async function confirmAuthorityDelegate(client: pg.ClientBase, projectId: string, person: Person, reference: string): Promise<{ userId: string; name: string }> {
+	const p = typeof person === 'string' ? { email: person } : person;
+	const { rows } =
+		'email' in p
+			? await client.query<{ id: string; name: string }>('SELECT id, display_name AS name FROM app_user WHERE lower(email::text) = $1', [p.email])
+			: await client.query<{ id: string; name: string }>('SELECT id, display_name AS name FROM app_user WHERE id = $1', [p.userId]);
+	if (!rows[0]) throw new NoPersonError('email' in p ? p.email : p.userId);
 	await client.query('SELECT authority_confirm_by_operator($1, $2, $3)', [projectId, rows[0].id, reference]);
 	return { userId: rows[0].id, name: rows[0].name };
 }

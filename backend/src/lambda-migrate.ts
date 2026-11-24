@@ -38,8 +38,9 @@
 // And it runs the operator's owner actions (docs/deployment.md § Owner
 // actions, ops/ownerActions.ts): an event `{ "action": "<name>", … }`
 // (billing-grant, billing-revoke, billing-grants, billing-report,
-// authority-confirm; from .github/workflows/billing-admin.yml or the
-// operator's SSO session) runs no migration and no role sync; it checks the
+// authority-confirm from .github/workflows/billing-admin.yml, which names
+// people by id only, or the operator's SSO session; billing-account, the
+// address lookup, from the SSO session only) runs no migration and no role sync; it checks the
 // event against that action's strict schema before anything connects, runs
 // the same function the local script does as the owner, and answers with ids,
 // plans, dates and counts, never an address or a name.

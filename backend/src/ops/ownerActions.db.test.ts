@@ -110,6 +110,62 @@ describe('billing-grant, billing-grants, billing-revoke through the migrate Lamb
 	});
 });
 
+describe('the workflow’s id targets and the operator’s private lookup', () => {
+	let person: User;
+	let teamId: string;
+	beforeAll(async () => {
+		person = await signUp('OwnerActIds');
+		const team = await person.call('POST', '/teams', { name: 'Owner action ids team' });
+		expect(team.status).toBe(201);
+		teamId = team.body.team.id;
+	});
+
+	it('looks up a person with no billing account by address: their id, no account, Free; writes nothing', async () => {
+		const out = await lambda({ action: 'billing-account', email: person.email.toUpperCase() });
+		expect(out).toEqual({ action: 'billing-account', kind: 'user', ownerId: person.id, accountId: null, planNow: 'free' });
+		expect(JSON.stringify(out)).not.toContain('@');
+		expect(await asOwner('SELECT 1 FROM billing_account WHERE user_id = $1', [person.id])).toEqual([]);
+	});
+
+	it('grants to the person by id (making the account), as the workflow sends it; then names the account by id', async () => {
+		const out = await lambda({ action: 'billing-grant', via: 'workflow', userId: person.id, plan: 'pro', reason: 'Founding user', by: 'octocat', replace: false });
+		const account = await accountOf(person);
+		expect(out).toEqual({ action: 'billing-grant', accountId: account, kind: 'user', plan: 'pro', endsAt: null, replaced: false });
+		expect(await lambda({ action: 'billing-account', email: person.email })).toEqual({ action: 'billing-account', kind: 'user', ownerId: person.id, accountId: account, planNow: 'pro' });
+		expect(await lambda({ action: 'billing-grants', via: 'workflow', accountId: account })).toMatchObject({ action: 'billing-grants', kind: 'user', accountId: account, planNow: 'pro' });
+		expect(await lambda({ action: 'billing-revoke', via: 'workflow', accountId: account, reason: 'Pilot ended', by: 'octocat' })).toEqual({
+			action: 'billing-revoke',
+			accountId: account,
+			kind: 'user',
+			plan: 'pro'
+		});
+		expect(await planOf(person)).toBe('free');
+	});
+
+	it('names a team’s account by its account id, with the team’s kind', async () => {
+		const looked = (await lambda({ action: 'billing-account', teamId })) as unknown as { kind: string; ownerId: string; accountId: string | null };
+		expect(looked).toMatchObject({ kind: 'team', ownerId: teamId });
+		const granted = (await lambda({ action: 'billing-grant', via: 'workflow', teamId, plan: 'team', until: '2099-01-31', reason: 'Invoice INV-7', by: 'octocat', replace: false })) as unknown as {
+			accountId: string;
+		};
+		expect(await lambda({ action: 'billing-grants', via: 'workflow', accountId: granted.accountId })).toMatchObject({ kind: 'team', accountId: granted.accountId, planNow: 'team' });
+		expect(await lambda({ action: 'billing-revoke', via: 'workflow', accountId: granted.accountId, reason: 'ended', by: 'octocat' })).toMatchObject({ kind: 'team', plan: 'team' });
+	});
+
+	it('refuses an unknown account, person or team id as a code; and the workflow’s address, before anything connects', async () => {
+		expect(await failure({ action: 'billing-grants', via: 'workflow', accountId: crypto.randomUUID() })).toMatchObject({ code: 'no_billing_account' });
+		expect(await failure({ action: 'billing-grant', via: 'workflow', accountId: crypto.randomUUID(), plan: 'pro', reason: 'x', by: 'octocat' })).toMatchObject({
+			code: 'no_billing_account'
+		});
+		expect(await failure({ action: 'billing-account', userId: crypto.randomUUID() })).toMatchObject({ code: 'no_person' });
+		expect(await failure({ action: 'billing-account', teamId: crypto.randomUUID() })).toMatchObject({ code: 'no_team' });
+		const address = `nobody-${crypto.randomUUID()}@example.org`;
+		expect(await failure({ action: 'billing-account', email: address }, address)).toMatchObject({ code: 'no_person' });
+		expect(await failure({ action: 'billing-grants', via: 'workflow', email: person.email }, person.email)).toMatchObject({ code: 'refused' });
+		expect(await failure({ action: 'billing-account', via: 'workflow', email: person.email }, person.email)).toMatchObject({ code: 'refused' });
+	});
+});
+
 describe('billing-report through the migrate Lambda', () => {
 	it('answers with the script’s report, redacted (no address)', async () => {
 		const out = (await lambda({ action: 'billing-report', month: '2001-03' })) as unknown as { action: string; report: Record<string, unknown> };
@@ -139,6 +195,18 @@ describe('authority-confirm through the migrate Lambda', () => {
 		]);
 		const events = await asOwner(`SELECT actor_label, subject FROM audit_event WHERE project_id = $1 AND kind = 'authority.confirmed'`, [projectId]);
 		expect(events).toMatchObject([{ actor_label: 'Operator', subject: { userId: owner.id, via: 'operator', reference: 'CMA letter 2026/07' } }]);
+	});
+
+	it('confirms by the person’s id, as the workflow sends it (no address anywhere in the payload)', async () => {
+		const other = await signUp('OwnerActAuById');
+		expect((await owner.call('POST', `/projects/${projectId}/members`, { email: other.email, role: 'editor' })).status).toBe(201);
+		const out = await lambda({ action: 'authority-confirm', via: 'workflow', projectId, userId: other.id, reference: 'CMA letter 2026/08' });
+		expect(out).toEqual({ action: 'authority-confirm', projectId, userId: other.id, confirmed: true });
+		expect(await asOwner('SELECT confirmed_at IS NOT NULL AS confirmed FROM authority_delegate WHERE project_id = $1 AND user_id = $2', [projectId, other.id])).toEqual([
+			{ confirmed: true }
+		]);
+		expect(await failure({ action: 'authority-confirm', via: 'workflow', projectId, userId: crypto.randomUUID(), reference: 'letter' })).toMatchObject({ code: 'no_person' });
+		expect(await failure({ action: 'authority-confirm', via: 'workflow', projectId, email: other.email, reference: 'letter' }, other.email)).toMatchObject({ code: 'refused' });
 	});
 
 	it('refuses a viewer (not_editor), without the address', async () => {
