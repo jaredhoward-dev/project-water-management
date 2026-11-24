@@ -16,6 +16,7 @@
 // reference).
 import pg from 'pg';
 import { loadDevEnv } from '../src/config/devEnv.js';
+import { confirmAuthorityDelegate } from '../src/projects/authorityConfirm.js';
 
 export interface ConfirmArgs {
 	projectId: string;
@@ -45,10 +46,7 @@ export async function confirmDelegate(url: string, args: ConfirmArgs): Promise<s
 	const client = new pg.Client({ connectionString: url });
 	await client.connect();
 	try {
-		const { rows } = await client.query<{ id: string; name: string }>('SELECT id, display_name AS name FROM app_user WHERE lower(email::text) = $1', [args.email]);
-		if (!rows[0]) throw new Error(`no account with the address ${args.email}`);
-		await client.query('SELECT authority_confirm_by_operator($1, $2, $3)', [args.projectId, rows[0].id, args.reference]);
-		return rows[0].name;
+		return (await confirmAuthorityDelegate(client, args.projectId, args.email, args.reference)).name;
 	} finally {
 		await client.end();
 	}

@@ -231,3 +231,24 @@ describe('a read-only check (docs/deployment.md § Read-only production checks)'
 		expect(String(logged.mock.calls[0]?.[1])).toContain('MASTER_SECRET_ARN is not set');
 	});
 });
+
+describe('handler: owner actions (docs/deployment.md § Owner actions)', () => {
+	it('refuses a malformed action before the secret is read, with a code and no echoed value', async () => {
+		vi.stubEnv('MASTER_SECRET_ARN', 'arn:aws:secretsmanager:af-south-1:000000000000:secret:never-read');
+		secret.text = '';
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		const err = (await handler({ action: 'billing-grant', email: 'person@example.org', plan: 'team', reason: 'r' }, context).catch((e: Error) => e)) as Error;
+		expect(err.name).toBe('OwnerActionFailed');
+		expect(JSON.parse(err.message)).toMatchObject({ code: 'refused', logStream: context.logStreamName, requestId: 'req-1' });
+		expect(err.message).not.toContain('person@example.org');
+	});
+
+	it('a failure past the parse (no secret) is action_failed with a fixed reason, the detail in CloudWatch only', async () => {
+		vi.stubEnv('MASTER_SECRET_ARN', '');
+		const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+		const err = (await handler({ action: 'billing-report', month: '2026-11' }, context).catch((e: Error) => e)) as Error;
+		expect(JSON.parse(err.message)).toMatchObject({ code: 'action_failed', reason: expect.any(String) });
+		expect(err.message).not.toContain('MASTER_SECRET_ARN');
+		expect(String(logged.mock.calls[0]?.[1])).toContain('MASTER_SECRET_ARN is not set');
+	});
+});

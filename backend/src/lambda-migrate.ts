@@ -35,6 +35,15 @@
 // event never carries SQL) in a READ ONLY transaction as the owner, and
 // answers with ids, engine versions, modes and dates only.
 //
+// And it runs the operator's owner actions (docs/deployment.md § Owner
+// actions, ops/ownerActions.ts): an event `{ "action": "<name>", … }`
+// (billing-grant, billing-revoke, billing-grants, billing-report,
+// authority-confirm; from .github/workflows/billing-admin.yml or the
+// operator's SSO session) runs no migration and no role sync; it checks the
+// event against that action's strict schema before anything connects, runs
+// the same function the local script does as the owner, and answers with ids,
+// plans, dates and counts, never an address or a name.
+//
 // The deploy workflow's logs are public (the repo is), so a failure's
 // payload is a summary too: a stable code, migration names and where the
 // detail is. The detail itself (Postgres's error text, which can quote SQL or
@@ -47,6 +56,7 @@ import { loadRuntimeSecrets } from './config/runtimeSecrets.js';
 import { getSecretString } from './config/secretsManager.js';
 import { migrate, MigrateError, type MigrateErrorCode } from '../scripts/migrate.js';
 import { CheckError, parseCheckRequest, runCheck, type CheckErrorCode, type CheckResult } from './checks/readOnlyChecks.js';
+import { ownerActionCode, ownerActionReason, parseOwnerAction, runOwnerAction, type OwnerActionErrorCode, type OwnerActionResult } from './ops/ownerActions.js';
 import { LoadError, loadReferenceText, parseLoadRequest, readReferenceText, type LoadErrorCode, type LoadResult, type ReadObject } from './geo/referenceLoad.js';
 
 // Its runtime secret (the water_app password) once per cold start
@@ -296,7 +306,58 @@ export async function readOnlyCheck(event: unknown, context?: LogContext): Promi
 	}
 }
 
-export async function handler(event?: unknown, context?: LogContext): Promise<MigrateResult | LoadResult | CheckResult> {
+/** What a failed owner action returns (the thrown error's message, JSON): a code, a fixed reason, and where the detail is. */
+export interface OwnerActionFailure {
+	code: OwnerActionErrorCode;
+	reason: string;
+	logGroup: string | null;
+	logStream: string | null;
+	requestId: string | null;
+}
+
+export function ownerActionFailureSummary(err: unknown, context?: LogContext): OwnerActionFailure {
+	const code = ownerActionCode(err);
+	return {
+		code,
+		reason: ownerActionReason(code),
+		logGroup: context?.logGroupName ?? null,
+		logStream: context?.logStreamName ?? null,
+		requestId: context?.awsRequestId ?? null
+	};
+}
+
+/** The schema owner's connection string, from the RDS-managed secret. */
+const ownerConnection = async (): Promise<string> => ownerUrl(await readMasterSecret(requireEnv('MASTER_SECRET_ARN')));
+
+/**
+ * One owner action (docs/deployment.md § Owner actions). `event` is the whole
+ * event; `connection` is the owner's URL (the DB tests pass the local one).
+ */
+export async function ownerAction(event: unknown, context?: LogContext, connection: () => Promise<string> = ownerConnection): Promise<OwnerActionResult> {
+	try {
+		// Refused before the secret is read or anything connects.
+		const action = parseOwnerAction(event);
+		const client = new pg.Client({ connectionString: await connection() });
+		await client.connect();
+		try {
+			const result = await runOwnerAction(client, action);
+			console.log(`owner action ${action.action}: done`);
+			return result;
+		} finally {
+			await client.end();
+		}
+	} catch (err) {
+		// CloudWatch only: the database's own words can quote the address the operator typed.
+		console.error('owner action failed:', err);
+		const failure = new Error(JSON.stringify(ownerActionFailureSummary(err, context)));
+		failure.name = 'OwnerActionFailed';
+		failure.stack = `${failure.name}: ${failure.message}`;
+		throw failure;
+	}
+}
+
+export async function handler(event?: unknown, context?: LogContext): Promise<MigrateResult | LoadResult | CheckResult | OwnerActionResult> {
+	if (event && typeof event === 'object' && 'action' in event) return ownerAction(event, context);
 	if (event && typeof event === 'object' && 'check' in event) return readOnlyCheck(event, context);
 	if (event && typeof event === 'object' && 'load' in event) return loadReference((event as { load: unknown }).load, context);
 	try {
