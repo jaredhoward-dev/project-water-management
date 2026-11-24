@@ -3801,7 +3801,7 @@ page holds the conversation and sends it with each turn.
   turn still running keeps counting with its `user_id` cleared, until it is
   charged or expires.
 
-### Billing (323_billing.sql, 331_billing_rls_order.sql, 338_live_catchments.sql, 339_team_assistant_share.sql)
+### Billing (323_billing.sql, 331_billing_rls_order.sql, 338_live_catchments.sql, 339_team_assistant_share.sql, 340_live_catchment_gaps.sql)
 
 Plans, who each project bills to, and monthly usage, in **shadow mode**
 (issue #641 Phase 1): everything is counted, nothing is refused, and no
@@ -3904,6 +3904,14 @@ never to a farmer, contributor or viewer.
     under the account's billing advisory lock it reads the plan's
     `live_catchments` (no live subscription = Free, 1) and raises `23514`
     with constraint `plan_limit` (DETAIL key `live_catchments`) past it.
+    340 adds `project_live_start_off` (BEFORE INSERT on `project`, after
+    `project_billing_account_set` by name: with enforcement on, a new
+    project with automatic runs on, on an account at its limit, starts with
+    `settings.autoRun.enabled` false, never refused) and
+    `project_move_live_guard` (AFTER UPDATE OF `team_id`,
+    `billing_account_id`: a live project moving to another account calls the
+    guard), both owner-only, and `app_account_plan`'s
+    `usage.liveCatchments { used, limit }`.
     [billing.md § Live catchments (Free)](./billing.md#live-catchments-free).
   - `app_entitlements(project) → jsonb`: `{ plan, limits, features,
     status }` for an editor or owner; NULL for anyone else.
