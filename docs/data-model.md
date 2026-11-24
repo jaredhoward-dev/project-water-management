@@ -3809,7 +3809,7 @@ never to a farmer, contributor or viewer.
 | --- | --- |
 | `plan` | The tiers, `code` (`free`, `pro`, `team`) primary key, `name`, `price_monthly_minor`, `price_annual_minor` (ZAR cents), `currency` (`ZAR`), `limits`, `features`, `trial_days`, `active`. Written only by migrations; a signed-in person reads it (331; the public pricing route through `app_billing_plans()`) |
 | `billing_account` | A person's or a team's: `id`, `kind` (`user`, `team`), `user_id` (cascade) or `team_id` (cascade), exactly one set and each unique (which covers both keys), `projects_created` (every project it has ever billed, Free's lifetime count), `external_customer_ref` (328: the payment provider's customer, Stripe's `cus_…`, unique, NULL until the first Stripe checkout; written only by `app_billing_set_customer_ref`), `created_at` |
-| `subscription` | An account's plan over time: `billing_account_id` (cascade), `plan_code`, `status` (`trialing`, `active`, `past_due`, `canceled`, `expired`), `seats`, `period_start`, `period_end`, `trial_end`, `cancel_at_period_end`, `provider` (`mock`, `manual`, `stripe`), `external_ref` (unique per provider), `created_at`. A partial unique index, `subscription_one_live_per_account`, allows one live (trialing, active, past_due) row per account; canceled and expired rows stay as history, so an account can take the same plan again. **No live subscription means Free** |
+| `subscription` | An account's plan over time: `billing_account_id` (cascade), `plan_code`, `status` (`trialing`, `active`, `past_due`, `canceled`, `expired`), `seats`, `period_start`, `period_end`, `trial_end`, `cancel_at_period_end`, `provider` (`mock`, `manual`, `stripe`), `external_ref` (unique per provider), `created_at`, `billing_interval` (332: `month` or `year`, null before 332, for the staff grant and when the provider's isn't a plain month or year). A partial unique index, `subscription_one_live_per_account`, allows one live (trialing, active, past_due) row per account; canceled and expired rows stay as history, so an account can take the same plan again. **No live subscription means Free** |
 | `usage_counter` | Monthly counts per account: (`billing_account_id`, `kind` (`reports`, `packs_issued`), `month`) primary key, `qty`. `month` is the first day of the month in Africa/Johannesburg (`app_billing_month()`) |
 | `renewal_notice` | The annual renewal notice's sent-log (329, CPA s14): (`subscription_id` (cascade), `period_end`) primary key, so one notice per subscription and period ever; `user_id` (cascade, indexed), `status` (`pending`, `sending`, `sent`, `skipped`, `failed`), `attempts`, `created_at`, `claimed_at`, `locked_until`, `sent_at`, `settled_at`, `reason`. Written only by the worker's `app_renewal_notice_queue`, `_claim` and `_finish` (`alert_worker_context`); `water_app` reads its own rows (`renewal_notice_own`). Never purged: it is the record that the notice went ([billing.md § Renewal notice](./billing.md#renewal-notice)) |
 | `billing_grant_log` | The staff grant's audit log (330, issue #641): `id`, `billing_account_id` (cascade; indexed with `created_at`), `subscription_id` (set null, indexed), `action` (`grant`, `revoke`, `expire`), `plan_code`, `until` (the grant's end, null for until revoked; for a revoke, when), `reason` (1–500 characters), `granted_by` (the operator's name, or `expiry`), `created_at`. Append-only: written only by `app_staff_grant_plan` and `app_staff_revoke_grant` (the schema owner's, caller's rights, revoked from `water_app` and PUBLIC) and the worker's `app_staff_grant_expire` (`alert_worker_context`); `water_app` reads the rows of accounts it may read (`app_billing_account_readable`). A grant is a `provider = 'manual'` subscription; the partial index `subscription_manual_end_idx` serves the expiry scan ([billing.md § Staff grants](./billing.md#staff-grants)) |
@@ -3847,6 +3847,11 @@ never to a farmer, contributor or viewer.
     customer only while none is stored (the first wins) and answers the
     stored one; NULL for anyone else. Checkout calls it after Stripe makes the
     customer.
+  - `app_billing_live_subscription_ref(account) → jsonb` (333):
+    `{ provider, externalRef }` of the account's live subscription, NULL with
+    none or unless the caller is its person or an admin of its team. The
+    seat change reads it to reach the provider's subscription and to refuse
+    a staff grant (billing.md § Changing a Team's seats).
   - `app_my_billing_account() → uuid`: the caller's own account, made if
     missing; NULL with no signed-in user.
   - `app_team_billing_account(team) → uuid`: the team's account, made if
@@ -3860,7 +3865,11 @@ never to a farmer, contributor or viewer.
     `unpriced_turns` summed, beside the plan's dollar allowance:
     `assistant_usd_micros_per_month`, or `assistant_usd_micros_per_seat_month`
     × the seats, the live subscription's but never fewer than
-    `seats_included`); NULL unless the caller is the account's person or an admin of its
+    `seats_included`); 332 adds the subscription's `interval` and, on a
+    team's account, `team.editorCount` (the distinct people with editor or
+    owner on the team's projects: its members and admins, and direct editors
+    and owners of its projects, each once; viewers, contributors and farmers
+    hold no seat); NULL unless the caller is the account's person or an admin of its
     team. Shape in [api.md](./api.md).
   - `app_entitlements(project) → jsonb`: `{ plan, limits, features,
     status }` for an editor or owner; NULL for anyone else.
@@ -3902,6 +3911,7 @@ through one function, which is the **only writer of subscription status**.
 | Table | Holds |
 | --- | --- |
 | `billing_event` | One row per event acted on: (`provider` (`mock`, `manual`, `stripe`), `event_id`) primary key, `type`, `received_at`, `account_id` (set null when the account goes; indexed), `outcome` (`applied`, `recorded`, `conflict`, `unknown_account`; 327 added `stale`). **Owner-only**: RLS on, no policy, no privilege for `water_app`; only `app_billing_apply` writes it. Indexed on `received_at`, which the tick's purge reads: rows received more than 90 days ago are deleted (327 `app_purge_billing_events`, worker context only, never under 4 days, past Stripe's 3-day redelivery window) |
+| `subscription.billing_interval` (332) | How often the subscription bills (`month`, `year`), from the payload's `interval`: absent keeps the stored value, `null` clears it, anything else is `invalid`. The plan page works out the subscription's total from it ([billing.md § Billing interval and editor count](./billing.md#billing-interval-and-editor-count)) |
 | `subscription.last_event_at` (327) | The provider's time (`eventCreated`) of the newest event applied to the subscription; null before 327, for the staff grant, and while no event carried a time. Bookkeeping for ordering, not in "Download my data" |
 
 `app_billing_apply(provider, event_id, type, payload jsonb) → text`
@@ -3910,7 +3920,7 @@ through one function, which is the **only writer of subscription status**.
 it raises `42501` inside a user's or an API key's transaction. The payload
 is the route's normalised one, never a raw provider object:
 `{ accountId, planCode, status, seats, periodStart, periodEnd, trialEnd,
-cancelAtPeriodEnd, externalRef, eventCreated? }`, timestamps as ISO 8601 with an offset.
+cancelAtPeriodEnd, externalRef, interval?, eventCreated? }` (`interval`: `month`, `year` or `null`, 332), timestamps as ISO 8601 with an offset.
 
 - It checks the arguments and the payload first, and answers `invalid`
   without recording anything (so the provider's retry of a corrected event

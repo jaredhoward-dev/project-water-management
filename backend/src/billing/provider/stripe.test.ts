@@ -97,6 +97,33 @@ describe('normaliseStripeEvent', () => {
 		expect(normaliseStripeEvent(zero)).toMatchObject({ event: { payload: { seats: 3 } } });
 	});
 
+	it('reads the interval from the items’ prices: monthly Team, yearly Team (subscription-team-yearly)', () => {
+		expect(normaliseStripeEvent(fixture('subscription-team-seats'))).toMatchObject({ event: { payload: { seats: 5, interval: 'month' } } });
+		expect(normaliseStripeEvent(fixture('subscription-team-yearly'))).toMatchObject({
+			kind: 'event',
+			event: { type: 'subscription.updated', payload: { planCode: 'team', seats: 5, interval: 'year', externalRef: 'sub_synthetic_team_yearly_0001' } }
+		});
+	});
+
+	it('sends a null interval when the prices aren’t a plain month or year, and none when the items carry no price', () => {
+		const odd = (patch: (items: { price?: Record<string, unknown> }[]) => void) => {
+			const e = fixture('subscription-team-seats');
+			patch(e.data.object.items.data);
+			const r = normaliseStripeEvent(e);
+			if (r.kind !== 'event' || r.event.type !== 'subscription.updated') throw new Error('expected a subscription event');
+			return r.event.payload;
+		};
+		expect(odd((items) => (items[0]!.price = { recurring: { interval: 'month', interval_count: 3 } })).interval).toBeNull();
+		expect(odd((items) => (items[0]!.price = { recurring: { interval: 'week' } })).interval).toBeNull();
+		expect(odd((items) => (items[0]!.price = { recurring: { interval: 'year' } })).interval).toBeNull();
+		expect(odd((items) => (items[0]!.price = { id: 'price_one_off', recurring: null })).interval).toBeNull();
+		const bare = odd((items) => items.forEach((i) => delete i.price));
+		expect('interval' in bare).toBe(false);
+		// The older fixtures carry no price: no interval, so app_billing_apply keeps the stored one.
+		const r = normaliseStripeEvent(fixture('subscription-updated'));
+		expect(r.kind === 'event' && 'interval' in r.event.payload).toBe(false);
+	});
+
 	it('refuses a seats_included that isn’t a whole number of seats, or a fractional quantity', () => {
 		for (const bad of ['0', '-1', '2.5', 'three', 3]) {
 			const e = fixture('subscription-team-seats');

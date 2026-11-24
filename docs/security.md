@@ -1957,7 +1957,13 @@ In short:
   `app_billing_apply` (326), the provider webhook's function, which runs
   with no user and refuses (`42501`) inside a user's or an API key's
   transaction; `billing_event`, its de-duplication, is owner-only
-  (`apply.db.test.ts`).
+  (`apply.db.test.ts`). The billing write routes follow the same rule: a
+  team's `POST /teams/:id/plan/checkout`, `/portal` and `/seats` answer
+  `404` to anyone but a team admin before any provider call, and seat
+  changes never write `subscription.seats` (the webhook brings them back
+  through `app_billing_apply`; `seats.db.test.ts`, 333's
+  `app_billing_live_subscription_ref` answers only the account's person or
+  team admins).
 - **Accounts under RLS** (`068_app_user_rls.sql`). `app_user` had no RLS
   (sign-in reads it before anyone is signed in), so any `water_app`
   transaction, an API key's or the job tick's included, could read every
@@ -4184,7 +4190,7 @@ PDF someone else asked for kept the person as a recipient
 | Dam traces, counted for the hourly cap: the user's id and the project's (186) | `map_compute_throttle` | One hour from the window's first attempt | Lapses with its window | Lapses with its window |
 | The assistant's use (262; 324 added the cache tokens and the cost in micro-USD): the person's tokens (input and output) and messages per project and UTC month, as counts only (never the conversation); own rows only under RLS; in "Download my data" (`assistantUsage`) | `assistant_usage` | The month it counts and the 12 after it (`ASSISTANT_USAGE_RETENTION_MONTHS`, 13), then deleted by the job tick (`app_purge_assistant`) | Kept without the name (`user_id` set null), so the month still counts what was spent, until its retention ends | Deleted |
 | The person's billing account (323, issue #641): kind (`user`), its lifetime count of projects created and when it was made; made when their first project needs it or when they open their plan (`GET /account/plan`); own row only under RLS (a team's account is the team's, read by its admins); its customer reference at the billing provider (328, `external_customer_ref`: Stripe's `cus_…`, set at the first checkout; null under the mock and `manual`); in "Download my data" (`billing.account`, the reference included). `project.billing_account_id` points at it | `billing_account` | Until the account is deleted | Deleted (cascades from `app_user`); each project it billed keeps going with `billing_account_id` set null | – (the account isn't the project's) |
-| The billing account's subscriptions (323): plan, status, seats, period, trial end, whether it cancels at period end, the provider and its reference; empty in Phase 1 (no provider); read under RLS by the account's person (or its team's admins); in "Download my data" (`billing.subscriptions`) | `subscription` | Until the account is deleted | Deleted (cascades from `billing_account`) | – |
+| The billing account's subscriptions (323): plan, status, seats, period, trial end, whether it cancels at period end, the billing interval (332), the provider and its reference; empty in Phase 1 (no provider); read under RLS by the account's person (or its team's admins); in "Download my data" (`billing.subscriptions`) | `subscription` | Until the account is deleted | Deleted (cascades from `billing_account`) | – |
 | The billing provider's webhook events for the account (326): the provider, its event id and type, when it arrived, what it did, and the account it named; no one reads it under RLS (owner-only); not in "Download my data", which already holds the subscriptions they set | `billing_event` | 90 days from arrival, then the tick deletes it (327 `app_purge_billing_events`, `BILLING_EVENT_RETENTION_DAYS`; never under 4 days, past Stripe's 3-day redelivery window) | Kept without the account (`account_id` set null when the billing account cascades away) | – |
 | The billing account's monthly counts (323): server PDF reports queued and evidence packs issued, per SAST month, counts only; read under RLS as `subscription`; in "Download my data" (`billing.usageCounters`) | `usage_counter` | Until the account is deleted | Deleted (cascades from `billing_account`) | – (counted on the account, not the project) |
 | The yearly renewal notices sent to the person (329, issue #641; CPA s14(2)(c)): one per subscription and period, with the period end it was about, its send status, attempts, when it was claimed, sent and settled, and a short failure reason; the email's words aren't stored. Written only by the worker's definer functions; own rows readable under RLS; in "Download my data" (`billing.renewalNotices`: period end, status, when sent and when made) | `renewal_notice` | Kept as the record that the notice went, until its subscription or the person's account is deleted | Deleted (cascades from `app_user`, and from `subscription` with the billing account) | – |
@@ -4375,6 +4381,20 @@ readable by anyone. The rules:
   invented catchment (NATO-alphabet farm names, seeded random series), and only
   its layout follows b023. Regenerate it; never edit it by hand or paste client
   values into it ([scripts/wbt-import/README.md](../scripts/wbt-import/README.md#the-synthetic-workbook)).
+- **No personal information in Actions inputs.** A `workflow_dispatch`
+  run's inputs are submitted to GitHub, and in a public repo we can't rule
+  out GitHub showing them to anyone (the run page, the API, a run name, a
+  later change), so a person's address or name there would be personal
+  information published (POPIA). Masking hides it from the log only. So a
+  workflow names people, teams, billing accounts and projects by UUID, never
+  by address or name: `billing-admin.yml` refuses any input containing `@`
+  before anyone is asked to approve (`scripts/release/owner-action.mjs`), and
+  the migrate Lambda refuses an `email` field in a payload marked `via:
+  "workflow"` (`backend/src/ops/ownerActions.ts`). Turning an address into an
+  id is the operator's own `aws lambda invoke` from their SSO session, which
+  never touches GitHub ([deployment.md § Owner
+  actions](./deployment.md#owner-actions)). The same goes for free-text
+  inputs (a grant's reason, a letter's reference): no address in them.
 - **Client terms guard.** The client's catchment, farm and workbook names
   (and the gauge and quaternary codes that pinpoint it) are listed in
   `../infra-secrets/water-management/client-terms.txt`, outside this repo,
@@ -4556,7 +4576,7 @@ key there would let any read-only principal forge any user's session.
 - **CI's dependency cache is not trusted by release builds.** Every job in
   `ci.yml` (and `dependabot-lockfile.yml`'s credential-free job) restores
   pnpm's store through `actions/setup-node`'s `cache: pnpm`; both deploy
-  workflows and `load-reference.yml` restore no cache at all, setup-node's
+  workflows, `load-reference.yml` and `billing-admin.yml` restore no cache at all, setup-node's
   implicit `packageManager` cache included (`package-manager-cache: false`;
   `check_workflows.mjs` rule `no-cache`, [deployment.md § What each deploy
   does](./deployment.md#what-each-deploy-does)).
@@ -4803,6 +4823,23 @@ key there would let any read-only principal forge any user's session.
   for one other key, `tiles/water.pmtiles` (`api_water`); off by default.
   The file sits under `tiles/`, so `/tiles/*` serves it by bounded ranges
   like the other archives; GSW's terms allow redistribution.
+- **Owner actions run as the schema owner** (issue #641; [deployment.md §
+  Owner actions](./deployment.md#owner-actions)): a staff grant, its revoke,
+  the grant list, the monthly billing report and the operator's authority
+  confirmation, through `billing-admin.yml`, gated exactly like a reference
+  load (`production` environment, `main` only, the `preflight` job, the
+  session narrowed to invoking the migrate function). The event is a fixed,
+  named action whose every field a strict schema checks before anything
+  connects (`backend/src/ops/ownerActions.ts`); it never carries SQL. The
+  run's log is public, so no input is put in a step's environment or a
+  command (the payload is built from the event file by
+  `scripts/release/owner-action.mjs`), and the job summary prints ids,
+  plans, dates and counts only: the Lambda's answer carries no address or
+  name, and the workflow leaves out grants' reasons and the report's email
+  domains too. Its **inputs are ids only** (§ Public repo hygiene, "No
+  personal information in Actions inputs"): the address forms and the
+  `billing-account` lookup run only through the operator's own `aws lambda
+  invoke`.
 - **Reference loads run as the schema owner**, so they are gated like a
   deploy: `load-reference.yml` reaches AWS only in the `production`
   environment (a required reviewer, then OIDC), from `main` only, after a

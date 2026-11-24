@@ -11,6 +11,7 @@
 	import { errorText } from '#lib/i18n/apiError.js';
 	import LoadState from '#lib/components/common/LoadState.svelte';
 	import PlanUsage from '#lib/components/billing/PlanUsage.svelte';
+	import SeatChange from '#lib/components/billing/SeatChange.svelte';
 
 	const teamId = $derived(page.params.id ?? '');
 
@@ -82,7 +83,11 @@
 				portal={() => api.teams.portal(teamId)}
 				{reload}
 				returned={page.url.searchParams.get('checkout')}
-			/>
+			>
+				{#snippet seatChange()}
+					{#if plan}<SeatChange {plan} change={(n) => api.teams.changeSeats(teamId, n)} {reload} />{/if}
+				{/snippet}
+			</PlanUsage>
 		{/if}
 	</LoadState>
 </main>

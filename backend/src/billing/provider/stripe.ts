@@ -16,7 +16,8 @@
 // subscription_details') metadata `billing_account_id`, which checkout sets;
 // the plan is its metadata `plan_code`. An event without them is `invalid`.
 // The seats are its metadata `seats_included` plus the items' extra seats
-// (seatsOf, below).
+// (seatsOf, below), and the interval its items' prices' recurring.interval
+// (intervalOf).
 import { PLAN_CODES, type NormalisedEvent, type SubscriptionPayload, type SubscriptionStatus } from '../provider.js';
 
 export const STRIPE_EVENT_TYPES = [
@@ -97,6 +98,30 @@ export function seatsOf(metadata: unknown, items: Obj[]): number | null {
 	return seats >= 1 && seats <= 10_000 ? seats : null;
 }
 
+/**
+ * How often a subscription bills: its items' price `recurring.interval` when
+ * every item says the same plain month or year (`interval_count` 1 or
+ * absent). Null when the items' prices say something else (a day or week, a
+ * quarter as 3 months, items that disagree, an item without a recurring
+ * price beside one with): the plan page then shows no total rather than a
+ * guessed one. Undefined when no item carries a price at all (an object
+ * without them, like a test's), so app_billing_apply keeps what it stored
+ * (332; docs/billing.md § Billing interval and editor count).
+ */
+export function intervalOf(items: Obj[]): 'month' | 'year' | null | undefined {
+	if (!items.some((item) => item.price !== undefined)) return undefined;
+	let found: 'month' | 'year' | null = null;
+	for (const item of items) {
+		const recurring = isObj(item.price) && isObj(item.price.recurring) ? item.price.recurring : null;
+		if (!recurring) return null;
+		const { interval, interval_count: count } = recurring;
+		if ((interval !== 'month' && interval !== 'year') || (count !== undefined && count !== null && count !== 1)) return null;
+		if (found !== null && found !== interval) return null;
+		found = interval;
+	}
+	return found;
+}
+
 /** A subscription object as the full payload, or why it can't be. */
 function subscriptionPayload(sub: Obj): SubscriptionPayload | string {
 	const accountId = accountOf(sub.metadata);
@@ -117,6 +142,7 @@ function subscriptionPayload(sub: Obj): SubscriptionPayload | string {
 	const trialEnd = time(sub.trial_end);
 	if (!periodStart || !periodEnd || trialEnd === undefined) return 'missing or invalid period';
 	if (typeof sub.cancel_at_period_end !== 'boolean') return 'missing cancel_at_period_end';
+	const interval = intervalOf(items);
 	return {
 		accountId,
 		planCode,
@@ -127,7 +153,8 @@ function subscriptionPayload(sub: Obj): SubscriptionPayload | string {
 		periodEnd,
 		trialEnd,
 		cancelAtPeriodEnd: sub.cancel_at_period_end,
-		externalRef
+		externalRef,
+		...(interval === undefined ? {} : { interval })
 	};
 }
 

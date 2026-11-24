@@ -3139,14 +3139,45 @@ The page is two cards, side by side where they fit and stacked on a phone:
   (*1e1*) stays as typed, marks the field `aria-invalid` with *Choose a whole
   number of seats from 3 to 50.* under it, and leaves the buttons
   `aria-disabled` and unpriced (*Upgrade to Team, monthly*), so no price for
-  some other count shows. It always starts at the included seats, not the
-  team's current editors: `AccountPlan` has no member count (`plan.ts`
+  some other count shows. It starts at the larger of the included seats and
+  the team's editors (`AccountPlan.team.editorCount`, capped at 50), so a team
+  with more editors than that doesn't check out fewer seats than it uses, and
+  a line above the price hint says *This team has 4 editors.*, named by the
+  field's `aria-describedby` too (`plan.ts` `startingSeats`, `editorsHint`,
   `seatOffer`, `upgradeLabel`, `checkoutTotalMinor`;
   [billing.md § Team seats at checkout](./billing.md#team-seats-at-checkout)).
-  Once a team has a subscription, a line under it says its seats: *5 editor
+  Once there is a subscription with a recorded interval, a line under it
+  says what it costs, from the interval, the seats and the plan's prices:
+  *R 3 497.00 a month for 5 editor seats* on a team, *R 899.00 a month* on a
+  person's (`subscriptionTotalLine`). A staff grant, or a subscription from
+  before migration 332, has no interval and shows no total rather than a
+  guessed one. A team's line under that says its seats: *5 editor
   seats (3 included, 2 extra)*, or *3 editor seats (all included)*
-  (`subscriptionSeatsLine`). It shows no total, since `Subscription` doesn't
-  record whether it is billed monthly or yearly. While `enforced` is false, a note says nothing is refused:
+  (`subscriptionSeatsLine`). Under that line, inside the Plan card, a
+  team's page has **Change seats** (`SeatChange.svelte`, a sub-heading in a
+  `.panel-head`, passed to `PlanUsage` as its `seatChange` snippet by the team
+  plan route only, for a live Team subscription under `mock` or `stripe`):
+  a NumberInput (`whole`, the included 3 to 50, *Choose a whole number of
+  seats from 3 to 50.* for anything else; it starts at the seats now the
+  first time a live subscription shows, so one that a checkout's re-read
+  brings fills it too), the team's editors (*This team has 4 editors.*,
+  `editorsHint`) and a *Change seats* button, `aria-disabled` while the
+  count is invalid or the current one. It asks in the app's confirm dialog
+  (`confirmDialog`, *Change editor seats?*, confirm button *Change seats*),
+  whose line says the change, *From 3 to 5 editor seats: R 998.00 more a
+  month.* when the plan carries the subscription's interval, else only
+  *From 3 to 5 editor seats.*, that the rest of the period is prorated on
+  the next invoice, and, below the team's editors, *This team has 5
+  editors: 1 would have no seat.* (`seatChange.ts` `seatChangeLine`).
+  Closing the dialog hands the focus back to the button. Confirmed, it calls
+  `POST /teams/:id/plan/seats`, then re-reads the plan on checkout's
+  `CONFIRM_DELAYS_MS` until the new seats show, and says in a live region
+  *Asked for 5 editor seats. Waiting for the payment provider to confirm…*,
+  then *The team now has 5 editor seats.* or, if they still haven't landed,
+  to reload in a minute (`seatChangeNotice`). A refusal shows inline in
+  English, as the buttons above do, and the field keeps the count typed
+  ([billing.md § Changing a Team's seats](./billing.md#changing-a-teams-seats);
+  `e2e/tests/billing-seats.spec.ts`). While `enforced` is false, a note says nothing is refused:
   with no buttons, that plans aren't charged yet; beside them (which can
   charge), only that limits aren't enforced yet (`plan.ts` `shadowNote`). Each
   button asks the API for a URL (`POST …/plan/checkout` or `…/plan/portal`)

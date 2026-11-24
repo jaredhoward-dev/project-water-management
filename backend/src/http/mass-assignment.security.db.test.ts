@@ -421,6 +421,11 @@ const RECIPE: Record<string, () => Promise<Req> | Req> = {
 		await ok(ctx.owner.call('GET', `/teams/${ctx.teamId}/plan`));
 		return { params: { id: ctx.teamId } };
 	},
+	// Changing a Team's seats (Phase 5): the sweep's team has no live Team subscription, so it is NOT_REACHED below.
+	'POST /teams/:id/plan/seats': async () => {
+		await ok(ctx.owner.call('GET', `/teams/${ctx.teamId}/plan`));
+		return { params: { id: ctx.teamId }, body: { seats: 5 } };
+	},
 	// The mock's pages: a token for the owner's account (signed with the dev key the sweep stubs), and a choice that
 	// writes nothing (cancels; the portal's cancel with no subscription). Their bodies are never read.
 	'POST /billing/mock/checkout': async () => ({ query: { t: await mockToken('checkout'), outcome: 'cancels' } }),
@@ -671,6 +676,10 @@ const NOT_REACHED = new Map<string, { why: string; legit: number }>([
 	[
 		'POST /projects/:id/licence-record/confirm',
 		{ why: 'takes an empty body only (strict); the sweep records the licence outcome first (PUT), and a recorded outcome leaves no review to confirm (licence/licence-record.db.test.ts confirms one)', legit: 409 }
+	],
+	[
+		'POST /teams/:id/plan/seats',
+		{ why: 'the sweep’s team has no live Team subscription, refused (409) once its strict body is read; billing/seats.db.test.ts changes a mock Team’s seats', legit: 409 }
 	],
 	['POST /share/scenario', { why: 'a read (app_share_scenario); the ladder link is a baseline link, which opens no scenario', legit: 404 }],
 	['POST /share/pack', { why: 'a read (app_share_pack); the ladder link is a baseline link, which opens no pack', legit: 404 }],

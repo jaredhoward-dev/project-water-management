@@ -172,7 +172,9 @@ export const ERROR_CODES = [
  *     page. billing_unavailable (409, the manual provider or none: no online
  *     billing), billing_provider_error (503, the provider failed or isn't set
  *     up; never its text), billing_no_customer (409, the portal for an
- *     account that never checked out).
+ *     account that never checked out), billing_grant_seats (409, POST
+ *     /teams/:id/plan/seats on a staff grant, whose seats change by a new
+ *     grant; Phase 5).
  */
 export const MACHINE_ERROR_CODES = [
 	'render_token_refused',
@@ -200,7 +202,8 @@ export const MACHINE_ERROR_CODES = [
 	'assistant_provider_error',
 	'billing_unavailable',
 	'billing_provider_error',
-	'billing_no_customer'
+	'billing_no_customer',
+	'billing_grant_seats'
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number] | (typeof MACHINE_ERROR_CODES)[number];
 

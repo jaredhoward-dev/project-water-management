@@ -4743,6 +4743,99 @@ A later move (to `icwbt.co.za` or `icwbt.com`, issue #551's "later") is the
 same runbook with an apex zone, `icwbt.jaredhoward.com` joining
 `redirect_domains`.
 
+## Owner actions
+
+Some of the operator's work writes as the schema owner: a staff grant and its
+revoke (runbook 21), the monthly billing report (runbook 22, which reads
+owner-only functions) and confirming who acts for a project's responsible
+authority (runbook 17). RDS is private with no bastion, so these run in the
+migrate Lambda, the one function holding the owner's credentials, as fixed,
+named actions (`backend/src/ops/ownerActions.ts`, issue #641): an event
+`{ "action": "<name>", … }` whose every field a strict schema checks before
+the secret is read or anything connects. It never carries SQL; an unknown
+action or field is refused (`code: "refused"`). Each action runs the same
+function as the local script, so production and `pnpm dev:billing:grant`,
+`dev:billing:report` and `dev:authority:confirm` do the same thing:
+
+| action | fields | does (as the local script) | answers |
+|---|---|---|---|
+| `billing-grant` | one of `accountId`, `userId`, `teamId` (or `email`, direct invoke only); `plan` (`pro`, `team`); `until` (YYYY-MM-DD, SAST, optional: until revoked); `reason` (1–500); `by` (1–100); `replace` (optional) | `dev:billing:grant <who> <plan> …` | `accountId`, `kind`, `plan`, `endsAt` (SAST), `replaced` |
+| `billing-revoke` | one of `accountId`, `userId`, `teamId` (or `email`, direct invoke only); `reason`; `by` | `… --revoke` | `accountId`, `kind`, `plan` |
+| `billing-grants` | one of those, or none | `… --list`; none: every live grant | one account: `accountId`, `kind`, `planNow`, its `log` (with reasons); all: `grants` (account, kind, person or team id, plan, since, until) |
+| `billing-report` | `month` (YYYY-MM, optional: this SAST month) | `dev:billing:report --month …` (never `--show-emails`) | `report`, redacted as the script prints it |
+| `authority-confirm` | `projectId`; `userId` (or `email`, direct invoke only); `reference` (1–200) | `dev:authority:confirm` | `projectId`, `userId`, `confirmed` |
+| `billing-account` | one of `email`, `userId`, `teamId`. **Direct invoke only**: the workflow doesn't offer it | (the lookup behind the ids the workflow takes; writes nothing) | `kind`, `ownerId` (the person's or team's id), `accountId` (`null`: none yet), `planNow` |
+
+Every action takes an optional `via: "workflow"`, which the workflow sets.
+A payload so marked is refused (`refused`) if it carries `email`, and the
+`billing-account` lookup refuses the mark outright.
+
+No answer carries an address or a person's name. A failure is an
+`OwnerActionFailed` error whose message is `{ code, reason, logGroup,
+logStream, requestId }`, the reason a fixed sentence: `no_person` (no
+account has that address), `no_team`, `no_billing_account`,
+`live_subscription` (a Stripe one: cancel it in Stripe first; a manual or
+mock one: `replace`), `no_live_grant`, `invalid` (the database refused a
+value: a plan, an end in the past), `not_editor` (authority-confirm: not an
+editor or owner of the project), `refused`, `action_failed`. The database's
+own words go to the function's CloudWatch log only (`no_person` also covers
+an unknown person id, `no_billing_account` an unknown account id). Nothing
+changes on a failure: each action is one transaction.
+
+**Ids only through the workflow.** The repo is public, and we can't rule
+out GitHub showing a run's `workflow_dispatch` inputs to anyone (the run
+page, the API, a run name, a later change), so a person's address in one
+would be personal information published, which masking the log doesn't
+prevent ([security.md § Public repo hygiene](./security.md#public-repo-hygiene)).
+The workflow names a billing account, a person, a team or a project by
+UUID, plus a plan, dates and the text a customer or the History reads; it
+refuses any input containing `@`, in the preflight job before anyone is
+asked to approve (`scripts/release/owner-action.mjs`). The Lambda refuses an
+`email` in its payload too. Get an id privately first:
+
+- **A team's id:** the team page's URL, `/teams/<id>`.
+- **A billing account's id:** the account's plan page (`GET /account/plan`,
+  `account.id`) if you can see it, or the lookup below.
+- **A person's id or account from their address:** the `billing-account`
+  lookup, from your SSO session only (it never touches GitHub). Write the
+  payload to a file in your editor, not on a command line (the address
+  would be in your shell history): `lookup.json` holding
+  `{"action":"billing-account","email":"<address>"}`. Then:
+
+  ```bash
+  aws lambda invoke --function-name water-management-migrate --cli-binary-format raw-in-base64-out --payload fileb://lookup.json --cli-read-timeout 300 --region af-south-1 --profile water-management lookup-out.json && jq . lookup-out.json && rm lookup.json lookup-out.json
+  ```
+
+  The answer is `{ "action": "billing-account", "kind": "user", "ownerId":
+  "<person id>", "accountId": "<account id or null>", "planNow": "…" }`.
+  Give the workflow `account_id` when there is one, else `user_id` (a grant
+  makes the account); `authority-confirm` takes `user_id`. A team:
+  `{"action":"billing-account","teamId":"<team id>"}`.
+
+**Run them through the workflow** (Actions → Owner action, or `gh workflow
+run billing-admin.yml -f action=… …`; the examples are in its header), with
+ids from the lookup above. It
+asks for the `production` environment's approval, then invokes the function
+with the run's GitHub login as `by`, and writes what was done to the job
+summary. That log is public, so the workflow builds the payload from the
+event file (no input is ever in a step's environment or a command) and
+prints ids, plans, dates and counts only: not a grant's
+reason, not the report's email domains. Record the reason and the outcome in
+the operator log (that's private: the address may go there).
+
+**Or from your SSO session**, when you need what the summary leaves out (the
+reasons in a grant log, the report's domain clusters) or an address form;
+the answer stays on your machine. Leave out `via` there. The function runs one at a time (reserved concurrency 1), as
+with the read-only checks:
+
+```bash
+aws lambda invoke --function-name water-management-migrate --cli-binary-format raw-in-base64-out --payload '{"action":"billing-report","month":"2026-11"}' --cli-read-timeout 300 --region af-south-1 --profile water-management billing-report.json && jq . billing-report.json
+```
+
+Write a payload with an address or a reason to a file first
+(`--payload fileb://action.json`) rather than into your shell history, and
+delete it after.
+
 ## Runbooks
 
 Step 2 operations (roadmap [step-2 § 8](./roadmap/step-2-shared-catchment.md#8-cost-and-operations)).
@@ -5107,7 +5200,14 @@ Every step is an ordinary app action by an owner unless it says "operator".
     host's word; confirm it with the authority out of band (a number it
     publishes, not one in the request). The person must already be an
     editor or owner of the project, directly or through its team (the host
-    adds them). Then, as the schema owner:
+    adds them). Find the person's id from the address in the request with
+    the `billing-account` lookup from your SSO session ([§ Owner
+    actions](#owner-actions); its `ownerId`), never through the workflow.
+    Then run the [owner action](#owner-actions)
+    `authority-confirm`: `gh workflow run billing-admin.yml -f
+    action=authority-confirm -f project_id=<project id> -f user_id=<person id>
+    -f reference="<the letter's reference and date, no address>"`, and approve it. As
+    a fallback (from inside the VPC, as the schema owner):
     `SELECT authority_confirm_by_operator('<project id>', (SELECT id FROM app_user WHERE email = '<address>'), '<the letter''s reference and date>');`
     It confirms their proposal or adds them confirmed, and refuses someone
     who isn't an editor (`23514`) or an empty reference; the project's
@@ -5177,12 +5277,35 @@ Every step is an ordinary app action by an owner unless it says "operator".
     manual Stripe invoice sent from the Stripe dashboard; grant once it is
     paid, until the end of the invoiced period), the first client's deal,
     founding users (no end), and Team's 30-day trial on request
-    (billing.md § Trials). It works whatever `billing_provider` is. Writes
-    run as the schema owner, which production reaches only from inside the
-    VPC ([infra/README.md § Database access and
-    recovery](../infra/README.md#database-access-and-recovery): no bastion;
-    a temporary SSM-managed instance in a private subnet, removed
-    afterwards); the read-only checks below can't write.
+    (billing.md § Trials). It works whatever `billing_provider` is.
+
+    **Through the workflow** (the [owner actions](#owner-actions); no
+    instance needed). It takes ids only, never an address (the repo is
+    public). For a person, first look up their ids from the address they
+    gave with the `billing-account` lookup from your SSO session (§ Owner
+    actions): `accountId` if they have one, else `ownerId` as `user_id`. A
+    team's id is in `/teams/<id>`. Approve each run in the `production`
+    environment; `by` is your GitHub login:
+    - **Grant:** `gh workflow run billing-admin.yml -f action=billing-grant
+      -f account_id=<account id> -f plan=team -f until=2026-12-31 -f reason="<reason>"`
+      (or `-f user_id=<person id>` for a person with no account yet, `-f
+      team_id=<team id>` for a team; no `until`: until revoked; `-f
+      replace=true` to end a live manual or mock subscription). The grant
+      lasts through that South African date. The reason holds no address.
+    - **Revoke:** `-f action=billing-revoke -f account_id=<account id> -f
+      reason="<reason>"`.
+    - **Check it:** `-f action=billing-grants -f account_id=<account id>`
+      (the plan now and the log, reasons left out of the public summary), or
+      `-f action=billing-grants` alone for every live grant (account, person
+      or team ids).
+    The rules below (a live Stripe subscription, `replace`, the reason the
+    customer reads, expiry) are the same; the refusals come back as codes
+    (deployment.md § Owner actions).
+
+    **Fallback, in SQL** (as the schema owner, which production reaches only
+    from inside the VPC: [infra/README.md § Database access and
+    recovery](../infra/README.md#database-access-and-recovery), a temporary
+    SSM-managed instance in a private subnet, removed afterwards):
     1. **Find the account.** A person's, from the address they gave (it
        makes the account if they have none yet, as their first plan page
        does): `SELECT billing_account_ensure('user', (SELECT id FROM
@@ -5241,24 +5364,28 @@ Every step is an ordinary app action by an owner unless it says "operator".
     (one row per person, **with their address**). The maths (activation,
     shares near each limit, percentiles, domain and canonical clusters) is
     TypeScript only (`backend/src/billing/metrics.ts`), so plain SQL gives
-    the rows, not the report. Production has two ways to it, both from inside
-    the VPC like step 21:
-    - **The report:** from a checkout of the released tag on that instance
+    the rows, not the report.
+    - **The report, through the workflow** (the [owner
+      action](#owner-actions) `billing-report`; no instance needed): `gh
+      workflow run billing-admin.yml -f action=billing-report -f
+      month=YYYY-MM`, approved in the `production` environment. The job
+      summary holds the report as JSON with no addresses and the email
+      domains hidden; for the domain clusters, invoke the same action from
+      your SSO session (§ Owner actions), whose answer stays on your
+      machine. The workflow takes only `month`; no input names a person.
+      To act on an account the report flags, take its id from the report
+      (`accountId`), never an address, into runbook 21's workflow. Never paste it outside the operator log beyond the counts.
+    - **Fallback, from inside the VPC** (a temporary instance, like runbook
+      21's fallback): from a checkout of the released tag on that instance
       (Node 24, `pnpm install`), with `MIGRATION_DATABASE_URL` set in the
       shell to the owner's connection, `pnpm dev:billing:report --month
       YYYY-MM`. The script loads the dev env files but never overrides a
       variable already set, and only rewrites a localhost URL, so it reads
-      production. Never `--show-emails` there, and never paste its output
-      outside the operator's terminal beyond the counts.
-    - **Just the account rows:** `SELECT plan_code, count(*), sum(runs),
-      sum(reports), sum(assistant_usd_micros) / 1e6 AS assistant_usd FROM
+      production. Never `--show-emails` there. Or just the account rows:
+      `SELECT plan_code, count(*), sum(runs), sum(reports),
+      sum(assistant_usd_micros) / 1e6 AS assistant_usd FROM
       billing_metrics_accounts('<YYYY-MM-01>') GROUP BY plan_code;` gives
       the month's totals by plan without any address.
-
-    There is no Lambda route for either (the read-only checks refuse rows
-    with an email, and a check can't run the TypeScript maths), so until one
-    exists the report needs that temporary instance
-    ([followups.md § Billing](./followups.md#billing-issue-641)).
 
 ## Rollback
 

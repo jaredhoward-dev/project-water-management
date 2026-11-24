@@ -1,0 +1,4 @@
+{
+	"addKb": 2,
+	"why": "#641 round 5: the plan page's subscription total and editor-count hint, and the team page's Change seats panel (SeatChange.svelte, seatChange.ts): total measured 2520 KB on #817's branch (9760c31fb + 726e6d76c), 2522 KB on round 5"
+}

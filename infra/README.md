@@ -1126,7 +1126,11 @@ The apply, for any of the sops keys:
   endpoint. Schema changes go through migrations. For a one-off
   investigation, the least-effort option is a temporary SSM-managed EC2
   instance in a private subnet. That needs the `ssm`, `ssmmessages` and `ec2messages`
-  endpoints (~$22/month while they exist), so remove them afterwards.
+  endpoints (~$22/month while they exist), so remove them afterwards. The
+  operator's routine owner writes don't need one: staff grants, the billing
+  report and the authority confirmation are named actions on the migrate
+  Lambda (`billing-admin.yml`, docs/deployment.md § Owner actions), and the
+  read-only checks answer fixed questions; the instance is for anything else.
 - **Point-in-time restore** creates a *new* instance, and by default puts it
   in the default subnet group, security group and parameter group with no
   deletion protection. Use `scripts/restore-db.sh` (dry run by default,
