@@ -7,7 +7,7 @@ import { loadRuntimeSecrets, RUNTIME_SECRETS, RuntimeSecretError, runtimeSecretK
 const ARN = 'arn:aws:secretsmanager:af-south-1:000000000000:secret:water-management/runtime/api-AbCdEf';
 const VALUES = {
 	AUTH_JWT_SECRET: 'jwt-value-that-must-never-be-printed-0000000',
-	DATABASE_URL: 'postgresql://water_app:pw-that-must-never-be-printed@db.example.org:5432/water?sslmode=verify-full',
+	DATABASE_URL: 'postgresql://water_app:pw-that-must-never-be-printed@db.example.org:5432/water?sslmode=verify-full', // trufflehog:ignore (synthetic: reserved host)
 	CLOUDFRONT_SHARED_SECRET: 'edge-value-that-must-never-be-printed-00000',
 	CLOUDFRONT_PRIVATE_KEY: 'signing-key-that-must-never-be-printed-000000',
 	APP_ENCRYPTION_KEY: 'sealing-key-that-must-never-be-printed-00000'
