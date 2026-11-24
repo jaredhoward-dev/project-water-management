@@ -343,7 +343,7 @@ export async function buildSubjectExport(userId: string, now = new Date()) {
 		const billingId = billingAccount[0]?.id ?? null;
 		const { rows: subscriptions } = await db.query(
 			`SELECT plan_code AS "planCode", status, seats, period_start AS "periodStart", period_end AS "periodEnd", trial_end AS "trialEnd",
-				cancel_at_period_end AS "cancelAtPeriodEnd", provider, external_ref AS "externalRef", created_at AS "createdAt"
+				cancel_at_period_end AS "cancelAtPeriodEnd", billing_interval AS "interval", provider, external_ref AS "externalRef", created_at AS "createdAt"
 			 FROM subscription WHERE billing_account_id = $1 ORDER BY created_at DESC, id`,
 			[billingId]
 		);

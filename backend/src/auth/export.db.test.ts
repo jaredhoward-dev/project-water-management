@@ -181,7 +181,7 @@ describe('GET /auth/me/export', () => {
 		await asOwner(`INSERT INTO billing_account (kind, team_id) VALUES ('team', $1) ON CONFLICT (team_id) DO NOTHING`, [teamId]);
 		const [teamAcct] = await asOwner('SELECT id FROM billing_account WHERE team_id = $1', [teamId]);
 		const [sub] = await asOwner(
-			`INSERT INTO subscription (billing_account_id, plan_code, status, provider, external_ref, seats) VALUES ($1, 'pro', 'canceled', 'manual', 'export-test-ref', 1) RETURNING id`,
+			`INSERT INTO subscription (billing_account_id, plan_code, status, provider, external_ref, seats, billing_interval) VALUES ($1, 'pro', 'canceled', 'manual', 'export-test-ref', 1, 'year') RETURNING id`,
 			[acct.id]
 		);
 		// A renewal notice sent to them (329): as the schema owner, the pipeline isn't under test.
@@ -198,7 +198,7 @@ describe('GET /auth/me/export', () => {
 			const { doc, text } = await download(owner);
 			expect(doc.billing).toEqual({
 				account: { id: acct.id, kind: 'user', projectsCreated: expect.any(Number), externalCustomerRef: null, createdAt: expect.any(String) },
-				subscriptions: [expect.objectContaining({ planCode: 'pro', status: 'canceled', provider: 'manual', externalRef: 'export-test-ref', seats: 1 })],
+				subscriptions: [expect.objectContaining({ planCode: 'pro', status: 'canceled', provider: 'manual', externalRef: 'export-test-ref', seats: 1, interval: 'year' })],
 				usageCounters: expect.arrayContaining([{ kind: 'reports', month: '2026-10', qty: 4 }]),
 				renewalNotices: [{ periodEnd: '2027-03-01T10:00:00.000Z', status: 'sent', sentAt: expect.any(String), createdAt: expect.any(String) }],
 				grants: [{ action: 'grant', planCode: 'pro', until: null, reason: 'Export test grant', grantedBy: 'export-op', createdAt: expect.any(String) }]
