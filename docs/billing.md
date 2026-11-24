@@ -227,7 +227,7 @@ checkout. Every payload carries the event's `created` time as `eventCreated`
 | `customer.subscription.created`, `.updated` | `subscription.updated` | the account's subscription upserted by (provider, `externalRef`) |
 | `customer.subscription.deleted` | `subscription.deleted` | status `canceled` |
 | `checkout.session.completed` | `checkout.completed` | recorded only |
-| `invoice.paid` | `invoice.paid` | recorded only |
+| `invoice.paid` | `invoice.paid` | recorded only; a staff-tool B2B invoice's (no subscription, our `wm_invoice_key`) grants its plan (335, [§ B2B invoices](#b2b-invoices)) |
 | `invoice.payment_failed` | `invoice.payment_failed` | recorded only (Stripe moves the subscription to `past_due` and sends `customer.subscription.updated`) |
 
 The subscription payload is `{ accountId, planCode, status, seats,
@@ -862,9 +862,10 @@ invoices, usage records), where the SDK's coverage would outweigh its size.
 `backend/migrations/330_staff_grant.sql`, `backend/scripts/billing-grant.ts`
 (issue #641, "Staff overrides"). The operator's tool for manual plans: the
 first client's deal, founding users (Q4's grandfathering), and **v1 B2B
-invoices**. A business that pays by invoice gets a Stripe invoice ([§ B2B
-invoices](#b2b-invoices), or one sent from the Stripe dashboard), and once it
-is paid the operator grants the plan until the end of the invoiced period. It
+invoices**. A business that pays by invoice gets a Stripe invoice: one from
+the staff tool ([§ B2B invoices](#b2b-invoices)) grants its plan itself when
+it is paid; for one sent from the Stripe dashboard the operator grants the
+plan by hand, once it is paid, until the end of the invoiced period. It
 works with `BILLING_PROVIDER` unset.
 
 ```bash
@@ -941,7 +942,7 @@ number on the invoice"). The operator invoices a person's account for Pro or
 a team's for Team:
 
 ```bash
-pnpm dev:billing:invoice <email|team-id> <plan> --interval month|year --po "<PO number>" [--seats n] [--from YYYY-MM-DD]
+pnpm dev:billing:invoice <email|team-id> <plan> --interval month|year --po "<PO number>" [--seats n] [--from YYYY-MM-DD] [--paid]
 ```
 
 - **What it sends** (`provider/stripeApi.ts` `createInvoice`, API reference
@@ -966,7 +967,7 @@ pnpm dev:billing:invoice <email|team-id> <plan> --interval month|year --po "<PO 
 - **The period** runs from `--from` (a SAST day; default today) for one
   month or year, through the day before the same date (31 January + 1 month
   clamps to 28 February, so through 27 February). The answer's `until` is
-  the `--until` of the grant once it is paid.
+  the last day the paid invoice grants.
 - **Refused before Stripe is asked:** a PO number that isn't 1–64 letters,
   digits, spaces and `. / _ # : ( ) -` starting with a letter or digit
   (Stripe takes 140; it is printed on the PDF); seats outside 1–50 or below
@@ -975,12 +976,45 @@ pnpm dev:billing:invoice <email|team-id> <plan> --interval month|year --po "<PO 
   Stripe subscription, which already pays by card. `manual` refuses
   (`billing_unavailable`); the mock makes `in_mock_…` from the key with no
   network.
-- **When it is paid** nothing changes by itself yet: `invoice.paid` is
-  recorded (`billing_event`; the normaliser reads the account from the
-  invoice's own metadata when it has no subscription), and the operator
-  grants the plan through `until` ([§ Staff grants](#staff-grants);
-  deployment.md runbook 23). Turning a paid invoice into the grant
-  automatically is a follow-up.
+- **When it is paid, the plan is granted** (335_invoice_grant.sql), with no
+  step for the operator, however it is paid (card on Stripe's hosted page,
+  or an EFT the operator marks paid in Stripe's dashboard, "paid out of
+  band"; both send `invoice.paid`). For an invoice with no subscription and
+  our `wm_invoice_key`, the normaliser (`provider/stripe.ts`
+  `invoiceGrantOf`) adds `invoice: { ref, planCode, seats, interval,
+  periodStart, periodEnd, totalMinor, currency }` from its metadata
+  (`stripeApi.ts` `invoiceMetadata`, written when it was issued) and its own
+  total and currency; a field that doesn't parse is null. `app_billing_apply`
+  then writes the grant as [§ Staff grants](#staff-grants) does: a
+  `provider = 'manual'`, `active` subscription with `cancel_at_period_end`,
+  the invoice's plan, seats, interval and period, and `external_ref` the
+  invoice id; `billing_grant_log` gets a `grant` row with `granted_by`
+  `invoice` and the reason `invoice <id> paid`, which the customer reads.
+  The tick expires it at the period's end, like any grant, and the renewal
+  notice skips it.
+  - **Once.** A redelivery of the event is a `duplicate` (326); the same
+    invoice under another event id finds its row by (`manual`, invoice id)
+    and is `recorded`. `invoice.payment_failed` never touches a grant,
+    before or after the payment.
+  - **Refused as `conflict`** (recorded, answered 200 and logged as a
+    warning, since a retry wouldn't change it; the operator reads the log
+    and grants by hand if it is right): a field missing or malformed; a plan
+    that isn't the account's kind's; a currency that isn't the plan's; a
+    total below the plan table's price for those seats and that interval
+    (so an invoice cut in the dashboard grants nothing; the grant itself
+    never reads an amount, and a price raised between issue and payment
+    refuses too); a period that has ended or is longer than one interval;
+    and an account with a live card subscription, an open-ended grant, or a
+    grant reaching as far. A live grant ending sooner (the previous
+    period's: a renewal paid early) is replaced, logged as a `revoke`, so
+    the plan runs on unbroken.
+  - **Not granted:** an invoice sent from Stripe's dashboard without our
+    metadata (the operator grants it by hand, runbook 21), and an invoice
+    on a subscription (its `customer.subscription.*` events carry the plan).
+  - **Locally,** `--paid` with the mock stands in for the customer paying:
+    the script posts the mock's signed `invoice.paid` (`provider/mock.ts`
+    `invoicePaidEvent`) to the real webhook route and says whether the plan
+    was granted.
 - **Production** runs the same function as the migrate Lambda's
   `billing-invoice` owner action, **direct invoke only** (never the
   billing-admin workflow: a PO number and who is invoiced may identify a
@@ -994,10 +1028,15 @@ pnpm dev:billing:invoice <email|team-id> <plan> --interval month|year --po "<PO 
 Tests: `billing/invoice.test.ts` (PO number, seats, the SAST period, lines,
 key), `provider/stripeApi.test.ts` (the form fields of each request, a
 retry, a voided invoice, a draft with its lines), `provider/stripe.test.ts`
-(a standalone invoice's `invoice.paid`), `ops/ownerActions.test.ts` (the
-schema, refused from the workflow) and `billing/invoice.db.test.ts` (the
-plan table's price, the stored customer, the refusals, the script, the
-Lambda's `billing_unavailable`).
+(a standalone invoice's `invoice.paid` and its grant, a field that doesn't
+parse, none on a subscription's invoice or a failed payment),
+`provider/mock.test.ts` (the mock's paid event), `ops/ownerActions.test.ts`
+(the schema, refused from the workflow), `billing/invoice.db.test.ts` (the
+plan table's price, the stored customer, the refusals, the script and its
+`--paid` through the webhook route, the Lambda's `billing_unavailable`) and
+`billing/invoiceGrant.db.test.ts` (335: the grant, replay, either order with
+a failed payment, a team's extra seats, each refusal with its positive
+control, a card subscription and an open-ended grant left alone, a renewal).
 
 ## Later phases
 

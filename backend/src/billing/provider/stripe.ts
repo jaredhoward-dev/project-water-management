@@ -6,7 +6,8 @@
 //   customer.subscription.created | .updated → subscription.updated (applied: the account's subscription upserted)
 //   customer.subscription.deleted            → subscription.deleted (applied: status canceled)
 //   checkout.session.completed               → checkout.completed   (recorded only: the subscription events carry the state)
-//   invoice.paid                             → invoice.paid         (recorded only)
+//   invoice.paid                             → invoice.paid         (recorded only; a staff-tool invoice's
+//                                              carries its grant, `invoice`, which app_billing_apply applies, 335)
 //   invoice.payment_failed                   → invoice.payment_failed (recorded only: Stripe moves the subscription to
 //                                              past_due itself and sends customer.subscription.updated)
 // Any other type is `ignored`: answered 200 and never written (Stripe sends
@@ -18,7 +19,7 @@
 // The seats are its metadata `seats_included` plus the items' extra seats
 // (seatsOf, below), and the interval its items' prices' recurring.interval
 // (intervalOf).
-import { PLAN_CODES, type NormalisedEvent, type SubscriptionPayload, type SubscriptionStatus } from '../provider.js';
+import { PLAN_CODES, type InvoiceGrantPayload, type NormalisedEvent, type SubscriptionPayload, type SubscriptionStatus } from '../provider.js';
 
 export const STRIPE_EVENT_TYPES = [
 	'checkout.session.completed',
@@ -201,8 +202,36 @@ function normalise(body: unknown): NormaliseResult {
 	const accountId = accountOf(details?.metadata) ?? accountOf(object.metadata);
 	if (!accountId) return { kind: 'invalid', why: 'no billing_account_id in the invoice’s subscription or invoice metadata' };
 	const sub = details?.subscription ?? object.subscription;
+	const externalRef = str(sub) ?? (isObj(sub) ? str(sub.id) : null);
+	// A paid B2B invoice (no subscription, our wm_invoice_key) carries its grant: app_billing_apply grants the plan (335).
+	const invoice = type === 'invoice.paid' && !details && !externalRef && isObj(object.metadata) && str(object.metadata.wm_invoice_key) ? invoiceGrantOf(object) : undefined;
 	return {
 		kind: 'event',
-		event: { eventId, type: type === 'invoice.paid' ? 'invoice.paid' : 'invoice.payment_failed', payload: { accountId, externalRef: str(sub) ?? (isObj(sub) ? str(sub.id) : null) } }
+		event: { eventId, type: type === 'invoice.paid' ? 'invoice.paid' : 'invoice.payment_failed', payload: invoice ? { accountId, externalRef, invoice } : { accountId, externalRef } }
+	};
+}
+
+/**
+ * The grant a staff-tool invoice's metadata names (billing/invoice.ts wrote it, provider/stripeApi.ts
+ * invoiceMetadata): each field as app_billing_apply takes it, or null when it doesn't parse, which the
+ * SQL refuses (recorded as a conflict, 335). The total and currency are the invoice's own, for the
+ * SQL's check against the plan table's price; the grant never reads an amount.
+ */
+export function invoiceGrantOf(invoice: Obj): InvoiceGrantPayload {
+	const m = isObj(invoice.metadata) ? invoice.metadata : {};
+	const whole = (v: unknown): number | null => (typeof v === 'string' && /^\d{1,10}$/.test(v) ? Number(v) : null);
+	const at = (v: unknown): string | null => {
+		const n = whole(v);
+		return n === null ? null : (time(n) ?? null);
+	};
+	return {
+		ref: str(invoice.id),
+		planCode: str(m.plan_code),
+		seats: whole(m.seats),
+		interval: str(m.interval),
+		periodStart: at(m.period_start),
+		periodEnd: at(m.period_end),
+		totalMinor: typeof invoice.total === 'number' && Number.isInteger(invoice.total) ? invoice.total : null,
+		currency: str(invoice.currency)
 	};
 }

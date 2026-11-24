@@ -1010,13 +1010,12 @@ are #641's checklist. Open items from building it:
       a NAT for the API's subnets (a monthly cost), or a Lambda outside the
       VPC that makes only the provider calls. Trigger: before Stripe is
       turned on (deployment.md § Turning on Stripe).
-- [ ] **Paying a B2B invoice doesn't grant the plan.** `invoice.paid` for a
-      standalone invoice changes nothing yet: the operator grants the plan
-      through the invoice's period by hand (deployment.md runbook 23,
-      billing.md § B2B invoices). Durable fix: the webhook turns a paid
-      invoice that carries our account and plan metadata into the staff
-      grant, idempotently. Trigger: the second B2B customer, or a missed
-      grant.
+- [x] **Paying a B2B invoice doesn't grant the plan.** **Done (round 7,
+      335_invoice_grant):** a staff-tool invoice's `invoice.paid` grants the
+      invoiced plan, seats and period through `app_billing_apply`, once,
+      refusing what doesn't check out as a logged `conflict` (billing.md §
+      B2B invoices). An invoice sent from Stripe's dashboard, without our
+      metadata, is still granted by hand (runbook 21).
 - [ ] **One refused invite leaves all of a person's invites pending.**
       `markVerified` (`backend/src/auth/email-routes.ts`) runs
       `app_accept_invites` in one savepoint, so when one invite would pass a

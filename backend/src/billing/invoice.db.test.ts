@@ -84,13 +84,44 @@ describe('issueInvoice', () => {
 });
 
 describe('the local script and the Lambda action', () => {
-	it('the script invoices through the mock by default and prints the grant to run once it is paid', async () => {
+	it('the script invoices through the mock by default and says paying it grants the plan', async () => {
 		const person = await signUp('InvoiceScript');
 		const args = parseArgs([person.email, 'pro', '--interval', 'month', '--po', 'PO 77', '--from', '2027-03-31']);
 		if (typeof args === 'string') throw new Error(args);
 		const lines = await runInvoice(OWNER_URL, args, { BILLING_WEBHOOK_SECRET: 'dev-only-test' });
 		expect(lines[0]).toMatch(/^Invoiced .* \(mock\): in_mock_\w+ .*pro × 1 seats, 2027-03-31 to 2027-04-29/);
-		expect(lines[1]).toMatch(/--until 2027-04-29 --reason "Invoice MOCK-\w+, PO PO 77"/);
+		expect(lines[1]).toBe('Once it is paid, its invoice.paid grants pro until 2027-04-29 through the webhook (docs/billing.md § B2B invoices).');
+		const account = (await person.call('GET', '/account/plan')).body.account.id as string;
+		expect(await asOwner('SELECT 1 FROM subscription WHERE billing_account_id = $1', [account])).toEqual([]);
+	});
+
+	it('--paid: the mock’s invoice.paid through the real webhook route grants the invoiced plan for its period (335), once', async () => {
+		vi.stubEnv('BILLING_PROVIDER', 'mock');
+		vi.stubEnv('BILLING_WEBHOOK_SECRET', 'dev-only-test');
+		try {
+			const admin = await signUp('InvoicePaidTeam');
+			const teamId = (await admin.call('POST', '/teams', { name: 'Invoice Paid WUA' })).body.team.id as string;
+			const today = new Date(Date.now() + 2 * 3_600_000).toISOString().slice(0, 10);
+			const args = parseArgs([teamId, 'team', '--interval', 'year', '--po', 'PO-5', '--seats', '5', '--from', today, '--paid']);
+			if (typeof args === 'string') throw new Error(args);
+			const lines = await runInvoice(OWNER_URL, args, process.env);
+			expect(lines[1]).toMatch(/^Paid \(mock\): team granted until \d{4}-\d{2}-\d{2} through the webhook\.$/);
+			const rows = (await asOwner(
+				`SELECT s.provider, s.external_ref, s.plan_code, s.status, s.seats, s.billing_interval FROM subscription s JOIN billing_account a ON a.id = s.billing_account_id WHERE a.team_id = $1`,
+				[teamId]
+			)) as { provider: string; external_ref: string }[];
+			expect(rows).toEqual([expect.objectContaining({ provider: 'manual', plan_code: 'team', status: 'active', seats: 5, billing_interval: 'year' })]);
+			expect(rows[0]!.external_ref).toMatch(/^in_mock_/);
+			// The team's admin reads Team on its plan page.
+			expect((await admin.call('GET', `/teams/${teamId}/plan`)).body.plan.code).toBe('team');
+			// Paid again (the same key, the same mock invoice): nothing more is granted.
+			await runInvoice(OWNER_URL, args, process.env);
+			expect(await asOwner('SELECT 1 FROM subscription s JOIN billing_account a ON a.id = s.billing_account_id WHERE a.team_id = $1', [teamId])).toHaveLength(1);
+			// --paid is the mock's alone.
+			await expect(runInvoice(OWNER_URL, args, { BILLING_PROVIDER: 'manual' })).rejects.toThrow(/--paid is the mock/);
+		} finally {
+			vi.unstubAllEnvs();
+		}
 	});
 
 	it('the script refuses under manual (its invoices are sent from Stripe’s dashboard)', async () => {
@@ -133,5 +164,6 @@ describe('parseArgs', () => {
 		expect(parseArgs(['a@b.org', 'pro', '--interval', 'year', '--po', 'PO1', '--seats', '2.5'])).toMatch(/whole number/);
 		expect(parseArgs(['someone', 'pro'])).toMatch(/uuid/);
 		expect(parseArgs(['a@b.org', 'pro', '--amount', '1'])).toMatch(/unknown option/);
+		expect(parseArgs(['a@b.org', 'pro', '--interval', 'year', '--po', 'PO1', '--paid'])).toMatchObject({ paid: true });
 	});
 });

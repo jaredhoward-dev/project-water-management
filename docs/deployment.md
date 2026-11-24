@@ -5287,8 +5287,9 @@ Every step is an ordinary app action by an owner unless it says "operator".
 21. **Granting a plan by hand** (operator; 330_staff_grant, issue #641;
     [billing.md § Staff grants](./billing.md#staff-grants)). For a plan
     nobody buys through checkout: a business paying by purchase order (a
-    Stripe invoice, runbook 23, or one sent from the Stripe dashboard; grant
-    once it is paid, until the end of the invoiced period), the first client's deal,
+    Stripe invoice from runbook 23 grants itself when paid; for one sent
+    from the Stripe dashboard, grant once it is paid, until the end of the
+    invoiced period), the first client's deal,
     founding users (no end), and Team's 30-day trial on request
     (billing.md § Trials). It works whatever `billing_provider` is.
 
@@ -5423,11 +5424,18 @@ Every step is an ordinary app action by an owner unless it says "operator".
     payload is the same invoice (`reused: true` once sent): nothing new is
     made or emailed. A changed field (seats, `from`, the PO number) is a
     new invoice, so void a wrong one in Stripe before sending the right
-    one. **When it is paid** (Stripe's dashboard, or the `invoice.paid`
-    row in `billing_event`), grant the plan for the period (runbook 21):
-    `billing-grant` with `until` the answer's `until` and the reason
-    `Invoice <number>, PO <PO>` (the customer reads it). Record the invoice
-    and the PO in the operator log.
+    one. **When it is paid, the plan is granted by itself** for the
+    period, through `until` (335; billing.md § B2B invoices): by card on
+    Stripe's page, or when you mark an EFT paid in Stripe's dashboard
+    ("Mark as paid", paid out of band). Check it took: `billing-grants`
+    (runbook 21) lists the grant with `granted_by` `invoice`. If it isn't
+    there, the API's log has a `billing_webhook` line with `result`
+    `conflict` for the `invoice.paid` (a changed price, a live card
+    subscription or longer grant on the account, a period already over):
+    decide, then grant by hand (runbook 21) with the reason
+    `Invoice <number>, PO <PO>`. An invoice sent from Stripe's dashboard
+    (not this action) carries none of our metadata, so it is always granted
+    by hand. Record the invoice and the PO in the operator log.
 
 ## Rollback
 
