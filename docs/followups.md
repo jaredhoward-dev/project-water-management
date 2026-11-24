@@ -912,13 +912,15 @@ are #641's checklist. Open items from building it:
       sets it. Durable fix: a team-admin route and a control on the team's
       Plan page, with a DB test. Trigger: before `BILLING_ENFORCED` is on for
       Team accounts.
-- [ ] **The assistant panel doesn't word the dollar refusals or show a
-      meter.** The API returns stable codes and #641's English text (the
-      workspace stays English, so no catalogue entry); the panel shows the
-      text, but has no *Compare plans* button and no "questions left today"
-      meter. Durable fix: map the four codes in the panel, with the meter
-      from the account's median turn cost. Trigger: before
-      `BILLING_ENFORCED` is on.
+- [ ] **The assistant panel has no upgrade button or meter for the dollar
+      caps.** The panel maps the four codes (round 7: the server's words,
+      when it's back, the box closed until then), but has no *Compare
+      plans* button on the Free caps and no "questions left today" meter.
+      Durable fix: the button on `assistant_daily_cap` and
+      `assistant_monthly_cap` for Free (never on the pool), and the meter
+      from the account's median turn cost, with an e2e case in
+      `e2e/tests/assistant.spec.ts`. Trigger: before `BILLING_ENFORCED` is
+      on.
 - [ ] **Terraform doesn't set the dollar-cap settings.** The assistant
       Lambda runs on the code's defaults ($0.30, 20 messages, a $30 pool);
       `ASSISTANT_FREE_*` are checked when set (config/production.ts).

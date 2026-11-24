@@ -43,7 +43,9 @@ export function dayResetsAt(now = new Date()): string {
 export type DollarOutcome = 'day' | 'month' | 'member' | 'pool';
 
 /** Each dollar refusal's stable code (http/errors.ts ERROR_CODES) and the issue's words (#641 "Copy"; workspace, English). */
-export const DOLLAR_REFUSAL: Record<DollarOutcome, { code: ErrorCode; message: (resetsAt: string) => string }> = {
+const DAY_MS = 86_400_000;
+
+export const DOLLAR_REFUSAL: Record<DollarOutcome, { code: ErrorCode; message: (resetsAt: string, nowMs?: number) => string }> = {
 	day: {
 		code: 'assistant_daily_cap',
 		message: () =>
@@ -61,7 +63,12 @@ export const DOLLAR_REFUSAL: Record<DollarOutcome, { code: ErrorCode; message: (
 	},
 	pool: {
 		code: 'assistant_free_pool_spent',
-		message: () => 'The free assistant has reached its shared limit for today. It’s back tomorrow. This isn’t something you did, and your work isn’t affected.'
+		// The day's paced share is back at the next midnight; when the month's whole pool is gone it is back at the
+		// month's start, which can be weeks away, so that case names the date rather than saying "tomorrow".
+		message: (resetsAt, nowMs = Date.now()) =>
+			Date.parse(resetsAt) - nowMs > DAY_MS
+				? `The free assistant has reached its shared limit for this month. It’s back on ${longDate(resetsAt)}. This isn’t something you did, and your work isn’t affected.`
+				: 'The free assistant has reached its shared limit for today. It’s back tomorrow. This isn’t something you did, and your work isn’t affected.'
 	}
 };
 

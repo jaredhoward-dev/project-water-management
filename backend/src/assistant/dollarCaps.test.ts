@@ -93,5 +93,14 @@ describe('the dollar caps’ settings and words', () => {
 		expect(DOLLAR_REFUSAL.month.message('2026-12-01T00:00:00.000Z')).toContain('1 December');
 		expect(DOLLAR_REFUSAL.pool.message('')).toContain('This isn’t something you did');
 		expect(DOLLAR_REFUSAL.pool.message('')).not.toMatch(/Pro|plan/);
+		// The day's share is back tomorrow; the month's whole pool, on the month's first day.
+		const now = Date.parse('2026-11-10T15:00:00.000Z');
+		expect(DOLLAR_REFUSAL.pool.message('2026-11-11T00:00:00.000Z', now)).toContain('back tomorrow');
+		const month = DOLLAR_REFUSAL.pool.message('2026-12-01T00:00:00.000Z', now);
+		expect(month).toContain('limit for this month');
+		expect(month).toContain('back on 1 December');
+		expect(month).not.toMatch(/Pro|plan|tomorrow/);
+		// The month's last day: the month's start is the next midnight, so it is tomorrow.
+		expect(DOLLAR_REFUSAL.pool.message('2026-12-01T00:00:00.000Z', Date.parse('2026-11-30T15:00:00.000Z'))).toContain('back tomorrow');
 	});
 });

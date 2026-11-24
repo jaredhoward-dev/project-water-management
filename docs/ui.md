@@ -13944,8 +13944,12 @@ with read-only tools over the project's data. It never changes anything.
   whose (the project's, yours across your projects, or the server's: three
   monthly caps, docs/api.md § Assistant) and when it starts again, and the
   box takes nothing. The share left under the box is of the cap nearest its
-  end. Any other refusal shows
-  its message.
+  end. With billing enforced, a dollar cap (`assistant_daily_cap`,
+  `assistant_monthly_cap`, `assistant_member_cap`,
+  `assistant_free_pool_spent`; billing.md § Assistant dollar caps) shows the
+  server's words and "Back … your time." from `params.resetsAt`, with no
+  upgrade prompt, and the box takes nothing until then
+  (`data-testid="assistant-cap"`). Any other refusal shows its message.
 - **A recommended change** (the `propose_settings` tool) is a card in the
   answer, **Recommended change**. Its title is the server's, never the
   model's words (issue #640): what kind of change it is (**Management
