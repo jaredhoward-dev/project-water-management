@@ -214,8 +214,8 @@ spend keeps `assistant_usage`'s UTC month, as `app_account_plan` does.
 trial or limit-message events), churn after the limit (no record of hitting
 one), reverse trial to paid (no trials), the share at the assistant's daily
 cap and the Free pool's burn by day (`assistant_day_usage` keeps each day
-since 336, but the report doesn't read it yet), the share at the live-catchment limit (nothing is marked
-live), paid seats reaching $15 (spend isn't kept per paid seat), disposable
+since 336, but the report doesn't read it yet), the share at the live-catchment limit (338 defines live,
+but the report doesn't read it yet), paid seats reaching $15 (spend isn't kept per paid seat), disposable
 rejections (no blocklist yet), sign-up throttle hits per address
 (`signup_throttle` keeps only an hour's hashed buckets) and suspensions (no
 suspend action yet).
@@ -913,6 +913,67 @@ invoices, usage records), where the SDK's coverage would outweigh its size.
   its confirm step, and the new count on the page).
 - `e2e/tests/billing-checkout.spec.ts`: the plan page's buttons, Team's seat
   field, and the mock checkout and portal in a browser.
+
+## Live catchments (Free)
+
+Free never rations modelling; it limits operations to one catchment (#641,
+operator 2026-10-29: "live feeds + automatic runs + alerts + published farm
+views (1 catchment)"). The plan's `live_catchments` limit is 1 on Free and
+null (unlimited) on Pro and Team (323). Migration 338 defines it and refuses
+a second one when `BILLING_ENFORCED` is on.
+
+- **What live means: derived, no flag.** A project is live when it has any
+  of: an enabled `data_feed`, an enabled `alert_rule`, automatic runs on
+  (`settings.autoRun.enabled`, 042's test) or a publication (any
+  `run_publication`: publishing supersedes the old one but keeps it, and
+  farm views stay up with their last publication). Why derived rather than
+  a flag the owner sets: "the owner picks the one live catchment" is
+  already what switching those on does, and a separate flag could disagree
+  with what is actually running (a feed fetching in a catchment marked not
+  live). The owner moves the live catchment by switching its feeds, alerts
+  and automatic runs off there; a publication can't be taken back, so a
+  catchment that published stays the live one. When the reverse trial ends
+  (a later slice), the picker on the Plan page can do exactly that: switch
+  the others' operations off, deleting nothing.
+- **One definition.** `app_project_live_except(project, …)` (whether a
+  project is live through anything but the named row) and
+  `app_live_catchments_in_use(account)` (its billed projects that are live).
+  Owner-only, like 334's seat functions.
+- **The refusal.** AFTER triggers on `data_feed` and `alert_rule` (insert, or
+  `enabled` turned on), `run_publication` (insert) and `project` (automatic
+  runs off to on) call `app_live_catchment_guard(project)` only when the
+  change makes a project live that wasn't. It takes 334's
+  `pg_advisory_xact_lock(hashtext('billing:' || account))`, reads the plan
+  (no live subscription = Free), counts, and raises `plan_limit` past the
+  limit. Every path (routes, the alert rules' own `ensure*` helpers, the
+  owner's SQL) goes through it. Two parallel switches in two catchments:
+  exactly one passes.
+- **Never switched off.** A change in a catchment already live is never
+  refused, even on an account past its limit (live before enforcement, or
+  after a downgrade), and nothing already on is turned off. Stopping
+  automatic runs on the other catchments after a grace (#641 § Downgrade)
+  is a later slice ([followups.md](./followups.md)). A copy or an import of
+  a catchment with automatic runs on isn't refused either: refusing it
+  would ration copying and importing, which Free never limits (the durable
+  fix is in followups.md).
+- **The answer.** `402 plan_limit` with `{ limit: 1, used, plan: 'free',
+  key: 'live_catchments' }` and fixed words ([api.md §
+  Billing](./api.md#billing)). The numbers keep 334's shape (`limit` the
+  plan's number); `key` names which limit, so the seat refusal (no `key`)
+  is unchanged. Only from the workspace's switches: farmer pages never
+  switch operations on.
+- **In the workspace.** The Data feeds panel (attaching or switching a feed
+  on) and the alert rules editor show it as an information note, not an
+  error (`LiveLimitNotice.svelte`, `liveLimit.ts` in
+  `frontend/src/lib/components/billing/`), in #641's tone (no "quota" or
+  "402"), with *Compare plans* linking to Plan and usage. The settings save
+  bar (automatic runs) and Publish to farmers still show the server's fixed
+  words in their error style ([followups.md](./followups.md)).
+- **Tests.** `backend/src/billing/liveCatchments.db.test.ts`: off, two
+  catchments go live; on, each route (feed, alert rules, automatic runs)
+  and a publication is refused in a second catchment and passes in the
+  first; switching the first off frees the slot; past the limit nothing is
+  refused in a live catchment; Pro is never refused; the race.
 
 ## Staff grants
 

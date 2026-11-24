@@ -5928,6 +5928,16 @@ used, plan } }`**: `limit` the paid seats, `used` the seats the change would
 need. `plan_limit` is in `ERROR_CODES`, since the Invitations page (a
 translated page) words it from the code ([§ Errors](#errors)). Confirming
 an email address never answers it: the invite stays pending.
+Free's one live catchment answers the same code (338, [billing.md § Live
+catchments (Free)](./billing.md#live-catchments-free)): with enforcement on,
+on an account with no live subscription, switching the first operation on in
+a second catchment (`POST /projects/:id/feeds` or `PATCH
+/projects/:id/feeds/:feedId` with a feed enabled, `PUT
+/projects/:id/alert-rules` with a rule enabled, `PATCH /projects/:id` turning
+`settings.autoRun.enabled` on, publishing to farmers) answers **`402 { error,
+code: "plan_limit", params: { limit: 1, used, plan: "free", key:
+"live_catchments" } }`**. `key` names the limit (the seat refusal has none).
+A catchment already live is never refused.
 Each answer comes from a `323_billing` definer function run as the caller.
 
 | Method | Path | Body | Response | Who |
