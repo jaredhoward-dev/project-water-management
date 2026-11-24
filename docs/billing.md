@@ -913,6 +913,27 @@ flag: the two settings can disagree, so turning one on without the other
 either offers a trial nobody gets or grants one the page doesn't mention;
 the variable's row in deployment.md says to move them together.
 
+**What the pages show** (349, round 2026-11-24). The plan JSON marks a
+reverse trial: `subscription.reverseTrial` is true for a `manual` +
+`trialing` subscription (`billing/entitlements.ts` `accountPlan` asks
+`app_billing_live_subscription_ref` for the provider of a trialing one;
+false for a staff grant or a Stripe trial). During one the Plan page offers
+**Upgrade** rather than Manage billing (`plan.ts` `billingActions`), since
+checkout replaces the trial (below). In the trial's last 3 days (the
+trial-ending email's window, [§ Plan emails](#plan-emails)) a note on the
+Plan page, and one in the workspace header beside the paused notice, says
+when it ends, that the account then moves to Free with nothing charged or
+deleted and nothing paused for 14 days, and offers Upgrade
+(`components/billing/trialEnding.ts`). The workspace reads the project's
+`planTrialEnd` (`349_project_trial_end.sql`, `app_project_trial_end`): the
+trial end of the account the catchment is billed to, only for that
+account's person or a team admin (`app_billing_account_readable`), so a
+member never sees someone else's trial. All of it is inert while
+`REVERSE_TRIAL` is off: no trial row exists. Tests:
+`billing/trialBanner.db.test.ts`, `entitlements.test.ts`, the frontend's
+`plan.test.ts`, `trialEnding.test.ts` and `planPause.test.ts`, and e2e
+cases in `billing-checkout.spec.ts` and `billing-keep-live.spec.ts`.
+
 **The trial's assistant.** Pro's month applies, and on top, during a reverse
 trial, `app_assistant_begin` refuses (enforced only):
 

@@ -573,8 +573,9 @@ address (`LANDING_ROUTES`, `addressFor` in `lib/auth/session.svelte.ts`).
   can't read the `plan` table; `backend/src/billing/planFigures.db.test.ts`
   fails when a migration moves a figure and that file doesn't follow.
 - **Links.** The landing page's closing panel ("See plans and prices") and
-  its footer, in the page's language. The Plan page's *Compare plans*
-  (assistant panel, live-catchment note) still goes to `/account/plan`.
+  its footer, in the page's language, and the Plan page's *See all plans*
+  (in English, the workspace's language). The *Compare plans* links
+  (assistant panel, live-catchment note) still go to `/account/plan`.
 - **Not yet.** Checkout's disclosures and consent tick (#641 Phase 4) are on
   the Plan page's checkout, not here.
 
@@ -1413,7 +1414,13 @@ role, freshness, Add data) and each tab's own header:
   live catchments (341) a note that its feeds, alerts and automatic runs are
   paused because the plan it is billed to ended, that nothing is lost, with
   a link to the plan (`billing/planPause.ts`; billing.md § Pausing after a
-  downgrade). Every message and action of the
+  downgrade); and in the last 3 days of the person's reverse trial (342,
+  the trial-ending email's window) *Your Pro trial ends on 7 Dec 2026…*,
+  that the account then moves to Free with nothing charged or deleted and
+  nothing paused for 14 days, with an **Upgrade** link to the Plan page
+  (`planPause.ts` `trialNotice`, `billing/trialEnding.ts`; from the
+  project's `planTrialEnd`, which only the billing account's own person
+  gets, 349; billing.md § The reverse trial). Every message and action of the
   old banners is kept. The model save bar stays the dock at the bottom
   (Save changes, Discard, the reason), and the grid modal and sheets keep
   their own `ModelSaveRow`.
@@ -3193,7 +3200,17 @@ The page is two cards, side by side where they fit and stacked on a phone:
   up): with no subscription, *Upgrade to Pro, monthly (R 899.00 a month)* and
   *…, yearly (R 8 990.00 a year)* (*Team* on a team's page), priced from
   `GET /billing/plans` (unpriced until it answers, or if it fails); with one,
-  *Manage billing*. Team's Upgrade has an *Editor seats* number field above
+  *Manage billing*, except during a live reverse trial
+  (`subscription.reverseTrial`, 342), where the Upgrade buttons stay, since
+  checkout replaces the trial (344; `plan.ts` `billingActions`,
+  `onReverseTrial`). In the trial's last 3 days a note above them says when
+  it ends, that the account then moves to Free with nothing charged or
+  deleted and nothing paused for 14 days, and to upgrade to keep Pro
+  (`billing/trialEnding.ts`; billing.md § The reverse trial). Coming back
+  from checkout during a trial, the page waits for a subscription other
+  than the trial (`hasPaidSubscription`). Under the buttons, **See all
+  plans** links the public pricing page (`/welcome/pricing`, through
+  `resolve()`), which sets the three plans side by side. Team's Upgrade has an *Editor seats* number field above
   the buttons (a `NumberInput` spinbutton with `whole`, labelled, from the 3
   included to 50, a hint under it with each extra seat's monthly and yearly
   price, named by `aria-describedby`; ArrowUp and ArrowDown step it by one),

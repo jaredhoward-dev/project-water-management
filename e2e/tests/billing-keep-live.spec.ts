@@ -103,3 +103,31 @@ test('a paused catchment’s workspace says so, and links to the Plan page', asy
 	await link.click();
 	await expect(page).toHaveURL(/\/account\/plan$/);
 });
+
+test('in a reverse trial’s last 3 days the workspace says when it ends, and links Upgrade to the Plan page', async ({ page, owner }) => {
+	void owner;
+	// REVERSE_TRIAL is off in e2e: the project is answered with the trial end only its account's owner gets (349).
+	const project = await createProject(page.request, 'Trial catchment');
+	const trialEnd = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString();
+	await page.route(`${API_URL}/projects/${project.id}`, async (route) => {
+		if (route.request().method() !== 'GET') return route.fallback();
+		const res = await route.fetch();
+		const body = (await res.json()) as { project: Record<string, unknown> };
+		await route.fulfill({ response: res, json: { project: { ...body.project, planTrialEnd: trialEnd } } });
+	});
+	await page.goto(`/projects/${project.id}`);
+	const note = page.getByTestId('plan-trial-ending');
+	await expect(note).toContainText('Your Pro trial ends on');
+	await expect(note).toContainText('nothing is charged, nothing is deleted');
+	await expectNoViolations(page);
+	await note.getByRole('link', { name: 'Upgrade' }).click();
+	await expect(page).toHaveURL(/\/account\/plan$/);
+});
+
+test('with no trial the workspace shows no trial notice', async ({ page, owner }) => {
+	void owner;
+	const project = await createProject(page.request, 'No trial');
+	await page.goto(`/projects/${project.id}`);
+	await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+	await expect(page.getByTestId('plan-trial-ending')).toHaveCount(0);
+});

@@ -262,3 +262,37 @@ test('back from a payment the provider hasn’t confirmed yet, the page waits fo
 	await expect(page).toHaveURL(/\/account\/plan$/);
 	expect(reads).toBe(2);
 });
+
+// The reverse trial (342, 344, 349; docs/billing.md § The reverse trial): REVERSE_TRIAL is off in e2e, so no trial
+// is ever granted; the plan is answered here with page.route as Pro on a reverse trial ending in 2 days. The page
+// says when it ends and what Free means, and offers Upgrade (which checkout accepts during a trial), not Manage
+// billing. The DB tests (backend billing/trialBanner.db.test.ts) cover the real flag.
+test('during a reverse trial’s last 3 days the Plan page warns and offers Upgrade, not Manage billing', async ({ page, owner }) => {
+	void owner;
+	const trialEnd = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString();
+	await page.route(`${API_URL}/account/plan`, async (route) => {
+		if (route.request().method() !== 'GET') return route.fallback();
+		const res = await route.fetch();
+		const body = (await res.json()) as { plan: Record<string, unknown> };
+		await route.fulfill({
+			response: res,
+			json: {
+				...body,
+				plan: { ...body.plan, code: 'pro', name: 'Pro' },
+				subscription: { status: 'trialing', seats: 1, periodStart: new Date().toISOString(), periodEnd: trialEnd, trialEnd, cancelAtPeriodEnd: true, interval: null, reverseTrial: true }
+			}
+		});
+	});
+	await page.goto('/account/plan');
+	const plan = page.getByRole('region', { name: 'Plan', exact: true });
+	await expect(plan.locator('[data-subscription="trialing"]')).toHaveText(/^Trial ends /);
+	await expect(plan.locator('[data-trial-ending]')).toHaveText(/^Your Pro trial ends on .+ nothing is charged, nothing is deleted.+Upgrade to keep Pro\.$/);
+	await expect(plan.getByRole('button', { name: MONTHLY })).toBeVisible();
+	await expect(plan.getByRole('button', { name: YEARLY })).toBeVisible();
+	await expect(plan.getByRole('button', { name: 'Manage billing' })).toHaveCount(0);
+	await expectNoViolations(page);
+
+	// See all plans opens the public pricing page.
+	await plan.getByRole('link', { name: 'See all plans' }).click();
+	await expect(page).toHaveURL(/\/welcome\/pricing$/);
+});

@@ -83,6 +83,7 @@ const REVIEWED: Record<string, { why: string; in: string[] }> = {
 	manifestUrl: { why: 'pack page: URL.createObjectURL of the manifest JSON it builds, a blob: URL for the download', in: ['routes/projects/[id]/packs/[packId]/+page.svelte'] },
 	curtailmentHref: { why: 'BUILDER: "<base>/projects/…" (portfolio.ts; the team page wraps it under the same name)', in: ['routes/teams/[id]/+page.svelte', 'lib/components/projects/ProjectTable.svelte'] },
 	planHref: { why: 'BUILDER: Compare plans (billing/planLink.ts): basePath() + "/teams/" + the encoded team id + "/plan" (the team that bills the catchment, from project.team), or basePath() + "/account/plan" (#641)', in: ['lib/components/billing/LiveLimitNotice.svelte', 'lib/components/billing/AutoRunsOffNotice.svelte', 'lib/components/assistant/AssistantPanel.svelte'] },
+	'trial.href': { why: 'the workspace’s trial-ending notice: billing/planPause.ts trialNotice → billing/planLink.ts planHref (BUILDER), basePath() + "/teams/" + the encoded team id + "/plan", or basePath() + "/account/plan" (#641, 349)', in: ['routes/projects/[id]/+page.svelte'] },
 	'paused.href': { why: 'the workspace’s paused notice: billing/planPause.ts pausedNotice → billing/planLink.ts planHref (BUILDER), basePath() + "/teams/" + the encoded team id + "/plan", or basePath() + "/account/plan" (#641, 341)', in: ['routes/projects/[id]/+page.svelte'] },
 	historyHref: { why: 'BUILDER: compare/attribution.ts "/projects/" + encoded project id + "?tab=history"', in: ['lib/components/compare/CompareView.svelte'] },
 	// Local builders and constants in the component itself: a literal "?" or "#" head, or resolve() of a literal path.
@@ -153,7 +154,10 @@ const REVIEWED: Record<string, { why: string; in: string[] }> = {
 	dataHref: { why: 'CalibrationWindowFields prop: CalibrationSettings passes "?tab=series&series=" + encodeURIComponent(series id) + "#data-chart"', in: ['lib/components/calibration/CalibrationWindowFields.svelte'] },
 	'missing.panel.link.href': { why: 'CalibrationResults: the line for a linked Model quality panel the run doesn\'t have, a literal "?tab=…" constant (runs/missingPanel.ts NEEDS, issue #586 Round 3)', in: ['lib/components/calibration/CalibrationResults.svelte'] },
 	'missingLink.panel.link.href': { why: 'RunsTab: the line for a linked panel the run doesn\'t have, a literal "?tab=…" constant (runs/missingPanel.ts NEEDS, issue #586)', in: ['lib/components/runs/RunsTab.svelte'] },
-	resolve: { why: 'resolve() of ACCOUNT_TWO_STEP, a literal "account#two-step" constant in auth-extras/requireTwoStep.ts: an app path, never a scheme (issue #586)', in: ['lib/components/auth-extras/RequireTwoStep.svelte'] },
+	resolve: {
+		why: 'resolve() of ACCOUNT_TWO_STEP, a literal "account#two-step" constant in auth-extras/requireTwoStep.ts (issue #586), or of the literal route id "/welcome/pricing/[[lang=locale]]" with no params (PlanUsage\'s See all plans, #641): an app path, never a scheme',
+		in: ['lib/components/auth-extras/RequireTwoStep.svelte', 'lib/components/billing/PlanUsage.svelte']
+	},
 	'moved.href': { why: 'SectionNav: a moved setting\'s link from the page\'s `elsewhere` list, a literal "?tab=…#…" constant (settings/sections.ts SETTINGS_ELSEWHERE, issue #521)', in: ['lib/components/common/SectionNav.svelte'] },
 	hrefOf: { why: 'SectionNav: a section\'s `href` (a literal "?tab=…" from the page that lists it) or "#" + its id', in: ['lib/components/common/SectionNav.svelte'] },
 	's.href': { why: 'MapSetupPill: a step\'s link, map/mapSetup.ts dataStep copying a map/startData.ts item\'s literal "?tab=…" constant (#646)', in: ['lib/components/map/MapSetupPill.svelte'] },

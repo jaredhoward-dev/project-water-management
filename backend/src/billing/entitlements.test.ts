@@ -131,6 +131,25 @@ describe('accountPlan', () => {
 		expect(await accountPlan(db as never, null)).toBeNull();
 		expect(db.queries).toHaveLength(1);
 	});
+
+	it('marks the reverse trial (manual + trialing), asking the provider only of a trialing subscription', async () => {
+		const sub = (status: string) => ({ ...plan, plan: { code: 'pro' }, subscription: { status, trialEnd: '2026-12-07T10:00:00.000Z' } });
+		const answer = (status: string, provider: string) => (sql: string) =>
+			sql.includes('app_account_plan') ? [{ plan: sub(status) }] : [{ ref: { provider, externalRef: null } }];
+		const trial = fakeDb(answer('trialing', 'manual'));
+		expect(((await accountPlan(trial as never, A, {}))?.subscription as { reverseTrial: boolean }).reverseTrial).toBe(true);
+		expect(trial.queries[1]).toEqual({ sql: 'SELECT app_billing_live_subscription_ref($1) AS ref', params: [A] });
+		// A Stripe trial (set by hand in Stripe's dashboard) isn't one.
+		const stripe = fakeDb(answer('trialing', 'stripe'));
+		expect(((await accountPlan(stripe as never, A, {}))?.subscription as { reverseTrial: boolean }).reverseTrial).toBe(false);
+		// A staff grant (manual, active): not a trial, and no second query.
+		const grant = fakeDb(answer('active', 'manual'));
+		expect(((await accountPlan(grant as never, A, {}))?.subscription as { reverseTrial: boolean }).reverseTrial).toBe(false);
+		expect(grant.queries).toHaveLength(1);
+		// No subscription (Free): left as it is.
+		const free = fakeDb(() => [{ plan }]);
+		expect((await accountPlan(free as never, A, {}))?.subscription).toBeNull();
+	});
 });
 
 describe('the account lookups', () => {
