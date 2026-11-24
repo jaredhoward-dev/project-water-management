@@ -1380,6 +1380,8 @@ const FIELDS: Record<string, string[] | string> = {
 	'evidence/packReproduceParts.ts:gatheringId': 'a job payload (302): jobs/trust.security.db.test.ts holds it to its job’s project',
 	'evidence/packReproduceParts.ts:partId': 'a job payload (302): jobs/trust.security.db.test.ts holds it to its job’s project',
 	'jobs/handlers/applicant-pack-render.ts:packId': 'a job payload: jobs/trust.security.db.test.ts',
+	'ops/ownerActions.ts:projectId': 'an owner action on the migrate Lambda, invoked by the operator (production-gated workflow or their SSO session), run as the schema owner: not a request, no caller to cross projects',
+	'ops/ownerActions.ts:teamId': 'an owner action on the migrate Lambda, invoked by the operator (production-gated workflow or their SSO session), run as the schema owner: not a request, no caller to cross projects',
 	'jobs/transport.ts:fetchJobId': 'a queue envelope between the app’s own Lambdas, not a request',
 	'jobs/transport.ts:feedId': 'a queue envelope between the app’s own Lambdas, not a request',
 	'jobs/transport.ts:reportId': 'a queue envelope between the app’s own Lambdas, not a request',
