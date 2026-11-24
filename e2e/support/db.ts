@@ -70,6 +70,26 @@ export async function plantEmailToken(email: string, purpose: 'reset' | 'verify'
 }
 
 /**
+ * The account's pending email change (347_email_change), which POST
+ * /auth/change-email made, given a link token the spec knows: the row (its
+ * new address, expiry and the request's limits) stays as the request left it,
+ * and only the stored hash is swapped, since the mailed token went to the
+ * backend's log. Returns the token and the address the change is to.
+ */
+export async function plantEmailChangeToken(email: string): Promise<{ token: string; newEmail: string }> {
+	const { token, hash } = newToken();
+	const newEmail = await withDb(async (db) => {
+		const r = await db.query<{ new_email: string }>(
+			`UPDATE email_change c SET token_hash = $2 FROM app_user u WHERE u.id = c.user_id AND u.email = $1 RETURNING c.new_email`,
+			[email, hash]
+		);
+		if (r.rowCount !== 1) throw new Error(`no pending email change for ${email}`);
+		return r.rows[0]!.new_email;
+	});
+	return { token, newEmail };
+}
+
+/**
  * Recovering a lost second factor (205_mfa_recovery): the account's waiting
  * reset's 3-day wait ends now, so the next worker tick completes it (the wait
  * is moved in the database, never slept).

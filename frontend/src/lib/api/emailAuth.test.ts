@@ -110,6 +110,8 @@ describe('signed-out access', () => {
 		expect(isPublicPath('/forgot-password')).toBe(true);
 		expect(isPublicPath('/reset-password')).toBe(true);
 		expect(isPublicPath('/verify-email')).toBe(true);
+		// The email change link (347) may be opened on another device, signed out.
+		expect(isPublicPath('/verify-email/change')).toBe(true);
 	});
 });
 

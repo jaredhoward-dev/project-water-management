@@ -3,8 +3,9 @@
 // password while signed in (this device stays signed in, every other one is
 // signed out), and download a copy of their data (GET /auth/me/export).
 import { readFile } from 'node:fs/promises';
-import { register, signInUnconfirmed } from '../support/api.ts';
+import { register, signInUnconfirmed, uniqueEmail } from '../support/api.ts';
 import { expectNoViolations } from '../support/a11y.ts';
+import { plantEmailChangeToken } from '../support/db.ts';
 import { API_URL } from '../support/env.ts';
 import { expect, test } from '../support/fixtures.ts';
 
@@ -99,14 +100,15 @@ test('changing the password keeps this device signed in and signs out another de
 	await expect(otherPage.getByRole('heading', { level: 1, name: 'Projects' })).toBeVisible();
 
 	await page.goto('/account');
-	await page.getByLabel('Current password').fill(owner.password);
+	const passwordPanel = page.getByRole('region', { name: 'Password', exact: true });
+	await passwordPanel.getByLabel('Current password').fill(owner.password);
 	await page.getByLabel('New password', { exact: true }).fill('a brand new password');
 	await page.getByLabel('Repeat new password').fill('a brand new password');
 	await page.getByRole('button', { name: 'Change password' }).click();
 	await expect(
 		page.getByRole('status').filter({ hasText: 'Password changed. Every other device has been signed out.' })
 	).toBeVisible();
-	await expect(page.getByLabel('Current password')).toHaveValue('');
+	await expect(passwordPanel.getByLabel('Current password')).toHaveValue('');
 
 	// This device is still signed in, with the re-issued cookie.
 	await page.goto('/teams');
@@ -130,7 +132,7 @@ test('changing the password keeps this device signed in and signs out another de
 
 test('a wrong current password and a too-short new password are shown as errors', async ({ page, owner }) => {
 	await page.goto('/account');
-	const current = page.getByLabel('Current password');
+	const current = page.getByRole('region', { name: 'Password', exact: true }).getByLabel('Current password');
 
 	await current.fill('not my password');
 	await page.getByLabel('New password', { exact: true }).fill('a brand new password');
@@ -149,6 +151,73 @@ test('a wrong current password and a too-short new password are shown as errors'
 	await expect(page.getByLabel('New password', { exact: true })).toHaveAttribute('aria-invalid', 'true');
 	await expect(page.getByLabel('Repeat new password')).toHaveAccessibleDescription('Use at least 8 characters.');
 	await expect(current).not.toHaveAttribute('aria-invalid');
+});
+
+// Changing the email address (347): the request mails a link to the new
+// address and changes nothing until it is used. Mail goes to the backend's
+// log here, so the link's token is planted on the pending change the request
+// made (support/db.ts plantEmailChangeToken).
+test('changing the email address sends a link to the new address, and the link switches the account to it', async ({ page, owner }) => {
+	await page.goto('/account');
+	const panel = page.getByRole('region', { name: 'Email address', exact: true });
+	const account = page.getByRole('region', { name: 'Account', exact: true });
+	await expect(account).toContainText(owner.email);
+
+	// Without the right password nothing is sent.
+	const next = uniqueEmail('moved');
+	await panel.getByLabel('New email address').fill(next);
+	await panel.getByLabel('Current password').fill('not my password');
+	await panel.getByRole('button', { name: 'Send the link' }).click();
+	await expect(panel.getByRole('alert')).toHaveText('Your current password is wrong.');
+	await expect(panel.getByLabel('Current password')).toHaveAttribute('aria-invalid', 'true');
+
+	await panel.getByLabel('Current password').fill(owner.password);
+	await panel.getByRole('button', { name: 'Send the link' }).click();
+	await expect(panel.getByRole('status')).toHaveText(`If ${next} can take the change, a link is on its way there. Open it to finish.`);
+	await expect(panel.getByRole('alert')).toHaveCount(0);
+	// Nothing changes until the link is used.
+	await page.reload();
+	await expect(account).toContainText(owner.email);
+
+	const { token, newEmail } = await plantEmailChangeToken(owner.email);
+	expect(newEmail).toBe(next);
+	const confirms: string[] = [];
+	page.on('request', (r) => {
+		if (r.url().endsWith('/auth/confirm-email-change')) confirms.push(r.url());
+	});
+	await page.goto(`/verify-email/change?token=${token}`);
+	await expect(page.getByRole('heading', { level: 1, name: 'Confirm your new email address' })).toBeVisible();
+	await expect(page.getByRole('status')).toHaveText(`Your email address is now ${next}. Sign in with it from now on.`);
+	// The token is dropped from the address bar once read.
+	await expect(page).toHaveURL('/verify-email/change');
+
+	// Signed in, the page leads back to the account, which shows the new address at once.
+	await page.getByRole('link', { name: 'Back to your account' }).click();
+	await expect(page).toHaveURL('/account');
+	await expect(account).toContainText(next);
+	await expect(account).not.toContainText(owner.email);
+
+	// Back: the history holds the page without its token, so the spent link isn't sent again.
+	await page.goBack();
+	await expect(page).toHaveURL('/verify-email/change');
+	await expect(page.getByRole('alert')).toHaveText('This link is invalid or has expired. Ask for a new one.');
+	expect(confirms).toHaveLength(1);
+	await page.goForward();
+	await expect(page).toHaveURL('/account');
+	await expect(account).toContainText(next);
+});
+
+test('a bad or spent email change link says so, signed out, and leads to sign-in', async ({ page }) => {
+	await page.goto(`/verify-email/change?token=${'x'.repeat(43)}`);
+	await expect(page.getByRole('heading', { level: 1, name: 'Confirm your new email address' })).toBeVisible();
+	await expect(page.getByRole('alert')).toHaveText('This link is invalid or has expired. Ask for a new one.');
+	await expect(page).toHaveURL('/verify-email/change');
+	await expect(page.getByRole('link', { name: 'Sign in', exact: true })).toBeVisible();
+	await expectNoViolations(page);
+
+	// No token at all: the same answer, without a request.
+	await page.goto('/verify-email/change');
+	await expect(page.getByRole('alert')).toHaveText('This link is invalid or has expired. Ask for a new one.');
 });
 
 // Screen use (issue #17): the header says who you are; on a wide screen the
@@ -284,7 +353,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
 				await expect(page.getByLabel('Display name')).toHaveValue(owner.displayName);
 				await expectNoViolations(page);
 
-				await page.getByLabel('Current password').fill('not my password');
+				await page.getByRole('region', { name: 'Password', exact: true }).getByLabel('Current password').fill('not my password');
 				await page.getByLabel('New password', { exact: true }).fill('a brand new password');
 				await page.getByLabel('Repeat new password').fill('a brand new password');
 				await page.getByRole('button', { name: 'Change password' }).click();
