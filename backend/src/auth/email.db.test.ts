@@ -1,8 +1,9 @@
 // Password reset, email verification and session revocation (004_email.sql,
 // auth/email-routes.ts). Mail is captured by the in-memory transport.
 import { SignJWT } from 'jose';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { hashToken } from './tokens.js';
+import { reverseTrialHash } from '../billing/reverseTrial.js';
 import { anon, asOwner, lastMailTo, mailCount, signUp, tokenIn } from '../__tests__/helpers.js';
 
 const verifyMail = (email: string) => {
@@ -70,6 +71,37 @@ describe('email verification', () => {
 		expect((await anon('POST', '/auth/verify-email', { token: first })).status).toBe(400);
 		expect((await anon('POST', '/auth/verify-email', { token: second })).status).toBe(200);
 		expect((await u.call('POST', '/auth/resend-verification')).status).toBe(409);
+	});
+	it('verifies even when the reverse trial fails to start: the trial rolls back to its savepoint, logged without the address', async () => {
+		// A real failure inside app_reverse_trial_start (342): plan pro with no trial_days raises 22023 mid-transaction.
+		// Without the savepoint the transaction is aborted and the verification (and its token) roll back with it.
+		vi.stubEnv('BILLING_ENFORCED', 'true');
+		vi.stubEnv('REVERSE_TRIAL', 'true');
+		const days = ((await asOwner(`SELECT trial_days AS days FROM plan WHERE code = 'pro'`)) as { days: number }[])[0]!.days;
+		expect(days).toBeGreaterThan(0);
+		const lines: string[] = [];
+		const spy = vi.spyOn(console, 'error').mockImplementation((line: unknown) => void lines.push(String(line)));
+		try {
+			const u = await signUp('TrialFails', { verified: false });
+			await asOwner(`UPDATE plan SET trial_days = 0 WHERE code = 'pro'`);
+			const ok = await anon('POST', '/auth/verify-email', { token: tokenIn(verifyMail(u.email)) });
+			expect(ok.status).toBe(200);
+			expect(ok.body).toEqual({ verified: true, email: u.email });
+			const [row] = (await asOwner('SELECT email_verified_at FROM app_user WHERE id = $1', [u.id])) as { email_verified_at: Date | null }[];
+			expect(row!.email_verified_at).toBeInstanceOf(Date);
+			// Nothing of the trial survived: no subscription, no claim on the address.
+			expect(
+				await asOwner('SELECT s.id FROM subscription s JOIN billing_account b ON b.id = s.billing_account_id WHERE b.user_id = $1', [u.id])
+			).toEqual([]);
+			expect(await asOwner('SELECT 1 FROM reverse_trial_claim WHERE email_hash = $1', [reverseTrialHash(u.email)])).toEqual([]);
+			const failed = lines.map((l) => JSON.parse(l) as Record<string, unknown>).filter((l) => l.event === 'reverse_trial_start_failed');
+			expect(failed).toEqual([{ event: 'reverse_trial_start_failed', userId: u.id, error: 'error', code: '22023' }]);
+			expect(lines.join('\n')).not.toContain(u.email);
+		} finally {
+			await asOwner(`UPDATE plan SET trial_days = $1 WHERE code = 'pro'`, [days]);
+			spy.mockRestore();
+			vi.unstubAllEnvs();
+		}
 	});
 });
 

@@ -18,6 +18,8 @@ import { ACCOUNT_MAIL_CAP, ACCOUNT_MAIL_WINDOW, newToken, parseToken, RESEND_COO
 import { readJson } from '../http/body.js';
 import { logLoginFailed, type LoginFailureRoute } from './loginFailed.js';
 import { startReverseTrial } from '../billing/reverseTrial.js';
+import { logEvent } from '../logging/logEvent.js';
+import { safeError } from '../logging/safeError.js';
 
 const email = z.string().trim().toLowerCase().email().max(254);
 const token = z.string().max(200);
@@ -91,7 +93,17 @@ export async function markVerified(db: Db, userId: string): Promise<void> {
 	}
 	// The first verification is what starts the reverse trial (342, billing/reverseTrial.ts): only with
 	// REVERSE_TRIAL and BILLING_ENFORCED on, once per canonical email; off, it reads and writes nothing.
-	await startReverseTrial(db, userId);
+	// Confirming the address must not fail for it either (a live plan racing in from a webhook or grant on the
+	// one-live index, the account's billing triggers): its writes roll back to the savepoint, the address stays
+	// verified, and the failure is logged by its code only, never the address (logging/safeError.ts).
+	await db.query('SAVEPOINT reverse_trial');
+	try {
+		await startReverseTrial(db, userId);
+		await db.query('RELEASE SAVEPOINT reverse_trial');
+	} catch (err) {
+		await db.query('ROLLBACK TO SAVEPOINT reverse_trial');
+		logEvent('error', { event: 'reverse_trial_start_failed', userId, ...safeError(err) });
+	}
 }
 
 /** 334's seat guard refusing (SQLSTATE 23514, constraint plan_limit). */
