@@ -3,7 +3,8 @@
 //   - GET /account/plan marks a reverse trial (`manual` + `trialing`) with `subscription.reverseTrial`, and a staff
 //     grant (`manual` + `active`) or a Stripe trial not;
 //   - GET /projects/:id carries `planTrialEnd` to the account's owner (positive control), never to a member who
-//     isn't, nor on a project whose account has no reverse trial.
+//     isn't, nor on a project whose account has no reverse trial; on a team-billed project, to a team admin (positive
+//     control) and never to a plain team member (349's app_billing_account_readable branch).
 // The trial row is written as the schema owner, as 342's app_reverse_trial_start writes it, so the test needs neither
 // REVERSE_TRIAL nor a fresh canonical email.
 import { describe, expect, it } from 'vitest';
@@ -61,6 +62,34 @@ describe('the reverse trial in the plan JSON and the project', () => {
 		const theirs = await member.call('GET', `/projects/${id}`);
 		expect(theirs.status).toBe(200);
 		expect(theirs.body.project.planTrialEnd).toBeNull();
+	});
+
+	it('on a team-billed project, a team admin sees planTrialEnd and a plain team member does not (positive control: the admin)', async () => {
+		const admin = await signUp('TrialTeamAdmin');
+		const member = await signUp('TrialTeamMember');
+		const teamId = (await admin.call('POST', '/teams', { name: 'Trial banner WUA' })).body.team.id as string;
+		expect((await admin.call('POST', `/teams/${teamId}/members`, { email: member.email, role: 'member' })).status).toBe(201);
+		const id = (await admin.call('POST', '/projects', { name: 'Team trial banner', teamId })).body.project.id as string;
+		const { team_account, billed_to } = (await asOwner(
+			`SELECT (SELECT id FROM billing_account WHERE team_id = $1) AS team_account,
+			        (SELECT billing_account_id FROM project WHERE id = $2) AS billed_to`,
+			[teamId, id]
+		))[0] as { team_account: string; billed_to: string };
+		expect(billed_to).toBe(team_account); // the team's account, not the admin's own
+		// No trial yet: null for the admin too.
+		expect((await admin.call('GET', `/projects/${id}`)).body.project.planTrialEnd).toBeNull();
+		await asOwner(
+			`INSERT INTO subscription (billing_account_id, plan_code, status, period_start, period_end, trial_end, cancel_at_period_end, provider)
+			 VALUES ($1, 'team', 'trialing', now(), now() + interval '2 days', now() + interval '2 days', true, 'manual')`,
+			[team_account]
+		);
+		const seen = (await admin.call('GET', `/projects/${id}`)).body.project.planTrialEnd;
+		expect(Date.parse(seen)).toBeGreaterThan(Date.now());
+		const theirs = await member.call('GET', `/projects/${id}`);
+		expect(theirs.status).toBe(200); // the member reads the project, just not the team's plan
+		expect(theirs.body.project.planTrialEnd).toBeNull();
+		// The admin's own account has no trial: the date is the team's.
+		expect((await admin.call('GET', '/account/plan')).body.subscription).toBeNull();
 	});
 
 	it('a staff grant gives no planTrialEnd', async () => {
