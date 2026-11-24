@@ -558,6 +558,13 @@ alongside teams, e.g. to give an outside client `viewer` access.
   runs were paused because its billing account's plan ended past Free's live
   catchments (`app_project_plan_paused`), or `null`. Every member sees it: the
   workspace's notice reads it.
+- **Reverse trial ending** (349; [billing.md § The reverse trial](./billing.md#the-reverse-trial-built-off)):
+  `project.planTrialEnd` (on `GET /projects/:id` and wherever
+  `planPausedAt` is) is when the reverse trial (`manual` + `trialing`) of
+  the account the project is billed to ends (`app_project_trial_end`), only
+  for that account's person or a team admin; `null` for anyone else, with no
+  such trial, and always while `REVERSE_TRIAL` is off. The workspace's
+  trial-ending notice reads it.
 - **Two-step sign-in** (204_mfa_opt_in; [§ Two-step sign-in](#two-step-sign-in)):
   `project.requireMfa` (boolean, default `false`) is the project's own
   setting; `project.mfaRequired` (on `GET`/`PATCH /projects/:id`, create,
@@ -5990,7 +5997,7 @@ Each answer comes from a `323_billing` definer function run as the caller.
   `assistant_usd_micros_per_month`, `assistant_usd_micros_per_seat_month`);
   `null` is unlimited.
 - `AccountPlan = { account: { id, kind: 'user' \| 'team' }, plan: { code, name, priceMonthlyMinor, priceAnnualMinor, currency, limits, features }, subscription, team, usage, enforced, provider }`:
-  - `subscription`: `null` (Free) or `{ status, seats, periodStart, periodEnd, trialEnd, cancelAtPeriodEnd, interval }`; `interval` is `'month'`, `'year'` or `null` when not recorded (a staff grant, a subscription from before migration 332; [billing.md § Billing interval and editor count](./billing.md#billing-interval-and-editor-count)).
+  - `subscription`: `null` (Free) or `{ status, seats, periodStart, periodEnd, trialEnd, cancelAtPeriodEnd, interval, reverseTrial }`; `interval` is `'month'`, `'year'` or `null` when not recorded (a staff grant, a subscription from before migration 332; [billing.md § Billing interval and editor count](./billing.md#billing-interval-and-editor-count)). `reverseTrial` is `true` for the reverse trial (342: provider `manual`, status `trialing`; it ends at `trialEnd`, and checkout accepts the account), `false` for any other subscription ([billing.md § The reverse trial](./billing.md#the-reverse-trial-built-off)).
   - `team`: `null` on a person's account; on a team's, `{ editorCount, assistantMemberMaxPct }`: `editorCount`, the distinct people with editor or owner on the team's projects (its members and admins, and direct editors and owners of its projects, each once; viewers, contributors and farmers hold no seat); `assistantMemberMaxPct` (339), the most of the team's monthly assistant dollars one member may use, 1–100 (default 50; binds on a per-seat plan, Team).
   - `usage = { month: 'YYYY-MM', catchments, liveCatchments, reports, packsIssued, assistantTokens, assistantCost }`,
     each but `assistantCost` `{ used, limit }` (`limit` `null` = unlimited). `catchments.used`

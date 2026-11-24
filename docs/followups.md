@@ -882,13 +882,16 @@ plan stays on the issue. Found while building:
 Phase 1 (shadow mode) is in [billing.md](./billing.md); the later phases
 are #641's checklist. Open items from building it:
 
-- [ ] **The Plan page's "Compare plans" could link the public pricing
+- [x] **The Plan page's "Compare plans" could link the public pricing
       page.** `/welcome/pricing` (Phase 4) now shows the three plans side by
       side; the Plan page (`PlanUsage.svelte`) and its Compare plans links
       (assistant panel, live-catchment note) still go to `/account/plan`.
       Durable fix: a "See all plans" link on the Plan page to
       `/welcome/pricing`, once its owner settles where comparing plans
       lives. Trigger: the Plan page's next change.
+      *Done (round 2026-11-24): the Plan card ends with **See all plans**
+      to `/welcome/pricing` (ui.md § Plan and usage). The Compare plans
+      links stay on `/account/plan`, where Upgrade is.*
 - [ ] **The pricing page's Afrikaans has no native review.** Written by the
       i18n-translator and checked by the i18n-checker (2026-11-24); terms to
       put to the client's reviewer: "lewendig" for live, "gepubliseerde
@@ -961,13 +964,13 @@ are #641's checklist. Open items from building it:
       a trial** (round 10, 344): checkout accepts an account whose live row
       is a reverse trial, and `app_billing_apply` ends the trial (`expired`,
       logged as an `expire` by `checkout`) in the transaction that writes the
-      paid row (billing.md § The reverse trial). Its UI half is open: the
-      Plan page offers Manage billing, not Upgrade, while the trial is live
-      (`components/billing/plan.ts` `billingActions`), and the plan JSON
-      doesn't yet say a subscription is a reverse trial; trigger: before
-      `REVERSE_TRIAL` goes on. Still to do: (2) the banner 3 days before the end (the email 3 days before is
-      done: 346, billing.md § Plan emails; the banner belongs on the Plan
-      page and the workspace);
+      paid row (billing.md § The reverse trial), and its UI half (round
+      2026-11-24, 349): the plan JSON's `subscription.reverseTrial`, and
+      the Plan page offers Upgrade, not Manage billing, while the trial is
+      live (`plan.ts` `billingActions`); ~~(2) the banner 3 days before the
+      end~~ (round 2026-11-24, 349: on the Plan page and in the workspace
+      header, `billing/trialEnding.ts`, from the project's `planTrialEnd`;
+      the email is 346's). Still to do:
       ~~(3) the live-catchment picker at the end and pausing the others~~
       (345's picker and 341's pause after the 14-day grace, which a trial's
       end starts like any lapse); (4) the assistant panel's

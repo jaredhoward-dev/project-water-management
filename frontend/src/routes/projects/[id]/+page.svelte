@@ -49,7 +49,7 @@
 	import { trackClose } from '#lib/nav/closeNav.js';
 	import { resolve } from '$app/paths';
 	import { basePath } from '#lib/nav/base.js';
-	import { pausedNotice } from '#lib/components/billing/planPause.js';
+	import { pausedNotice, trialNotice } from '#lib/components/billing/planPause.js';
 	import { page } from '$app/state';
 	import type { SeriesMeta } from '@water-management/engine';
 	import { headlineView } from '#lib/calibration/zones.js';
@@ -1132,8 +1132,16 @@
 {#snippet headerNotices()}
 	{@const behind = !banner && behindRun.length > 0 && tab !== 'runs'}
 	{@const paused = pausedNotice(project, basePath())}
-	{#if !canEdit || banner || behind || rerunError || paused}
+	{@const trial = trialNotice(project, basePath())}
+	{#if !canEdit || banner || behind || rerunError || paused || trial}
 		<div class="notice-line" data-testid="notice-line">
+			{#if trial}
+				<!-- 349: the person's reverse trial ends within 3 days (billing/trialEnding.ts); an information note, not an error. -->
+				<span class="note note-info" role="note" data-testid="plan-trial-ending">
+					<span class="note-text">{trial.text}</span>
+					<a href={trial.href}>{trial.linkText}</a>
+				</span>
+			{/if}
 			{#if paused}
 				<!-- 341: operations paused past Free's live catchments (billing/planPause.ts); an information note, not an error. -->
 				<span class="note note-info" role="note" data-testid="plan-paused">

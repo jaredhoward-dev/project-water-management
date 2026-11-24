@@ -7,6 +7,7 @@
 // workspace is; a farmer page never shows it.
 import type { Project } from '#lib/api/types.js';
 import { fmtDate } from '#lib/format/number.js';
+import { trialEndingText } from './trialEnding';
 
 export interface PausedNotice {
 	text: string;
@@ -38,4 +39,23 @@ export function pausedNotice(p: Pick<Project, 'planPausedAt' | 'team'> | null | 
 		href: planHref(teamId, base),
 		linkText: p.team ? 'The team’s plan' : 'Plan and usage'
 	};
+}
+
+/** The header's trial-ending notice (349; trialEnding.ts): its words and the plan page to upgrade on. */
+export interface TrialNotice {
+	text: string;
+	href: string;
+	linkText: string;
+}
+
+/**
+ * The notice in the 3 days before the reverse trial of the account this
+ * catchment is billed to ends, or null. Only the account's person gets
+ * `planTrialEnd` (349), so a member never sees someone else's trial. Links to
+ * the Plan page, where Upgrade is offered during the trial.
+ */
+export function trialNotice(p: Pick<Project, 'planTrialEnd' | 'team'> | null | undefined, base = '', now: number = Date.now()): TrialNotice | null {
+	const text = trialEndingText(p?.planTrialEnd, now);
+	if (!text) return null;
+	return { text, href: planHref(p?.team?.id ?? null, base), linkText: 'Upgrade' };
 }

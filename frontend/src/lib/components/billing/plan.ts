@@ -178,15 +178,30 @@ export function usageRows(p: AccountPlan): UsageRow[] {
 	];
 }
 
+/** Whether the subscription is a live reverse trial (342: 14 days of Pro, no card), which checkout replaces (344). */
+export function onReverseTrial(s: Subscription | null | undefined): boolean {
+	return !!s && s.status === 'trialing' && s.reverseTrial === true;
+}
+
+/**
+ * Whether the account has a subscription someone set up: any live one but the
+ * reverse trial. Coming back from checkout, the page waits until one shows
+ * (the trial was already there before the payment).
+ */
+export function hasPaidSubscription(p: Pick<AccountPlan, 'subscription'>): boolean {
+	return !!p.subscription && !onReverseTrial(p.subscription);
+}
+
 /**
  * What the page offers for billing (Phase 3, docs/ui.md § Plan and usage):
  * nothing when the provider is `manual` or none (the operator changes plans by
- * hand); else Upgrade while there is no live subscription (Pro for a person,
- * Team for a team), and Manage billing once there is one.
+ * hand); else Upgrade while there is no live subscription, or only the reverse
+ * trial (which checkout replaces, 344; Pro for a person, Team for a team), and
+ * Manage billing once there is any other.
  */
 export function billingActions(p: AccountPlan): { upgrade: { code: 'pro' | 'team'; name: string } | null; manage: boolean } {
 	if (p.provider !== 'mock' && p.provider !== 'stripe') return { upgrade: null, manage: false };
-	if (p.subscription) return { upgrade: null, manage: true };
+	if (hasPaidSubscription(p)) return { upgrade: null, manage: true };
 	return { upgrade: p.account.kind === 'team' ? { code: 'team', name: 'Team' } : { code: 'pro', name: 'Pro' }, manage: false };
 }
 

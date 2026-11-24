@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { pausedNotice, planHref } from './planPause';
+import { pausedNotice, planHref, trialNotice } from './planPause';
 
 describe('pausedNotice (341: the workspace notice on a paused catchment)', () => {
 	it('says nothing on a catchment that isn’t paused, or from an older API', () => {
@@ -44,5 +44,22 @@ describe('planHref (the paused notice’s link)', () => {
 	it('never uses the words #641 rules out', () => {
 		const n = pausedNotice({ planPausedAt: '2026-12-03T08:00:00.000Z', team: null })!;
 		expect(n.text).not.toMatch(/quota|abuse|402|error/i);
+	});
+});
+
+describe('trialNotice (349: the workspace notice before a reverse trial ends)', () => {
+	const NOW = Date.parse('2026-12-05T10:00:00.000Z');
+	it('says nothing without a trial end (a member, no trial, an older API) or before its last 3 days', () => {
+		expect(trialNotice(null, '', NOW)).toBeNull();
+		expect(trialNotice({ planTrialEnd: null, team: null }, '', NOW)).toBeNull();
+		expect(trialNotice({ team: null }, '', NOW)).toBeNull();
+		expect(trialNotice({ planTrialEnd: '2026-12-15T10:00:00.000Z', team: null }, '', NOW)).toBeNull();
+	});
+
+	it('in the last 3 days, says when it ends and links Upgrade to your plan', () => {
+		const n = trialNotice({ planTrialEnd: '2026-12-07T10:00:00.000Z', team: null }, '/app', NOW)!;
+		expect(n.text).toMatch(/^Your Pro trial ends on /);
+		expect(n.href).toBe('/app/account/plan');
+		expect(n.linkText).toBe('Upgrade');
 	});
 });

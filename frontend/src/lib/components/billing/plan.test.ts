@@ -5,6 +5,8 @@ import {
 	MAX_CHECKOUT_SEATS,
 	billingActions,
 	billingRedirect,
+	hasPaidSubscription,
+	onReverseTrial,
 	checkoutNotice,
 	checkoutTotalMinor,
 	editorsHint,
@@ -259,6 +261,26 @@ describe('billingActions (Phase 3)', () => {
 	});
 	it('offers Manage billing, not Upgrade, once there is a subscription', () => {
 		expect(billingActions(plan({ subscription: sub({}) }))).toEqual({ upgrade: null, manage: true });
+	});
+	it('offers Upgrade during a live reverse trial (checkout replaces it, 344), Manage billing on any other trial', () => {
+		const trial = sub({ status: 'trialing', trialEnd: '2026-12-07T10:00:00.000Z', reverseTrial: true });
+		expect(billingActions(plan({ subscription: trial }))).toEqual({ upgrade: { code: 'pro', name: 'Pro' }, manage: false });
+		expect(billingActions(plan({ provider: 'manual', subscription: trial }))).toEqual({ upgrade: null, manage: false });
+		// A Stripe trial (set by hand in Stripe's dashboard) and an older API without the flag: Manage billing.
+		expect(billingActions(plan({ subscription: sub({ status: 'trialing', reverseTrial: false }) }))).toEqual({ upgrade: null, manage: true });
+		expect(billingActions(plan({ subscription: sub({ status: 'trialing' }) }))).toEqual({ upgrade: null, manage: true });
+	});
+});
+
+describe('onReverseTrial and hasPaidSubscription', () => {
+	it('tells the reverse trial from a subscription someone set up', () => {
+		expect(onReverseTrial(null)).toBe(false);
+		expect(onReverseTrial(sub({ status: 'trialing', reverseTrial: true }))).toBe(true);
+		// Expired: no longer live, whatever the flag says.
+		expect(onReverseTrial(sub({ status: 'expired', reverseTrial: true }))).toBe(false);
+		expect(hasPaidSubscription(plan())).toBe(false);
+		expect(hasPaidSubscription(plan({ subscription: sub({ status: 'trialing', reverseTrial: true }) }))).toBe(false);
+		expect(hasPaidSubscription(plan({ subscription: sub({}) }))).toBe(true);
 	});
 });
 

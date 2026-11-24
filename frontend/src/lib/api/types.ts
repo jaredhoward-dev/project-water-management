@@ -289,6 +289,11 @@ export interface Project extends ProjectSummary {
 	 * catchments (341, docs/billing.md § Pausing after a downgrade), ISO; null when not paused. Absent from an older API.
 	 */
 	planPausedAt?: string | null;
+	/**
+	 * When the reverse trial (342: 14 days of Pro, no card) of the account this catchment is billed to ends, ISO; only
+	 * to that account's person (349), else null. The header's trial-ending notice reads it. Absent from an older API.
+	 */
+	planTrialEnd?: string | null;
 }
 
 /** What a series merge or replace answers: the series, and when the automatic re-run it queued is due (null: none queued). */
@@ -4708,6 +4713,12 @@ export interface Subscription {
 	cancelAtPeriodEnd: boolean;
 	/** How often it bills (332): null when not recorded (a staff grant, a subscription from before 332, an interval that isn't a plain month or year). */
 	interval: BillingInterval | null;
+	/**
+	 * The reverse trial (342: provider `manual`, status `trialing`, docs/billing.md § The reverse trial): the Plan page
+	 * offers Upgrade in its place and warns before `trialEnd`. False for a staff grant or a Stripe trial; absent from an
+	 * older API.
+	 */
+	reverseTrial?: boolean;
 }
 
 /** One counted thing this month; `limit: null` is unlimited. */
