@@ -203,6 +203,9 @@ export const toUser = (r: UserRow) => ({
 });
 export const USER_COLS = `id, email, display_name, email_verified_at, locale, volume_unit, mail_suppressed_at, mail_suppressed_reason, terms_version, farm_notice_version, ${PREFERENCES_COL}`;
 
+/** A disposable address at sign-up while BILLING_ENFORCED is on (issue #641). */
+const signupDisposable = () => ApiError.coded(400, 'signup_disposable', 'use a permanent email address: this one is from a temporary-mail service');
+
 /** Whether the invite behind this token hash is live and names exactly this address (the closed sign-up's pass). */
 async function inviteNames(inviteHash: Buffer, address: string): Promise<boolean> {
 	const invited = await withoutUser(
@@ -260,20 +263,24 @@ export const authRoutes = new Hono<AuthEnv>()
 			c.header('Retry-After', String(wait));
 			throw ApiError.coded(429, 'signup_throttled', 'too many sign-ups from your network — try again later', { seconds: wait });
 		}
+		const inviteHash = body.inviteToken ? parseToken(body.inviteToken) : null;
+		// Whether a live invite names exactly this address; looked up at most once, and only when a rule below asks.
+		let invitedFor: Promise<boolean> | undefined;
+		const invited = () => (invitedFor ??= inviteHash ? inviteNames(inviteHash, body.email) : Promise.resolve(false));
 		// A disposable address (auth/disposable.ts, issue #641 item 5 "block disposable domains"), only with
 		// BILLING_ENFORCED on, like every other Free-tier rule (docs/billing.md § Verified email on Free). After the
-		// throttle, before the address is looked up: it depends on the domain alone, so it tells nothing about accounts.
-		if (billingEnforced() && isDisposable(body.email)) {
-			throw ApiError.coded(400, 'signup_disposable', 'use a permanent email address: this one is from a temporary-mail service');
-		}
-		const inviteHash = body.inviteToken ? parseToken(body.inviteToken) : null;
+		// throttle, before the address is looked up: it depends on the domain (and the invite) alone, so it tells
+		// nothing about accounts. A sign-up through a live invite for exactly this address is exempt: the farmer or
+		// viewer a catchment's manager invited is always free, and the invite already proves the inbox.
+		const disposable = billingEnforced() && isDisposable(body.email);
+		if (disposable && !(await invited())) throw signupDisposable();
 		// Sign-up by invitation (auth/signupOpen.ts, docs/security.md § Sign-up
 		// by invitation): while sign-up is closed, only a live invite for
 		// exactly this address may make an account. Checked after the throttle,
 		// so guessing invite tokens is throttled too, and before anything is
 		// written or mailed. An invite names its address, so the 403 tells its
 		// holder nothing new, and anyone else gets it for every address.
-		if (!signupOpen() && !(inviteHash && (await inviteNames(inviteHash, body.email)))) {
+		if (!signupOpen() && !(await invited())) {
 			throw ApiError.coded(403, 'signup_closed', 'sign-up is by invitation only: ask the person who manages your catchment to invite you');
 		}
 		const hash = await hashPassword(body.password);
@@ -304,8 +311,11 @@ export const authRoutes = new Hono<AuthEnv>()
 					return { kind: 'joined', row: fresh[0]! };
 				}
 			}
-			// Closed, and the invite lapsed since the check above (expired or
-			// withdrawn in between): throwing rolls the new account back.
+			// The invite lapsed since the checks above (expired or withdrawn in
+			// between): a disposable address it let through is refused after
+			// all, and so is any sign-up while closed. Throwing rolls the new
+			// account back.
+			if (disposable) throw signupDisposable();
 			if (!signupOpen()) throw ApiError.coded(403, 'signup_closed', 'sign-up is by invitation only: ask the person who manages your catchment to invite you');
 			const verify = await verificationMail(db, row.id, row.email);
 			return { kind: 'confirm', mail: 'mail' in verify ? verify.mail : null };

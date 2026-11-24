@@ -1,6 +1,7 @@
 // Changing the email address, re-verified (347_email_change.sql,
 // auth/email-change-routes.ts), and the sign-up's disposable-domain refusal
-// (auth/routes.ts /register, issue #641 item 5). Mail is captured in memory.
+// (auth/routes.ts /register, issue #641 item 5; a live invite for exactly the
+// address is exempt). Mail is captured in memory.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LEGAL_VERSION } from '@water-management/engine/legal';
 import { withUser } from '../db/tx.js';
@@ -34,6 +35,40 @@ describe('sign-up with a disposable address', () => {
 		expect((await register(fresh('permanent'))).status).toBe(202);
 		vi.stubEnv('BILLING_ENFORCED', 'false');
 		expect((await register(`temp-${crypto.randomUUID()}@mailinator.com`)).status).toBe(202);
+	});
+
+	it('is allowed through a live invite for exactly that address (invitees are always free); not through one for another', async () => {
+		const owner = await signUp('DisposableInviter');
+		const projectId = (await owner.call('POST', '/projects', { name: 'Invites a throwaway' })).body.project.id as string;
+		const invite = async (email: string) => {
+			expect((await owner.call('POST', `/projects/${projectId}/members`, { email, role: 'viewer' })).status).toBe(201);
+			return tokenIn(lastMailTo(email));
+		};
+		vi.stubEnv('BILLING_ENFORCED', 'true');
+		const invited = `farmer-${crypto.randomUUID()}@mailinator.com`;
+		const token = await invite(invited);
+		const ok = await anon('POST', '/auth/register', {
+			email: invited,
+			password: PASSWORD,
+			displayName: 'Farmer',
+			acceptTerms: LEGAL_VERSION,
+			inviteToken: token
+		});
+		expect(ok.status).toBe(201);
+		expect(ok.body.user.email).toBe(invited);
+		// Positive control: another disposable address carrying that (live) invite is still refused, and nothing is made.
+		const other = `other-${crypto.randomUUID()}@mailinator.com`;
+		const otherToken = await invite(`second-${crypto.randomUUID()}@mailinator.com`);
+		const refused = await anon('POST', '/auth/register', {
+			email: other,
+			password: PASSWORD,
+			displayName: 'Other',
+			acceptTerms: LEGAL_VERSION,
+			inviteToken: otherToken
+		});
+		expect(refused.status).toBe(400);
+		expect(refused.body.code).toBe('signup_disposable');
+		expect(await asOwner('SELECT 1 FROM app_user WHERE email = $1', [other])).toEqual([]);
 	});
 });
 
