@@ -1,0 +1,238 @@
+name: Owner action (billing, authority)
+
+# Runs one of the operator's owner actions in production (docs/deployment.md
+# § Owner actions; runbooks 17, 21 and 22): grant a plan, revoke a grant, list
+# grants, the monthly billing report, or confirm who acts for a project's
+# responsible authority. The database is in a private VPC, so the action runs
+# in the migrate Lambda, which already holds the schema owner's credentials
+# (backend/src/ops/ownerActions.ts): a fixed, named action whose every field
+# its strict schema checks before anything connects. No SQL is ever sent.
+#
+# Two jobs, as in load-reference.yml:
+#   preflight  no environment, no AWS: the `production` environment exists,
+#              has a required reviewer and its branch policy
+#              (scripts/release/preflight.mjs environment).
+#   act        `environment: production` (a required reviewer, then OIDC: the
+#              deploy role's trust policy pins that environment), from main
+#              only: invokes the migrate Lambda with { action, … } and writes
+#              what it did to the job summary. The session is narrowed to
+#              invoking that one function (inline-session-policy).
+#
+# This log and its summary are public (the repo is). So:
+#   - no input is spliced into a command or set in a step's environment
+#     (both print in the log): the payload is built by jq from the event file,
+#     and the address is masked before anything else runs;
+#   - the Lambda's answer never carries an address or a name, and this
+#     summary prints less still: ids, plans, dates and counts, never a grant's
+#     reason or an email domain. For those, invoke the function from your SSO
+#     session (deployment.md § Owner actions), whose answer stays on your
+#     machine.
+# Who acts (billing_grant_log.granted_by) is the GitHub login that started the run.
+#
+#   gh workflow run billing-admin.yml -f action=billing-grant -f email=<address> -f plan=team -f until=2027-01-31 -f reason="Invoice INV-0042"
+#   gh workflow run billing-admin.yml -f action=billing-revoke -f team_id=<uuid> -f reason="Pilot ended"
+#   gh workflow run billing-admin.yml -f action=billing-grants            (every live grant; give email or team_id for one account's log)
+#   gh workflow run billing-admin.yml -f action=billing-report -f month=2026-11
+#   gh workflow run billing-admin.yml -f action=authority-confirm -f project_id=<uuid> -f email=<address> -f reference="<the letter>"
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'The owner action (docs/deployment.md § Owner actions)'
+        required: true
+        type: choice
+        options:
+          - billing-grants
+          - billing-grant
+          - billing-revoke
+          - billing-report
+          - authority-confirm
+      email:
+        description: 'The person’s address (grant, revoke, grants, authority-confirm). Masked; never printed'
+        required: false
+        type: string
+        default: ''
+      team_id:
+        description: 'Or the team’s id (grant, revoke, grants): /teams/<id>'
+        required: false
+        type: string
+        default: ''
+      plan:
+        description: 'Grant: the plan'
+        required: false
+        type: choice
+        default: none
+        options:
+          - none
+          - pro
+          - team
+      until:
+        description: 'Grant: last day, YYYY-MM-DD (SAST); empty: until revoked'
+        required: false
+        type: string
+        default: ''
+      replace:
+        description: 'Grant: end a live manual or mock subscription first (never a Stripe one)'
+        required: false
+        type: boolean
+        default: false
+      reason:
+        description: 'Grant, revoke: the reason, 1–500 characters. The customer reads it (their plan page, Download my data)'
+        required: false
+        type: string
+        default: ''
+      month:
+        description: 'Report: YYYY-MM; empty: this month (SAST)'
+        required: false
+        type: string
+        default: ''
+      project_id:
+        description: 'Authority-confirm: the project’s id'
+        required: false
+        type: string
+        default: ''
+      reference:
+        description: 'Authority-confirm: the authority’s letter or request, 1–200 characters (in the project’s History)'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  # The migrate function runs one at a time (reserved concurrency 1).
+  group: migrate-lambda-owner-action
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Preflight (environment, AWS config)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read # read the production environment's protection rules
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          # No cache in a workflow that acts with production credentials
+          # (zizmor cache-poisoning).
+          package-manager-cache: false
+
+      - name: Environment preflight
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUIRED_CONFIG: AWS_DEPLOY_ROLE_ARN,AWS_REGION,MIGRATE_FUNCTION_NAME
+          AWS_DEPLOY_ROLE_ARN: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          MIGRATE_FUNCTION_NAME: ${{ vars.MIGRATE_FUNCTION_NAME }}
+        run: node scripts/release/preflight.mjs environment
+
+  act:
+    name: Act (migrate Lambda)
+    needs: [preflight]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: production
+      url: ${{ vars.PUBLIC_SITE_URL }}
+    permissions:
+      contents: read
+      id-token: write # OIDC: assume AWS_DEPLOY_ROLE_ARN, no long-lived keys
+    steps:
+      # First, before anything could print it: the address, read from the event file and masked.
+      - name: Mask the address
+        run: |
+          set -euo pipefail
+          email=$(jq -r '.inputs.email // ""' "$GITHUB_EVENT_PATH")
+          if [ -n "$email" ]; then echo "::add-mask::$email"; fi
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          role-session-name: owner-action-${{ github.run_id }}
+          aws-region: ${{ vars.AWS_REGION }}
+          # Narrow the deploy role to the one call this job makes: a session
+          # policy can only take away (docs/security.md § Reference loads).
+          inline-session-policy: >-
+            {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"lambda:InvokeFunction","Resource":"arn:aws:lambda:${{ vars.AWS_REGION }}:*:function:${{ vars.MIGRATE_FUNCTION_NAME }}"}]}
+
+      - name: Invoke the migrate Lambda with the action
+        env:
+          MIGRATE_FUNCTION_NAME: ${{ vars.MIGRATE_FUNCTION_NAME }}
+        run: |
+          set -euo pipefail
+          [ -n "$MIGRATE_FUNCTION_NAME" ] || { echo "::error::The MIGRATE_FUNCTION_NAME variable is not set (docs/deployment.md § GitHub configuration)."; exit 1; }
+          # Only the fields the action takes; an empty input is left out. The
+          # Lambda's strict schema refuses anything else.
+          jq '.inputs as $i
+            | def opt(k; v): if (v // "") == "" then {} else {(k): v} end;
+              def who: opt("email"; $i.email) + opt("teamId"; $i.team_id);
+            {action: $i.action} + (
+              if $i.action == "billing-grant" then who + {plan: $i.plan, reason: $i.reason, by: env.GITHUB_ACTOR,
+                replace: ($i.replace == true or $i.replace == "true")} + opt("until"; $i.until)
+              elif $i.action == "billing-revoke" then who + {reason: $i.reason, by: env.GITHUB_ACTOR}
+              elif $i.action == "billing-grants" then who
+              elif $i.action == "billing-report" then opt("month"; $i.month)
+              elif $i.action == "authority-confirm" then {projectId: $i.project_id, email: $i.email, reference: $i.reference}
+              else {} end)' "$GITHUB_EVENT_PATH" > payload.json
+          # Synchronous. No --log-type Tail: the function's log can quote the address.
+          aws lambda invoke \
+            --function-name "$MIGRATE_FUNCTION_NAME" \
+            --cli-binary-format raw-in-base64-out \
+            --payload fileb://payload.json \
+            --cli-read-timeout 300 \
+            result.json > meta.json
+          rm payload.json
+          # Every printed field is checked against the shape it must have and
+          # replaced if it doesn't match, so nothing but ids, plans, dates and
+          # counts reaches this public log.
+          defs='def safe(re): if type == "string" and test(re) then . else "unknown" end;
+            def count: if type == "number" and . >= 0 and . == floor then tostring else "unknown" end;
+            def id: safe("^[0-9a-f-]{36}$"); def plan: safe("^(free|pro|team)$"); def kind: safe("^(user|team)$");
+            def when: if . == null then "when revoked" else safe("^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}$") + " SAST" end;'
+          if jq -e 'has("FunctionError")' meta.json > /dev/null; then
+            jq -r "$defs"'
+              (.errorMessage | try fromjson catch {}) | if type == "object" then . else {} end
+              | "Code: \(.code | safe("^[a-z_]+$"))",
+                "Reason: \(.reason | safe("^[A-Za-z0-9 ,.:;()/§’–\\x27_-]+$"))",
+                "CloudWatch stream: \(.logStream | safe("^[A-Za-z0-9/_.$#\\[\\]-]+$")) (request \(.requestId | safe("^[A-Za-z0-9-]+$")))"' result.json | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "CloudWatch log group: /aws/lambda/${MIGRATE_FUNCTION_NAME} (the detail is there)"
+            echo "::error::The owner action failed; nothing was changed."
+            exit 1
+          fi
+          jq -r "$defs"'
+            if .action == "billing-grant" then
+              "Granted \(.plan | plan) to the \(.kind | kind) billing account \(.accountId | id), ending \(.endsAt | when)\(if .replaced == true then ", replacing its live subscription" else "" end)."
+            elif .action == "billing-revoke" then
+              "Revoked the \(.plan | plan) grant of the \(.kind | kind) billing account \(.accountId | id); it is on Free now."
+            elif .action == "billing-grants" and .kind == "all" then
+              "Live staff grants: \(.grants | length)", "",
+              "| billing account | kind | person or team | plan | since (SAST) | ends |", "|---|---|---|---|---|---|",
+              (.grants[] | "| \(.accountId | id) | \(.kind | kind) | \(.ownerId | id) | \(.plan | plan) | \(.since | safe("^[0-9 :-]{16}$")) | \(.until | when) |")
+            elif .action == "billing-grants" then
+              (if .accountId == null then "No billing account (Free, never granted)."
+               else "Billing account \(.accountId | id): on \(.planNow | plan) now. Reasons are not printed here (the account’s plan page shows them).", "",
+                 "| at (SAST) | action | plan | ends | by |", "|---|---|---|---|---|",
+                 (.log[] | "| \(.at | safe("^[0-9 :-]{16}$")) | \(.action | safe("^(grant|revoke|expire)$")) | \(.plan | plan) | \(.until | when) | \(.by | safe("^[A-Za-z0-9._-]{1,100}$")) |")
+               end)
+            elif .action == "billing-report" then
+              "Billing metrics for \(.report.month | safe("^[0-9]{4}-[0-9]{2}$")) (no addresses; email domains hidden)", "", "```json",
+              (.report | .abuse.domainClusters |= map(.domain = "(hidden)")
+                | walk(if type == "string" and (test("@") or (test("^[A-Za-z0-9 ,.:;()/%$_’–-]{0,200}$") | not)) then "(hidden)" else . end)
+                | tostring),
+              "```"
+            elif .action == "authority-confirm" then
+              "Confirmed person \(.userId | id) as acting for the responsible authority of project \(.projectId | id) (History: authority.confirmed by Operator)."
+            else "Unknown answer." end' result.json | tee -a "$GITHUB_STEP_SUMMARY"

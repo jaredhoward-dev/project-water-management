@@ -957,7 +957,7 @@ are #641's checklist. Open items from building it:
       mock sends it), and the plan page's total worked out from it and
       `seats`. Trigger: the plan page needs to show a subscription's
       total.
-- [ ] **No Lambda route for the operator's billing commands.** The staff
+- [x] **No Lambda route for the operator's billing commands.** The staff
       grant and the abuse report run as the schema owner, which production
       reaches only from a temporary instance inside the VPC
       (deployment.md § Runbooks 21 and 22, infra/README.md § Database access
@@ -966,6 +966,12 @@ are #641's checklist. Open items from building it:
       revoke and the report's counts (no SQL in the event, the report
       redacted as the script prints it), like the read-only checks. Trigger:
       the first staff grant or monthly report in production.
+      **Done (round 5, issue #641):** the migrate Lambda's owner actions
+      `billing-grant`, `billing-revoke`, `billing-grants`, `billing-report`
+      and `authority-confirm` (`backend/src/ops/ownerActions.ts`), run
+      through `.github/workflows/billing-admin.yml` in the `production`
+      environment (deployment.md § Owner actions; runbooks 17, 21 and 22
+      keep the SQL as a fallback).
 
 ## DB tests share the mail outbox (2026-10-02, PR #360)
       **Decided (round 3, N):** a bounded whole-file pass (data-sources.md § ssebop-eta); the build is its own item below.
