@@ -1,5 +1,5 @@
 // The assistant's dollar caps and the paced Free pool (issue #641;
-// 336_assistant_dollar_caps.sql, 337_assistant_sast_day.sql, docs/billing.md §
+// 336_assistant_dollar_caps.sql, 337_assistant_sast_day.sql, 342_reverse_trial.sql (the trial's caps), docs/billing.md §
 // Assistant dollar caps). app_assistant_begin decides; this module holds the
 // sums the backend shows or logs beside it, and the refusals' wording. The Free
 // day is the South African day (00:00 SAST, 22:00 UTC; 337); every month is
@@ -57,8 +57,16 @@ export function dayResetsAt(now = new Date()): string {
 	return new Date(sastDay(now).getTime() + DAY_MS - SAST_OFFSET_MS).toISOString();
 }
 
-/** app_assistant_begin's dollar outcomes. */
-export type DollarOutcome = 'day' | 'month' | 'member' | 'pool';
+/**
+ * The reverse trial's assistant caps in micro-USD (issue #641 "AI during the trial: Sonnet, $2 in all, $1 a day";
+ * 342_reverse_trial.sql assistant_trial_caps, which a DB test pins to these): over the whole trial, and a SAST day.
+ */
+export const TRIAL_CAPS = { totalUsdMicros: 2_000_000, dayUsdMicros: 1_000_000 } as const;
+
+/** app_assistant_begin's dollar outcomes ('trial', 'trial_day': a reverse trial's own caps, 342). */
+export type DollarOutcome = 'day' | 'trial' | 'trial_day' | 'month' | 'member' | 'pool';
+
+export const isDollarOutcome = (o: string): o is DollarOutcome => Object.hasOwn(DOLLAR_REFUSAL, o);
 
 /** Each dollar refusal's stable code (http/errors.ts ERROR_CODES) and the issue's words (#641 "Copy"; workspace, English). */
 
@@ -67,6 +75,16 @@ export const DOLLAR_REFUSAL: Record<DollarOutcome, { code: ErrorCode; message: (
 		code: 'assistant_daily_cap',
 		message: () =>
 			'That’s today’s free assistant use. It’s back at midnight, South African time. Everything else in your catchment keeps working: runs, calibration, scenarios and exports have no limit on Free.'
+	},
+	trial: {
+		code: 'assistant_trial_cap',
+		message: (resetsAt) =>
+			`You’ve used the assistant allowance that comes with your trial. The free assistant is back on ${longDate(resetsAt)}, when your trial ends. Everything else in your catchment keeps working.`
+	},
+	trial_day: {
+		code: 'assistant_trial_daily_cap',
+		message: () =>
+			'That’s today’s assistant use on your trial. It’s back at midnight, South African time. Everything else in your catchment keeps working.'
 	},
 	month: {
 		code: 'assistant_monthly_cap',

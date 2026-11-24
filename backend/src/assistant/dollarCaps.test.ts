@@ -113,7 +113,7 @@ describe('the dollar caps’ settings and words', () => {
 	});
 
 	it('words each refusal with a stable code, the pool one with no upgrade prompt', () => {
-		expect(Object.values(DOLLAR_REFUSAL).map((r) => r.code)).toEqual(['assistant_daily_cap', 'assistant_monthly_cap', 'assistant_member_cap', 'assistant_free_pool_spent']);
+		expect(Object.values(DOLLAR_REFUSAL).map((r) => r.code)).toEqual(['assistant_daily_cap', 'assistant_trial_cap', 'assistant_trial_daily_cap', 'assistant_monthly_cap', 'assistant_member_cap', 'assistant_free_pool_spent']);
 		expect(DOLLAR_REFUSAL.month.message('2026-12-01T00:00:00.000Z')).toContain('1 December');
 		expect(DOLLAR_REFUSAL.pool.message('')).toContain('This isn’t something you did');
 		expect(DOLLAR_REFUSAL.pool.message('')).not.toMatch(/Pro|plan/);
