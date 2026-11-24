@@ -23,7 +23,9 @@
 	let changedTo = $state('');
 
 	onMount(async () => {
-		if (page.url.searchParams.has('token')) void goto(resolve('verify-email/change'), { shallow: true, replace: true });
+		// A real (not shallow) replace: a shallow entry keeps the tokened URL in SvelteKit's history state and Back
+		// from another page navigates to it, sending the spent link again (account.spec.ts). The component stays.
+		if (page.url.searchParams.has('token')) void goto(resolve('verify-email/change'), { replace: true, reset: false });
 		if (!token) return;
 		try {
 			const { email } = await emailAuth.confirmEmailChange(token);

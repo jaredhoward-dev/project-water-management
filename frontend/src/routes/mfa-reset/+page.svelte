@@ -22,7 +22,7 @@
 	// Read once, then dropped from the address bar so it doesn't linger in history.
 	const token = linkToken(page.url);
 	onMount(() => {
-		if (page.url.searchParams.has('token')) void goto(resolve('mfa-reset'), { shallow: true, replace: true });
+		if (page.url.searchParams.has('token')) void goto(resolve('mfa-reset'), { replace: true, reset: false });
 	});
 
 	let busy = $state(false);

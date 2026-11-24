@@ -1194,8 +1194,12 @@ result without signing in, until it expires or its owner revokes it.
 - **In the fragment.** The URL is `/share#t=<token>`. A browser never sends
   the fragment to a server, so the token doesn't reach CloudFront, WAF or
   Lambda access logs, or a `Referer`. The `/share` page reads it, strips it
-  from the address bar with a shallow `goto` that replaces the history entry
-  (as the reset pages strip `?token=`; e2e checks each page's address after load), and POSTs it in a JSON body. The page sets `noindex` and
+  from the address bar with a `goto` that replaces the history entry
+  (as the reset pages strip `?token=`; e2e checks each page's address after load),
+  and POSTs it in a JSON body. The `goto` is a real navigation, never a
+  shallow one: a shallow entry keeps the tokened URL in SvelteKit's history
+  state, and Back from another page navigates to it, sending the spent token
+  again (account.spec.ts checks Back on the email change page). The page sets `noindex` and
   `no-referrer`. A link pasted into a chat app is still readable by whoever
   sees the message: that is what a link is.
 - **Owner-only for a baseline link.** `share_link` RLS: SELECT, INSERT (as

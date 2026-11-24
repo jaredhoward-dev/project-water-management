@@ -25,7 +25,7 @@
 	let otherAccount = $state<string | null>(null);
 
 	onMount(async () => {
-		if (page.url.searchParams.has('token')) void goto(resolve('verify-email'), { shallow: true, replace: true });
+		if (page.url.searchParams.has('token')) void goto(resolve('verify-email'), { replace: true, reset: false });
 		if (!token) return;
 		// Whether the signed-in account still needed confirming when the link was opened.
 		const wasUnconfirmed = session.user?.emailVerified === false;

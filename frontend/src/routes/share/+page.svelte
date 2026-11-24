@@ -94,7 +94,7 @@
 		const hash = location.hash || returning();
 		token = readShareToken(hash);
 		kind = readShareKind(hash);
-		if (location.hash) void goto(resolve('share'), { shallow: true, replace: true });
+		if (location.hash) void goto(resolve('share'), { replace: true, reset: false });
 		load();
 	}
 

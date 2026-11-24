@@ -18,7 +18,7 @@
 
 	const token = linkToken(page.url);
 	onMount(() => {
-		if (page.url.searchParams.has('token')) void goto(resolve('mfa-reset/cancel'), { shallow: true, replace: true });
+		if (page.url.searchParams.has('token')) void goto(resolve('mfa-reset/cancel'), { replace: true, reset: false });
 	});
 
 	let busy = $state(false);
