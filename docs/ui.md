@@ -5211,7 +5211,10 @@ map" card) stays the schematic; this is the geography.
   list), and a value read over a redrawn outline, the rest of the
   catchment's area, a dam in another unit's boundary and a moved gauge, each
   with a link to where it is set again (MAP from the grid, Rain for each
-  unit, Crops, Evaporation from the map, Network). The grid's "Where each
+  unit, Crops, Evaporation from the map, Network). A WR2012 reference whose
+  quaternary was looked up at the boundary or a gauge redrawn, moved or
+  deleted since is flagged too, linking to **WR2012 check: Propose from the
+  map** (followups F8/F14). The grid's "Where each
   hydrological unit’s area came from" says "’s earlier outline" beside such
   a unit. Until 2026-10-02 a line in the column with
   **Show the checks** opening a side sheet, **Map checks** (`checks=1`); that
@@ -9953,7 +9956,10 @@ calibration's line points at *How the shown run fits* for NSE and PBIAS.
   a gauge on the map, or typed coordinates) in the loaded quaternary dataset
   and lists its values (code, area, MAP, MAR, period, monthly means, source)
   beside what the form holds, each with **Use** (or *Same* / *Used*, or *Not
-  in the data*). A used value goes into the form only; Save keeps it. A
+  in the data*). A used value goes into the form only; Save keeps it, with
+  where it was looked up (`reference.lookup`: the point, the code, and the
+  boundary or gauge as it stood; nothing for typed coordinates), which the
+  Map's Checks re-check after a boundary edit. A
   proposal from the committed synthetic dataset carries a warning that its
   values are invented; with no dataset loaded, or no quaternary at the point,
   it says so (with no dataset, in plain words: enter the values from the

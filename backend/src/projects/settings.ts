@@ -501,6 +501,27 @@ export function normaliseBaselineAllocationMode(settings: Record<string, unknown
  * checks — the MAR within the rain on the quaternary when its MAP is given,
  * and the 12 monthly means (Mm³ per month) adding up to the MAR within 5 %.
  */
+/**
+ * Where the reference's quaternary was looked up on the map (engine
+ * Wr2012Lookup, docs/maps.md § Quaternary lookup): the point, the code found
+ * there and the feature the point came from as it stood, so the Map's Checks
+ * can flag the reference after that feature is redrawn. Provenance only.
+ */
+const Wr2012Lookup = z
+	.object({
+		point: z.tuple([z.number().min(-180).max(180), z.number().min(-90).max(90)]),
+		code: z.string().trim().min(1).max(16),
+		feature: z
+			.object({
+				id: z.string().uuid(),
+				kind: z.enum(['catchment_boundary', 'gauge']),
+				updatedAt: z.iso.datetime({ offset: true }),
+				areaM2: z.number().min(0).max(1e13).nullable()
+			})
+			.strict()
+			.nullable()
+	})
+	.strict();
 const Wr2012Reference = z
 	.object({
 		quaternary: z.string().trim().min(1).max(16),
@@ -510,7 +531,8 @@ const Wr2012Reference = z
 		periodStart: z.number().int().min(1800).max(2200),
 		periodEnd: z.number().int().min(1800).max(2200),
 		mapMm: z.number().positive().max(20_000).nullable(),
-		source: z.string().trim().min(1).max(500)
+		source: z.string().trim().min(1).max(500),
+		lookup: Wr2012Lookup.nullable().optional()
 	})
 	.strict()
 	.superRefine((r, ctx) => {

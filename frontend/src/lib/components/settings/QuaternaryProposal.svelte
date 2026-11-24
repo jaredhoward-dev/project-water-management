@@ -13,7 +13,7 @@
 	import { parseDegrees } from '#lib/components/map/mapData.js';
 	import { fmtNum } from '#lib/format/number.js';
 	import type { Wr2012Draft } from './wr2012';
-	import { lookupPoints, proposalRows, useValue, type LookupPoint, type ProposalKey } from './quaternaryProposal';
+	import { lookupPoints, proposalRows, recordLookup, useValue, type LookupPoint, type ProposalKey } from './quaternaryProposal';
 
 	let { projectId, ref = $bindable() }: { projectId: string; ref: Wr2012Draft } = $props();
 
@@ -29,6 +29,8 @@
 	let lookupError = $state<string | null>(null);
 	let result = $state<QuaternaryLookup | null>(null);
 	let used = $state<ProposalKey[]>([]);
+	/** The map feature the shown result was looked up from (null: typed coordinates), recorded with each value used. */
+	let lookedFrom = $state<LookupPoint['feature'] | null>(null);
 
 	// Opened by Settings' "Propose from the map": the gauges and the boundary to start from.
 	$effect(() => {
@@ -52,6 +54,7 @@
 		e.preventDefault();
 		lookupError = null;
 		let at: [number, number];
+		let from: LookupPoint['feature'] | null = null;
 		if (choice === 'typed') {
 			if ('error' in typedLat || 'error' in typedLon) {
 				lookupError = 'error' in typedLat ? typedLat.error : (typedLon as { error: string }).error;
@@ -62,10 +65,12 @@
 			const p = points?.find((x) => x.id === choice);
 			if (!p) return;
 			at = p.at;
+			from = p.feature;
 		}
 		looking = true;
 		try {
 			result = await api.map.quaternary(projectId, at[0], at[1]);
+			lookedFrom = from;
 			used = [];
 		} catch (err) {
 			lookupError = msg(err);
@@ -79,6 +84,7 @@
 	function use(key: ProposalKey) {
 		if (!result?.quaternary) return;
 		useValue(ref, result.quaternary, key, result.point);
+		recordLookup(ref, result.quaternary, result.point, lookedFrom);
 		used = [...used, key];
 	}
 </script>

@@ -684,6 +684,30 @@ describe('SettingsPatch.wr2012', () => {
 		expect(ok({})).toBe(true);
 	});
 
+	it('accepts where the quaternary was looked up (a boundary, a gauge, typed coordinates), and none', () => {
+		const feature = { id: '00000000-0000-4000-8000-000000000001', kind: 'catchment_boundary', updatedAt: '2026-11-24T08:00:00.000Z', areaM2: 1.5e8 };
+		expect(ok({ reference: { ...reference, lookup: { point: [21.35, -33.65], code: 'Z99A', feature } } })).toBe(true);
+		expect(ok({ reference: { ...reference, lookup: { point: [21.35, -33.65], code: 'Z99A', feature: { ...feature, kind: 'gauge', areaM2: null } } } })).toBe(true);
+		expect(ok({ reference: { ...reference, lookup: { point: [21.35, -33.65], code: 'Z99A', feature: null } } })).toBe(true);
+		expect(ok({ reference: { ...reference, lookup: null } })).toBe(true);
+	});
+
+	it('rejects a malformed lookup', () => {
+		const feature = { id: '00000000-0000-4000-8000-000000000001', kind: 'gauge', updatedAt: '2026-11-24T08:00:00.000Z', areaM2: null };
+		const lookup = { point: [21.35, -33.65], code: 'Z99A', feature };
+		for (const bad of [
+			{ ...lookup, point: [-33.65, 210] },
+			{ ...lookup, point: [21.35] },
+			{ ...lookup, code: '' },
+			{ ...lookup, feature: { ...feature, kind: 'dam' } },
+			{ ...lookup, feature: { ...feature, id: 'not-a-uuid' } },
+			{ ...lookup, feature: { ...feature, updatedAt: 'yesterday' } },
+			{ ...lookup, extra: 1 }
+		]) {
+			expect(ok({ reference: { ...reference, lookup: bad } }), JSON.stringify(bad)).toBe(false);
+		}
+	});
+
 	it('rejects a MAR larger than the rain volume over the quaternary (MAP × area)', () => {
 		// 600 mm × 100 km² = 60 Mm³ a year of rain.
 		expect(ok({ reference: { ...reference, marMm3: 60, monthlyMm3: monthly(60) } })).toBe(true);

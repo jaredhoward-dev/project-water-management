@@ -5,7 +5,8 @@
 // (backend/scripts/examples/map.ts), so shared edges carry real rounding.
 import { describe, expect, it } from 'vitest';
 import type { MapFeature, MapFeatureKind, MapGeometry, MapNodeArea, MapPosition } from '#lib/api/types.js';
-import { GAUGE_RIVER_DISTANCE_M, haversineM, mapChecks, OVERLAP_TOLERANCE_M } from './mapChecks';
+import type { Wr2012Reference } from '@water-management/engine';
+import { GAUGE_RIVER_DISTANCE_M, haversineM, mapChecks, OVERLAP_TOLERANCE_M, WR2012_LOOKUP_LINK } from './mapChecks';
 
 const ORIGIN: MapPosition = [21.2, -33.64];
 const KM_PER_DEG_LAT = 110.95;
@@ -380,5 +381,77 @@ describe('what a map edit left behind (issue #646 F6–F9)', () => {
 		expect(kinds(mapChecks([point('gauge', 'Nudged weir', [0.03, 0], { nodeId: 'g', linkPoint: place([0, 0]) })], [g]))).not.toContain('gauge-moved');
 		// Linked before 273 (no point recorded), or not linked: nothing to compare.
 		expect(kinds(mapChecks([point('gauge', 'Old weir', [0.2, 0], { nodeId: 'g', linkPoint: null })], [g]))).not.toContain('gauge-moved');
+	});
+});
+
+describe('the WR2012 quaternary looked up at a feature edited since (followups F8, F14)', () => {
+	// Synthetic: an invented quaternary and round numbers.
+	const reference = (lookup: Wr2012Reference['lookup'], quaternary = 'Z99A'): Wr2012Reference => ({
+		quaternary,
+		areaKm2: 100,
+		marMm3: 10,
+		monthlyMm3: new Array(12).fill(10 / 12),
+		periodStart: 1990,
+		periodEnd: 2009,
+		mapMm: null,
+		source: 'Synthetic table',
+		lookup
+	});
+	const stamp = (f: MapFeature) => ({ id: f.id, kind: f.kind as 'catchment_boundary' | 'gauge', updatedAt: f.updatedAt, areaM2: f.areaM2 });
+	const wr = (features: MapFeature[], ref: Wr2012Reference | null) => mapChecks(features, [], {}, { wr2012: ref }).filter((c) => c.id.startsWith('wr2012-lookup'));
+
+	it('flags a boundary redrawn with another area since the lookup, linking to the lookup', () => {
+		const b = boundary(0, 0, 4, 4);
+		const centre = place([2, -2]);
+		const ref = reference({ point: centre, code: 'Z99A', feature: stamp(b) });
+		expect(wr([b], ref)).toEqual([]);
+		const redrawn = { ...b, geometry: rect(0, 0, 5, 4), areaM2: 20e6, updatedAt: '2026-11-24T00:00:00.000Z' };
+		expect(wr([redrawn], ref)).toEqual([
+			{
+				id: `wr2012-lookup:${b.id}`,
+				text: expect.stringMatching(/^The WR2012 reference's quaternary Z99A was looked up on the map, and the catchment boundary has been redrawn since it was looked up at its centre \(.+\): look the quaternary up again/),
+				featureIds: [b.id],
+				nodeIds: [],
+				link: WR2012_LOOKUP_LINK
+			}
+		]);
+		expect(WR2012_LOOKUP_LINK.href).toBe('?tab=calibration#set-wr2012');
+	});
+
+	it('keeps a rename (same area), but flags a reshape that keeps the area once the point lies outside it', () => {
+		const b = boundary(0, 0, 4, 4);
+		const ref = reference({ point: place([2, -2]), code: 'Z99A', feature: stamp(b) });
+		const later = '2026-11-24T00:00:00.000Z';
+		expect(wr([{ ...b, name: 'Renamed', updatedAt: later }], ref)).toEqual([]);
+		// Same 16 km², moved 10 km east: the point it was looked up at is outside it now.
+		expect(wr([{ ...b, geometry: rect(10, 0, 4, 4), updatedAt: later }], ref)).toHaveLength(1);
+	});
+
+	it('flags a boundary or gauge that is gone', () => {
+		const b = boundary(0, 0, 4, 4);
+		expect(wr([], reference({ point: place([2, -2]), code: 'Z99A', feature: stamp(b) }))[0]!.text).toContain('the catchment boundary it was looked up at is gone');
+		const g = point('gauge', 'Weir', [1, 1]);
+		const c = wr([], reference({ point: place([1, 1]), code: 'Z99A', feature: stamp(g) }));
+		expect(c[0]!.text).toContain('the gauge it was looked up at is gone');
+		expect(c[0]!.featureIds).toEqual([]);
+	});
+
+	it('flags a gauge moved more than GAUGE_MOVED_M since the lookup, not a nudge', () => {
+		const g = point('gauge', 'Weir', [0, 0]);
+		const ref = reference({ point: place([0, 0]), code: 'Z99A', feature: stamp(g) });
+		expect(wr([{ ...g, geometry: { type: 'Point', coordinates: place([0.03, 0]) } }], ref)).toEqual([]);
+		const moved = wr([{ ...g, geometry: { type: 'Point', coordinates: place([2, 0]) } }], ref);
+		expect(moved).toHaveLength(1);
+		expect(moved[0]!.text).toContain('gauge Weir has moved 2.0 km since it was looked up there');
+	});
+
+	it('leaves alone a reference without a lookup, typed coordinates, and a code typed since', () => {
+		const b = boundary(0, 0, 4, 4);
+		const redrawn = { ...b, geometry: rect(0, 0, 5, 4), areaM2: 20e6, updatedAt: '2026-11-24T00:00:00.000Z' };
+		expect(wr([redrawn], null)).toEqual([]);
+		expect(wr([redrawn], reference(undefined))).toEqual([]);
+		expect(wr([redrawn], reference(null))).toEqual([]);
+		expect(wr([redrawn], reference({ point: place([2, -2]), code: 'Z99A', feature: null }))).toEqual([]);
+		expect(wr([redrawn], reference({ point: place([2, -2]), code: 'Z99A', feature: stamp(b) }, 'Z99B'))).toEqual([]);
 	});
 });
