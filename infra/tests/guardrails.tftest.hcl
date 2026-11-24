@@ -823,8 +823,8 @@ run "production_guardrails" {
     error_message = "No distribution-wide custom error responses — they would rewrite API 403/404 JSON into index.html. The SPA fallback is the spa_rewrite function."
   }
   assert {
-    condition     = strcontains(aws_cloudfront_function.spa_rewrite.code, "var PRERENDERED = ['/welcome', '/welcome/af', '/privacy', '/terms', '/methods', '/data-sources'];") && strcontains(aws_cloudfront_function.spa_rewrite.code, "if (PRERENDERED.indexOf(uri) !== -1) {") && strcontains(aws_cloudfront_function.spa_rewrite.code, "request.uri = uri + '.html'")
-    error_message = "The prerendered pages (/welcome, /welcome/af, /privacy, /terms, /methods, /data-sources) must be served from their .html, not the SPA fallback."
+    condition     = strcontains(aws_cloudfront_function.spa_rewrite.code, "var PRERENDERED = ['/welcome', '/welcome/af', '/welcome/pricing', '/welcome/pricing/af', '/privacy', '/terms', '/methods', '/data-sources'];") && strcontains(aws_cloudfront_function.spa_rewrite.code, "if (PRERENDERED.indexOf(uri) !== -1) {") && strcontains(aws_cloudfront_function.spa_rewrite.code, "request.uri = uri + '.html'")
+    error_message = "The prerendered pages (/welcome, /welcome/af, /welcome/pricing, /welcome/pricing/af, /privacy, /terms, /methods, /data-sources) must be served from their .html, not the SPA fallback."
   }
   assert {
     condition     = aws_acm_certificate.frontend.domain_name == "icwbt.jaredhoward.com" && toset(aws_acm_certificate.frontend.subject_alternative_names) == toset(["water-management.jaredhoward.com"])
