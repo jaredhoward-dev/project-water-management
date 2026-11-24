@@ -89,6 +89,7 @@ Every job that fetches from an upstream:
 | [deafrica-wofs-scenes](#deafrica-wofs-scenes) | DE Africa WOfS (`wofs_ls`, per Landsat scene) and its STAC search, summed inside our own dam outlines (built R5-C) | built; runs in the fetcher's `dams-weekly` mode, off in production until `dam_observations_enabled` | `explorer.digitalearth.africa`, `deafrica-services.s3.af-south-1.amazonaws.com` | – | `backend/src/dams/observed/wofs/` (`pass.ts`, `stac.ts`, `sum.ts`), `backend/src/raster/` (`cog.ts`, `mask.ts`, `utm.ts`) |
 | [deafrica-sentinel-2-c1](#deafrica-sentinel-2-c1) | DE Africa Sentinel-2 L2A Collection 1 (`s2_l2a_c1`), our own water classification inside traced dam outlines (issue #624) | built, off by default (#624 step 4: the pass, behind `DAM_OBSERVATIONS_S2` / `dam_s2_enabled`; not shown on a screen yet) | `deafrica-sentinel-2-l2a-c1.s3.af-south-1.amazonaws.com`, `explorer.digitalearth.africa` | – | `backend/src/dams/observed/sentinel/` (`s2.ts`, `pass.ts`); `wofs/stac.ts` (`assetUrl`, `s2_l2a_c1`) |
 | [deafrica-sentinel-1](#deafrica-sentinel-1) | DE Africa Sentinel-1 RTC (`s1_rtc`), radar water as a secondary dam observation (issue #624) | built, off by default (#624 step 5: the pass and the S1/S2 agreement report, behind `DAM_OBSERVATIONS_S1` / `dam_s1_mode`: `measure` runs it with no radar shown, `on` also loads radar for the dams whose own agreement passes) | `deafrica-sentinel-1.s3.af-south-1.amazonaws.com`, `explorer.digitalearth.africa` | – | `backend/src/dams/observed/sentinel/` (`s1.ts`, `pass.ts`, `agreement.ts`); `wofs/stac.ts` (`assetUrl`, `s1_rtc`) |
+| [swot-lakesp](#swot-lakesp) | SWOT LakeSP Version D (`SWOT_L2_HR_LakeSP_D`): per-pass lake water-surface elevation and area by Prior Lake Database lake, for measured dam curves (issue #625) | planned (trial, #625): a one-off operator-run script, no production path; nothing fetches it yet | `cmr.earthdata.nasa.gov`, `archive.swot.podaac.earthdata.nasa.gov` (Earthdata Login bearer token) | – | #625 step 2 `ingest/swot_trial.py` (not built) |
 | [wapor-aeti](#wapor-aeti) | FAO WaPOR v3 `L2-AETI-D`, dekadal actual ET and interception at 100 m (a unit's observed water use, issue #623) | built, off (`et_observations_enabled`); blocked in production until FAO's reply is recorded on #618 (step 8a) | `storage.googleapis.com` (bucket `fao-gismgr-wapor-3-data` only) | – | `backend/src/water-use/observed/` (`wapor.ts`, `pass.ts`; the comparison is #623 step 5) |
 | [ssebop-eta](#ssebop-eta) | USGS FEWS NET SSEBop v6.1 global dekadal actual ET at 1 km (WaPOR's fallback, issue #623) | planned (#623 step 6: a bounded whole-file pass, decided; built only if FAO declines or as a second opinion) | `edcintl.cr.usgs.gov` (the `…/global/dekadal/etav61/` tree only) | – | `backend/src/water-use/observed/upstream.ts` |
 | [dynamical](#dynamical) | dynamical.org's copy of CHIRPS v3 | planned R3-E (verification only) | `s3://dynamical-ucsb-chc-chirps` (us-west-2) | – | R3 `ingest/verify_copy.py` |
@@ -667,6 +668,84 @@ for the WOfS backfill's pace only: each key keeps its own cadence below.
   from invented scenes (`backend/fixtures/feeds/s1-sample.json`,
   `sentinel/s1Fixtures.ts`), so dev, CI and e2e never reach either host.
 - **Owner:** the operator; code `backend/src/dams/observed/` (#624).
+
+### swot-lakesp
+
+- **Source:** SWOT (Surface Water and Ocean Topography, the NASA–CNES
+  mission) Level 2 KaRIn High Rate Lake Single-Pass Vector product, Version
+  D: collection `SWOT_L2_HR_LakeSP_D` (CMR `C3233944983-POCLOUD`, DOI
+  10.5067/SWOT-LAKESP-D, released 2025-05-13, from 2022-12-16, status
+  ACTIVE), archived by PO.DAAC, processed at JPL. For each pass and
+  continent (`AF` for us) there are three granules, each one zipped
+  shapefile: `Obs` (observed features), `Prior` (one row per Prior Lake
+  Database lake, with `lake_id`, `wse`, `area_total`, the quality flags and
+  time; the one the trial reads) and `Unassigned`. The three are also their
+  own collections (`SWOT_L2_HR_LakeSP_obs_D`, `_prior_D`, `_unassigned_D`,
+  the same DOI). A granule is about 2 MB (the `Obs` and `Prior` of pass
+  059_208 on 2026-11-19: 2.0 and 1.7 MB). Read in CMR on 2026-11-24.
+- **Hosts:** `cmr.earthdata.nasa.gov` (the granule search by bounding box
+  and dates, no sign-in) and `archive.swot.podaac.earthdata.nasa.gov`
+  (PO.DAAC's SWOT archive, the `podaac-swot-ops-cumulus-protected` path;
+  not `archive.podaac.earthdata.nasa.gov`, which #625's design named).
+  Without a login it answers 302 to Earthdata Login's OAuth page (checked
+  2026-11-24, no file fetched); with a bearer token it redirects to a
+  pre-signed URL in PO.DAAC's us-west-2 bucket (the usual Cumulus pattern,
+  not yet seen with our token). Direct S3 access
+  (`s3://podaac-swot-ops-cumulus-protected/SWOT_L2_HR_LakeSP_D/`, with
+  `/s3credentials`) works only from us-west-2, so it isn't for us.
+- **Licence:** NASA's data use guidance: "Unless the content is marked with
+  a use restriction or license, data provided from a NASA-led mission are
+  licensed as Creative Commons Zero (CC0)", and restricted content "shall be
+  labeled as such"
+  ([Earthdata](https://www.earthdata.nasa.gov/engage/open-data-services-software-policies/data-use-guidance),
+  read 2026-11-24). The collection carries no label: its CMR record has no
+  `UseConstraints` and no `AccessConstraints` (read 2026-11-24), and its
+  PO.DAAC page names no licence and asks only for citation (read
+  2026-10-27; podaac.jpl.nasa.gov refused connections on 2026-11-24). NASA's
+  data and information policy adds no period of exclusive access and
+  non-discriminatory access for all users
+  ([Earthdata](https://www.earthdata.nasa.gov/engage/open-data-services-software-policies/data-information-policy),
+  read 2026-11-24). So CC0: commercial use and redistributing values or
+  curves derived from them are allowed, which passes D-B. Two caveats.
+  SWOT is a joint mission, and NASA's guidance says CC0 for "NASA-led"
+  missions; PO.DAAC distributes it as NASA's (publisher "JPL NASA") with no
+  label, which is what the guidance says a restriction would need, so we
+  read it as CC0. And CNES's copies (Hydroweb.next, AVISO) carry CNES's own
+  terms; we never use them.
+- **Attribution:** none is required under CC0; NASA asks that the dataset
+  be cited and NASA acknowledged as the source, without implying NASA's
+  endorsement. Wherever a derived curve shows: "SWOT LakeSP vD, NASA/CNES,
+  PO.DAAC", and in a report, PO.DAAC's citation (its usual form; the
+  landing page's own wording to be checked when it answers): "SWOT. 2025. SWOT Level 2
+  Lake Single-Pass Vector Data Product, Version D. Ver. D. PO.DAAC, CA, USA.
+  Dataset accessed [date] at https://doi.org/10.5067/SWOT-LAKESP-D."
+- **Contact:** PO.DAAC user services (podaac@podaac.jpl.nasa.gov) and the
+  Earthdata forum; Earthdata Login support (earthdata-support@nasa.gov).
+- **Access pattern (the trial):** run once, by the operator, never by the
+  app: `ingest/swot_trial.py` (#625 step 2) searches CMR for the `Prior`
+  granules over the dams' bounding box from 2023-07 on, downloads each zip
+  over HTTPS with the operator's Earthdata Login bearer token (the same
+  token kind as [imerg](#imerg); the operator exports it in their own
+  shell, Claude never handles it), and keeps only the rows whose `lake_id`
+  matches a dam. Per-dam rows go to the gitignored `data/`; the spike report
+  (`docs/spikes/604-swot-trial.md`) has aggregate figures only. Earthdata
+  Login's pages publish no rate limit or automated-access rule (its
+  Terms of Service and policy pages, read 2026-11-24); its sign-in banner
+  says "US Govt Property. Unauthorized use subject to prosecution", which a
+  token used by its own account holder meets.
+- **Limits we keep to:** the polite-client checklist: one descriptive
+  User-Agent with `INGEST_CONTACT`, about 1 request a second, one in flight,
+  whole files only (a few hundred 2 MB zips for a season's passes over
+  the region), and a 401 or 403 stops the run with no retry.
+- **Limits of the data:** heights to 25 cm (1σ) are a requirement only for
+  lakes over 6.25 ha; 1 ha is a goal, and nothing below 1 ha or outside the
+  Prior Lake Database is reported (#625 § Does the "1 ha" claim hold?).
+- **Fallback:** none needed: if SWOT fails the trial, dams keep the power-law
+  curve from capacity (model.md §2.7a) and a farmer's or DWS survey curve.
+- **Offline:** the trial's unit tests read synthetic LakeSP fixtures; a
+  graduated pass would follow R5 (fixtures and off by default).
+- **Owner:** the operator; code #625 step 2 (`ingest/swot_trial.py`, not
+  built).
 
 ## Observed actual evapotranspiration
 
@@ -1558,7 +1637,9 @@ its comments 4, 6, 7 and 8).
 | Source | Licence | Access | Use |
 | --- | --- | --- | --- |
 | GloFAS v4 reanalysis | CEMS-FLOODS, free with attribution | EWDS API | modelled daily flow for ungauged catchments |
-| SWOT lake heights (Sentinel-1/2 and WaPOR moved to the register for #624 and #623) | SWOT terms unconfirmed | PO.DAAC | area–volume curves (trial) |
+
+Sentinel-1/2, WaPOR and SWOT moved to the register for #624, #623 and
+#625 ([swot-lakesp](#swot-lakesp)).
 
 ## Vendored lists
 
