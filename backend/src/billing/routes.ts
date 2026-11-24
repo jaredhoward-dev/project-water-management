@@ -137,6 +137,8 @@ async function portal(c: Context<AuthEnv>, resolve: (db: Db) => Promise<string |
 	if (!state) throw new ApiError(404, 'not found');
 	const provider = billingProvider();
 	if (!provider || provider.name === 'manual') throw new BillingUnavailableError();
+	// No fields, but a body sent is still read and checked (http/body.ts), as checkout's is: a hostile one is a 400, before any provider call.
+	z.object({}).strict().parse((await readJson(c, { optional: true })) ?? {});
 	const sub = state.plan.subscription;
 	const live: LiveSubscription | null = sub
 		? {
