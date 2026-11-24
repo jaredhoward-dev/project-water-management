@@ -15,6 +15,7 @@
 		"./legal": "./src/legal.ts",
 		"./limitations": "./src/liability/limitations.generated.ts",
 		"./methodology": "./src/liability/methodology-text.generated.ts",
+		"./plans": "./src/plans.ts",
 		"./provenance": "./src/seriesProvenance.ts",
 		"./sentinel-credit": "./src/evidence/sentinelCredit.ts",
 		"./station-format": "./src/stationFormat.ts",
