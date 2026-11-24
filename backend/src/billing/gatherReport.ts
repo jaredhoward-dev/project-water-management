@@ -5,7 +5,7 @@
 // Lambda's billing-report action (ops/ownerActions.ts), which answers with
 // redact(report) only. No dotenv here: the migrate Lambda bundles this module.
 import type pg from 'pg';
-import { buildReport, type AccountRow, type PersonRow, type PlanLimits, type Report } from './metrics.js';
+import { buildReport, type AccountRow, type GateRefusalRow, type PersonRow, type PlanLimits, type Report } from './metrics.js';
 
 /** The month's report (YYYY-MM, or null for the current SAST month), addresses included: redact before it leaves the caller. */
 export async function gatherReportOn(client: pg.ClientBase, month: string | null, now = new Date()): Promise<Report> {
@@ -32,5 +32,13 @@ export async function gatherReportOn(client: pg.ClientBase, month: string | null
 		(r): PersonRow => ({ userId: r.user_id, email: r.email, createdAt: r.created_at, verified: r.verified, firstRunAt: r.first_run_at, inMonth: r.in_month, signupDay: r.signup_day })
 	);
 	const limits = (await client.query<{ limits: PlanLimits }>(`SELECT limits FROM plan WHERE code = 'free'`)).rows[0]?.limits ?? {};
-	return buildReport(first.slice(0, 7), now, accounts, people, limits);
+	// The verified-email gate's refusals (348), by SAST day: the month's days.
+	const refusals = (
+		await client.query<{ code: GateRefusalRow['code']; feature: GateRefusalRow['feature']; refusals: string }>(
+			`SELECT code, feature, sum(refusals) AS refusals FROM email_gate_refusal
+			 WHERE day >= $1::date AND day < ($1::date + interval '1 month')::date GROUP BY code, feature`,
+			[first]
+		)
+	).rows.map((r): GateRefusalRow => ({ code: r.code, feature: r.feature, refusals: Number(r.refusals) }));
+	return buildReport(first.slice(0, 7), now, accounts, people, limits, refusals);
 }

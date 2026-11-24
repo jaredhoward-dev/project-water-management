@@ -9,7 +9,7 @@
 // send the alert mails those jobs queued (alerts/send.ts) and the evidence
 // pack notices (evidence/notices.ts), and complete or remind the resets of a
 // lost second factor (auth/mfaReset.ts), and send the annual renewal notices
-// (billing/renewal.ts). Every transport ends
+// (billing/renewal.ts) and the owners' plan emails (billing/planNotices.ts). Every transport ends
 // here: the local worker loop (worker.ts), `pnpm dev:jobs:tick`, the memory
 // transport (tests), and the production worker Lambda (lambda-worker.ts).
 import { sendAlerts, type SendResult } from '../alerts/send.js';
@@ -29,6 +29,7 @@ import { claimJobs, finishJob, type JobStatus, nextJobDueSeconds, purgeJobs, que
 import type { ClaimedJob, HandlerRegistry, JobHandler } from './registry.js';
 import { logEvent } from '../logging/logEvent.js';
 import { type MfaResetTickResult, runMfaResets } from '../auth/mfaReset.js';
+import { type PlanNoticeResult, runPlanNotices } from '../billing/planNotices.js';
 import { type RenewalNoticeResult, runRenewalNotices } from '../billing/renewal.js';
 import { type MirrorTickResult, runMirrorTick } from './handlers/mirror-tick.js';
 import { type DwsTickResult, runDwsTick } from '../feeds/gaugeRecordLoad.js';
@@ -248,6 +249,10 @@ export interface TickResult {
 	billingEventsPurged: number;
 	/** Staff grants past their end moved to expired, the account back to Free (330_staff_grant). */
 	staffGrantsExpired: number;
+	/** Reverse trials past their end moved to expired, the account back to Free (342_reverse_trial). */
+	reverseTrialsExpired: number;
+	/** Live catchments newly paused past Free's limit after the grace (341 app_plan_pause_tick; 0 unless billing is enforced). */
+	catchmentsPaused: number;
 	claimed: number;
 	done: number;
 	failed: number;
@@ -290,6 +295,8 @@ export interface TickResult {
 	mfaResets: MfaResetTickResult;
 	/** Annual renewal notices queued and sent (329_renewal_notice, billing/renewal.ts; CPA s14). */
 	renewalNotices: RenewalNoticeResult;
+	/** The owners' plan emails queued and sent: grace started, pause landed, trial ending (346_billing_notices, billing/planNotices.ts). */
+	planNotices: PlanNoticeResult;
 }
 
 /** Positive integer from the environment, or the fallback. */
@@ -327,6 +334,8 @@ export async function runTick(o: TickOptions = {}): Promise<TickResult> {
 		assistantPurged: 0,
 		billingEventsPurged: 0,
 		staffGrantsExpired: 0,
+		reverseTrialsExpired: 0,
+		catchmentsPaused: 0,
 		claimed: 0,
 		done: 0,
 		failed: 0,
@@ -342,7 +351,8 @@ export async function runTick(o: TickOptions = {}): Promise<TickResult> {
 		erratumNotices: { purged: 0, queued: 0, sent: 0, skipped: 0, failed: 0 },
 		licenceRecords: { due: 0, sent: 0, skipped: 0, failed: 0 },
 		mfaResets: { completed: 0, reminded: 0, purged: 0, failed: 0 },
-		renewalNotices: { queued: 0, sent: 0, skipped: 0, failed: 0 }
+		renewalNotices: { queued: 0, sent: 0, skipped: 0, failed: 0 },
+		planNotices: { queued: 0, sent: 0, skipped: 0, failed: 0 }
 	};
 	result.purged = await withoutUser((db) => purgeJobs(db));
 	result.invitesPurged = await withoutUser((db) => purgeInvites(db));
@@ -360,6 +370,11 @@ export async function runTick(o: TickOptions = {}): Promise<TickResult> {
 	);
 	// A staff grant past its end: expired (never deleted), the account back to Free.
 	result.staffGrantsExpired = await withoutUser(async (db) => (await db.query<{ n: number }>('SELECT app_staff_grant_expire() AS n')).rows[0]?.n ?? 0);
+	// A reverse trial past its end (342): expired (never deleted), the account back to Free.
+	result.reverseTrialsExpired = await withoutUser(async (db) => (await db.query<{ n: number }>('SELECT app_reverse_trial_expire() AS n')).rows[0]?.n ?? 0);
+	// After the expiry: an account that lost its paid plan starts its 14-day grace, and past it (billing enforced) its live
+	// catchments beyond Free's are paused, or resumed once it is back on a plan or within Free (341).
+	result.catchmentsPaused = await withoutUser(async (db) => (await db.query<{ n: number }>('SELECT app_plan_pause_tick() AS n')).rows[0]?.n ?? 0);
 	const noticesPurged = await purgePackNotices();
 	const erratumPurged = await purgeErratumNotices();
 	if (o.feeds !== false) {
@@ -421,6 +436,9 @@ export async function runTick(o: TickOptions = {}): Promise<TickResult> {
 	result.mfaResets = await runMfaResets();
 	// A person's yearly plan 60 business days from its end (CPA s14): queued once per period, sent as its recipient.
 	result.renewalNotices = await runRenewalNotices();
+	// The owners told when a lapse's grace starts and when its pause lands (enforced only), and 3 days before a reverse
+	// trial ends (346): once each per recipient, built as them. After the pause sweep above, so a pause is told this tick.
+	result.planNotices = await runPlanNotices();
 	result.stats = await withoutUser(queueStats);
 	return result;
 }

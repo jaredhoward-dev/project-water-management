@@ -12,6 +12,7 @@
 	import LoadState from '#lib/components/common/LoadState.svelte';
 	import PlanUsage from '#lib/components/billing/PlanUsage.svelte';
 	import SeatChange from '#lib/components/billing/SeatChange.svelte';
+	import AssistantShare from '#lib/components/billing/AssistantShare.svelte';
 
 	const teamId = $derived(page.params.id ?? '');
 
@@ -81,11 +82,16 @@
 				whose="this team"
 				checkout={(interval, seats) => api.teams.checkout(teamId, interval, seats)}
 				portal={() => api.teams.portal(teamId)}
+				liveCatchments={() => api.teams.liveCatchments(teamId)}
+				keepCatchment={(projectId) => api.teams.keepCatchment(teamId, projectId)}
 				{reload}
 				returned={page.url.searchParams.get('checkout')}
 			>
 				{#snippet seatChange()}
 					{#if plan}<SeatChange {plan} change={(n) => api.teams.changeSeats(teamId, n)} {reload} />{/if}
+				{/snippet}
+				{#snippet assistantShare()}
+					{#if plan}<AssistantShare {plan} change={(n) => api.teams.setAssistantShare(teamId, n)} {reload} />{/if}
 				{/snippet}
 			</PlanUsage>
 		{/if}

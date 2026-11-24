@@ -3,18 +3,19 @@
 // fallback index.html (docs/architecture.md § The landing page).
 //
 // `<html lang>` (issue #137): app.html says `en`, right for every page but the
-// landing page in another language (/welcome/af), whose prerendered words are
+// landing page in another language (/welcome/af, and the pricing page's
+// /welcome/pricing/af), whose prerendered words are
 // that language's. There it is the language the words came out in (wordsLang:
 // the page set it while rendering, before this transform sees the HTML; it
-// stays `en` if that language's catalogue is incomplete). Only that route:
+// stays `en` if that language's catalogue is incomplete). Only those routes:
 // the i18n state is module-wide, and another page (the fallback above all)
 // must not pick up the last landing page's language.
 import type { Handle } from '@sveltejs/kit/hooks';
-import { LANDING_ROUTE } from '#lib/auth/session.svelte.js';
+import { isLandingRoute } from '#lib/auth/session.svelte.js';
 import { wordsLang } from '#lib/i18n/locale.svelte.js';
 
 export const handle: Handle = ({ event, resolve }) => {
-	if (event.route.id !== LANDING_ROUTE) return resolve(event);
+	if (!isLandingRoute(event.route.id)) return resolve(event);
 	return resolve(event, {
 		transformPageChunk: ({ html }) => html.replace('<html lang="en">', `<html lang="${wordsLang()}">`)
 	});

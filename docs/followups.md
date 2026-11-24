@@ -882,6 +882,23 @@ plan stays on the issue. Found while building:
 Phase 1 (shadow mode) is in [billing.md](./billing.md); the later phases
 are #641's checklist. Open items from building it:
 
+- [ ] **The Plan page's "Compare plans" could link the public pricing
+      page.** `/welcome/pricing` (Phase 4) now shows the three plans side by
+      side; the Plan page (`PlanUsage.svelte`) and its Compare plans links
+      (assistant panel, live-catchment note) still go to `/account/plan`.
+      Durable fix: a "See all plans" link on the Plan page to
+      `/welcome/pricing`, once its owner settles where comparing plans
+      lives. Trigger: the Plan page's next change.
+- [ ] **The pricing page's Afrikaans has no native review.** Written by the
+      i18n-translator and checked by the i18n-checker (2026-11-24); terms to
+      put to the client's reviewer: "lewendig" for live, "gepubliseerde
+      bladsye vir boere" for published farm views, "assistenttoelaag".
+      Trigger: the next Afrikaans review round.
+- [ ] **The pricing page doesn't mention the reverse trial.** Deliberate
+      while `REVERSE_TRIAL` is off (ui.md § Pricing page). Durable fix: a
+      "14 days of Pro, no card" line from `plan.trial_days` added to
+      `PLAN_FIGURES`, through the i18n flow (English and Afrikaans).
+      Trigger: before `REVERSE_TRIAL` goes on.
 - [ ] **Drop the 4-argument `app_assistant_charge`.** Migration 324 keeps
       it as a wrapper (charged as unpriced) so a backend released before
       324 keeps charging during the rollout. Durable fix: a forward
@@ -895,6 +912,83 @@ are #641's checklist. Open items from building it:
       checked. Durable fix: read the Bedrock price for the model id the
       deployment calls and update the table and its test. Trigger:
       `assistant_free_model_id` (or any setting) pointing at Haiku 5.5.
+- [ ] **Drop the 8-argument `app_assistant_begin`.** Migration 336 keeps
+      264's form as a wrapper (no price, no Free day or pool) so a backend
+      released before 336 keeps beginning turns. Durable fix: a forward
+      migration that drops it once nothing calls it. Trigger: the
+      `backend@` release carrying 336 is in production and no older
+      backend can be rolled back to.
+- [x] **The Free day resets at UTC midnight, not 00:00 SAST** (done 2026-11-24,
+      `337_assistant_sast_day.sql`). #641 states SAST; 336 had used the UTC
+      day. 337 keys `assistant_day_usage.day`, the reservation's `day` and
+      the pool's pacing on the SAST day and waits the day's refusals to
+      00:00 SAST; every month stays UTC, as `assistant_usage`'s
+      ([billing.md § Assistant dollar caps](./billing.md#assistant-dollar-caps)).
+- [x] **A team admin can't raise the member share.** 336 adds
+      `billing_account.assistant_member_max_pct` (50) but no route or page
+      sets it. Fixed in round 8: `app_team_set_assistant_share` (339), `POST
+      /teams/:id/plan/assistant-share` (team admins; 404 to anyone else) and
+      *Assistant share* in the team's Plan card
+      (`billing/assistantShare.db.test.ts`, the e2e case in
+      `billing-seats.spec.ts`).
+- [ ] **The assistant panel has no meter for the dollar caps.** The panel
+      maps the four codes (round 7: the server's words, when it's back, the
+      box closed until then) and, since round 8, offers *Compare plans* on
+      Free's day and month from the 429's `params.plan` (ui.md § Assistant),
+      but has no "questions left today" meter. Durable fix: the meter from
+      the account's median turn cost (the status would need the Free day's
+      dollars left), with an e2e case in `e2e/tests/assistant.spec.ts`.
+      Trigger: before `BILLING_ENFORCED` is on.
+- [x] **Terraform doesn't set the dollar-cap settings.** The assistant
+      Lambda ran on the code's defaults ($0.30, 20 messages, a $30 pool),
+      and the production check didn't require `ASSISTANT_FREE_*`.
+      Durable fix: variables in infra/variables.tf passed in
+      infra/assistant.tf, and #641's assistant budget raised to $30 pool +
+      $15 × paid seats + a margin. Trigger: before `BILLING_ENFORCED` is on.
+      *Done (#641 round 8): `assistant_free_usd_per_day`,
+      `assistant_free_messages_per_day` and
+      `assistant_free_pool_usd_per_month` set them on the assistant Lambda;
+      `assistant_budget_monthly_usd` defaults to $100 (50 M weighted tokens
+      deployment-wide), and the plan refuses a pool past the budget or the
+      deployment-wide cap (infra/tests/assistant.tftest.hcl); the
+      assistant's production check now requires all three.*
+- [x] **Trials have no caps of their own.** Done (round 9, #641): 342's
+      `app_assistant_begin` gives a reverse trial $2 in all and $1 a SAST
+      day (`assistant_trial_cap`, `assistant_trial_daily_cap`), still in the
+      Free pool (billing.md § The reverse trial).
+- [ ] **The reverse trial: what 342 left** (round 9, #641). Built and off
+      (`REVERSE_TRIAL` and `BILLING_ENFORCED`). Done: (1) **buying Pro during
+      a trial** (round 10, 344): checkout accepts an account whose live row
+      is a reverse trial, and `app_billing_apply` ends the trial (`expired`,
+      logged as an `expire` by `checkout`) in the transaction that writes the
+      paid row (billing.md § The reverse trial). Its UI half is open: the
+      Plan page offers Manage billing, not Upgrade, while the trial is live
+      (`components/billing/plan.ts` `billingActions`), and the plan JSON
+      doesn't yet say a subscription is a reverse trial; trigger: before
+      `REVERSE_TRIAL` goes on. Still to do: (2) the banner 3 days before the end (the email 3 days before is
+      done: 346, billing.md § Plan emails; the banner belongs on the Plan
+      page and the workspace);
+      ~~(3) the live-catchment picker at the end and pausing the others~~
+      (345's picker and 341's pause after the 14-day grace, which a trial's
+      end starts like any lapse); (4) the assistant panel's
+      words for `assistant_trial_cap` and `assistant_trial_daily_cap`
+      (`frontend/.../assistant/chat.svelte.ts` `DOLLAR_CAP_CODES` doesn't
+      list them, so they show as a plain error); (5) the abuse report's
+      "reverse trial → paid within 30 days" from `billing_grant_log`'s
+      `reverse trial` grants; (6) whether to key `reverse_trial_claim` with an
+      HMAC under a server secret rather than a bare SHA-256 (a bare hash can be
+      tested against a known address; an HMAC needs a secret kept for good, or
+      the claims stop matching); operator decision.
+- [ ] **Every turn's begin sums the month's dollars.** 336's
+      `assistant_dollars_spent` scans the month's `assistant_usage`, today's
+      `assistant_day_usage` and every reservation, and the pool calls
+      `assistant_pool_account` once per account, all under the
+      deployment-wide `assistant_usage:all` lock that serialises begins
+      (264). Correct, and fine at launch's size; it is the slow path as
+      accounts grow. Durable fix: a per-month pool counter row the charge
+      updates, read in O(1), not a wider lock; a `perf-db` budget on begin
+      to pin it. Trigger: begin latency visible in the assistant's p95, or
+      a few hundred active Free accounts.
 - [x] **Webhook events apply in arrival order.** `app_billing_apply` (326)
       ignores the payload's `eventCreated`, and Stripe doesn't guarantee
       delivery order, so an older `customer.subscription.updated` arriving
@@ -994,29 +1088,78 @@ are #641's checklist. Open items from building it:
       Team seats), and the operator issues a B2B Stripe invoice with a PO
       number (`pnpm dev:billing:invoice`, the `billing-invoice` owner action,
       direct invoke only; billing.md § B2B invoices).
+- [ ] **Free's live catchment: what 338 left** (issue #641 round 8,
+      2026-11-24). `338_live_catchments` refuses a second live catchment on
+      Free when `BILLING_ENFORCED=true` (billing.md § Live catchments
+      (Free)). Done in round 9 (340_live_catchment_gaps): ~~(1) the Plan
+      page's "live catchments 1/1"~~ (`usage.liveCatchments`); ~~(3) a
+      project moved to another billing account isn't checked~~
+      (`project_move_live_guard`); ~~(5) the settings save bar and Publish
+      to farmers show the refusal as an error~~ (`LiveLimitNotice` in both);
+      ~~(7) a copy or import with automatic runs on makes another live
+      catchment~~ (it starts with them off, `autoRunsOff` in the answer).
+      Done in round 10: ~~the picker on the Plan page~~ (345, `POST
+      …/plan/keep`, the *Live catchments* card), ~~a workspace banner on
+      a paused catchment~~ (`project.planPausedAt`, the header's notice) and
+      ~~the owners' email when the grace starts and when the pause lands~~
+      (346, billing.md § Plan emails). Still to do:
+      (4) the abuse report's "share at the live-catchment limit" can now be
+      measured from 338's count; (6) *Compare plans* always opens the
+      person's own Plan page, not a team's for a team catchment billed to a
+      Free team; (8) the copy and import dialogs don't yet show the API's
+      `autoRunsOff` (the new project opens with automatic runs off and its
+      Model settings say so, but nothing says why); durable fix: a line in
+      the copy dialog's and ImportProjectDialog's done state with *Compare
+      plans*. Trigger: before `BILLING_ENFORCED` goes on in production.
+- [ ] **Free's verified-email gate: what 343 left** (issue #641 round 9,
+      2026-11-24). `343_free_email_gate` refuses the assistant and switching
+      a feed on, on Free, to an unverified or disposable-domain address when
+      `BILLING_ENFORCED=true` (billing.md § Verified email on Free). Still to
+      do: ~~(1) sign-up and an email change refuse a disposable address~~
+      (done in round 10: `400 signup_disposable` and the re-verified email
+      change, 347; billing.md § Verified email on Free); ~~(2) the reverse trial calls `isDisposable` before granting~~ (done at
+      round 9's merge: `disposable`, nothing claimed); ~~(3) the list's monthly refresh is by hand~~ (done in round 10:
+      `.github/workflows/disposable-domains.yml` runs `pnpm
+      gen:disposable-domains` monthly, refuses a size change past ±20 %,
+      and opens a PR; data-sources.md § disposable-email-domains);
+      ~~(4) the abuse report's "disposable rejections" count~~ (done in
+      round 10: each refusal is logged with no address and counted per SAST
+      day in `email_gate_refusal`, 348; billing.md § Metrics and the abuse
+      report); (5) other
+      live operations (alert rules, automatic runs, publishing) aren't gated:
+      #641 names the assistant and live feeds only, so (5) stays open by
+      design.
 - [ ] **`billing-invoice` can't reach Stripe from the migrate Lambda.** The
       migrate Lambda has no `BILLING_PROVIDER=stripe`, no key and no route to
       Stripe, so the action answers `billing_unavailable`
       (`backend/src/lambda-migrate.ts`). Durable fix: give the function the
-      provider's settings and a route out (the same choice as the next
-      item). Trigger: the first B2B order.
-- [ ] **The API Lambda can't reach api.stripe.com.** It runs in the private
-      VPC, which has no internet gateway and no NAT (`infra/network.tf`,
-      the API function's `vpc_config` in `infra/lambda.tf`), so once
-      `billing_provider = "stripe"` checkout, the portal and seat changes
-      fail with `billing_provider_error`. Durable fix, the operator's
-      choice: run the Stripe calls through the fixed-egress VPC the fetcher
-      and mirror-ingest use (`fixed_egress_enabled`, `infra/egress.tf`), or
-      a NAT for the API's subnets (a monthly cost), or a Lambda outside the
-      VPC that makes only the provider calls. Trigger: before Stripe is
-      turned on (deployment.md § Turning on Stripe).
-- [ ] **Paying a B2B invoice doesn't grant the plan.** `invoice.paid` for a
-      standalone invoice changes nothing yet: the operator grants the plan
-      through the invoice's period by hand (deployment.md runbook 23,
-      billing.md § B2B invoices). Durable fix: the webhook turns a paid
-      invoice that carries our account and plan metadata into the staff
-      grant, idempotently. Trigger: the second B2B customer, or a missed
-      grant.
+      provider's settings, `STRIPE_SECRET_KEY` in its runtime secret
+      (`RUNTIME_SECRETS.migrate` in `backend/src/config/runtimeSecrets.ts`
+      and `infra/secrets.tf`, only while billing is `stripe`) and a route
+      out: put its `vpc_config` on the Stripe egress module's subnets and
+      HTTPS-out group, as the API's is (`infra/egress.tf`, deployment.md §
+      Stripe egress). Trigger: the first B2B order.
+- [x] **The API Lambda can't reach api.stripe.com.** It runs in the private
+      VPC, which has no internet gateway and no NAT (`infra/network.tf`).
+      Done (round 7): `stripe_egress_enabled` (off by default; plan refuses
+      `billing_provider = "stripe"` without it) adds a NAT gateway to the
+      private VPC and two subnets of the API's own routed through it, plus an
+      HTTPS-out security group on the API only; RDS and the other Lambdas
+      keep the route-less subnets (`infra/modules/stripe-egress/`,
+      deployment.md § Stripe egress, about $45 a month in af-south-1).
+      Left open: a security group can't name a host, so the API may reach
+      any HTTPS host through it. Durable fix if that matters: a small Lambda
+      outside the VPC that makes only the provider calls, invoked through a
+      Lambda interface endpoint (cheaper, and the private VPC keeps no route
+      out), at the cost of a backend transport change and a second deploy
+      artifact. Trigger: a security review that wants hostname-level egress,
+      or the NAT's cost becoming an objection.
+- [x] **Paying a B2B invoice doesn't grant the plan.** **Done (round 7,
+      335_invoice_grant):** a staff-tool invoice's `invoice.paid` grants the
+      invoiced plan, seats and period through `app_billing_apply`, once,
+      refusing what doesn't check out as a logged `conflict` (billing.md §
+      B2B invoices). An invoice sent from Stripe's dashboard, without our
+      metadata, is still granted by hand (runbook 21).
 - [ ] **One refused invite leaves all of a person's invites pending.**
       `markVerified` (`backend/src/auth/email-routes.ts`) runs
       `app_accept_invites` in one savepoint, so when one invite would pass a

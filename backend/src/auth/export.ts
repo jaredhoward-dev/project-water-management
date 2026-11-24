@@ -85,6 +85,8 @@ export const USER_FK_COVERAGE: Record<string, { section: string } | { excluded: 
 	'start_proposal.decided_by': { excluded: 'the project’s start-from-the-map proposal; who decided it only, and map.start_applied / _discarded are in auditEvents' },
 	// The assistant (262_assistant_usage): the person's tokens and messages per project and month; the hourly count is a cap's only.
 	'assistant_usage.user_id': { section: 'assistantUsage' },
+	// 336: the person's assistant messages and dollars per billing account and UTC day (the Free day's cap).
+	'assistant_day_usage.user_id': { section: 'assistantDays' },
 	'assistant_rate.user_id': { excluded: 'a count of assistant messages for the hourly cap, an hour at most' },
 	// 264: settled into assistantUsage when the turn ends, or charged there in full when it expires.
 	'assistant_reservation.user_id': { excluded: 'a running turn’s reserved budget, minutes at most; settled into assistantUsage' },
@@ -102,6 +104,7 @@ export const USER_FK_COVERAGE: Record<string, { section: string } | { excluded: 
 	// An evidence pack (112_evidence_pack): who drafted and issued it is in the audit events (pack.drafted, pack.issued), exported with them.
 	'evidence_pack.created_by': { excluded: 'the project’s evidence pack; its maker only, and the drafting is an exported audit event' },
 	'evidence_pack.issued_by': { excluded: 'the project’s evidence pack; its issuer only, and the issue is an exported audit event' },
+	'email_change.user_id': { excluded: 'a pending change of address (347): the new address, not yet proven, and a link hash, 48 hours at most' },
 	'email_token.user_id': { excluded: 'secrets (verify / reset token hashes), a week at most' },
 	// The "known engine bug" emails sent to the person as an owner (153_erratum_notices), 30 days.
 	'erratum_notice.user_id': { section: 'erratumNotices' },
@@ -154,6 +157,8 @@ export const USER_FK_COVERAGE: Record<string, { section: string } | { excluded: 
 	'billing_account.user_id': { section: 'billing.account' },
 	// The annual renewal notices sent to them (329, CPA s14): in billing, beside the subscription each is about.
 	'renewal_notice.user_id': { section: 'billing.renewalNotices' },
+	// The plan emails sent to them (346): grace started, pause landed, trial ending; a team's admins get theirs too.
+	'billing_notice.user_id': { section: 'billing.planNotices' },
 	'team.created_by': { excluded: 'the team itself; the membership is in teamMemberships' },
 	'team_member.user_id': { section: 'teamMemberships' },
 	// The person's own display preferences (083): the workspace sections they hid.
@@ -334,6 +339,12 @@ export async function buildSubjectExport(userId: string, now = new Date()) {
 			 FROM assistant_usage WHERE user_id = $1 ORDER BY month DESC, project_id`,
 			[userId]
 		);
+		// Their assistant days (336_assistant_dollar_caps): messages and dollars per billing account and UTC day; own rows under RLS.
+		const { rows: assistantDays } = await db.query(
+			`SELECT billing_account_id AS "billingAccountId", day::text AS day, messages, cost_usd_micros::float8 AS "costUsdMicros", updated_at AS "updatedAt"
+			 FROM assistant_day_usage WHERE user_id = $1 ORDER BY day DESC, billing_account_id`,
+			[userId]
+		);
 		// Their own billing account (323_billing; kind 'user', never a team's), its subscriptions and its monthly counters: own rows under RLS.
 		// null when they never needed one.
 		const { rows: billingAccount } = await db.query<{ id: string }>(
@@ -356,6 +367,12 @@ export async function buildSubjectExport(userId: string, now = new Date()) {
 			 FROM renewal_notice WHERE user_id = $1 ORDER BY period_end DESC`,
 			[userId]
 		);
+		// The plan emails sent to them (346), whichever account each was about (theirs, or a team's they administer).
+		const { rows: planNotices } = await db.query(
+			`SELECT kind, about, status, sent_at AS "sentAt", created_at AS "createdAt"
+			 FROM billing_notice WHERE user_id = $1 ORDER BY created_at DESC, kind`,
+			[userId]
+		);
 		// The staff grants of their plan (330): what was granted, until when, why and by whom, as the account reads it.
 		const { rows: grants } = await db.query(
 			`SELECT action, plan_code AS "planCode", until, reason, granted_by AS "grantedBy", created_at AS "createdAt"
@@ -363,7 +380,10 @@ export async function buildSubjectExport(userId: string, now = new Date()) {
 			[billingId]
 		);
 		// A notice is keyed to the person, not the account, so it is exported even if the account were gone.
-		const billing = billingAccount[0] || renewalNotices.length ? { account: billingAccount[0] ?? null, subscriptions, usageCounters, renewalNotices, grants } : null;
+		const billing =
+			billingAccount[0] || renewalNotices.length || planNotices.length
+				? { account: billingAccount[0] ?? null, subscriptions, usageCounters, renewalNotices, planNotices, grants }
+				: null;
 		// Two-step sign-in (150): own rows only under RLS. The authenticator's state, never its sealed secret or the code hashes.
 		const { rows: twoStepSignIn } = await db.query(
 			`SELECT t.created_at AS "createdAt", t.confirmed_at AS "confirmedAt",
@@ -422,6 +442,7 @@ export async function buildSubjectExport(userId: string, now = new Date()) {
 			erratumNotices,
 			preferences: prefs,
 			assistantUsage,
+			assistantDays,
 			billing,
 			twoStepSignIn,
 			twoStepSignInResets,

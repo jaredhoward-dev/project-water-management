@@ -24,6 +24,7 @@
 	import Dialog from '#lib/components/common/Dialog.svelte';
 	import Fold from '#lib/components/common/Fold.svelte';
 	import AnswerText from './AnswerText.svelte';
+	import EmailGateNotice from '#lib/components/billing/EmailGateNotice.svelte';
 	import { tick } from 'svelte';
 	import type { AssistantProposal } from '#lib/api/types.js';
 	import { fmtDay, fmtPct, fmtWhen } from '#lib/format/number.js';
@@ -31,7 +32,8 @@
 	import { focusAfterRemove } from '#lib/a11y/focusAfterRemove.js';
 	import { basePath } from '#lib/nav/base.js';
 	import { withSite } from '@water-management/engine';
-	import { applicable, waitText, type AssistantChat, type AssistantTurn, type ProposalEntry } from './chat.svelte';
+	import { resolve } from '$app/paths';
+	import { applicable, capOffersPlans, waitText, type AssistantChat, type AssistantTurn, type ProposalEntry } from './chat.svelte';
 
 	let {
 		open = $bindable(false),
@@ -73,7 +75,7 @@
 	const SPENT_WHOSE = { project: 'This project’s', user: 'Your', total: 'This server’s' } as const;
 	const left = $derived(st ? chat.tokensLeft! / Math.max(1, st.budget.tokensPerMonth) : null);
 	const limited = $derived(chat.refusal?.kind === 'rate');
-	const blocked = $derived(chat.spent || limited);
+	const blocked = $derived(chat.spent || limited || chat.capped);
 	const lastTurn = $derived(chat.turns.at(-1));
 	/** What the screen reader hears once a turn ends (the streaming text itself isn't read out word by word). */
 	const announce = $derived.by(() => {
@@ -313,10 +315,22 @@
 				<p class="note warn" role="alert" data-testid="assistant-rate-limited">
 					You have reached the assistant’s limit of {st.rate.messagesPerHour} messages an hour. Try again in about {waitText(chat.refusal.seconds)}.
 				</p>
+			{:else if chat.refusal?.kind === 'cap'}
+				<!-- A dollar cap (billing enforced): the server's words, then when it's back in the viewer's time. Free's day and
+				     month offer Compare plans (the month adds what Pro includes); the Free pool and a paid account's caps never upsell. -->
+				<p class="note warn" role="alert" data-testid="assistant-cap" data-code={chat.refusal.code}>
+					{chat.refusal.message}
+					Back {fmtWhen(chat.refusal.resetsAt)} your time.
+					{#if capOffersPlans(chat.refusal) && chat.refusal.code === 'assistant_monthly_cap'}Pro includes about 15 times as much.{/if}
+					{#if capOffersPlans(chat.refusal)}<a class="cap-plans" href={resolve('account/plan')} data-testid="assistant-compare-plans">Compare plans</a>{/if}
+				</p>
 			{:else if chat.spent && st}
 				<p class="note warn" role="alert" data-testid="assistant-budget-spent">
 					{SPENT_WHOSE[chat.spentScope ?? 'project']} assistant budget for the month is used up. It starts again on {fmtDay(st.budget.resetsAt)}.
 				</p>
+			{:else if chat.refusal?.kind === 'email'}
+				<!-- Free's verified-email gate (billing enforced): #641's words and Resend; the box stays open for after. -->
+				<EmailGateNotice code={chat.refusal.code} feature="assistant" />
 			{:else if chat.refusal?.kind === 'error'}
 				<p class="note err" role="alert">The question wasn’t sent: {chat.refusal.message}</p>
 			{/if}
@@ -704,6 +718,11 @@
 	.note.warn {
 		background: var(--warning-soft);
 		color: var(--text);
+	}
+	.cap-plans {
+		display: inline-block;
+		margin-left: 0.25rem;
+		font-weight: 500;
 	}
 	.note.err {
 		background: var(--danger-soft);

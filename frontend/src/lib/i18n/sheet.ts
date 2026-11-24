@@ -24,6 +24,7 @@ export const SECTIONS: Record<string, string> = {
 	'mfa-reset':
 		'The pages opened from the emails about removing two-step sign-in (a code from an authenticator app on the phone or sent by email, asked for after the password) when someone can’t get a code and has lost the recovery codes: one starts a 3-day wait, the other cancels it. {when} is a time and date like “07:42 on 19 Jan 2024”.',
 	verify: 'The confirm-your-email page (opened from the confirmation email).',
+	'verify.change': 'The confirm-your-new-address page, opened from the email sent to a new address after a change of email address on the Account page. Opening it switches the account to that address.',
 	banner: 'The strips at the top of every page: until the email address is confirmed, and while an invitation to a catchment or team waits to be accepted.',
 	account: 'The account page: name, language and units, password.',
 	'account.two-step':
@@ -89,6 +90,7 @@ export const SECTIONS: Record<string, string> = {
 	'landing.audiences': 'Landing page: “Who it’s for”, four kinds of user.',
 	'landing.how': 'Landing page: “How it works”, three steps.',
 	'landing.trust': 'Landing page: “Why trust it”, and three figures from the example catchment.',
+	'landing.pricing': 'The public pricing page (/welcome/pricing): the three plans, Free, Pro and Team (plan names stay as they are), with their prices in rand and what each includes. Modelling is never limited on any plan; the plans differ in the AI assistant, live operations (data feeds, automatic runs, alerts and farm views), server PDF reports and issued evidence packs (signed model results for a water-use licence application). Plain and honest, no sales talk. {price}, {month} and {year} are amounts like “R 899”; {n} is a number.',
 	crash: 'The error page: shown in place of a page that crashed (with an error id the person can quote when they report it) or an address that matches no page. Plain and calm; it is not the person’s fault.',
 	error: 'A message from the server when something couldn’t be done, shown in a red box on the sign-in, account, alert and farm pages. Plain and short; say what to do next where it helps.',
 	'error.minutes': 'Error messages: a number of minutes inside “Try again in {wait}”.',

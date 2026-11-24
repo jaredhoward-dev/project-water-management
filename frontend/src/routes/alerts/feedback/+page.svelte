@@ -33,7 +33,7 @@
 		token = fragmentToken(page.url.hash);
 		useful = fragmentAnswer(page.url.hash);
 		// Out of the address bar and the history once read.
-		if (page.url.hash) void goto(resolve('alerts/feedback'), { shallow: true, replace: true });
+		if (page.url.hash) void goto(resolve('alerts/feedback'), { replace: true, reset: false });
 		status = token ? 'ask' : 'incomplete';
 	});
 

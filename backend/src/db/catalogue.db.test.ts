@@ -27,7 +27,8 @@ const NO_RLS = new Set(['schema_migrations']);
 // written only through app_et_load_marks, app_et_load_mark_write and the et_parcels_changed trigger.
 // assistant_reservation (264): a turn's reserved budget, read and written only by the assistant's definer functions.
 // billing_event (326): the billing webhook's de-duplication, written only by app_billing_apply from a session with no user.
-const OWNER_ONLY = new Set(['assistant_reservation', 'billing_event', 'erasure_log', 'reference_load', 'mfa_reset_cancel', 'mfa_reset_quota', 'allocation_holder_salt', 'run_allocation_holder', 'dam_observation_load_mark', 'et_observation_load_mark']);
+// email_gate_refusal (348): the verified-email gate's daily refusal counts, written only by app_email_gate_refused, read by the owner's report.
+const OWNER_ONLY = new Set(['assistant_reservation', 'reverse_trial_claim', 'billing_event', 'erasure_log', 'reference_load', 'mfa_reset_cancel', 'mfa_reset_quota', 'allocation_holder_salt', 'run_allocation_holder', 'dam_observation_load_mark', 'et_observation_load_mark', 'email_gate_refusal']);
 /**
  * Views that may run with their owner's rights (security_invoker off), each
  * with why. An owner-rights view reads its tables as the schema owner, so RLS
@@ -211,6 +212,8 @@ const NO_INSERT = new Set(['series_blob', 'note_revision']);
  */
 const READ_ONLY = new Set([
 	'language',
+	// The pause past Free's limit (341): members read the marker, only app_plan_pause_sync writes it.
+	'project_plan_pause',
 	'pack_notice',
 	'alert_feedback',
 	'erratum_notice',
@@ -267,6 +270,9 @@ const READ_ONLY = new Set([
 	// The assistant's usage counters (262_assistant_usage): a person reads their own rows; only app_assistant_begin
 	// and app_assistant_charge write them, so no caller charges another's row or resets a month.
 	'assistant_usage',
+	// Each person's assistant day per billing account (336_assistant_dollar_caps): own rows read; only app_assistant_begin,
+	// app_assistant_charge and the expiry sweep write them.
+	'assistant_day_usage',
 	// DE Africa's Waterbodies polygons (261_dam_observation), loaded by the operator (`pnpm import:waterbodies`), and what
 	// satellites saw of each traced dam: its waterbody match and its observations, written only by app_dam_match_write and
 	// app_dam_observation_load (the worker, with no user) and dropped by map_feature_outline_changed when a dam is redrawn.
@@ -291,6 +297,8 @@ const READ_ONLY = new Set([
 	'usage_counter',
 	// The annual renewal notice's sent-log (329, CPA s14): written only by the worker's definer functions; own rows read.
 	'renewal_notice',
+	// The owners' plan emails' sent-log (346): written only by the worker's definer functions; own rows read.
+	'billing_notice',
 	// The staff grant's log (330): written only by the owner's grant and revoke and the worker's expiry; the account's rows read.
 	'billing_grant_log'
 ]);
@@ -346,6 +354,8 @@ const APP_USER_ON_DELETE: Record<string, 'cascade' | 'set null' | 'restrict'> = 
 	// The assistant's spend stays counted against the project's month, without the name; the hourly count goes (262_assistant_usage).
 	'assistant_usage.user_id': 'set null',
 	'assistant_rate.user_id': 'cascade',
+	// A person's assistant day per account (336): goes with them; the month's cost stays on assistant_usage (set null).
+	'assistant_day_usage.user_id': 'cascade',
 	// A turn's reservation still counts against the project's and the deployment's month until it settles or expires (264).
 	'assistant_reservation.user_id': 'set null',
 	'api_key.revoked_by': 'set null',
@@ -355,6 +365,8 @@ const APP_USER_ON_DELETE: Record<string, 'cascade' | 'set null' | 'restrict'> = 
 	'billing_account.user_id': 'cascade',
 	// A person's renewal notices go with them (329); they go with the subscription anyway.
 	'renewal_notice.user_id': 'cascade',
+	// A person's plan emails go with them (346); a team's with its account.
+	'billing_notice.user_id': 'cascade',
 	// Who acts for the authority (229): the delegation goes with the account; who proposed or confirmed it is cleared.
 	'authority_delegate.confirmed_by': 'set null',
 	'authority_delegate.proposed_by': 'set null',
@@ -367,6 +379,8 @@ const APP_USER_ON_DELETE: Record<string, 'cascade' | 'set null' | 'restrict'> = 
 	// A count for the elevation-model cap; goes with the account (184_dem_attempt).
 	'dem_attempt.user_id': 'cascade',
 	'email_token.user_id': 'cascade',
+	// A pending change of address (347) goes with the account.
+	'email_change.user_id': 'cascade',
 	// An evidence pack is the project's evidence; it stays with who drafted or issued it cleared (112_evidence_pack.sql).
 	'evidence_pack.created_by': 'set null',
 	'evidence_pack.issued_by': 'set null',

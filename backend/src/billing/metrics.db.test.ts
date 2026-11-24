@@ -43,6 +43,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
 	await asOwner('DELETE FROM usage_counter WHERE billing_account_id = $1', [account]);
+	await asOwner(`DELETE FROM email_gate_refusal WHERE day IN ('2001-03-01', '2001-03-31', '2001-04-01')`);
 });
 
 const inZone = async <T extends pg.QueryResultRow>(tz: string, sql: string, params: unknown[]) => {
@@ -92,6 +93,18 @@ describe('billing_metrics_people', () => {
 		expect(r.heaviestFree).toContainEqual({ accountId: account, usdMicros: 900000 });
 		const april = await gatherReport(process.env.TEST_MIGRATION_DATABASE_URL!, '2001-04', new Date('2026-11-23T00:00:00Z'));
 		expect(april.activation).toMatchObject({ cohort: 1, activated: 0 });
+	});
+
+	it('feeds the report the month’s verified-email gate refusals (348), by SAST day', async () => {
+		await asOwner(
+			`INSERT INTO email_gate_refusal (day, code, feature, refusals) VALUES
+			 ('2001-03-01', 'email_disposable', 'assistant', 2), ('2001-03-31', 'email_disposable', 'feeds', 1),
+			 ('2001-03-31', 'email_unverified', 'assistant', 5), ('2001-04-01', 'email_disposable', 'assistant', 9)`
+		);
+		const r = await gatherReport(process.env.TEST_MIGRATION_DATABASE_URL!, '2001-03', new Date('2026-11-23T00:00:00Z'));
+		expect(r.gateRefusals).toEqual({ disposable: { assistant: 2, feeds: 1, total: 3 }, unverified: { assistant: 5, feeds: 0, total: 5 } });
+		const april = await gatherReport(process.env.TEST_MIGRATION_DATABASE_URL!, '2001-04', new Date('2026-11-23T00:00:00Z'));
+		expect(april.gateRefusals.disposable).toEqual({ assistant: 9, feeds: 0, total: 9 });
 	});
 });
 

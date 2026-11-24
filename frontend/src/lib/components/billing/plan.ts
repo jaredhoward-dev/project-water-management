@@ -3,7 +3,7 @@
 // shadow mode: usage is counted against the plan's limits, nothing is charged
 // or refused, so a count past its limit is said, never blocked. The workspace
 // is English; plan data never reaches a farmer page.
-import type { AccountPlan, BillingInterval, Plan, Subscription } from '#lib/api/types.js';
+import type { AccountPlan, BillingInterval, LiveCatchment, LiveCatchments, Plan, Subscription } from '#lib/api/types.js';
 import { fmtDate, fmtNum } from '#lib/format/number.js';
 
 /**
@@ -89,7 +89,7 @@ export function subscriptionTotalLine(p: Pick<AccountPlan, 'account' | 'plan' | 
 
 /** One usage bar: its label, the figures as words, and how full it is (null when there is no bar). */
 export interface UsageRow {
-	key: 'catchments' | 'reports' | 'packsIssued' | 'assistantCost';
+	key: 'catchments' | 'liveCatchments' | 'reports' | 'packsIssued' | 'assistantCost';
 	label: string;
 	used: number;
 	limit: number | null;
@@ -136,7 +136,8 @@ function row(key: UsageRow['key'], label: string, used: number, limit: number | 
 const count = (n: number) => fmtNum(n);
 
 /**
- * The page's four bars, in the order the plan is read: catchments, reports
+ * The page's bars, in the order the plan is read: catchments, live
+ * catchments (340; left out when an older API doesn't send them), reports
  * this month, packs issued this month, the assistant's spend this month. The
  * assistant is capped by cost, so its row is in dollars, counted by the UTC
  * month (the others by South African time), and says when some turns carry
@@ -156,6 +157,16 @@ export function usageRows(p: AccountPlan): UsageRow[] {
 			planName,
 			note: 'Every catchment billed to this account counts, whoever made it.'
 		}),
+		...(u.liveCatchments
+			? [
+					row('liveCatchments', 'Live catchments', u.liveCatchments.used, u.liveCatchments.limit, {
+						fmt: count,
+						verb: 'live',
+						planName,
+						note: 'A catchment is live while it has data feeds, alerts or automatic runs on, or a farm view published. Runs, calibration, scenarios and exports have no limit.'
+					})
+				]
+			: []),
 		row('reports', `Reports in ${month}`, u.reports.used, u.reports.limit, { fmt: count, verb: 'made', planName }),
 		row('packsIssued', `Evidence packs issued in ${month}`, u.packsIssued.used, u.packsIssued.limit, { fmt: count, verb: 'issued', planName }),
 		row('assistantCost', `Assistant use in ${month}`, cost.usedUsdMicros, cost.limitUsdMicros, {
@@ -318,4 +329,48 @@ export function billingRedirect(url: unknown, apiBase: string, pageHref: string)
 	const mockPage = /\/billing\/mock\/(checkout|portal)$/.test(u.pathname);
 	if ((u.protocol === 'http:' || u.protocol === 'https:') && u.origin === api.origin && mockPage) return u.href;
 	return null;
+}
+
+/**
+ * Whether the Plan page asks for the live-catchment picker (341, 345; docs/ui.md
+ * § Plan and usage): the account is on Free (no live subscription) and past
+ * Free's live catchments. Whether it shows is then the list's: only once the
+ * plan has ended (`overFreeSince`), never on an account that never had one.
+ */
+export function wantsKeepPicker(p: AccountPlan): boolean {
+	const live = p.usage.liveCatchments;
+	return !p.subscription && !!live && live.limit !== null && live.used > live.limit;
+}
+
+const catchments = (n: number) => `${fmtNum(n)} catchment${n === 1 ? '' : 's'}`;
+
+/**
+ * The picker's opening words, in #641's tone (an information note, never an
+ * error): what Free keeps live, what pauses on the others and when, and that
+ * nothing is lost. Null when the picker has nothing to say (within Free, or a
+ * plan that never ended).
+ */
+export function keepPickerIntro(list: LiveCatchments, enforced: boolean, whose: string): string | null {
+	if (!list.overFreeSince || list.freeLimit === null || list.catchments.length <= list.freeLimit) return null;
+	const head = `The plan for ${whose} has ended, so it is on Free, which keeps ${catchments(list.freeLimit)} live.`;
+	const lost = 'Nothing is lost: everyone can still open, run, edit and export them, and they carry on as they were on a plan again.';
+	const others = 'feeds, alerts and automatic runs';
+	let when: string;
+	if (list.catchments.some((c) => c.pausedAt)) when = `On the others, ${others} are paused.`;
+	else if (!enforced) when = `Once plan limits apply, ${others} pause on the others 14 days after the plan ended.`;
+	else when = list.pausesFrom ? `From ${fmtDate(list.pausesFrom)}, ${others} pause on the others.` : `Soon, ${others} pause on the others.`;
+	return `${head} ${when} ${lost}`;
+}
+
+/** One catchment's state on the picker: "Stays live (your choice)", "Stays live", "Paused since 3 Dec 2026" or "Pauses from 3 Dec 2026". */
+export function keepRowState(c: LiveCatchment, list: Pick<LiveCatchments, 'pausesFrom'>): string {
+	if (c.staysLive) return c.chosen ? 'Stays live (your choice)' : 'Stays live';
+	if (c.pausedAt) return `Paused since ${fmtDate(c.pausedAt)}`;
+	return list.pausesFrom ? `Pauses from ${fmtDate(list.pausesFrom)}` : 'Pauses after the grace';
+}
+
+/** The confirm question's words for keeping `name` live in place of `current` (null: none stays live yet). */
+export function keepQuestion(name: string, current: string | null): string {
+	const instead = current ? ` in place of ${current}` : '';
+	return `${name} keeps its feeds, alerts and automatic runs${instead}. The others are the ones that pause; nothing on them is deleted, and you can change this at any time.`;
 }

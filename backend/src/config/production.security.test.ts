@@ -208,6 +208,9 @@ const PROD: Record<Role, Record<string, string>> = {
 		ASSISTANT_MAX_TOOL_RESULT_CHARS: '12000',
 		ASSISTANT_MAX_INPUT_CHARS: '40000',
 		ASSISTANT_KEEPALIVE_SECONDS: '15',
+		ASSISTANT_FREE_USD_PER_DAY: '0.3',
+		ASSISTANT_FREE_MESSAGES_PER_DAY: '20',
+		ASSISTANT_FREE_POOL_USD_PER_MONTH: '30',
 		ASSISTANT_TURN_SECONDS: '105'
 	}
 };
@@ -602,6 +605,14 @@ describe('each Lambda refuses a missing or local-default setting', () => {
 			['assistant', 'ASSISTANT_MAX_OUTPUT_TOKENS', '100000'],
 			['assistant', 'ASSISTANT_MAX_TOOL_RESULT_CHARS', '999'],
 			['assistant', 'ASSISTANT_MAX_INPUT_CHARS', '1000000'],
+			// The dollar caps (336): required on the assistant, since Terraform sets them (round 8).
+			['assistant', 'ASSISTANT_FREE_USD_PER_DAY', undefined],
+			['assistant', 'ASSISTANT_FREE_MESSAGES_PER_DAY', undefined],
+			['assistant', 'ASSISTANT_FREE_POOL_USD_PER_MONTH', undefined],
+			['assistant', 'ASSISTANT_FREE_USD_PER_DAY', '-0.3'],
+			['assistant', 'ASSISTANT_FREE_USD_PER_DAY', 'lots'],
+			['assistant', 'ASSISTANT_FREE_MESSAGES_PER_DAY', '0'],
+			['assistant', 'ASSISTANT_FREE_POOL_USD_PER_MONTH', '10001'],
 			['assistant', 'DB_POOL_MAX', undefined],
 			['assistant', 'ALLOWED_ORIGINS', 'http://localhost:7777'],
 			['assistant', 'CLOUDFRONT_SHARED_SECRET', undefined],

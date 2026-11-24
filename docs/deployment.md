@@ -822,7 +822,12 @@ install and no cache; opens an issue),
 `secret-scan-sweep.yml` (weekly full-history secret scan, opens a `secret-scan`
 issue when it fails), `renderer-apt-snapshot.yml` (weekly age check of the
 renderer image's apt snapshot; opens a `renderer-apt-snapshot` issue past 90
-days, § Reports), `fresh-clone.yml` (weekly `pnpm run setup && pnpm dev` on a
+days, § Reports), `disposable-domains.yml` (monthly refresh of the vendored
+disposable-email domain list; opens a PR when it moved, refuses a size change
+past ±20 %; data-sources.md § disposable-email-domains; it opens its PR with
+`GITHUB_TOKEN`, so it fails until the operator turns on the repo setting
+Settings → Actions → General → "Allow GitHub Actions to create and approve
+pull requests"), `fresh-clone.yml` (weekly `pnpm run setup && pnpm dev` on a
 clean checkout, also on PRs that touch setup; testing.md § Fresh clone), and
 weekly runs of `security.yml` and `scorecard.yml`.
 Also present: `claude.yml` (Claude Code on issue and PR comments, for the
@@ -1947,6 +1952,62 @@ addresses.
   outside any VPC and deletes the egress VPC. AWS releases a Lambda's ENIs
   some minutes after it leaves a subnet, so deleting the subnets can stall
   that apply for up to 20 minutes; it finishes on its own.
+
+### Stripe egress
+
+`stripe_egress_enabled` (default off; needed with `billing_provider =
+"stripe"`, and plan refuses `stripe` without it) gives the API Lambda a way
+out of the private VPC to `api.stripe.com` for checkout, the Customer Portal
+and seat changes (`infra/egress.tf`, `infra/modules/stripe-egress/`). Off,
+the private VPC has no route out at all (`infra/network.tf`), and every Stripe call
+fails with `billing_provider_error`.
+
+- **Shape.** Inside the private VPC: an internet gateway, one public subnet
+  (`/24` number 20 of `vpc_cidr`) holding a managed NAT gateway with an
+  Elastic IP, and two subnets of the API's own (`/24`s 21 and 22, two AZs)
+  whose route table sends `0.0.0.0/0` to the NAT gateway. The API Lambda
+  moves its ENIs there and carries a second security group, HTTPS (443) out
+  to anywhere, beside its own (whose rules to Postgres and the endpoints
+  stay as they were). Nothing else moves: RDS, the worker, the migrate
+  Lambda and the interface endpoints keep the original subnets, whose route
+  table still holds only the local route, so RDS stays private (it is
+  reached over the VPC's local route, and a NAT takes no inbound
+  connections). `tests/egress.tftest.hcl` pins it, on and off.
+- **Why a NAT in this VPC.** The API must reach both Postgres (private
+  VPC) and Stripe, and a Lambda sits in one VPC only. The fixed-egress VPC
+  can't carry it: a NAT in another VPC is no route target across peering,
+  and a transit gateway costs about as much as a NAT gateway before any
+  traffic. A Lambda outside the VPC that makes only the Stripe calls,
+  invoked through a Lambda interface endpoint, would keep the private VPC
+  without any route out and cost less (one endpoint, about $7.30 a month an
+  AZ), but it needs the backend's Stripe client to call that function
+  instead of `fetch`, a second deploy artifact and its own IAM; it remains
+  the upgrade if the network allowance below ever matters
+  ([followups.md § Billing](./followups.md)).
+- **Why a NAT gateway, not an instance.** The fixed egress uses a NAT
+  instance because nothing user-facing runs through it. Checkout does: a
+  managed gateway needs no patching, no first-boot script and no recovery
+  alarms. It costs about $45 a month in af-south-1 (~$33 in us-east-1) plus
+  per-GB processing, which Stripe's small JSON calls barely touch
+  ([deployment-tiers.md](./deployment-tiers.md#cheaper-options-and-why-they-arent-used)).
+  One gateway, in the first AZ: if that AZ fails, Stripe calls fail until
+  it is back (the single-AZ database is the larger exposure then anyway).
+- **Least privilege.** Only the API's ENIs have the route and the HTTPS-out
+  group. A security group can't name a host, so the network lets the API
+  reach any HTTPS host; the code calls only Stripe
+  (`backend/src/billing/provider/stripeApi.ts`). A hostname allowlist would
+  need AWS Network Firewall, which costs far more than the NAT itself.
+- **The migrate Lambda** (the `billing-invoice` owner action) still has no
+  provider, key or route: [followups.md § Billing](./followups.md).
+- **Turning it on.** Before or with `billing_provider = "stripe"` (§ Turning
+  on Stripe, step 5): add `stripe_egress_enabled = true` to
+  `prod.tfvars.sops`. Expect in the plan: the module's gateway, subnets,
+  route tables, NAT gateway, Elastic IP and security group, and an in-place
+  update of the backend function's `vpc_config`; nothing else in the VPC.
+- **Turning it off.** Only with `billing_provider = "manual"` (plan refuses
+  `stripe` without it). AWS releases the API's old ENIs some minutes after
+  it leaves the subnets, so deleting them can stall that apply for up to
+  20 minutes; it finishes on its own.
 
 ### ECMWF (the second forecast)
 
@@ -3323,9 +3384,12 @@ key goes into a chat, an issue or a CI log.
    `tf.sh` passes each as an ephemeral variable when present; neither reaches
    state or a saved plan.
 5. **Switch the provider, plan, read it, then apply** with your own
-   go-ahead. Add `billing_provider = "stripe"` to `prod.tfvars.sops`, then
+   go-ahead. Add `billing_provider = "stripe"` and `stripe_egress_enabled =
+   true` (§ Stripe egress: the API's route to Stripe) to `prod.tfvars.sops`, then
    `cd infra && AWS_PROFILE=water-management ./scripts/tf.sh plan -var-file=../../infra-secrets/water-management/prod.tfvars.sops -out=<plan>`
    and `AWS_PROFILE=water-management ./scripts/tf.sh apply <plan>`. Expect:
+   the Stripe egress module's resources and the backend function's
+   `vpc_config` moving to its subnets,
    `BILLING_PROVIDER` going from `manual` to `stripe` on the backend function,
    and every runtime secret version rewritten (the sops edit moved
    `runtime_secret_version`, so every Lambda cold-starts). Nothing else.
@@ -4401,6 +4465,18 @@ turn (up to 6 model calls with tool reads between) runs past the API's
   That timeout is the longest gap between two packets, not the response;
   the stream sends a `: keepalive` comment every 15 s
   (`ASSISTANT_KEEPALIVE_SECONDS`, kept at 1–30 s by the production check).
+  The Free dollar caps' settings (`ASSISTANT_FREE_USD_PER_DAY`,
+  `ASSISTANT_FREE_MESSAGES_PER_DAY`, `ASSISTANT_FREE_POOL_USD_PER_MONTH`)
+  are Terraform's `assistant_free_usd_per_day` ($0.30),
+  `assistant_free_messages_per_day` (20) and
+  `assistant_free_pool_usd_per_month` ($30), the code's defaults, bounded as
+  the production check bounds them; the plan also refuses a pool larger
+  than `assistant_budget_monthly_usd` or than the deployment-wide token cap
+  is worth at the input price, so free use alone passes neither. They are
+  set on this Lambda only (it begins every turn; the status shows the token
+  caps), required there by the production check (`config/production.ts`),
+  and refuse a turn only while `BILLING_ENFORCED` is on (billing.md §
+  Assistant dollar caps);
   The status (`GET /api/projects/:id/assistant`) stays on the API, which
   carries the same `ASSISTANT_*` values so it shows what the assistant
   enforces;
@@ -4451,8 +4527,8 @@ million input and $10.00 per million output tokens (AWS Price List API,
 it: 2 M a project a month (`assistant_tokens_per_month`),
 1 M a person a month across projects (`assistant_tokens_per_user_month`),
 and a deployment-wide monthly cap (`assistant_tokens_per_month_total`,
-derived by default from the assistant's budget at the input price: 25 M
-for $50 at $2/M), so no number of projects, accounts or turns at once gets
+derived by default from the assistant's budget at the input price: 50 M
+for $100 at $2/M), so no number of projects, accounts or turns at once gets
 past the budget (architecture.md § Assistant); then 30 messages a user an hour
 (`assistant_messages_per_hour`), and per turn 6 model calls
 (`assistant_max_hops`), 150 K weighted tokens (`assistant_max_turn_tokens`,
@@ -4462,7 +4538,9 @@ characters a tool result and 40,000 of conversation (all pinned in the
 Lambda's environment, the bounds checked by Terraform and by the
 production check alike). In AWS:
 the reserved concurrency above, and a third budget,
-`water-management-assistant`, USD 50 a month (`assistant_budget_monthly_usd`,
+`water-management-assistant`, USD 100 a month (`assistant_budget_monthly_usd`;
+issue #641 sizes it as the $30 Free pool + $15 a paid seat + a margin, so
+raise it by $15 a paid seat as subscriptions grow;
 ACTUAL 80% and 100% to the us-east-1 alerts topic), on the account's **AWS
 Marketplace** charges: Anthropic's models on Bedrock are billed through AWS
 Marketplace, "under the model provider (not under Amazon Bedrock)", and
@@ -4470,7 +4548,7 @@ nothing else in the account is. A third budget costs about $0.62 a month;
 Marketplace charges can lag a further 12–24 hours behind other billing
 data, so the app's caps are what stop a runaway and the hourly token alarm
 below is what reports one. With the assistant on, raise
-`budget_monthly_usd` by `assistant_budget_monthly_usd` (~$160 on the
+`budget_monthly_usd` by `assistant_budget_monthly_usd` (~$210 on the
 defaults): the account budget includes the model spend, and the
 assistant's ~$11 of fixed cost would otherwise put af-south-1's idle on the
 ACTUAL 80% line every month (infra/README.md § Cost).
@@ -4486,7 +4564,13 @@ a wrong model id, model access not enabled, a quota or IAM problem; the
 invocation is still a 200) and `assistant-tokens-hourly` (the turns'
 weighted tokens summed over an hour above `assistant_tokens_alarm_per_hour`,
 2 M ≈ $4 an hour, about 10× the expected use: the spend signal that doesn't
-wait for billing). Its unhandled 500s count toward `unhandled-error`. On
+wait for billing), and `assistant-free-pool-50` and `assistant-free-pool-80`
+(a turn on a Free or trial account logged an `assistant_free_pool` event:
+the month's Free pool has passed 50% or 80%; they fire whether or not
+`BILLING_ENFORCED` is on. Before day 20, follow #641's order: read the
+staff report's heaviest Free accounts, then raise the pool or move Free to
+a cheaper model; billing.md § Assistant dollar caps). Its unhandled 500s
+count toward `unhandled-error`. On
 the full tier: `assistant-duration-p95` (above 80% of the timeout for 10
 minutes), and its direct-traffic refusals count toward
 `origin-secret-rejected`. Each turn logs one `assistant_turn` line (its
@@ -5287,8 +5371,9 @@ Every step is an ordinary app action by an owner unless it says "operator".
 21. **Granting a plan by hand** (operator; 330_staff_grant, issue #641;
     [billing.md § Staff grants](./billing.md#staff-grants)). For a plan
     nobody buys through checkout: a business paying by purchase order (a
-    Stripe invoice, runbook 23, or one sent from the Stripe dashboard; grant
-    once it is paid, until the end of the invoiced period), the first client's deal,
+    Stripe invoice from runbook 23 grants itself when paid; for one sent
+    from the Stripe dashboard, grant once it is paid, until the end of the
+    invoiced period), the first client's deal,
     founding users (no end), and Team's 30-day trial on request
     (billing.md § Trials). It works whatever `billing_provider` is.
 
@@ -5423,11 +5508,18 @@ Every step is an ordinary app action by an owner unless it says "operator".
     payload is the same invoice (`reused: true` once sent): nothing new is
     made or emailed. A changed field (seats, `from`, the PO number) is a
     new invoice, so void a wrong one in Stripe before sending the right
-    one. **When it is paid** (Stripe's dashboard, or the `invoice.paid`
-    row in `billing_event`), grant the plan for the period (runbook 21):
-    `billing-grant` with `until` the answer's `until` and the reason
-    `Invoice <number>, PO <PO>` (the customer reads it). Record the invoice
-    and the PO in the operator log.
+    one. **When it is paid, the plan is granted by itself** for the
+    period, through `until` (335; billing.md § B2B invoices): by card on
+    Stripe's page, or when you mark an EFT paid in Stripe's dashboard
+    ("Mark as paid", paid out of band). Check it took: `billing-grants`
+    (runbook 21) lists the grant with `granted_by` `invoice`. If it isn't
+    there, the API's log has a `billing_webhook` line with `result`
+    `conflict` for the `invoice.paid` (a changed price, a live card
+    subscription or longer grant on the account, a period already over):
+    decide, then grant by hand (runbook 21) with the reason
+    `Invoice <number>, PO <PO>`. An invoice sent from Stripe's dashboard
+    (not this action) carries none of our metadata, so it is always granted
+    by hand. Record the invoice and the PO in the operator log.
 
 ## Rollback
 

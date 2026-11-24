@@ -23,7 +23,7 @@ import { runEnsemble, type ModelInput, type ResolvedEnsembleOptions } from '@wat
 import pg from 'pg';
 import { replaceEvaporationDataset } from '../geo/evaporationGrid.js';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { anon, app, asOwner, confirmAsOperator, lastMailTo, signUp, tokenIn } from '../__tests__/helpers.js';
+import { anon, app, asOwner, confirmAsOperator, lastMailTo, retirePendingJobs, signUp, tokenIn } from '../__tests__/helpers.js';
 import { loadSyntheticEvaporation } from '../../scripts/import-evaporation.js';
 import { loadSyntheticEvaporationStations } from '../../scripts/import-evaporation-stations.js';
 import { loadSyntheticQuaternaries } from '../../scripts/import-quaternaries.js';
@@ -97,6 +97,8 @@ function deep(b: unknown, depth = 0): unknown {
 	return addMissing(Object.fromEntries(Object.entries(b).map(([k, v]) => [k, deep(v, depth + 1)])));
 }
 
+/** The live catchments the keep recipes made (their alert rules queue alert_eval jobs, retired in afterAll). */
+const keepProjects: string[] = [];
 const freshUser = (n: string, verified = true) => signUp(n, { verified });
 /** A fresh account with an authenticator confirmed (two-step sign-in), and its TOTP key. */
 async function enrolledUser(n: string) {
@@ -283,6 +285,14 @@ const RECIPE: Record<string, () => Promise<Req> | Req> = {
 	'POST /auth/me/accept-terms': async () => ({ as: await freshUser('Mterms'), body: { version: LEGAL_VERSION } }),
 	'POST /auth/change-password': async () => ({ as: await freshUser('Mpassword'), body: { currentPassword: 'correct horse', newPassword: 'correct horse battery' } }),
 	'POST /auth/forgot-password': () => ({ as: null, body: { email: ctx.owner.email } }),
+	// Changing the email address (347): a fresh account each time (one pending change, a cooldown, per account).
+	'POST /auth/change-email': async () => ({ as: await freshUser('Mchange'), body: { newEmail: `mass-${crypto.randomUUID()}@example.com`, currentPassword: 'correct horse' } }),
+	'POST /auth/confirm-email-change': async () => {
+		const u = await freshUser('Mchanged');
+		const to = `mass-${crypto.randomUUID()}@example.com`;
+		await u.call('POST', '/auth/change-email', { newEmail: to, currentPassword: 'correct horse' });
+		return { as: null, body: { token: tokenIn(lastMailTo(to)) } };
+	},
 	'POST /auth/reset-password': async () => {
 		const u = await freshUser('Mreset');
 		await app.request('/auth/forgot-password', { method: 'POST', headers: { 'content-type': 'application/json', origin: ORIGIN }, body: JSON.stringify({ email: u.email }) });
@@ -425,6 +435,26 @@ const RECIPE: Record<string, () => Promise<Req> | Req> = {
 	'POST /teams/:id/plan/seats': async () => {
 		await ok(ctx.owner.call('GET', `/teams/${ctx.teamId}/plan`));
 		return { params: { id: ctx.teamId }, body: { seats: 5 } };
+	},
+	// A team member's share of the assistant dollars (339): the owner is the sweep team's admin.
+	'POST /teams/:id/plan/assistant-share': async () => {
+		await ok(ctx.owner.call('GET', `/teams/${ctx.teamId}/plan`));
+		return { params: { id: ctx.teamId }, body: { pct: 60 } };
+	},
+	// The kept live catchment (341/345): a live one of the account (an alert rule on, whose alert_eval jobs afterAll
+	// retires), so the legitimate body answers 200.
+	'POST /account/plan/keep': async () => {
+		const u = await freshUser('Mkeep');
+		const pid = (await ok(u.call('POST', '/projects', { name: 'Mass keep' }))).project.id as string;
+		keepProjects.push(pid);
+		await ok(u.call('PUT', `/projects/${pid}/alert-rules`, { rules: [{ kind: 'ewr_forecast_fail', threshold: 5, enabled: true }] }));
+		return { as: u, body: { projectId: pid } };
+	},
+	'POST /teams/:id/plan/keep': async () => {
+		const pid = (await ok(ctx.owner.call('POST', '/projects', { name: 'Mass team keep', teamId: ctx.teamId }))).project.id as string;
+		keepProjects.push(pid);
+		await ok(ctx.owner.call('PUT', `/projects/${pid}/alert-rules`, { rules: [{ kind: 'ewr_forecast_fail', threshold: 5, enabled: true }] }));
+		return { params: { id: ctx.teamId }, body: { projectId: pid } };
 	},
 	// The mock's pages: a token for the owner's account (signed with the dev key the sweep stubs), and a choice that
 	// writes nothing (cancels; the portal's cancel with no subscription). Their bodies are never read.
@@ -865,6 +895,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
 	vi.unstubAllEnvs();
+	await retirePendingJobs(...keepProjects);
 	// The ladder's yield job and what the sweep's POSTs queued (the rules' run …/auto-calibrations queues among them).
 	await clearLadderJobs(ctx);
 	// The invented A-pan grid the unit-apan recipe loaded: no other file should find an A-pan grid it didn't load.

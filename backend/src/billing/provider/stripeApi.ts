@@ -321,6 +321,24 @@ async function findInvoice(o: StripeClientOptions, customer: string, key: string
 }
 
 /**
+ * What a B2B invoice's metadata carries: everything its invoice.paid needs to grant the plan
+ * (provider/stripe.ts invoiceGrantOf, app_billing_apply 335), and our key. Stripe keeps metadata values as strings.
+ */
+export function invoiceMetadata(p: Pick<StripeInvoiceParams, 'accountId' | 'planCode' | 'seats' | 'interval' | 'periodStart' | 'periodEnd' | 'key' | 'lines'>): Record<string, string> {
+	return {
+		billing_account_id: p.accountId,
+		plan_code: p.planCode,
+		seats: String(p.seats),
+		interval: p.interval,
+		period_start: String(p.periodStart),
+		period_end: String(p.periodEnd),
+		// The total as issued: the paid invoice must cover it (335), so a price change after issue never refuses a paid invoice.
+		amount_minor: String(p.lines.reduce((a, l) => a + l.amountMinor, 0)),
+		wm_invoice_key: p.key
+	};
+}
+
+/**
  * A B2B invoice, made once per key and sent once: a send_invoice draft due in
  * INVOICE_DAYS_UNTIL_DUE days with the PO number as a custom field, its lines,
  * finalized and emailed. Every POST carries an idempotency key from `key` (a
@@ -334,15 +352,7 @@ export async function createInvoice(o: StripeClientOptions, p: StripeInvoicePara
 	if (p.lines.length === 0 || p.lines.some((l) => !Number.isInteger(l.amountMinor) || l.amountMinor <= 0)) throw new StripeApiError(400, 'invalid_request', 'lines');
 	const k = `wm-invoice-${p.key}`;
 	const expected = p.lines.reduce((a, l) => a + l.amountMinor, 0);
-	const metadata = {
-		billing_account_id: p.accountId,
-		plan_code: p.planCode,
-		seats: String(p.seats),
-		interval: p.interval,
-		period_start: String(p.periodStart),
-		period_end: String(p.periodEnd),
-		wm_invoice_key: p.key
-	};
+	const metadata = invoiceMetadata(p);
 	let inv = await findInvoice(o, p.customer, p.key);
 	const reused = inv !== null && inv.status !== 'draft' && meta(inv).wm_sent === 'true';
 	if (!inv) {

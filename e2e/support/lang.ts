@@ -21,6 +21,8 @@ type Catalogue = Record<string, string | Record<string, string>>;
 
 /** `lang`'s site words, by English (frontend/src/lib/i18n/messages/<lang>.ts, export `const <lang>`). */
 export async function words(lang: string): Promise<(english: string, context?: string) => string> {
+	// The messages are written in English at the call (t('…')): there is no English catalogue to read.
+	if (lang === 'en') throw new Error('words("en"): English has no catalogue, a message is its own English words');
 	const [catalogueModule, { messageId }] = (await Promise.all([import(url(`frontend/src/lib/i18n/messages/${lang}.ts`)), import(url('frontend/src/lib/i18n/msg.ts'))])) as [
 		Record<string, Catalogue>,
 		{ messageId: (english: string, context?: string) => string }

@@ -1560,6 +1560,47 @@ its comments 4, 6, 7 and 8).
 | GloFAS v4 reanalysis | CEMS-FLOODS, free with attribution | EWDS API | modelled daily flow for ungauged catchments |
 | SWOT lake heights (Sentinel-1/2 and WaPOR moved to the register for #624 and #623) | SWOT terms unconfirmed | PO.DAAC | area–volume curves (trial) |
 
+## Vendored lists
+
+Not geodata, and never fetched by the app: lists committed to the repo,
+refreshed in a PR.
+
+### disposable-email-domains
+
+- **What:** the community list of disposable (temporary-mail) email
+  domains, `disposable_email_blocklist.conf`
+  (<https://github.com/disposable-email-domains/disposable-email-domains>).
+  Read by `backend/src/auth/disposable.ts` for Free's verified-email gate
+  ([billing.md § Verified email on Free](./billing.md#verified-email-on-free));
+  sign-up, an email change and the reverse trial are to read it too (issue
+  #641 item 5, [followups.md](./followups.md)).
+- **Licence:** CC0 1.0 Universal (the repo's `LICENSE.txt`, read
+  2026-11-24): no attribution owed; the source is named in the file's header
+  anyway.
+- **Vendored:** `backend/src/auth/disposableDomains.ts`, at commit
+  `9cf2bee345b0276e1b65cee7484beb51e5c715b1` (2026-11-21), fetched
+  2026-11-24, 10 455 domains; the header records the upstream file's
+  SHA-256. Its test (`disposable.test.ts`) checks the format and a size range,
+  so a refresh that loses or doubles the list fails.
+- **Refresh:** monthly (#641: "refreshed monthly with a size-change
+  guard"). `.github/workflows/disposable-domains.yml` runs on the 1st at
+  06:00 UTC (and by hand, with an upstream `ref` and a `max_change`):
+  `pnpm gen:disposable-domains` (`scripts/guards/disposable_domains.mjs`,
+  tests beside it) reads upstream's newest commit from the GitHub API,
+  fetches the file at that exact commit from raw.githubusercontent.com (two
+  HTTPS GETs a month, no token, a descriptive User-Agent), refuses any line
+  that isn't a lower-case domain and a change of more than ±20 % in the
+  number of domains, and rewrites the file's header (commit, its date, the
+  fetch date, the count, the SHA-256). When the list moved, the workflow
+  opens a PR on `chore/disposable-domains-<sha7>` and starts CI on it by
+  dispatch (a PR opened with `GITHUB_TOKEN` starts no `pull_request` run);
+  the operator reviews and merges. A refusal fails the run for the operator
+  to read upstream's history and rerun with a larger `max_change`. Needs
+  the repo setting "Allow GitHub Actions to create and approve pull
+  requests". Fallback: the committed copy, which keeps working when
+  upstream is gone.
+- **Owner:** the operator.
+
 ## Rejected
 
 | Source | Why not |

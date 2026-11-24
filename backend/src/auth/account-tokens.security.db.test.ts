@@ -72,7 +72,7 @@ describe('no table stores a raw credential', () => {
 		);
 		// Positive control: the sweep finds the stores it is meant to guard.
 		const names = credential.map((r) => `${r.t}.${r.c}`);
-		for (const known of ['email_token.token_hash', 'invite.token_hash', 'share_link.token_hash', 'render_token.token_hash', 'api_key.key_hash', 'user_recovery_code.code_hash']) {
+		for (const known of ['email_token.token_hash', 'invite.token_hash', 'share_link.token_hash', 'render_token.token_hash', 'api_key.key_hash', 'user_recovery_code.code_hash', 'email_change.token_hash']) {
 			expect(names).toContain(known);
 		}
 		const bad = credential

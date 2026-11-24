@@ -1,0 +1,4 @@
+{
+	"addKb": 1,
+	"why": "LiveLimitNotice in the settings save bar and the Publish this run dialog, and the Plan page's Live catchments row (#641 round 9, migration 340): total 2525 KB against 2524 KB, measured with pnpm build:frontend && pnpm check:bundle"
+}

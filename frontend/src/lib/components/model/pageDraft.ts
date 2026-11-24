@@ -16,6 +16,8 @@ export interface PageDraft {
 	readonly dirty: boolean;
 	readonly saving: boolean;
 	readonly saveError: string | null;
+	/** Its last save was Free's live-catchment refusal (the settings' automatic runs, 338): the bar shows LiveLimitNotice, not an error. */
+	readonly liveLimit?: boolean;
 	/** What blocks its save, each a link to where it is fixed. */
 	readonly problems: readonly ProblemLink[];
 	/** Its save takes the bar's "Reason for this change" (the History tab keeps it): the settings do. */

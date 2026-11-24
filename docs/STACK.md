@@ -82,7 +82,7 @@ sides share.
   Map search over 150 000 gazetteer places and reading 5,000 allocations).
 - **frontend/**: SvelteKit 3 (Svelte 5) **SPA** (`adapter-static` with a fallback
   `index.html`; `ssr = false`, `prerender = false`, except the public landing
-  page at `/welcome` and `/welcome/af`, prerendered once per language, architecture.md), Vite, TypeScript, uPlot
+  page at `/welcome` and `/welcome/af` and the pricing page at `/welcome/pricing` and `/welcome/pricing/af`, prerendered once per language, architecture.md), Vite, TypeScript, uPlot
   charts, vitest. SvelteKit's config is the `sveltekit({…})` call in
   `vite.config.ts` (the Svelte options in `svelte-options.js`); `#lib/…` is a
   `package.json` `imports` subpath with the file's extension (`#lib/api/index.js`);
@@ -180,7 +180,7 @@ pnpm dev:db:psql            # psql as the schema owner
 pnpm dev:authority:confirm <project-id> <email> --reference "<letter>"   # the operator confirms who acts for a project's responsible authority (the first one is the operator's; security.md § Authorization)
 pnpm dev:billing:report [--month YYYY-MM] [--json] [--show-emails]   # the operator's billing Phase 1 metrics and staff abuse report, as the schema owner (325_billing_metrics); addresses only with --show-emails, operator only (billing.md § Metrics and the abuse report)
 pnpm dev:billing:grant <email|team-id> <plan> [--until YYYY-MM-DD] --reason "…" [--replace]   # the operator's staff grant of a plan (330_staff_grant), audit-logged, as the schema owner; --revoke --reason "…" ends it, --list shows the log; a live Stripe subscription is never replaced (billing.md § Staff grants)
-pnpm dev:billing:invoice <email|team-id> <plan> --interval month|year --po "<PO number>" [--seats n] [--from YYYY-MM-DD]   # a B2B invoice (net 30, the PO number on it) through BILLING_PROVIDER, as the schema owner: the mock by default, no network; production runs it as the billing-invoice owner action (billing.md § B2B invoices)
+pnpm dev:billing:invoice <email|team-id> <plan> --interval month|year --po "<PO number>" [--seats n] [--from YYYY-MM-DD] [--paid]   # a B2B invoice (net 30, the PO number on it) through BILLING_PROVIDER, as the schema owner: the mock by default, no network (--paid: the mock pays it, and its invoice.paid grants the plan through the webhook); production runs it as the billing-invoice owner action (billing.md § B2B invoices)
                              # production runs authority-confirm, billing-grant/-revoke/-grants and billing-report as owner actions on the migrate Lambda through .github/workflows/billing-admin.yml, ids only (deployment.md § Owner actions)
 pnpm dev:mail:up            # Mailpit: local inbox for all app email (UI :8026)
 pnpm dev:mail:down | dev:mail:status | dev:mail:logs | dev:mail:open
@@ -295,6 +295,7 @@ pnpm gen:example            # rewrite the example catchment the empty project li
 pnpm gen:help-art           # re-render the help pictures, by day and at dusk for dark mode (optional: Blender 5 + ImageMagick 7; HELP_ART_ONLY, HELP_ART_LIGHT, HELP_ART_DEVICE; output is committed)
 pnpm gen:landing-art        # regenerate the landing page's art, screens and figures (optional tooling; docs/design/landing-art.md)
 pnpm gen:e2e:timings       # refresh e2e/shard-timings.json (CI's e2e shards are packed by it) from the newest green main run; needs gh (e2e/README.md § CI)
+pnpm gen:disposable-domains [--ref <sha>] [--max-change 0.2]  # refresh the vendored disposable-email domain list (backend/src/auth/disposableDomains.ts) from upstream, refusing a size change past ±20 % (the monthly disposable-domains.yml runs it; data-sources.md § disposable-email-domains)
 pnpm gen:liability          # regenerate the known limitations, the engine errata and the methodology hashes from engine-audit.md, engine-errata.md and docs/methodology/ (after changing any)
 pnpm gen:assistant:help     # rewrite backend/src/assistant/helpIndex.json, the help guides and glossary the assistant's search_help reads (after changing any; a guard in test:guards fails until you do)
 pnpm gen:i18n:sheet [lang…]        # rewrite a language's translation sheet (default: every non-English language in

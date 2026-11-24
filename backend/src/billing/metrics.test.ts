@@ -5,8 +5,8 @@
 // metrics.db.test.ts.
 import { describe, expect, it } from 'vitest';
 import {
-	abuseReport, activation, busiestWeek, buildReport, canonicalEmail, formatReport, freeLimitShares, heaviestFree, newAccountFreeSpend,
-	percentile, redact, spendByPlan, type AccountRow, type PersonRow
+	abuseReport, activation, busiestWeek, buildReport, canonicalEmail, formatReport, freeLimitShares, gateRefusals, heaviestFree, newAccountFreeSpend,
+	NOT_YET_MEASURABLE, percentile, redact, spendByPlan, type AccountRow, type PersonRow
 } from './metrics.js';
 
 const t = (iso: string) => new Date(iso);
@@ -155,5 +155,26 @@ describe('abuse signals', () => {
 		expect(formatReport(report, true)).toContain('farm.er@gmail.com');
 		expect(text).toContain('Not yet measurable');
 		expect(text).toContain('Upgrade at the limit');
+	});
+});
+
+describe('gateRefusals (348: the verified-email gate)', () => {
+	it('sums the month by code and feature, and reports zero for none', () => {
+		const g = gateRefusals([
+			{ code: 'email_disposable', feature: 'assistant', refusals: 3 },
+			{ code: 'email_disposable', feature: 'feeds', refusals: 2 },
+			{ code: 'email_unverified', feature: 'assistant', refusals: 7 }
+		]);
+		expect(g).toEqual({ disposable: { assistant: 3, feeds: 2, total: 5 }, unverified: { assistant: 7, feeds: 0, total: 7 } });
+		expect(gateRefusals([])).toEqual({ disposable: { assistant: 0, feeds: 0, total: 0 }, unverified: { assistant: 0, feeds: 0, total: 0 } });
+	});
+
+	it('prints the disposable-domain refusals as measured, no longer as a gap', () => {
+		const report = buildReport('2026-11', t('2026-11-20T00:00:00Z'), [], [], {}, [{ code: 'email_disposable', feature: 'feeds', refusals: 4 }]);
+		const text = formatReport(report, false);
+		expect(text).toContain('disposable-domain refusals by the verified-email gate: 4 (assistant 0, feeds 4)');
+		expect(text).toContain('unverified-email refusals by the same gate: 0');
+		expect(NOT_YET_MEASURABLE.map((m) => m.metric)).not.toContain('Disposable-domain rejections');
+		expect(text.slice(text.indexOf('Not yet measurable'))).not.toMatch(/Disposable-domain/i);
 	});
 });

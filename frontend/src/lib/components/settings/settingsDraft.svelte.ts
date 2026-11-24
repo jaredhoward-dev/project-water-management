@@ -172,6 +172,11 @@ export class SettingsDraft {
 	kept = $state<Record<string, unknown>>({});
 	saving = $state(false);
 	saveError = $state<string | null>(null);
+	/**
+	 * The last save was Free's live-catchment refusal (automatic runs switched on in a second catchment, 338): the
+	 * save bar shows LiveLimitNotice, an information note, instead of the server's words as an error.
+	 */
+	liveLimit = $state(false);
 	/** The child sections' problems (their `bind:error`), kept here so they outlive the tab. */
 	errors = $state(noErrors());
 	/** Whether the saved settings have loaded (before, `s` is empty and nothing is checked). */
@@ -217,6 +222,7 @@ export class SettingsDraft {
 		if (!this.dirty) this.#reset();
 		else {
 			this.saveError = null;
+			this.liveLimit = false;
 			this.#openX2();
 		}
 	}
@@ -229,6 +235,7 @@ export class SettingsDraft {
 	applyPatch(patch: Record<string, unknown>): void {
 		this.s = withPatch($state.snapshot(this.s) as EditableSettings, patch);
 		this.saveError = null;
+		this.liveLimit = false;
 		this.#openX2();
 	}
 
@@ -283,6 +290,7 @@ export class SettingsDraft {
 		this.lastGapMap = null;
 		this.lastLakeMonthly = null;
 		this.saveError = null;
+		this.liveLimit = false;
 		this.errors = noErrors();
 		this.kept = {};
 	}

@@ -179,4 +179,54 @@ describe('a B2B invoice from the staff tool (no subscription)', () => {
 		e.data.object = { id: 'in_b2b', object: 'invoice', parent: null, metadata: {} };
 		expect(normaliseStripeEvent(e)).toMatchObject({ kind: 'invalid' });
 	});
+
+	const b2b = (metadata: Record<string, unknown>, over: Record<string, unknown> = {}) => {
+		const e = fixture('invoice-paid');
+		e.data.object = {
+			id: 'in_b2b',
+			object: 'invoice',
+			parent: null,
+			total: 1078800,
+			currency: 'zar',
+			metadata: { billing_account_id: ACCOUNT, plan_code: 'pro', seats: '1', interval: 'year', period_start: '1798754400', period_end: '1830290400', amount_minor: '1078800', wm_invoice_key: 'k', ...metadata },
+			...over
+		};
+		return e;
+	};
+
+	it('a paid one carries the grant its metadata names (335): plan, seats, interval, period, and its own total and currency', () => {
+		expect(normaliseStripeEvent(b2b({}))).toEqual({
+			kind: 'event',
+			event: {
+				eventId: 'evt_synthetic_invoice_paid_0001',
+				type: 'invoice.paid',
+				payload: {
+					accountId: ACCOUNT,
+					externalRef: null,
+					eventCreated: iso(1796209800),
+					invoice: { ref: 'in_b2b', planCode: 'pro', seats: 1, interval: 'year', periodStart: iso(1798754400), periodEnd: iso(1830290400), totalMinor: 1078800, issuedMinor: 1078800, currency: 'zar' }
+				}
+			}
+		});
+	});
+
+	it('a field that doesn’t parse is null, for the SQL to refuse; the event still names its account', () => {
+		const r = normaliseStripeEvent(b2b({ seats: '2.5', period_start: 'soon', interval: 7, amount_minor: '-5' }, { total: '1078800' }));
+		expect(r).toMatchObject({ kind: 'event', event: { payload: { accountId: ACCOUNT, invoice: { seats: null, periodStart: null, interval: null, totalMinor: null, issuedMinor: null, planCode: 'pro' } } } });
+	});
+
+	it('no grant on a subscription’s invoice, one without our key (a dashboard invoice), or a failed payment', () => {
+		const sub = fixture('invoice-paid');
+		Object.assign(sub.data.object, { total: 89900, currency: 'zar', metadata: { wm_invoice_key: 'k', plan_code: 'pro' } });
+		const subPayload = normaliseStripeEvent(sub);
+		expect(subPayload).toMatchObject({ kind: 'event', event: { payload: { externalRef: 'sub_synthetic_0001' } } });
+		expect((subPayload as { event: { payload: object } }).event.payload).not.toHaveProperty('invoice');
+		const dashboard = normaliseStripeEvent(b2b({ wm_invoice_key: undefined }));
+		expect((dashboard as { event: { payload: object } }).event.payload).not.toHaveProperty('invoice');
+		const failed = b2b({});
+		failed.type = 'invoice.payment_failed';
+		const f = normaliseStripeEvent(failed);
+		expect(f).toMatchObject({ kind: 'event', event: { type: 'invoice.payment_failed' } });
+		expect((f as { event: { payload: object } }).event.payload).not.toHaveProperty('invoice');
+	});
 });

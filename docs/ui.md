@@ -78,7 +78,7 @@ header (issue #17): **Account**, then who you are as its summary line, the
 initials avatar, display name, email and a Confirmed / Not confirmed badge
 (a region named by the heading). Below it the cards sit in **two columns**
 once the page itself is 52rem wide (a container query, so the 240 px
-sidebar counts): Profile, Password, Two-step sign-in and Delete my account on the left; Language and units,
+sidebar counts): Profile, Password, Email address, Two-step sign-in and Delete my account on the left; Language and units,
 Alert emails and Your data on the right; one column below that. The page is
 capped at 92rem from the sidebar's edge, and at 1440 × 960 it fits the
 window without scrolling (`account.spec.ts` › layout pins both widths). Form
@@ -96,7 +96,13 @@ language switch and the farm view's m³ / ML, [§ Language](#language)), a
 data-subject export (`GET /auth/me/export`, a JSON file; the download
 helpers load on click, and a second click within the minute shows the
 server's `429` message in an alert; under it, outside the farm frame, a
-**Plan and usage** link to `/account/plan`, [§ Plan and usage](#plan-and-usage)) and a
+**Plan and usage** link to `/account/plan`, [§ Plan and usage](#plan-and-usage)), an
+**Email address** card (`components/account/ChangeEmail.svelte`, 347: the new
+address and the current password; it says only that a link is on its way to
+the new address if it can take the change, since the server answers the same
+for a taken one; the link opens `/verify-email/change`, which switches the
+account and says the new address, signed in or out, [security.md § Changing
+the email address](./security.md#changing-the-email-address)) and a
 **Password** form
 (current, new, repeat; `POST /auth/change-password`). Changing the password
 signs out every other device while this browser stays signed in. Errors show
@@ -534,6 +540,37 @@ other signed-out route still goes to `/login?next=`.
   catchment:", the last the run's calibration NSE in plain words ("fit to
   the measured river flow (1 is perfect)"). The art, the motion rules and the
   pipeline that makes them: [design/landing-art.md](./design/landing-art.md).
+
+## Pricing page
+
+`/welcome/pricing` in English and `/welcome/pricing/<code>` in every other
+language (`/welcome/pricing/af`), issue #641 Phase 4
+(`routes/welcome/pricing/[[lang=locale]]`, `lib/components/pricing/`,
+`e2e/tests/pricing.spec.ts`). Prerendered and routed exactly like the
+landing page: public, translated, never asks for the session, the address
+sets the language and a visitor whose language is another goes on to that
+address (`LANDING_ROUTES`, `addressFor` in `lib/auth/session.svelte.ts`).
+
+- **What it says.** Free, Pro and Team side by side, each with its price a
+  month (and a year, with the months saved) and what it includes. Modelling
+  is never limited on any plan; the plans differ only in the assistant, live
+  operations (feeds, automatic runs, alerts, published farm views: 1
+  catchment on Free), server PDF reports and issued evidence packs.
+  "Farmers and viewers are always free" and "Assessors verify evidence
+  packs free" come first; "No VAT is charged", Free's non-commercial rule,
+  and that data is never held back by a plan close it. Never "quota",
+  "abuse" or "402". It says nothing about the reverse trial on purpose: the
+  trial is off (`REVERSE_TRIAL`), and a page offering what isn't on would
+  mislead ([followups.md](./followups.md)).
+- **Figures from one place.** Every price and limit comes from
+  `@water-management/engine/plans` (`PLAN_FIGURES`), since a static page
+  can't read the `plan` table; `backend/src/billing/planFigures.db.test.ts`
+  fails when a migration moves a figure and that file doesn't follow.
+- **Links.** The landing page's closing panel ("See plans and prices") and
+  its footer, in the page's language. The Plan page's *Compare plans*
+  (assistant panel, live-catchment note) still goes to `/account/plan`.
+- **Not yet.** Checkout's disclosures and consent tick (#641 Phase 4) are on
+  the Plan page's checkout, not here.
 
 ## Legal pages
 
@@ -1106,7 +1143,12 @@ takes the bar away, a live region outside it says "Changes saved." or
 reason and Preview, `revert()`); the page adapts the details and the
 settings to it and saves them in `saveAll`. The optional reason field shows
 with model or settings edits (it goes into History with them; one reason for
-both). A failed save says so in the bar ("Save failed: …"), beside Save.
+both). A failed save says so in the bar ("Save failed: …"), beside Save,
+except Free's live-catchment refusal (automatic runs switched on in a second
+live catchment, the draft's `liveLimit`): the bar shows the information note
+(`LiveLimitNotice`, *Compare plans*) under its row instead, the edit stays
+unsaved, and the next save clears it ([billing.md § Live catchments
+(Free)](./billing.md#live-catchments-free)).
 Discard and Save (and Preview) sit in one box that never splits on a
 phone. Every other card on the Project page acts at once. Settings has no
 save bar of its own. A save keeps what was typed while it was in flight:
@@ -1361,7 +1403,11 @@ role, freshness, Add data) and each tab's own header:
   banners: the viewer's **View only** note (every section), the upload
   result with **Re-run model** / **Dismiss**, **New data since the last
   run** with **Re-run model** (not on Runs or Data, which say it in their
-  own way), and a run that didn't start. Every message and action of the
+  own way), a run that didn't start, and on a catchment paused past Free's
+  live catchments (341) a note that its feeds, alerts and automatic runs are
+  paused because the plan it is billed to ended, that nothing is lost, with
+  a link to the plan (`billing/planPause.ts`; billing.md § Pausing after a
+  downgrade). Every message and action of the
   old banners is kept. The model save bar stays the dock at the bottom
   (Save changes, Discard, the reason), and the grid modal and sheets keep
   their own `ModelSaveRow`.
@@ -3177,7 +3223,23 @@ The page is two cards, side by side where they fit and stacked on a phone:
   to reload in a minute (`seatChangeNotice`). A refusal shows inline in
   English, as the buttons above do, and the field keeps the count typed
   ([billing.md § Changing a Team's seats](./billing.md#changing-a-teams-seats);
-  `e2e/tests/billing-seats.spec.ts`). While `enforced` is false, a note says nothing is refused:
+  `e2e/tests/billing-seats.spec.ts`). After the subscription lines, a
+  team's card has **Assistant share** (`AssistantShare.svelte`, a sub-heading;
+  on every team plan, and only team admins reach the page): the most of the
+  team's monthly assistant dollars one member may use, a whole-percent
+  `NumberInput` (*Most one member may use (%)*, 1 to 100, starting at the
+  share now, 50 by default) and a *Change share* button, `aria-disabled`
+  while the value is invalid or the current one. The line under it says the
+  share in dollars on Team, *One member may use up to 50% of the team's
+  assistant dollars a month ($22.50 of $45.00).*, and off Team that it
+  applies once the team is on Team (`assistantShare.ts`). The confirm dialog
+  (*Change the assistant share?*, confirm button *Change share*) says *From
+  50% to 80%: one member may use up to $36.00 of the team's $45.00 a month.
+  It applies from each member's next question.*; confirmed, it calls `POST
+  /teams/:id/plan/assistant-share`, says *Saved: one member may now use up
+  to 80%.* in a live region and re-reads the plan
+  ([billing.md § Assistant dollar caps](./billing.md#assistant-dollar-caps)).
+  While `enforced` is false, a note says nothing is refused:
   with no buttons, that plans aren't charged yet; beside them (which can
   charge), only that limits aren't enforced yet (`plan.ts` `shadowNote`). Each
   button asks the API for a URL (`POST …/plan/checkout` or `…/plan/portal`)
@@ -3209,7 +3271,11 @@ The page is two cards, side by side where they fit and stacked on a phone:
   Back from the mock's page, a refused request (its words inline, the focus
   kept) and a payment confirmed a read late.
 - **Usage in <month>**: one row each for catchments (every catchment billed
-  to the account counts, whoever made it; there is no archived state),
+  to the account counts, whoever made it; there is no archived state), live
+  catchments (340: those with data feeds, alerts or automatic runs on, or a
+  farm view published; "1 of 1 · At the limit" on Free, left out when an
+  older API doesn't send it; [billing.md § Live catchments
+  (Free)](./billing.md#live-catchments-free)),
   reports, issued evidence packs and the assistant's spend this month. A row
   with a limit reads "3 of 5 · 2 left" over a bar (`role="meter"`, its value
   text the same words); past the limit it says "1 over the limit" and the bar
@@ -3237,7 +3303,22 @@ and for a team member who isn't an admin, a farmer-only user sent back to
 both widths, the team's Upgrade to Team with its seat field, the two priced
 buttons wrapping at 360 px); `auth/redirect.test.ts` keeps `/account/plan` English. The
 frontend calls `GET /billing/plans` only for the Upgrade buttons' prices
-(the planned pricing page will too).
+(the public pricing page doesn't: it is prerendered, and its figures are
+`PLAN_FIGURES` in `packages/engine/src/plans.ts`, pinned to the plan table by
+`planFigures.db.test.ts`).
+
+
+**Live catchments (341, 345).** On Free past its live catchments after a plan
+ended, a third card, *Live catchments* (`billing/KeepLive.svelte`, words from
+`plan.ts` `keepPickerIntro`, `keepRowState`, `keepQuestion`), lists them (`GET
+…/plan/live-catchments`): what Free keeps live, when the others pause (or that
+they are paused), that nothing is lost, each one's state (*Stays live*, *Stays
+live (your choice)*, *Pauses from …*, *Paused since …*), and *Keep live* on
+each other one, through the app's confirm dialog (`POST …/plan/keep`; a status
+line says which stays live). An information note in #641's tone, never the
+error colour; the page asks only when `usage.liveCatchments` is over its limit
+with no live subscription, and shows nothing for an account that never had a
+plan ([billing.md § Choosing the catchment to keep](./billing.md#choosing-the-catchment-to-keep)).
 
 ## Network
 
@@ -10998,7 +11079,10 @@ read it before.
   notice: the level with its percentage ("Advisory · 10 %"), its text in
   each language written (table order, `noticeLanguages`), the next update
   date and who last changed it. Editors get, in the panel's head (issue
-  #521), **Publish this run** on any other run: a confirm dialog says what changes
+  #521), **Publish this run** on any other run (on Free with another catchment
+  live, the dialog shows the live-catchment information note,
+  `LiveLimitNotice`, in place of an error and stays open; billing.md § Live
+  catchments (Free)): a confirm dialog says what changes
   for stakeholders (each farmer sees this run's figures for their own farm
   from 1 October to the run's last day, day first, and the notice; it replaces the current baseline, which
   stays in the history), warns when farm dams have no stop level ("N farm
@@ -13944,8 +14028,22 @@ with read-only tools over the project's data. It never changes anything.
   whose (the project's, yours across your projects, or the server's: three
   monthly caps, docs/api.md § Assistant) and when it starts again, and the
   box takes nothing. The share left under the box is of the cap nearest its
-  end. Any other refusal shows
-  its message.
+  end. With billing enforced, a dollar cap (`assistant_daily_cap`,
+  `assistant_monthly_cap`, `assistant_member_cap`,
+  `assistant_free_pool_spent`; billing.md § Assistant dollar caps) shows the
+  server's words and "Back … your time." from `params.resetsAt`, and the box
+  takes nothing until then (`data-testid="assistant-cap"`). On Free's day and
+  month (`params.plan` is `free`, which the API sends on those two) the note
+  ends with a **Compare plans** link to the Plan page (`/account/plan`,
+  `data-testid="assistant-compare-plans"`), the month's after "Pro includes
+  about 15 times as much." (Free $1, Pro $15 a month, 323's plan limits).
+  The Free pool never upsells (it isn't the person's doing), nor does a paid
+  account's month or a Team member's share, whose words say a team admin
+  can raise it; an editor who can't read the owner's account gets no plan,
+  so no link (`chat.svelte.ts` `capOffersPlans`). The issue's *OK* button is
+  left out: the note stays until the cap lifts, as the box does. Tests:
+  `AssistantPanel.test.ts`, `chat.svelte.test.ts`, `assistant.spec.ts` (the
+  POST answered 429 by `page.route`). Any other refusal shows its message.
 - **A recommended change** (the `propose_settings` tool) is a card in the
   answer, **Recommended change**. Its title is the server's, never the
   model's words (issue #640): what kind of change it is (**Management

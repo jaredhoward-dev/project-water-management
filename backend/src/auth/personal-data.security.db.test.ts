@@ -384,6 +384,16 @@ beforeAll(async () => {
 		`INSERT INTO renewal_notice (subscription_id, period_end, user_id, status, sent_at, settled_at) VALUES ($1, '2027-03-01T10:00:00Z', $2, 'sent', now(), now())`,
 		[renewing.id, subject.id]
 	);
+	// A plan email sent to them (346): the trial-ending one, on their own account. The deletion cascades it away.
+	await asOwner(
+		`INSERT INTO billing_notice (billing_account_id, kind, about, user_id, status, sent_at, settled_at) VALUES ($1, 'trial_ending', '2027-03-01T10:00:00Z', $2, 'sent', now(), now())`,
+		[billingAccount.id, subject.id]
+	);
+	// A pending change of their address (347): the new address and the mailed link's hash. The deletion cascades it away.
+	await asOwner(
+		`INSERT INTO email_change (user_id, new_email, token_hash, expires_at) VALUES ($1, $2, sha256(convert_to($3, 'UTF8')), now() + interval '2 days')`,
+		[subject.id, `new-${tag}@example.com`, `email-change-${tag}`]
+	);
 	// Evidence that names its maker (138, issue #112): a project they imported (with its import report) and a team they
 	// made, each with the owner as a second owner or admin; a run of theirs, nominated as evidence, with a completed
 	// ensemble; and a team scenario. All stay after the deletion, with the maker cleared.

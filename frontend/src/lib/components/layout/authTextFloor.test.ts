@@ -19,6 +19,7 @@ const FILES = [
 	'routes/forgot-password/+page.svelte',
 	'routes/reset-password/+page.svelte',
 	'routes/verify-email/+page.svelte',
+	'routes/verify-email/change/+page.svelte',
 	'routes/alerts/unsubscribe/+page.svelte',
 	'routes/alerts/feedback/+page.svelte'
 ];

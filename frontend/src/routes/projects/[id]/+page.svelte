@@ -48,6 +48,8 @@
 	import { afterNavigate, goto } from '$app/navigation';
 	import { trackClose } from '#lib/nav/closeNav.js';
 	import { resolve } from '$app/paths';
+	import { basePath } from '#lib/nav/base.js';
+	import { pausedNotice } from '#lib/components/billing/planPause.js';
 	import { page } from '$app/state';
 	import type { SeriesMeta } from '@water-management/engine';
 	import { headlineView } from '#lib/calibration/zones.js';
@@ -72,6 +74,7 @@
 	import type { UnsavedEdits } from '#lib/preview/overlay.js';
 	import IssueList from '#lib/components/model/IssueList.svelte';
 	import SaveBar from '#lib/components/model/SaveBar.svelte';
+	import { isLiveLimit } from '#lib/components/billing/liveLimit.js';
 	import OverviewTab from '#lib/components/overview/OverviewTab.svelte';
 	import { agoText } from '#lib/format/age.js';
 	import { freshness, newDataSinceRun, STALE_DAYS } from '#lib/components/series/freshness.js';
@@ -255,6 +258,9 @@
 		},
 		get saveError() {
 			return settings.saveError;
+		},
+		get liveLimit() {
+			return settings.liveLimit;
 		},
 		// Each panel with a problem, linked to it on its page (Model settings or Calibration, issue #586 round 3): in
 		// place on that page, from any other tab through it.
@@ -683,6 +689,7 @@
 		if (settings.blockers.length || settings.saving) return false;
 		settings.saving = true;
 		settings.saveError = null;
+		settings.liveLimit = false;
 		try {
 			const why = saveReason.trim();
 			const sent = settings.snapshot();
@@ -694,7 +701,9 @@
 			fieldHistory?.refresh();
 			return true;
 		} catch (e) {
-			settings.saveError = e instanceof Error ? e.message : String(e);
+			// Automatic runs switched on in a second live catchment on Free (338): the bar's information note, not an error.
+			if (isLiveLimit(e)) settings.liveLimit = true;
+			else settings.saveError = e instanceof Error ? e.message : String(e);
 			return false;
 		} finally {
 			settings.saving = false;
@@ -1122,8 +1131,16 @@
 <!-- The notices: one slim line under the header, not full-width banners. -->
 {#snippet headerNotices()}
 	{@const behind = !banner && behindRun.length > 0 && tab !== 'runs'}
-	{#if !canEdit || banner || behind || rerunError}
+	{@const paused = pausedNotice(project, basePath())}
+	{#if !canEdit || banner || behind || rerunError || paused}
 		<div class="notice-line" data-testid="notice-line">
+			{#if paused}
+				<!-- 341: operations paused past Free's live catchments (billing/planPause.ts); an information note, not an error. -->
+				<span class="note note-info" role="note" data-testid="plan-paused">
+					<span class="note-text">{paused.text}</span>
+					<a href={paused.href}>{paused.linkText}</a>
+				</span>
+			{/if}
 			{#if !canEdit}
 				<span class="note readonly-note" role="note">
 					<svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">

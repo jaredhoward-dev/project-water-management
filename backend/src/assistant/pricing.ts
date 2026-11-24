@@ -102,3 +102,16 @@ export function turnCostUsdMicros(provider: Exclude<AssistantProviderName, 'off'
 	const price = modelPrice(model);
 	return price ? costUsdMicros(price, t) : null;
 }
+
+/**
+ * The most a weighted token (config.ts weightedTokens: input + 5 × output) can
+ * cost with this model, in micro-USD: the greatest of the input, cache-write
+ * and output ÷ 5 prices. A turn's token budget × this bounds its cost, so the
+ * dollars app_assistant_begin reserves are never short
+ * (336_assistant_dollar_caps). 0 for the local providers, null with no price.
+ */
+export function usdMicrosPerWeightedToken(provider: Exclude<AssistantProviderName, 'off'>, model: string): number | null {
+	if (provider === 'mock' || provider === 'ollama') return 0;
+	const price = modelPrice(model);
+	return price ? Math.max(price.input, price.cacheWrite, price.output / 5) : null;
+}

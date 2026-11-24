@@ -29,6 +29,13 @@
 # fixed_egress_enabled the fetcher and mirror-ingest run in a separate egress
 # VPC behind one Elastic IP (egress.tf, modules/fixed-egress), never this one.
 #
+# The one exception, off by default: with stripe_egress_enabled (needed with
+# billing_provider = "stripe") a module adds a NAT gateway to this VPC and two
+# subnets of the API's own routed through it, so the API Lambda reaches
+# api.stripe.com (egress.tf, modules/stripe-egress). The subnets, route table
+# and security groups in this file stay as they are: RDS, the worker, migrate
+# and the endpoints keep the route-less subnets below.
+#
 # Security groups: API, migrate and worker Lambdas; RDS (5432 from those
 # three only); one per interface endpoint (Secrets Manager here, SQS in
 # jobs.tf, SES in ses.tf). tests/guardrails.tftest.hcl (run "network")

@@ -402,6 +402,13 @@ resource "aws_lambda_function" "assistant" {
       ASSISTANT_TOKENS_PER_USER_MONTH  = tostring(var.assistant_tokens_per_user_month)
       ASSISTANT_TOKENS_PER_MONTH_TOTAL = tostring(local.assistant_tokens_per_month_total)
       ASSISTANT_MESSAGES_PER_HOUR      = tostring(var.assistant_messages_per_hour)
+      # The Free dollar caps (issue #641; docs/billing.md § Assistant dollar
+      # caps): only this Lambda begins a turn, so only it reads them (the
+      # API's status shows the token caps). They refuse only while
+      # BILLING_ENFORCED is on.
+      ASSISTANT_FREE_USD_PER_DAY        = tostring(var.assistant_free_usd_per_day)
+      ASSISTANT_FREE_MESSAGES_PER_DAY   = tostring(var.assistant_free_messages_per_day)
+      ASSISTANT_FREE_POOL_USD_PER_MONTH = tostring(var.assistant_free_pool_usd_per_month)
       # A turn's own bounds, pinned here rather than left to the code's
       # defaults, so the plan shows them.
       ASSISTANT_MAX_HOPS               = tostring(var.assistant_max_hops)

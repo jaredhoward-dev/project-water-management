@@ -559,6 +559,34 @@ token, a malformed or unknown one, a live invite for another address) is
   `auth/signupClosed.security.db.test.ts`, and the `signup_open` runs in
   `infra/tests/guardrails.tftest.hcl`.
 
+## Changing the email address
+
+Issue #641 item 5 (347_email_change, `auth/email-change-routes.ts`). A
+signed-in person asks with the new address and their **current password**
+(checked through the sign-in lockout, as changing the password is, so a
+stolen session alone can't move the account). A link goes to the **new**
+address (the email-token pattern: 32 random bytes, only the SHA-256 stored in
+`email_change`, single use, 48 h, one pending change per account, a newer one
+replaces it); the account's address switches **only** when that link is used,
+and the **old** address then gets a notice naming the new one. Until then
+nothing about the account changes. Limits: the verification email's one-a-minute
+cooldown and the account's daily cap of reset, verification and change emails
+(078's `account_mail_quota`). **No enumeration:** the answer is the same `202`
+whether or not the new address has an account (a taken address gets no
+link: its holder gets sign-up's "you already have an account" email, or a
+fresh confirmation link, under that address's own cooldown and cap, sent
+inside the same `answerAlike`), after the same time (`answerAlike`) and under the same limits (the link
+is issued, and counted, before the address is looked up), so this reveals no
+more than sign-up. If an account takes the address after the link went out,
+the switch is refused (`409 email_change_taken`) by `app_user`'s unique email;
+only the holder of that inbox can see it. On the switch the address is marked
+verified, a bounce suppression (the old address's) is cleared, and outstanding
+verify and reset links to the old address are dropped. Every session of the
+account is signed out, as a password change does; the browser that confirms
+keeps a fresh session if it is signed in to that account. A
+disposable new address is refused only with `BILLING_ENFORCED` on, as at
+sign-up ([billing.md § Verified email on Free](./billing.md#verified-email-on-free)).
+
 ## Password reset, email verification and invites
 
 - **Tokens** are 32 bytes from `crypto.randomBytes`, mailed as base64url. The
@@ -781,6 +809,20 @@ token, a malformed or unknown one, a live invite for another address) is
   checks that adding a member, team member or farmer (single and bulk) and
   signing in answer the same for an unknown address and an unverified or
   wrong-password one.
+- **Verified email on Free** (issue #641, 343_free_email_gate; off unless
+  `BILLING_ENFORCED`): on a Free project an unverified or disposable-domain
+  address can't start an assistant turn or switch a data feed on (`403
+  email_unverified` / `email_disposable`), so the costly parts need a real
+  inbox. `app_free_email_gate` is a definer function that answers a
+  non-member NULL and a member only their own address and whether it is
+  verified; the error text never carries the address. The disposable list
+  is vendored (CC0, `backend/src/auth/disposableDomains.ts`), never fetched
+  at runtime ([billing.md § Verified email on
+  Free](./billing.md#verified-email-on-free)), and refreshed by a monthly PR
+  (data-sources.md § disposable-email-domains). With `BILLING_ENFORCED` on,
+  sign-up (`400 signup_disposable`) and an email change (`400
+  email_change_disposable`) refuse it too (a sign-up through a live invite for exactly that address is
+  exempt).
 
 ### Throttles that don't depend on the WAF
 
@@ -1152,8 +1194,12 @@ result without signing in, until it expires or its owner revokes it.
 - **In the fragment.** The URL is `/share#t=<token>`. A browser never sends
   the fragment to a server, so the token doesn't reach CloudFront, WAF or
   Lambda access logs, or a `Referer`. The `/share` page reads it, strips it
-  from the address bar with a shallow `goto` that replaces the history entry
-  (as the reset pages strip `?token=`; e2e checks each page's address after load), and POSTs it in a JSON body. The page sets `noindex` and
+  from the address bar with a `goto` that replaces the history entry
+  (as the reset pages strip `?token=`; e2e checks each page's address after load),
+  and POSTs it in a JSON body. The `goto` is a real navigation, never a
+  shallow one: a shallow entry keeps the tokened URL in SvelteKit's history
+  state, and Back from another page navigates to it, sending the spent token
+  again (account.spec.ts checks Back on the email change page). The page sets `noindex` and
   `no-referrer`. A link pasted into a chat app is still readable by whoever
   sees the message: that is what a link is.
 - **Owner-only for a baseline link.** `share_link` RLS: SELECT, INSERT (as
@@ -1958,8 +2004,10 @@ In short:
   with no user and refuses (`42501`) inside a user's or an API key's
   transaction; `billing_event`, its de-duplication, is owner-only
   (`apply.db.test.ts`). The billing write routes follow the same rule: a
-  team's `POST /teams/:id/plan/checkout`, `/portal` and `/seats` answer
-  `404` to anyone but a team admin before any provider call, and seat
+  team's `POST /teams/:id/plan/checkout`, `/portal`, `/seats` and
+  `/assistant-share` answer `404` to anyone but a team admin before any
+  provider call or body read (`app_team_set_assistant_share`, 339, answers
+  NULL to anyone else; `assistantShare.db.test.ts`), and seat
   changes never write `subscription.seats` (the webhook brings them back
   through `app_billing_apply`; `seats.db.test.ts`, 333's
   `app_billing_live_subscription_ref` answers only the account's person or
@@ -4199,12 +4247,15 @@ PDF someone else asked for kept the person as a recipient
 | Adds by email, counted for the daily cap: the adder's id and the project's or team's (101) | `invite_throttle` | 24 hours from the window's first add | Lapses with its window | Lapses with its window |
 | Dam traces, counted for the hourly cap: the user's id and the project's (186) | `map_compute_throttle` | One hour from the window's first attempt | Lapses with its window | Lapses with its window |
 | The assistant's use (262; 324 added the cache tokens and the cost in micro-USD): the person's tokens (input and output) and messages per project and UTC month, as counts only (never the conversation); own rows only under RLS; in "Download my data" (`assistantUsage`) | `assistant_usage` | The month it counts and the 12 after it (`ASSISTANT_USAGE_RETENTION_MONTHS`, 13), then deleted by the job tick (`app_purge_assistant`) | Kept without the name (`user_id` set null), so the month still counts what was spent, until its retention ends | Deleted |
+| The assistant's use per day (336, the dollar caps): the person's messages and cost in micro-USD per billing account and UTC day, counts only; own rows only under RLS; in "Download my data" (`assistantDays`) | `assistant_day_usage` | As `assistant_usage`: purged with it by the job tick (`app_purge_assistant`) | Deleted (`user_id` cascade); the month's cost stays on `assistant_usage` without the name | Deleted |
 | The person's billing account (323, issue #641): kind (`user`), its lifetime count of projects created and when it was made; made when their first project needs it or when they open their plan (`GET /account/plan`); own row only under RLS (a team's account is the team's, read by its admins); its customer reference at the billing provider (328, `external_customer_ref`: Stripe's `cus_…`, set at the first checkout; null under the mock and `manual`); in "Download my data" (`billing.account`, the reference included). `project.billing_account_id` points at it | `billing_account` | Until the account is deleted | Deleted (cascades from `app_user`); each project it billed keeps going with `billing_account_id` set null | – (the account isn't the project's) |
 | The billing account's subscriptions (323): plan, status, seats, period, trial end, whether it cancels at period end, the billing interval (332), the provider and its reference; empty in Phase 1 (no provider); read under RLS by the account's person (or its team's admins); in "Download my data" (`billing.subscriptions`) | `subscription` | Until the account is deleted | Deleted (cascades from `billing_account`) | – |
 | The billing provider's webhook events for the account (326): the provider, its event id and type, when it arrived, what it did, and the account it named; no one reads it under RLS (owner-only); not in "Download my data", which already holds the subscriptions they set | `billing_event` | 90 days from arrival, then the tick deletes it (327 `app_purge_billing_events`, `BILLING_EVENT_RETENTION_DAYS`; never under 4 days, past Stripe's 3-day redelivery window) | Kept without the account (`account_id` set null when the billing account cascades away) | – |
 | The billing account's monthly counts (323): server PDF reports queued and evidence packs issued, per SAST month, counts only; read under RLS as `subscription`; in "Download my data" (`billing.usageCounters`) | `usage_counter` | Until the account is deleted | Deleted (cascades from `billing_account`) | – (counted on the account, not the project) |
 | The yearly renewal notices sent to the person (329, issue #641; CPA s14(2)(c)): one per subscription and period, with the period end it was about, its send status, attempts, when it was claimed, sent and settled, and a short failure reason; the email's words aren't stored. Written only by the worker's definer functions; own rows readable under RLS; in "Download my data" (`billing.renewalNotices`: period end, status, when sent and when made) | `renewal_notice` | Kept as the record that the notice went, until its subscription or the person's account is deleted | Deleted (cascades from `app_user`, and from `subscription` with the billing account) | – |
+| The plan emails sent to the person (346, issue #641): the grace after a lapse started, the pause landed, a reverse trial ends in 3 days; one per account, kind, occurrence and recipient, with the account it was about (theirs, or a team's they administer), when the occurrence began (`about`), its send status, attempts, when it was claimed, sent and settled, and a short failure reason; the email's words aren't stored. The emails name only the catchments the recipient can read under RLS (others are counted). Written only by the worker's definer functions; own rows readable under RLS; in "Download my data" (`billing.planNotices`: kind, `about`, status, when sent and when made) | `billing_notice` | Kept as the record that the email went, until the account or the person's account is deleted | Deleted (cascades from `app_user` and from `billing_account`) | – |
 | The staff grants of the account's plan (330, issue #641): plan, until when, the reason, who granted or revoked it (the operator's name) and when, and each expiry. The reason is written for the customer to read. Written only by the schema owner's grant and revoke functions and the worker's expiry; read under RLS by the account's person and its team's admins; the person's in "Download my data" (`billing.grants`: action, plan, until, reason, granted by, when) | `billing_grant_log` | Kept as the audit record of the plan while the account exists | Deleted (cascades from `billing_account`, so from `app_user` or `team`) | – |
+| That a canonical email address has had the Pro reverse trial, and when (342, issue #641 "Once per canonical email"): a SHA-256 of the canonical address (lower-cased, `+tag` and Gmail's dots dropped), never the address, with no link to any account. Pseudonymous, not anonymous: anyone holding an address can hash it and test for a row, so it is personal information, kept to the least that enforces the rule. Owner only (no `water_app` privilege); written once by `app_reverse_trial_start`, read by nothing but it. Not in "Download my data": the row is not linked to the account, and finding it means hashing the address | `reverse_trial_claim` | Kept for good: the rule is once ever, so a row deleted with the account would give a second trial to whoever deletes and signs up again | **Kept** on account deletion (no foreign key): it names no account and holds no address | – |
 | The assistant's messages per person in the current hour, for the hourly cap (262); no one reads it but the cap's own function | `assistant_rate` | Until its hour is over: the person's next message or the job tick deletes it | Deleted | – |
 | A running assistant turn's reserved budget (264): who began it, on which project, and how many weighted tokens; no one reads it but the assistant's own functions | `assistant_reservation` | While the turn runs: deleted when it is charged, or, if never charged, converted into the usage row in full once it expires (the turn's deadline + 120 s; the next turn or the job tick) | Kept without the name (`user_id` set null) until it is charged or expires | – |
 | Display preferences: the workspace sections a person hid from their sidebar (083); own row only under RLS | `user_preferences` | Until the account is deleted | Deleted | – |
@@ -4641,7 +4692,7 @@ key there would let any read-only principal forge any user's session.
   get a 404, no query string reaches S3; infra/README.md, "Missing files are 404").
   The reports bucket keeps `GetObject` only.
 - **The public landing page** (`/`, signed out, and the prerendered
-  `/welcome` and `/welcome/af`, issues #57 and #137), the legal pages (`/privacy`, `/terms`,
+  `/welcome` and `/welcome/af`, issues #57 and #137; the pricing page, `/welcome/pricing[/af]`, #641), the legal pages (`/privacy`, `/terms`,
   [legal-status.md](./legal-status.md)), the methods page (`/methods`) and the data sources' credits (`/data-sources`) are static: it calls no API but `/auth/me` (the
   layout's session check, which it doesn't wait for), shows only invented
   example data built into the bundle, loads nothing from a third party (no

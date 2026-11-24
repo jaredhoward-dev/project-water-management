@@ -32,3 +32,39 @@ module "fixed_egress" {
   # The NAT instance's recover and reboot alarms page at the essential tier.
   alarm_topic_arns = local.alarms_essential ? [aws_sns_topic.alerts.arn] : []
 }
+
+# ----------------------------------------------------------------------------
+# Stripe egress (var.stripe_egress_enabled; modules/stripe-egress,
+# docs/deployment.md § Stripe egress)
+#
+# With billing_provider = "stripe" the API Lambda calls api.stripe.com
+# (checkout, the Customer Portal, seat changes), but it lives in the private
+# VPC, which has no way out (network.tf). On, the module adds a NAT gateway
+# to that VPC and two subnets of its own routed through it, and the API
+# Lambda moves its ENIs there and carries one more security group (HTTPS
+# out). Nothing else moves: RDS, the worker, migrate and the endpoints keep
+# the original route-less subnets, so RDS stays private. Off (the default),
+# nothing is created and the API keeps network.tf's subnets.
+# ----------------------------------------------------------------------------
+
+locals {
+  stripe_egress_on = var.stripe_egress_enabled
+
+  # The API Lambda's vpc_config: the module's subnets and both groups while
+  # it is on, network.tf's subnets and the API group alone otherwise.
+  api_subnet_ids = local.stripe_egress_on ? module.stripe_egress[0].api_subnet_ids : aws_subnet.private[*].id
+  api_security_group_ids = concat(
+    [aws_security_group.api_lambda.id],
+    local.stripe_egress_on ? [module.stripe_egress[0].api_security_group_id] : [],
+  )
+}
+
+module "stripe_egress" {
+  source = "./modules/stripe-egress"
+  count  = local.stripe_egress_on ? 1 : 0
+
+  project  = local.project
+  vpc_id   = aws_vpc.main.id
+  vpc_cidr = var.vpc_cidr
+  zone_ids = local.subnet_zone_ids
+}

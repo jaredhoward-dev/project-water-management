@@ -10,14 +10,16 @@
 // run at once). It is charged its tokens after it ends, whatever the
 // outcome, which settles the reservation; one never settled (the Lambda
 // died) is charged in full once it expires. The charge also records the
-// turn's cost in micro-USD (pricing.ts, 324_assistant_turn_cost), which no
-// cap reads yet (issue #641 Phase 1, shadow mode).
+// turn's cost in micro-USD (pricing.ts, 324_assistant_turn_cost), which the
+// dollar caps read (336_assistant_dollar_caps), refusing only with
+// BILLING_ENFORCED on (issue #641; dollarCaps.ts).
 import type { Context } from 'hono';
 import { withUser, type Db } from '../db/tx.js';
 import { ApiError } from '../http/errors.js';
 import { logEvent } from '../logging/logEvent.js';
 import { safeError } from '../logging/safeError.js';
 import type { AssistantConfig } from './config.js';
+import { DOLLAR_REFUSAL, isDollarOutcome, poolAlarmShare, type DollarOutcome } from './dollarCaps.js';
 
 /** When this UTC month's budget starts again: the first instant of next month, ISO. */
 export function monthResetsAt(now = new Date()): string {
@@ -93,18 +95,57 @@ export interface BegunTurn {
  * `assistant_user_budget_spent` for the person's, `assistant_budget_spent`
  * for the project's; nothing counted). `minTokens` is the turn's floor
  * (orchestrator.ts turnFloor), no more than cfg.maxTurnTokens.
+ *
+ * The dollar caps (336_assistant_dollar_caps, dollarCaps.ts): the turn's
+ * budget × `usdMicrosPerToken` (pricing.ts usdMicrosPerWeightedToken; null
+ * with no price) is reserved in dollars too. With BILLING_ENFORCED on, the
+ * account's month (`assistant_monthly_cap`), a Team member's share
+ * (`assistant_member_cap`), a Free person's day (`assistant_daily_cap`) and
+ * the paced Free pool (`assistant_free_pool_spent`) refuse too, and cut the
+ * budget to what they have left; off, they only record. The day's and the
+ * month's 429 carry `params.plan` (the refusing account's plan code) for the
+ * panel's Compare plans, shown on Free only.
  */
+/** The plan code of the project's billing account as the caller may read it (app_account_plan); null when they may not. */
+async function accountPlanCode(db: Db, projectId: string): Promise<string | null> {
+	const { rows } = await db.query<{ code: string | null }>(
+		`SELECT app_account_plan(p.billing_account_id) -> 'plan' ->> 'code' AS code FROM project p WHERE p.id = $1`,
+		[projectId]
+	);
+	return rows[0]?.code ?? null;
+}
+
 export async function beginTurn(
 	c: Context,
 	db: Db,
 	projectId: string,
-	cfg: Pick<AssistantConfig, 'tokensPerMonth' | 'tokensPerUserMonth' | 'tokensTotalPerMonth' | 'messagesPerHour' | 'maxTurnTokens' | 'turnSeconds'>,
-	minTokens: number
+	cfg: Pick<
+		AssistantConfig,
+		| 'tokensPerMonth'
+		| 'tokensPerUserMonth'
+		| 'tokensTotalPerMonth'
+		| 'messagesPerHour'
+		| 'maxTurnTokens'
+		| 'turnSeconds'
+		| 'freeUsdMicrosPerDay'
+		| 'freeMessagesPerDay'
+		| 'poolUsdMicrosPerMonth'
+	>,
+	minTokens: number,
+	usdMicrosPerToken: number | null = null
 ): Promise<BegunTurn> {
 	const { rows } = await db.query<
-		UsedRow & { outcome: 'ok' | 'rate' | 'budget' | 'user_budget' | 'total_budget'; wait_seconds: number; reservation_id: string | null; budget: string | null }
+		UsedRow & {
+			outcome: 'ok' | 'rate' | 'budget' | 'user_budget' | 'total_budget' | DollarOutcome;
+			wait_seconds: number;
+			reservation_id: string | null;
+			budget: string | null;
+			pool_used_usd_micros: string | null;
+			pool_usd_micros: string | null;
+		}
 	>(
-		'SELECT outcome, wait_seconds, project_used, user_used, total_used, reservation_id, budget FROM app_assistant_begin($1, $2, $3, $4, $5, $6, $7, $8)',
+		`SELECT outcome, wait_seconds, project_used, user_used, total_used, reservation_id, budget, pool_used_usd_micros, pool_usd_micros
+		 FROM app_assistant_begin($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
 		[
 			projectId,
 			cfg.tokensPerMonth,
@@ -113,7 +154,11 @@ export async function beginTurn(
 			cfg.tokensTotalPerMonth,
 			cfg.maxTurnTokens,
 			Math.ceil(minTokens),
-			cfg.turnSeconds + RESERVATION_MARGIN_SECONDS
+			cfg.turnSeconds + RESERVATION_MARGIN_SECONDS,
+			usdMicrosPerToken,
+			cfg.freeUsdMicrosPerDay,
+			cfg.freeMessagesPerDay,
+			cfg.poolUsdMicrosPerMonth
 		]
 	);
 	const r = rows[0]!;
@@ -123,10 +168,26 @@ export async function beginTurn(
 			seconds: r.wait_seconds
 		});
 	}
+	if (isDollarOutcome(r.outcome)) {
+		const refusal = DOLLAR_REFUSAL[r.outcome];
+		const resetsAt = new Date(Date.now() + r.wait_seconds * 1000).toISOString();
+		c.header('Retry-After', String(r.wait_seconds));
+		// The plan whose allowance refused (`params.plan`), so the panel can offer Compare plans on Free's day and month
+		// only: the day refuses a Free person only; the month is the project's account's, read as app_account_plan
+		// answers the caller (null, so left out, when they may not read that account). The member share and the pool
+		// never upsell, so they carry none; nor do a reverse trial's caps (342): the person is on Pro already.
+		const plan = r.outcome === 'day' ? 'free' : r.outcome === 'month' ? await accountPlanCode(db, projectId) : null;
+		throw ApiError.coded(429, refusal.code, refusal.message(resetsAt), { seconds: r.wait_seconds, resetsAt, ...(plan ? { plan } : {}) });
+	}
 	if (r.outcome !== 'ok') {
 		const scope: BudgetScope = r.outcome === 'budget' ? 'project' : r.outcome === 'user_budget' ? 'user' : 'total';
 		c.header('Retry-After', String(r.wait_seconds));
 		throw ApiError.coded(429, SPENT[scope].code, `${SPENT[scope].what}; it starts again on ${monthResetsAt().slice(0, 10)}.`, { seconds: r.wait_seconds, scope });
+	}
+	// The Free pool's 50% and 80% alarms (infra/alarms.tf) count this line; amounts only, nobody named.
+	const share = poolAlarmShare(r.pool_used_usd_micros === null ? null : Number(r.pool_used_usd_micros), r.pool_usd_micros === null ? null : Number(r.pool_usd_micros));
+	if (share !== null) {
+		logEvent('warn', { event: 'assistant_free_pool', share, usedUsdMicros: Number(r.pool_used_usd_micros), poolUsdMicros: Number(r.pool_usd_micros) });
 	}
 	return { used: monthUsed(r), reservationId: r.reservation_id!, budget: Number(r.budget) };
 }

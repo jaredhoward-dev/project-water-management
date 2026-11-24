@@ -31,6 +31,7 @@ import type {
 	PlanOffer,
 	BillingInterval,
 	BillingRedirect,
+	LiveCatchments,
 	EmailCodeSent,
 	MfaChallenge,
 	MfaMethod,
@@ -762,7 +763,13 @@ export function createApi(baseUrl: string, fetchFn: FetchFn = (...a) => fetch(..
 			/** Open the team's billing portal (team admin). */
 			portal: (id: string) => request<BillingRedirect>('POST', `${t(id)}/plan/portal`),
 			/** Change the Team subscription's editor seats (team admin; Phase 5, prorated by the provider). The seats land through the webhook. */
-			changeSeats: (id: string, seats: number) => request<{ seats: number }>('POST', `${t(id)}/plan/seats`, { seats })
+			changeSeats: (id: string, seats: number) => request<{ seats: number }>('POST', `${t(id)}/plan/seats`, { seats }),
+			/** Set the share (1–100 %) of the team's monthly assistant dollars one member may use (team admin; 339). */
+			setAssistantShare: (id: string, pct: number) => request<{ pct: number }>('POST', `${t(id)}/plan/assistant-share`, { pct }),
+			/** The team account's live catchments, for the Plan page's picker (team admin; 345). */
+			liveCatchments: (id: string) => request<LiveCatchments>('GET', `${t(id)}/plan/live-catchments`),
+			/** Keep one of the team account's live catchments live past Free's limit (team admin; 341's pause moves at once). */
+			keepCatchment: (id: string, projectId: string) => request<LiveCatchments>('POST', `${t(id)}/plan/keep`, { projectId })
 		},
 		/** Plans and usage (issue #641, Phase 1: counted, never charged or refused). */
 		billing: {
@@ -773,7 +780,11 @@ export function createApi(baseUrl: string, fetchFn: FetchFn = (...a) => fetch(..
 			/** Start checkout for Pro on your own account (Phase 3). */
 			checkout: (interval: BillingInterval) => request<BillingRedirect>('POST', '/account/plan/checkout', { plan: 'pro', interval }),
 			/** Open your own account's billing portal. */
-			portal: () => request<BillingRedirect>('POST', '/account/plan/portal')
+			portal: () => request<BillingRedirect>('POST', '/account/plan/portal'),
+			/** Your own account's live catchments, for the Plan page's picker (345). */
+			liveCatchments: () => request<LiveCatchments>('GET', '/account/plan/live-catchments'),
+			/** Keep one of your account's live catchments live past Free's limit (341's pause moves at once). */
+			keepCatchment: (projectId: string) => request<LiveCatchments>('POST', '/account/plan/keep', { projectId })
 		},
 		model: {
 			get: (id: string) => request<ProjectModel>('GET', `${p(id)}/model`),

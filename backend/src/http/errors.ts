@@ -51,6 +51,12 @@ export const ERROR_CODES = [
 	'signin_locked',
 	'signup_throttled',
 	'signup_closed',
+	// Sign-up with an address on a disposable domain, with BILLING_ENFORCED on (auth/disposable.ts, #641 item 5).
+	'signup_disposable',
+	// Changing the email address (347, auth/email-change-routes.ts).
+	'email_change_same',
+	'email_change_disposable',
+	'email_change_taken',
 	'terms_not_accepted',
 	'farm_notice_changed',
 	'wrong_current_password',
@@ -169,7 +175,14 @@ export const ERROR_CODES = [
  *     assistant_budget_spent (429 + Retry-After, the project's tokens this
  *     month), assistant_user_budget_spent (the person's this month, across
  *     projects) and assistant_total_budget_spent (the deployment's this
- *     month; each params.seconds and params.scope), assistant_input_too_large
+ *     month; each params.seconds and params.scope); with BILLING_ENFORCED
+ *     on, the dollar caps (336_assistant_dollar_caps, assistant/dollarCaps.ts;
+ *     429 + Retry-After, params.seconds and params.resetsAt):
+ *     assistant_daily_cap (a Free person's SAST day), assistant_trial_cap and
+ *     assistant_trial_daily_cap (a reverse trial's $2 in all and $1 a day, 342), assistant_monthly_cap
+ *     (the account's month), assistant_member_cap (a Team member's share of
+ *     it) and assistant_free_pool_spent (the shared Free pool);
+ *     assistant_input_too_large
  *     (413, the newest message alone passes ASSISTANT_MAX_INPUT_CHARS). As a
  *     stream's `error` event (assistant/orchestrator.ts TURN_ERRORS):
  *     assistant_hop_limit, assistant_output_limit, assistant_turn_limit,
@@ -182,6 +195,13 @@ export const ERROR_CODES = [
  *     account that never checked out), billing_grant_seats (409, POST
  *     /teams/:id/plan/seats on a staff grant, whose seats change by a new
  *     grant; Phase 5).
+ *   email_unverified, email_disposable (403): Free's verified-email gate
+ *     (billing/emailGate.ts, 343_free_email_gate; only with BILLING_ENFORCED
+ *     on): the caller, on a project whose account is on Free, hasn't verified
+ *     their email, or it is on a disposable domain (auth/disposable.ts). Sent
+ *     by POST …/assistant/messages and by a feed save that switches a feed on
+ *     (POST …/feeds, PATCH …/feeds/:feedId). The workspace's assistant and
+ *     feeds panels word them, with a Resend for the first.
  */
 export const MACHINE_ERROR_CODES = [
 	'render_token_refused',
@@ -201,6 +221,12 @@ export const MACHINE_ERROR_CODES = [
 	'assistant_budget_spent',
 	'assistant_user_budget_spent',
 	'assistant_total_budget_spent',
+	'assistant_daily_cap',
+	'assistant_trial_cap',
+	'assistant_trial_daily_cap',
+	'assistant_monthly_cap',
+	'assistant_member_cap',
+	'assistant_free_pool_spent',
 	'assistant_input_too_large',
 	'assistant_hop_limit',
 	'assistant_output_limit',
@@ -210,7 +236,9 @@ export const MACHINE_ERROR_CODES = [
 	'billing_unavailable',
 	'billing_provider_error',
 	'billing_no_customer',
-	'billing_grant_seats'
+	'billing_grant_seats',
+	'email_unverified',
+	'email_disposable'
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number] | (typeof MACHINE_ERROR_CODES)[number];
 
@@ -233,10 +261,15 @@ export const ROLE_CONFLICT_MESSAGE =
 export const PLAN_LIMIT_SEATS_MESSAGE =
 	'every editor seat on this team’s plan is in use: a team admin can add seats on the team’s Plan and usage page, or make someone a viewer';
 
+/** 402 plan_limit's words for Free's one live catchment (338_live_catchments): fixed, never the database's text. */
+export const PLAN_LIMIT_LIVE_MESSAGE =
+	'Free runs one catchment live (data feeds, automatic runs, alerts and published farm views): switch them off in the other catchment, or compare plans';
+
 /**
- * The plan_limit refusal's numbers, from the DETAIL 334's guard writes
- * ({"limit", "used", "plan"}): only a whole number for each count and a known
- * plan code pass, so nothing else from the database reaches the response.
+ * The plan_limit refusal's numbers, from the DETAIL 334's and 338's guards
+ * write ({"limit", "used", "plan"}, and 338's "key": "live_catchments"): only
+ * a whole number for each count, a known plan code and a known limit key
+ * pass, so nothing else from the database reaches the response.
  */
 export function planLimitParams(err: unknown): Record<string, number | string> {
 	const out: Record<string, number | string> = {};
@@ -250,6 +283,7 @@ export function planLimitParams(err: unknown): Record<string, number | string> {
 	const d = detail as Record<string, unknown>;
 	for (const k of ['limit', 'used'] as const) if (Number.isSafeInteger(d[k]) && (d[k] as number) >= 0) out[k] = d[k] as number;
 	if (d.plan === 'free' || d.plan === 'pro' || d.plan === 'team') out.plan = d.plan;
+	if (d.key === 'live_catchments') out.key = d.key;
 	return out;
 }
 
@@ -291,9 +325,12 @@ export function handleError(err: unknown, c: Context) {
 	// 163's conflict guard names itself, so the client can say what to change.
 	if (code === PG_CHECK && (err as { constraint?: string }).constraint === 'role_conflict')
 		return c.json({ error: ROLE_CONFLICT_MESSAGE, code: 'role_conflict' satisfies ErrorCode }, 409);
-	// 334's seat guard names itself: 402 plan_limit, with only the numbers it put in its DETAIL.
-	if (code === PG_CHECK && (err as { constraint?: string }).constraint === 'plan_limit')
-		return c.json({ error: PLAN_LIMIT_SEATS_MESSAGE, code: 'plan_limit' satisfies ErrorCode, params: planLimitParams(err) }, 402);
+	// 334's seat guard and 338's live-catchment guard name themselves: 402 plan_limit, with only the numbers they put in their DETAIL.
+	if (code === PG_CHECK && (err as { constraint?: string }).constraint === 'plan_limit') {
+		const params = planLimitParams(err);
+		const error = params.key === 'live_catchments' ? PLAN_LIMIT_LIVE_MESSAGE : PLAN_LIMIT_SEATS_MESSAGE;
+		return c.json({ error, code: 'plan_limit' satisfies ErrorCode, params }, 402);
+	}
 	if (code === PG_CHECK) return c.json({ error: 'violates a data rule' }, 409);
 	// An exclusion constraint (e.g. one issued evidence pack per application, 112): a conflict with another row.
 	if (code === PG_EXCLUSION) return c.json({ error: 'conflicts with another record' }, 409);

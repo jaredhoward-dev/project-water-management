@@ -32,6 +32,7 @@ import { calibrationHref } from './components/calibration/links';
 import { warningParts, warningPlaceHref } from './components/runs/warningText';
 import { runHref } from './components/overview/attention';
 import { curtailmentHref } from './components/portfolio/portfolio';
+import { planHref } from './components/billing/planPause';
 import { riverHref } from './components/river/links';
 import { mapNodeHref } from './workspace/mapLinks';
 import { supplyHref } from './components/supply/links';
@@ -81,6 +82,7 @@ const REVIEWED: Record<string, { why: string; in: string[] }> = {
 	bundleUrl: { why: 'pack page: api.packs.bundleUrl (PUBLIC_API_URL + the encoded project and pack ids), never from a response', in: ['routes/projects/[id]/packs/[packId]/+page.svelte'] },
 	manifestUrl: { why: 'pack page: URL.createObjectURL of the manifest JSON it builds, a blob: URL for the download', in: ['routes/projects/[id]/packs/[packId]/+page.svelte'] },
 	curtailmentHref: { why: 'BUILDER: "<base>/projects/…" (portfolio.ts; the team page wraps it under the same name)', in: ['routes/teams/[id]/+page.svelte', 'lib/components/projects/ProjectTable.svelte'] },
+	'paused.href': { why: 'the workspace’s paused notice: billing/planPause.ts pausedNotice → planHref (BUILDER), basePath() + "/teams/" + the encoded team id + "/plan", or basePath() + "/account/plan" (#641, 341)', in: ['routes/projects/[id]/+page.svelte'] },
 	historyHref: { why: 'BUILDER: compare/attribution.ts "/projects/" + encoded project id + "?tab=history"', in: ['lib/components/compare/CompareView.svelte'] },
 	// Local builders and constants in the component itself: a literal "?" or "#" head, or resolve() of a literal path.
 	tabHref: { why: 'routes/projects/[id]: "?tab=<TabId>" (&run=<encoded run id> on a run tab, workspace/tabLinks.ts) or the current pathname', in: ['routes/projects/[id]/+page.svelte'] },
@@ -174,7 +176,12 @@ const REVIEWED: Record<string, { why: string; in: string[] }> = {
 	srcset: { why: 'landing Diorama: `<base>/landing/hero-<day|dusk>-<width>.<avif|webp>`, the widths from art.generated.ts (numbers)', in: ['lib/components/landing/Diorama.svelte'] },
 	set: { why: 'landing Shot: `<base>/landing/screen-<name>-<light|dark>-<width>.<avif|webp>`, name a literal from Screens.svelte', in: ['lib/components/landing/Shot.svelte'] },
 	addressOf: { why: 'LanguageSwitch: its `addressOf` prop; the landing page passes `<base>` + landingPath(code), "/welcome" or "/welcome/<code>" for a code of the language table (issue #137)', in: ['lib/i18n/LanguageSwitch.svelte'] },
-	abs: { why: 'landing link-preview tags: new URL(`<base>` + a literal path, page.url).href, the page’s own origin', in: ['lib/components/landing/Landing.svelte'] },
+	abs: {
+		why: 'landing and pricing link-preview tags: new URL(`<base>` + a path, page.url).href, the page’s own origin; the path a literal, LANDING_PATH or PRICING_PATH, or landingPath/pricingPath(code) (auth/session.svelte.ts: "/welcome" or "/welcome/pricing", + "/" + a code of the language table)',
+		in: ['lib/components/landing/Landing.svelte', 'lib/components/pricing/Pricing.svelte']
+	},
+	pricingHref: { why: 'Landing: `<base>` + pricingPath(the page’s Locale prop or wordsLang()), "/welcome/pricing" or "/welcome/pricing/<code>" for a code of the language table (auth/session.svelte.ts; #641 Phase 4)', in: ['lib/components/landing/Landing.svelte'] },
+	homeHref: { why: 'Pricing: `<base>` + landingPath(its Locale prop, the route’s locale-matched param), "/welcome" or "/welcome/<code>" (auth/session.svelte.ts; #641 Phase 4)', in: ['lib/components/pricing/Pricing.svelte'] },
 	// Objects built in code from the builders above.
 	'done.href': { why: 'the invitations page: `<base>/teams/`, `/farm/` or `/projects/` + the encoded id of what was joined', in: ['routes/account/invitations/+page.svelte'] },
 	'back.href': { why: 'FarmShell prop: callers pass `<base>/farm`, farmHref(…), or (the words page) `<base>` + a ?from= farmReturn accepted', in: ['lib/components/farm/FarmShell.svelte'] },
@@ -617,6 +624,8 @@ describe('URL attributes', () => {
 				farmDrawerHref(null, id),
 				compareTabHref({ projectId: id, runId: id }, { projectId: id, runId: id }),
 				curtailmentHref({ id, sourceRunId: id }),
+				planHref(id),
+				planHref(id, '/app'),
 				fieldHistoryHref({ filter: id }, id),
 				noteHref({ target: 'node', nodeId: id, runId: null, settingKey: null }) ?? '',
 				noteHref({ target: 'run', nodeId: null, runId: id, settingKey: null }) ?? '',

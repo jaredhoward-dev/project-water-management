@@ -229,7 +229,8 @@ resource "aws_budgets_budget" "daily" {
 # account is (the model card: "charges appear … under the model provider (not
 # under Amazon Bedrock)"), so the account's AWS Marketplace charges are the
 # assistant's model spend. ACTUAL 80% and 100% of
-# var.assistant_budget_monthly_usd (USD 50, issue #610's figure); no forecast,
+# var.assistant_budget_monthly_usd (USD 100: issue #641's $30 Free pool + $15
+# a paid seat + a margin; it was issue #610's 50); no forecast,
 # which a usage-driven line with a short history only makes noisy. Billing
 # data lags a day, and Marketplace charges up to a day more: the app's own
 # monthly caps in weighted tokens (input + 5 x output; per project, per
@@ -496,6 +497,43 @@ resource "aws_cloudwatch_metric_alarm" "assistant_charge_failed" {
   statistic           = "Sum"
   threshold           = 0
   alarm_description   = "The assistant failed to charge a turn's tokens to the month's counters (app_assistant_charge): each such turn's whole reserved budget is charged once its reservation expires, so the per-project, per-person and deployment-wide caps still hold but fill up faster than the real spend. Search the assistant's log group for event = assistant_charge_failed (code is a Postgres SQLSTATE: 42501 a grant, 08xxx the connection). Turn the assistant off (assistant_enabled = false) if it doesn't clear."
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+  treat_missing_data  = "notBreaching"
+}
+
+# The paced Free pool (336_assistant_dollar_caps, issue #641; docs/billing.md
+# § Assistant dollar caps): every begun turn of a Free or trial account logs
+#   {"event":"assistant_free_pool","share":50,"usedUsdMicros":15200000,"poolUsdMicros":30000000}
+# once the pool's month has passed 50% (share 50) or 80% (share 80); amounts
+# only, nobody named. Any one line in an hour pages, then the alarm stays in
+# ALARM while turns keep logging it. Runs in shadow mode too (BILLING_ENFORCED
+# off), so the operator sees the burn before enforcement.
+resource "aws_cloudwatch_log_metric_filter" "assistant_free_pool" {
+  for_each       = local.assistant_enabled && local.alarms_essential ? toset(["50", "80"]) : toset([])
+  name           = "${local.project}-assistant-free-pool-${each.key}"
+  log_group_name = aws_cloudwatch_log_group.assistant[0].name
+  pattern        = "{ $.message.event = \"assistant_free_pool\" && $.message.share >= ${each.key} }"
+
+  metric_transformation {
+    name          = "AssistantFreePool${each.key}"
+    namespace     = "${local.project}/Application"
+    value         = "1"
+    default_value = "0"
+    unit          = "Count"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "assistant_free_pool" {
+  for_each            = aws_cloudwatch_log_metric_filter.assistant_free_pool
+  alarm_name          = "${local.project}-assistant-free-pool-${each.key}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = each.value.metric_transformation[0].name
+  namespace           = each.value.metric_transformation[0].namespace
+  period              = 3600
+  statistic           = "Sum"
+  threshold           = 0
+  alarm_description   = "The assistant's Free pool (Free and trial accounts together, ASSISTANT_FREE_POOL_USD_PER_MONTH) has passed ${each.key}% of its month. Before day 20, issue #641's order: check the staff report (pnpm dev:billing:report, heaviest Free accounts and clusters), then raise the pool or move Free to a cheaper model. Search the assistant's log group for event = assistant_free_pool."
   alarm_actions       = [aws_sns_topic.alerts.arn]
   treat_missing_data  = "notBreaching"
 }

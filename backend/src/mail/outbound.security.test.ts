@@ -63,6 +63,9 @@ const builders: Record<string, () => Mail[]> = {
 	verifyEmailMail: () => templates.LOCALES.map((l) => templates.verifyEmailMail(TO, URL_, l)),
 	resetPasswordMail: () => templates.LOCALES.map((l) => templates.resetPasswordMail(TO, URL_, l)),
 	accountExistsMail: () => templates.LOCALES.map((l) => templates.accountExistsMail(TO, URL_, l)),
+	emailChangeMail: () => templates.LOCALES.map((l) => templates.emailChangeMail(TO, URL_, l)),
+	// The new address is a validated email in practice; hostile here all the same.
+	emailChangedMail: () => templates.LOCALES.map((l) => templates.emailChangedMail(TO, EVIL, l)),
 	inviteMail: () =>
 		(['sign-up', 'confirm'] as const).flatMap((mode) =>
 			(['project', 'team'] as const).map((kind) => templates.inviteMail(TO, URL_, EVIL, { kind, name: EVIL, role: 'editor' }, mode))
@@ -98,6 +101,14 @@ const builders: Record<string, () => Mail[]> = {
 	// The plan's name is the only text in it that isn't ours (plan.name, written by migrations), escaped all the same.
 	renewalNoticeMail: () =>
 		templates.LOCALES.map((l) => templates.renewalNoticeMail(TO, { plan: EVIL, periodEnd: new Date('2027-03-01T10:00:00Z'), amountMinor: 899000, currency: 'ZAR' }, l)),
+	// The owners' plan emails (346, billing/planNotices.ts): catchment and team names, and the plan's name.
+	planNoticeMail: () =>
+		templates.LOCALES.flatMap((l) => [
+			...(['grace', 'paused'] as const).map((kind) =>
+				templates.planNoticeMail(TO, { kind, account: { kind: 'team', team: EVIL }, pausesAt: new Date('2026-12-01T10:00:00Z'), pausing: [EVIL], othersPausing: 1, keeps: [EVIL] }, l)
+			),
+			templates.planNoticeMail(TO, { kind: 'trial_ending', plan: EVIL, trialEnd: new Date('2026-12-01T10:00:00Z') }, l)
+		]),
 	accountDeletedMail: () =>
 		templates.LOCALES.map((l) => templates.accountDeletedMail(TO, { projects: [EVIL, EVIL], teams: [EVIL] }, l)),
 	erratumNoticeMail: () =>
@@ -145,6 +156,8 @@ describe('every email template, against hostile names', () => {
 			verifyEmailMail: 'verify',
 			resetPasswordMail: 'reset',
 			accountExistsMail: 'account_exists',
+			emailChangeMail: 'email_change',
+			emailChangedMail: 'email_changed',
 			inviteMail: 'invite',
 			farmerInviteMail: 'farmer_invite',
 			reportReadyMail: 'report_ready',
@@ -157,7 +170,8 @@ describe('every email template, against hostile names', () => {
 			licenceRecordMail: 'licence_record',
 			mfaResetMail: 'mfa_reset',
 			mfaCodeMail: 'mfa_code',
-			renewalNoticeMail: 'renewal_notice'
+			renewalNoticeMail: 'renewal_notice',
+			planNoticeMail: 'plan_notice'
 		};
 		expect(Object.keys(expected).sort()).toEqual(Object.keys(builders).sort());
 		for (const [name, build] of Object.entries(builders)) for (const m of build()) expect(m.kind, name).toBe(expected[name]);
@@ -176,7 +190,7 @@ describe('every email template, against hostile names', () => {
 			const tags = new Set([...m.html.matchAll(/<\/?([a-z0-9]+)/gi)].map((t) => t[1]!.toLowerCase()));
 			for (const t of tags) expect(['html', 'head', 'meta', 'title', 'body', 'main', 'h1', 'p', 'a', 'br', 'span']).toContain(t);
 			// The text alternative keeps it readable, and it's plain text (no HTML part leaks into it).
-			if (name !== 'verifyEmailMail' && name !== 'resetPasswordMail' && name !== 'accountExistsMail' && name !== 'mfaCodeMail') {
+			if (name !== 'verifyEmailMail' && name !== 'resetPasswordMail' && name !== 'accountExistsMail' && name !== 'emailChangeMail' && name !== 'mfaCodeMail') {
 				expect(m.html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
 				expect(m.text).toContain('<script>alert(1)</script>');
 			}

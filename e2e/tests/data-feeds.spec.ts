@@ -11,8 +11,13 @@
 // as of the day it was made, once a worker tick has recorded it), and a feed
 // whose copy is late says so instead of looking stale. An ECMWF forecast
 // feed (issue #604 R4-C) reads the copy's ECMWF issue and credits ECMWF.
+// Free's one live catchment (issue #641, docs/billing.md § Live catchments
+// (Free)): attaching or switching on a feed refused 402 plan_limit (answered
+// by page.route, since the e2e API runs without billing enforced) shows the
+// live-limit note, not an error, keeps the form as it was, and offers
+// Compare plans.
 import { readFileSync } from 'node:fs';
-import type { APIRequestContext } from '@playwright/test';
+import type { APIRequestContext, Page } from '@playwright/test';
 import { addMember, createProject, createRun, putSeries, seedRunnableProject } from '../support/api.ts';
 import { API_URL } from '../support/env.ts';
 import { expectNoViolations } from '../support/a11y.ts';
@@ -522,6 +527,67 @@ test('an action on a feed changed elsewhere says why it failed and shows the lis
 	await panel.getByRole('button', { name: 'Refresh status' }).click();
 	await expect(panel.getByRole('status').filter({ hasText: 'Status refreshed.' })).toBeVisible();
 	await expect(panel.getByRole('alert')).toHaveCount(0);
+});
+
+/** Answers the feed request `method` + `path` matches with Free's live-catchment 402, as errors.ts sends it for 338's guard (with billing enforced). */
+async function refuseLive(page: Page, method: 'POST' | 'PATCH', path: RegExp) {
+	await page.route(path, (route) =>
+		route.request().method() === method
+			? route.fulfill({
+					status: 402,
+					contentType: 'application/json',
+					body: JSON.stringify({
+						error: 'Free runs one catchment live (data feeds, automatic runs, alerts and published farm views): switch them off in the other catchment, or compare plans',
+						code: 'plan_limit',
+						params: { limit: 1, used: 1, plan: 'free', key: 'live_catchments' }
+					})
+				})
+			: route.fallback()
+	);
+}
+
+test('on Free with another catchment live, attaching or switching on a feed shows the live-limit note, keeps the form, and offers Compare plans', async ({ page, owner }) => {
+	void owner;
+	const project = await createProject(page.request, 'Feeds second catchment');
+	const feedId = await attachFeed(page.request, project.id);
+	const off = await page.request.patch(`${API_URL}/projects/${project.id}/feeds/${feedId}`, { data: { enabled: false } });
+	expect(off.status()).toBe(200);
+	await refuseLive(page, 'POST', /\/projects\/[^/]+\/feeds$/);
+	await refuseLive(page, 'PATCH', /\/projects\/[^/]+\/feeds\/[^/]+$/);
+	await page.goto(`/projects/${project.id}?tab=series`);
+	const panel = page.getByRole('region', { name: 'Data feeds' });
+	const feed = panel.getByRole('list', { name: 'Data feeds' }).getByRole('listitem');
+	await expect(feed).toHaveAttribute('data-state', 'disabled');
+
+	// Attaching: the note, no error, and the form still open with what was typed.
+	await panel.getByRole('button', { name: 'Attach a feed' }).click();
+	await panel.getByLabel('Source').selectOption({ label: 'CHIRPS-GEFS rainfall forecast' });
+	await panel.getByLabel('Grid cells').fill('-20.12, 25.17');
+	await panel.getByRole('button', { name: 'Attach feed' }).click();
+	const note = panel.getByTestId('live-limit');
+	await expect(note).toBeVisible();
+	await expect(note).toContainText('Free runs one catchment live: data feeds, automatic runs, alerts and farm views.');
+	await expect(panel.getByRole('alert')).toHaveCount(0);
+	await expect(panel.getByLabel('Grid cells')).toHaveValue('-20.12, 25.17');
+	await expect(panel.getByLabel('Into series')).toHaveValue('rain_forecast_mm');
+	await expect(panel.getByRole('button', { name: 'Attach feed' })).toBeVisible();
+	await expect(feed).toHaveCount(1);
+	await expect(note.getByRole('link', { name: 'Compare plans' })).toHaveAttribute('href', /\/account\/plan$/);
+	await expectNoViolations(page);
+
+	// Switching the off feed on, on a fresh page (no note yet): the same note, no error, and the card still Off.
+	await page.reload();
+	await expect(feed).toHaveAttribute('data-state', 'disabled');
+	await expect(note).toHaveCount(0);
+	await feed.getByRole('button', { name: 'Switch on: Rainfall — CHIRPS' }).click();
+	await expect(note).toBeVisible();
+	await expect(panel.getByRole('alert')).toHaveCount(0);
+	await expect(feed).toHaveAttribute('data-state', 'disabled');
+	await expect(feed.getByRole('button', { name: 'Switch on: Rainfall — CHIRPS' })).toBeVisible();
+	const plans = note.getByRole('link', { name: 'Compare plans' });
+	await expect(plans).toHaveAttribute('href', /\/account\/plan$/);
+	await plans.click();
+	await expect(page).toHaveURL(/\/account\/plan$/);
 });
 
 test('while one feed saves, every card’s actions show as unavailable, and work again once it is back', async ({ page, owner, fetchRoute }) => {

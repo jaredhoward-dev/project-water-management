@@ -13,6 +13,7 @@
 // signed-in person and the project, and the panel's Past chats reopens one.
 // A reopened chat's recommended changes are read-only: ask again for a fresh
 // one. Storage that fails turns history off; the conversation carries on.
+import { emailGateCode, type EmailGateCode } from '#lib/components/billing/emailGate.js';
 import { ApiError } from '#lib/api/client.js';
 import type { AssistantBudgetScope, AssistantRequest, AssistantStatus, AssistantStreamEvent, ChatMessage, AssistantProposal } from '#lib/api/types.js';
 import { readEvents } from './stream';
@@ -68,6 +69,11 @@ export type Turn = UserTurn | AssistantTurn;
 export type Refusal =
 	| { kind: 'rate'; seconds: number; message: string }
 	| { kind: 'budget'; scope: AssistantBudgetScope; message: string }
+	/** A dollar cap (enforced billing only): the server's words say whose and when it's back; `resetsAt` (ISO) is when. */
+	/** `plan` is the refusing account's plan code (`params.plan`, sent on the day and the month), else null. */
+	| { kind: 'cap'; code: DollarCapCode; seconds: number; resetsAt: string; message: string; plan: string | null }
+	/** Free's verified-email gate (enforced billing only; billing/emailGate.ts): the panel words it, with Resend. */
+	| { kind: 'email'; code: EmailGateCode }
 	| { kind: 'error'; message: string };
 
 export interface AssistantDeps {
@@ -92,6 +98,24 @@ const BUDGET_SPENT: Record<string, AssistantBudgetScope> = {
 	assistant_total_budget_spent: 'total'
 };
 const RATE_LIMITED = 'assistant_rate_limited';
+/**
+ * The dollar caps, refused only with billing enforced (backend/src/assistant/dollarCaps.ts DOLLAR_REFUSAL;
+ * docs/billing.md § Assistant dollar caps): a Free person's day, the account's month, a Team member's share, the
+ * shared Free pool. Each comes with the issue's words and `params.seconds` / `params.resetsAt`.
+ */
+export const DOLLAR_CAP_CODES = ['assistant_daily_cap', 'assistant_monthly_cap', 'assistant_member_cap', 'assistant_free_pool_spent'] as const;
+export type DollarCapCode = (typeof DOLLAR_CAP_CODES)[number];
+const isDollarCap = (code: string | null | undefined): code is DollarCapCode => (DOLLAR_CAP_CODES as readonly (string | null | undefined)[]).includes(code);
+
+/**
+ * Whether a dollar cap's refusal offers Compare plans (issue #641's copy): Free's day and month only. The Free pool
+ * never upsells (it isn't the person's doing), and a paid account's month or a Team member's share doesn't either.
+ */
+export function capOffersPlans(r: Refusal | null): boolean {
+	return r?.kind === 'cap' && r.plan === 'free' && (r.code === 'assistant_daily_cap' || r.code === 'assistant_monthly_cap');
+}
+/** setTimeout's longest wait (2^31 − 1 ms, about 24.8 days); a longer one would fire at once. */
+const MAX_TIMER_MS = 2_147_483_647;
 const budgetScopeOf = (code: string | null | undefined): AssistantBudgetScope | null => (code && Object.hasOwn(BUDGET_SPENT, code) ? BUDGET_SPENT[code]! : null);
 
 /** "about 3 min" / "about 40 s" for a wait in seconds. */
@@ -165,6 +189,11 @@ export class AssistantChat {
 		return Math.max(0, this.status.budget.tokensPerMonth - this.status.budget.tokensUsed);
 	}
 
+	/** A dollar cap refused the last message: nothing can be sent until it's back (`refusal.resetsAt`). */
+	get capped(): boolean {
+		return this.refusal?.kind === 'cap';
+	}
+
 	/** The month's budget is used up: nothing can be sent until it resets. */
 	get spent(): boolean {
 		return this.tokensLeft === 0 || this.refusal?.kind === 'budget';
@@ -205,7 +234,7 @@ export class AssistantChat {
 	 */
 	async ask(text: string, runId?: string | null): Promise<boolean> {
 		const q = text.trim();
-		if (!q || this.busy || !this.available || this.spent) return false;
+		if (!q || this.busy || !this.available || this.spent || this.capped) return false;
 		const messages = capMessages([...this.messages(), { role: 'user' as const, content: q }]);
 		this.refusal = null;
 		this.busy = true;
@@ -376,6 +405,19 @@ export class AssistantChat {
 		}
 	}
 
+	/**
+	 * Once a refusal's wait is over the box takes messages again (unless a newer refusal replaced it). A wait past
+	 * setTimeout's longest (a month's cap early in the month) isn't timed: the refusal holds until the page is opened again.
+	 */
+	#liftAfter(seconds: number, kind: 'rate' | 'cap'): void {
+		const ms = seconds * 1000;
+		if (ms > MAX_TIMER_MS) return;
+		const seq = ++this.#refusals;
+		(this.#deps.later ?? ((fn, ms) => setTimeout(fn, ms)))(() => {
+			if (this.#refusals === seq && this.refusal?.kind === kind) this.refusal = null;
+		}, ms);
+	}
+
 	#refusalOf(e: unknown): Refusal {
 		if (e instanceof ApiError) {
 			this.#refusals++;
@@ -383,12 +425,19 @@ export class AssistantChat {
 			if (scope) return { kind: 'budget', scope, message: e.message };
 			if (e.code === RATE_LIMITED) {
 				const seconds = Number(e.params.retryAfter) || Number(e.params.seconds) || 60;
-				// Once the wait is over the box takes messages again (unless a newer refusal replaced this one).
-				const seq = ++this.#refusals;
-				(this.#deps.later ?? ((fn, ms) => setTimeout(fn, ms)))(() => {
-					if (this.#refusals === seq && this.refusal?.kind === 'rate') this.refusal = null;
-				}, seconds * 1000);
+				this.#liftAfter(seconds, 'rate');
 				return { kind: 'rate', seconds, message: e.message };
+			}
+			const gate = emailGateCode(e);
+			if (gate) return { kind: 'email', code: gate };
+			if (isDollarCap(e.code)) {
+				// When it's back: params.resetsAt, else params.seconds from now (the server sends both, and Retry-After).
+				const at = Date.parse(String(e.params.resetsAt ?? ''));
+				const seconds = Number.isFinite(at) ? Math.max(1, Math.ceil((at - Date.now()) / 1000)) : Number(e.params.seconds) || 60;
+				const resetsAt = Number.isFinite(at) ? new Date(at).toISOString() : new Date(Date.now() + seconds * 1000).toISOString();
+				this.#liftAfter(seconds, 'cap');
+				const plan = typeof e.params.plan === 'string' ? e.params.plan : null;
+				return { kind: 'cap', code: e.code, seconds, resetsAt, message: e.message || 'The assistant isn’t available to you until its allowance is back.', plan };
 			}
 			return { kind: 'error', message: e.message };
 		}

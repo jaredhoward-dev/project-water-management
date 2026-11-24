@@ -41,6 +41,29 @@ export const landingPath = (locale: string): string => (locale === DEFAULT_LOCAL
 export const LANDING_ROUTE = '/welcome/[[lang=locale]]';
 
 /**
+ * The public pricing page (issue #641 Phase 4): `/welcome/pricing` in English,
+ * `/welcome/pricing/<code>` in every other language, prerendered like the
+ * landing page (routes/welcome/pricing/[[lang=locale]]). Under LANDING_PATH,
+ * so it is public and translated with it.
+ */
+export const PRICING_PATH = `${LANDING_PATH}/pricing`;
+export const pricingPath = (locale: string): string => (locale === DEFAULT_LOCALE ? PRICING_PATH : `${PRICING_PATH}/${locale}`);
+export const PRICING_ROUTE = '/welcome/pricing/[[lang=locale]]';
+
+/**
+ * The prerendered pages whose language is their address's (issue #137): they
+ * never ask for the session, their <html lang> is set at build time
+ * (hooks.server.ts), and a visitor whose language is another one goes on to
+ * that one's address (routes/+layout.svelte, addressFor).
+ */
+export const LANDING_ROUTES = [LANDING_ROUTE, PRICING_ROUTE];
+export const isLandingRoute = (routeId: string | null | undefined): boolean => LANDING_ROUTES.includes(routeId ?? '');
+
+/** The address of a landing route in one language (`/welcome/af`, `/welcome/pricing/af`). */
+export const addressFor = (routeId: string | null | undefined, locale: string): string =>
+	routeId === PRICING_ROUTE ? pricingPath(locale) : landingPath(locale);
+
+/**
  * The prerendered static pages: the landing page, the legal pages
  * (/privacy, /terms), the methods page (/methods, the engine audit's
  * public summary) and the data sources' credits (/data-sources). Reachable either way, rendered at once (their HTML is
@@ -49,7 +72,7 @@ export const LANDING_ROUTE = '/welcome/[[lang=locale]]';
 export const STATIC_PATHS = [LANDING_PATH, '/privacy', '/terms', '/methods', '/data-sources'];
 
 /** The same pages by route id (the root layout matches by route: while prerendering, `base` is relative). */
-export const STATIC_ROUTES = [LANDING_ROUTE, '/privacy', '/terms', '/methods', '/data-sources'];
+export const STATIC_ROUTES = [LANDING_ROUTE, PRICING_ROUTE, '/privacy', '/terms', '/methods', '/data-sources'];
 
 /** Routes reachable without signing in. */
 export const PUBLIC_PATHS = [...GUEST_PATHS, ...OPEN_PATHS, ...STATIC_PATHS];

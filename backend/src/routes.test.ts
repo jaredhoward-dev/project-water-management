@@ -17,6 +17,8 @@ const PUBLIC = new Set([
 	'POST /auth/forgot-password',
 	'POST /auth/reset-password',
 	'POST /auth/verify-email',
+	// The emailed link to a new address is the credential (347).
+	'POST /auth/confirm-email-change',
 	// "Send the link again" on the sign-in page (issue #57): the same 202 for any address.
 	'POST /auth/resend-confirmation',
 	'POST /auth/invite-info',
@@ -186,9 +188,10 @@ describe('route auth inventory', () => {
 
 	// The account page (WP-1.9): renaming and changing the password need a session (auth/auth.db.test.ts),
 	// and so does "download my data" (POPIA; auth/export.db.test.ts), accepting new terms (auth/auth.db.test.ts),
-	// and "delete my account" (issue #112; auth/delete-me.db.test.ts).
+	// "delete my account" (issue #112; auth/delete-me.db.test.ts), and asking to change the email address
+	// (347; auth/email-change.db.test.ts; the link that confirms it is public, above).
 	it('inventories the account routes as auth-gated', () => {
-		for (const r of ['PATCH /auth/me', 'DELETE /auth/me', 'POST /auth/change-password', 'GET /auth/me/export', 'POST /auth/me/farm-notice', 'POST /auth/me/accept-terms']) {
+		for (const r of ['PATCH /auth/me', 'DELETE /auth/me', 'POST /auth/change-password', 'POST /auth/change-email', 'GET /auth/me/export', 'POST /auth/me/farm-notice', 'POST /auth/me/accept-terms']) {
 			expect(routes).toContain(r);
 			expect(PUBLIC.has(r)).toBe(false);
 		}
@@ -447,7 +450,7 @@ describe('route auth inventory', () => {
 	// Billing, Phase 3 (issue #641): checkout and the portal are auth-gated (billing/checkout.db.test.ts: a team's is 404
 	// to all but its admins); the mock's own pages are public, their signed token the credential.
 	it('inventories checkout and the portal as auth-gated and the mock pages as public', () => {
-		for (const r of ['POST /account/plan/checkout', 'POST /account/plan/portal', 'POST /teams/:id/plan/checkout', 'POST /teams/:id/plan/portal', 'POST /teams/:id/plan/seats']) {
+		for (const r of ['POST /account/plan/checkout', 'POST /account/plan/portal', 'POST /teams/:id/plan/checkout', 'POST /teams/:id/plan/portal', 'POST /teams/:id/plan/seats', 'POST /teams/:id/plan/assistant-share', 'POST /account/plan/keep', 'POST /teams/:id/plan/keep', 'GET /account/plan/live-catchments', 'GET /teams/:id/plan/live-catchments']) {
 			expect(routes).toContain(r);
 			expect(PUBLIC.has(r)).toBe(false);
 		}
@@ -595,6 +598,7 @@ describe('route auth inventory', () => {
 		'POST /auth/forgot-password',
 		'POST /auth/reset-password',
 		'POST /auth/verify-email',
+		'POST /auth/confirm-email-change',
 		'POST /auth/resend-confirmation',
 		'POST /auth/invite-info',
 		'POST /auth/render-session',

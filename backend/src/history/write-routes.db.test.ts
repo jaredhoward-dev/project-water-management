@@ -1184,6 +1184,8 @@ const inTeam = (c: TeamCtx) => c.teamProjects;
 
 const OTHER_WRITE_ROUTES: OtherEntry[] = [
 	// --- teams: who reaches the team's projects ------------------------------------------
+	{ route: `POST ${T}/plan/keep`, exempt: 'which of a Team account’s live catchments stays live past Free’s limit (issue #641, 341/345): billing, not project data; the pause is a marker that changes nothing the project holds' },
+	{ route: `POST ${T}/plan/assistant-share`, exempt: 'a Team member’s share of the assistant dollars (issue #641, 339): billing settings, not project data; teams keep no history' },
 	{ route: `POST ${T}/plan/seats`, exempt: 'a Team’s editor seats (issue #641 Phase 5): billing, not project data; the seats land through the provider’s webhook (app_billing_apply), and billing keeps its own event log' },
 	{ route: `POST ${T}/members`, exempt: 'an invite (issue #136) grants nothing and teams keep no history; accepting it records team_member.added (below)' },
 	{
@@ -1315,6 +1317,8 @@ const OTHER_WRITE_ROUTES: OtherEntry[] = [
 	{ route: 'POST /auth/me/farm-notice', exempt: 'records the caller’s own acknowledgement of the farm view notice on their account (093); changes no project' },
 	{ route: 'POST /auth/me/accept-terms', exempt: 'records which terms the caller’s own account accepted (app_user.terms_version, stamped by the database); changes no project' },
 	{ route: 'POST /auth/change-password', exempt: 'the caller’s own credential; changes no project, and the password is never logged' },
+	{ route: 'POST /auth/change-email', exempt: 'the caller’s own address: stores a pending change and mails a link; changes no project (347)' },
+	{ route: 'POST /auth/confirm-email-change', exempt: 'switches the link’s account to its new address and mails the old one; changes no project (347)' },
 	// Two-step sign-in (issue #282): the account's own factor. No project is touched, so no project history; each
 	// change the account would want to see is in its own append-only log, account_security_event (auth/mfa.db.test.ts).
 	{ route: 'POST /auth/mfa/totp/enrol', exempt: 'starts adding the caller’s own authenticator (unconfirmed); no project, and nothing to log until it is confirmed' },
@@ -1340,6 +1344,7 @@ const OTHER_WRITE_ROUTES: OtherEntry[] = [
 	// Plan state is written only by the webhook (and the staff grant), and kept on the account: billing_event (326) and
 	// billing_grant_log (330), not a project's history.
 	{ route: 'POST /account/plan/checkout', exempt: 'starts a checkout for the caller’s own billing account: a provider URL, at most the account’s customer reference stored (328); no project' },
+	{ route: 'POST /account/plan/keep', exempt: 'which of the caller’s own account’s live catchments stays live past Free’s limit (issue #641, 341/345): billing, not project data; the pause is a marker that changes nothing the project holds' },
 	{ route: 'POST /account/plan/portal', exempt: 'a link to the provider’s portal for the caller’s own billing account; writes nothing to the database or any project' },
 	{ route: `POST ${T}/plan/checkout`, exempt: 'starts a checkout for the team’s billing account (its admins only): a provider URL and at most its customer reference (328); no project changes' },
 	{ route: `POST ${T}/plan/portal`, exempt: 'a link to the provider’s portal for the team’s billing account (its admins only); writes nothing to the database or any project' },

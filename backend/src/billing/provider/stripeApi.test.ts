@@ -212,6 +212,7 @@ describe('createInvoice (B2B, from the staff tool)', () => {
 			'metadata[interval]': 'year',
 			'metadata[period_start]': '1798754400',
 			'metadata[period_end]': '1830290400',
+			'metadata[amount_minor]': '3497000',
 			'metadata[wm_invoice_key]': params.key
 		});
 		expect(form(calls[2]!.init)).toEqual({

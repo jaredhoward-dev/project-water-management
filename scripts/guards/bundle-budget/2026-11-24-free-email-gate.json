@@ -1,0 +1,4 @@
+{
+	"addKb": 2,
+	"why": "Free's verified-email gate notice (EmailGateNotice.svelte, emailGate.ts) in the assistant and Data feeds panels: total 2526 KB gzipped after, over the 2524 KB ceiling by 2 KB"
+}

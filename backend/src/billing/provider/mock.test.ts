@@ -2,7 +2,7 @@
 // with the dev key, for its kind and until it expires; the events it makes
 // are ones the real normaliser accepts, for the account and plan it names.
 import { describe, expect, it } from 'vitest';
-import { cancelAtPeriodEndEvent, mockSubscriptionRef, paidEvents, readMockSession, signedDelivery, signMockSession, type MockSession } from './mock.js';
+import { cancelAtPeriodEndEvent, invoicePaidEvent, mockSubscriptionRef, paidEvents, readMockSession, signedDelivery, signMockSession, type MockSession } from './mock.js';
 import { verifySignature } from './signature.js';
 import { normaliseStripeEvent } from './stripe.js';
 
@@ -132,5 +132,37 @@ describe('mock events', () => {
 	it('signs a delivery the webhook’s check accepts', () => {
 		const { body, signature } = signedDelivery(SECRET, paidEvents(checkout, NOW)[0]!, NOW);
 		expect(verifySignature(body, signature, SECRET, NOW)).toBe(true);
+	});
+});
+
+describe('invoicePaidEvent', () => {
+	it('is the invoice.paid the normaliser reads as a B2B grant: the metadata Stripe’s invoice carries and the lines’ total', () => {
+		const req = {
+			account: { id: ACCOUNT, customerRef: null },
+			planCode: 'team',
+			seats: 5,
+			interval: 'year' as const,
+			currency: 'ZAR',
+			poNumber: 'PO-1',
+			periodStart: 1798754400,
+			periodEnd: 1830290400,
+			lines: [
+				{ amountMinor: 100, description: 'base' },
+				{ amountMinor: 40, description: 'seats' }
+			],
+			key: 'k1'
+		};
+		const r = normaliseStripeEvent(invoicePaidEvent(req, 'in_mock_abc', NOW));
+		expect(r).toMatchObject({
+			kind: 'event',
+			event: {
+				type: 'invoice.paid',
+				payload: {
+					accountId: ACCOUNT,
+					externalRef: null,
+					invoice: { ref: 'in_mock_abc', planCode: 'team', seats: 5, interval: 'year', periodStart: new Date(1798754400_000).toISOString(), periodEnd: new Date(1830290400_000).toISOString(), totalMinor: 140, issuedMinor: 140, currency: 'zar' }
+				}
+			}
+		});
 	});
 });

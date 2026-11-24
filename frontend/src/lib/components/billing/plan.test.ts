@@ -19,9 +19,14 @@ import {
 	subscriptionLine,
 	subscriptionSeatsLine,
 	subscriptionTotalLine,
+	keepPickerIntro,
+	keepQuestion,
+	keepRowState,
 	upgradeLabel,
-	usageRows
+	usageRows,
+	wantsKeepPicker
 } from './plan';
+import type { LiveCatchments } from '#lib/api/types.js';
 
 const NB = ' ';
 const TS = ' ';
@@ -145,7 +150,7 @@ describe('subscriptionTotalLine', () => {
 		limits: { seats_included: 3 },
 		features: { extra_seat_monthly_minor: 49_900, extra_seat_annual_minor: 499_000 }
 	};
-	const team = (s: Partial<Subscription> | null) => plan({ account: { id: 't1', kind: 'team' }, plan: teamPlan, subscription: s === null ? null : sub(s), team: { editorCount: 5 } });
+	const team = (s: Partial<Subscription> | null) => plan({ account: { id: 't1', kind: 'team' }, plan: teamPlan, subscription: s === null ? null : sub(s), team: { editorCount: 5, assistantMemberMaxPct: 50 } });
 	const pro = (s: Partial<Subscription>) =>
 		plan({ plan: { ...plan().plan, code: 'pro', name: 'Pro', priceMonthlyMinor: 89_900, priceAnnualMinor: 899_000, limits: { seats_included: 1 } }, subscription: sub(s) });
 
@@ -224,6 +229,19 @@ describe('usageRows', () => {
 			status: 'Unlimited',
 			fraction: null
 		});
+	});
+	it('shows live catchments after catchments (340): "1 of 1", at the limit, never an error; unlimited on Pro and Team', () => {
+		const live = withUsage({ liveCatchments: { used: 1, limit: 1 } });
+		expect(live.map((r) => r.key)).toEqual(['catchments', 'liveCatchments', 'reports', 'packsIssued', 'assistantCost']);
+		expect(live[1]!).toMatchObject({ label: 'Live catchments', figures: '1 of 1', status: 'At the limit', fraction: 1, over: false });
+		expect(live[1]!.note).toMatch(/data feeds, alerts or automatic runs on, or a farm view published/);
+		expect(live[1]!.note).not.toMatch(/quota|abuse|402/i);
+		// Past it (live before enforcement, or after a downgrade): counted, the warning colour, not refused.
+		expect(withUsage({ liveCatchments: { used: 2, limit: 1 } })[1]!).toMatchObject({ status: '1 over the limit', over: true });
+		expect(withUsage({ liveCatchments: { used: 4, limit: null } })[1]!).toMatchObject({ figures: '4 used', status: 'Unlimited', fraction: null });
+	});
+	it('leaves live catchments out when an API older than 340 doesn’t send them', () => {
+		expect(rows.some((r) => r.key === 'liveCatchments')).toBe(false);
 	});
 	it('fmtUsdMicros reads millionths of a dollar', () => {
 		expect(fmtUsdMicros(1_500_000)).toBe('$1.50');
@@ -381,5 +399,60 @@ describe('billingRedirect', () => {
 		]) {
 			expect(billingRedirect(bad, api, 'http://localhost:7777/account/plan'), String(bad)).toBeNull();
 		}
+	});
+});
+
+describe('the live-catchment picker (341, 345)', () => {
+	const live = (used: number, limit: number | null) => plan({ usage: { ...plan().usage, liveCatchments: { used, limit } } });
+	const list = (over: Partial<LiveCatchments> = {}): LiveCatchments => ({
+		freeLimit: 1,
+		overFreeSince: '2026-11-20T08:00:00Z',
+		pausesFrom: '2026-12-04T08:00:00Z',
+		catchments: [
+			{ id: 'c', name: 'Catchment C', chosen: false, staysLive: true, pausedAt: null },
+			{ id: 'a', name: 'Catchment A', chosen: false, staysLive: false, pausedAt: null }
+		],
+		...over
+	});
+
+	it('is asked for only on Free past its live catchments', () => {
+		expect(wantsKeepPicker(live(2, 1))).toBe(true);
+		expect(wantsKeepPicker(live(1, 1))).toBe(false);
+		expect(wantsKeepPicker(live(3, null))).toBe(false);
+		expect(wantsKeepPicker(plan())).toBe(false);
+		expect(wantsKeepPicker({ ...live(2, 1), subscription: sub({}) })).toBe(false);
+	});
+
+	it('says nothing on an account whose plan never ended, or within Free', () => {
+		expect(keepPickerIntro(list({ overFreeSince: null, pausesFrom: null }), true, 'your account')).toBeNull();
+		expect(keepPickerIntro(list({ catchments: list().catchments.slice(0, 1) }), true, 'your account')).toBeNull();
+	});
+
+	it('in the grace, says when the others pause and that nothing is lost', () => {
+		const t = keepPickerIntro(list(), true, 'your account')!;
+		expect(t).toMatch(/^The plan for your account has ended, so it is on Free, which keeps 1 catchment live\. From /);
+		expect(t).toContain('feeds, alerts and automatic runs pause on the others');
+		expect(t).toContain('Nothing is lost');
+	});
+
+	it('once paused, says so; with limits not applied yet, says when they would', () => {
+		const paused = list({ catchments: [list().catchments[0]!, { ...list().catchments[1]!, pausedAt: '2026-12-04T08:05:00Z' }] });
+		expect(keepPickerIntro(paused, true, 'this team')).toContain('On the others, feeds, alerts and automatic runs are paused.');
+		expect(keepPickerIntro(list(), false, 'this team')).toContain('Once plan limits apply');
+	});
+
+	it('names each row’s state', () => {
+		const [c, a] = list().catchments as [LiveCatchments['catchments'][0], LiveCatchments['catchments'][0]];
+		expect(keepRowState(c, list())).toBe('Stays live');
+		expect(keepRowState({ ...c, chosen: true }, list())).toBe('Stays live (your choice)');
+		expect(keepRowState(a, list())).toMatch(/^Pauses from /);
+		expect(keepRowState({ ...a, pausedAt: '2026-12-04T08:05:00Z' }, list())).toMatch(/^Paused since /);
+		expect(keepRowState(a, { pausesFrom: null })).toBe('Pauses after the grace');
+	});
+
+	it('asks in plain words, never the ones #641 rules out', () => {
+		expect(keepQuestion('Catchment A', 'Catchment C')).toMatch(/^Catchment A keeps its feeds, alerts and automatic runs in place of Catchment C\./);
+		expect(keepQuestion('Catchment A', null)).not.toContain('in place of');
+		for (const t of [keepQuestion('A', 'C'), keepPickerIntro(list(), true, 'your account')!]) expect(t).not.toMatch(/quota|abuse|402/i);
 	});
 });

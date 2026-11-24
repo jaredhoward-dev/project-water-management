@@ -83,6 +83,7 @@ browser ──HTTPS──► CloudFront + WAF (us-east-1 ACL)      icwbt.jaredho
   top-level file or directory in `frontend/static`, or a new prerendered
   page (`PRERENDERED`: the landing page once per language, `/welcome` and
   `/welcome/af`, issue #137, so a new language adds its `/welcome/<code>`;
+  the pricing page `/welcome/pricing` and `/welcome/pricing/af`, issue #641;
   also `/privacy`, `/terms`, `/methods` and `/data-sources`),
   must be added to those lists:
   `infra/scripts/cloudfront-functions.test.mjs` (`pnpm test:guards`) runs the
@@ -233,8 +234,15 @@ browser ──HTTPS──► CloudFront + WAF (us-east-1 ACL)      icwbt.jaredho
   information (POPIA)). The API carries the same `ASSISTANT_*` values
   (`off` while disabled) for the status it answers. Alarms: errors and
   throttles (essential), p95 duration (full), and the origin-secret filter
-  on its log group; a third budget, `assistant_budget_monthly_usd` (USD 50)
-  on the account's AWS Marketplace charges (the model's billing entity).
+  on its log group; a third budget, `assistant_budget_monthly_usd` (USD 100:
+  issue #641's $30 Free pool + $15 a paid seat + a margin) on the account's
+  AWS Marketplace charges (the model's billing entity). The Free dollar caps
+  (`assistant_free_usd_per_day` $0.30, `assistant_free_messages_per_day` 20,
+  `assistant_free_pool_usd_per_month` $30, the code's defaults) are set on
+  the assistant only, which begins every turn; the plan refuses a pool
+  larger than the assistant budget or than the deployment-wide token cap is
+  worth at the input price, and the assistant's production check requires
+  all three (`backend/src/config/production.ts`).
 - **TLS to RDS** is `sslmode=verify-full` (chain + hostname). Both zips carry
   `infra/certs/rds-global-bundle.pem` (the public AWS RDS CA bundle from
   `https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem`), and
@@ -271,6 +279,7 @@ browser ──HTTPS──► CloudFront + WAF (us-east-1 ACL)      icwbt.jaredho
 | `jobs.tf` | Background jobs: SQS `jobs` queue + DLQ, worker Lambda + role + security group, its SQS event source and 5-minute EventBridge tick, the SQS interface endpoint and its security group (policy: `SendMessage` only, two roles, three queues), the API's send-only policy, and the DLQ / worker-errors / worker-throttles / worker-heartbeat / tick-failed / backlog / dead-job alarms |
 | `feeds.tf` | Data feeds: SQS `fetch-requests` / `ingest-results` + DLQs, the fetcher Lambda outside the VPC (role: those two queues only), its event source, the worker's feed-queue policy and `ingest-results` event source, and the two DLQ-depth and fetcher-errors alarms. The daily ingest (issue #604 R2-B): a daily EventBridge rule sending `{"mode":"daily-ingest"}` to the fetcher, its invoke permission and the fetcher's mirror-bucket write, all off until `daily_ingest_enabled`; the fetcher's async invoke config (no retries). The cutover (issue #604 R3-C): `local.per_feed_fetching` is false once `chirps_source = "mirror"` and `dws_source = "store"`, and then the two queues, their DLQs, both SQS triggers, both roles' queue policies, the queues' alarms, `feed-fetch-failed` and the worker's `FEED_FETCHER` are not created (`moved` blocks map the old state to instance `[0]`; `tests/cutover.tftest.hcl`; docs/deployment.md § The cutover). Station API feeds (issue #784): `station_api_feeds` keeps per-feed fetching on after the cutover, gives the fetcher its runtime secret (`secrets.tf`), `STATION_API_FEEDS` and the sealing public key, and gives station fetches their own FIFO queue, DLQ, alarms and fetcher trigger (`maximum_concurrency` 2) with the fetcher's reserved concurrency raised by that 2, so they never take CHC's and DWS's slots (`tests/cutover.tftest.hcl`; docs/deployment.md § Station API feeds) |
 | `egress.tf`, `modules/fixed-egress/` | The fixed egress (`fixed_egress_enabled`, default off, on in production; [deployment.md § Fixed egress](../docs/deployment.md#fixed-egress)): a separate VPC, never peered, with a public subnet holding a NAT instance (Amazon Linux 2023 arm64, `fixed_egress_instance_type`, source/destination checking off on the instance, IMDSv2 only, no key pair or instance profile, a temporary public IP for first boot `nat-user-data.sh`) with the Elastic IP associated, two private subnets routed through it for the fetcher's and mirror-ingest's ENIs, an S3 gateway endpoint, HTTPS-only security groups, and EC2 recover/reboot alarms; the two Lambdas' `vpc_config` and their roles' ENI policy (`iam.tf`) follow the flag; output `fixed_egress_ip` is the address to give CHC. Tests: `tests/egress.tftest.hcl` |
+| `egress.tf`, `modules/stripe-egress/` | The Stripe egress (`stripe_egress_enabled`, default off, needed with `billing_provider = "stripe"`; [deployment.md § Stripe egress](../docs/deployment.md#stripe-egress)): in the private VPC, an internet gateway, a public subnet with a managed NAT gateway and its Elastic IP, and two subnets of the API's own routed through it; the API Lambda's `vpc_config` moves there and adds an HTTPS-out security group beside its own. RDS, the worker, migrate and the endpoints keep `network.tf`'s route-less subnets. Tests: `tests/egress.tftest.hcl` |
 | `reports.tf` | Server-side reports: the private reports bucket (SSE, TLS only, 7-day lifecycle), the renderer's ECR repository (immutable, scanned) and Lambda (container image, outside the VPC, created once `renderer_image_tag` is set), SQS `render-requests` / `render-results` + DLQs, the worker's render-queue and SES policies, downloads through CloudFront (the trusted public keys from `report_download_public_keys` and their key group, the reports OAC, the origin request policy that forwards only the file name, and the bucket policy that lets only this distribution read `reports/`; the `/reports/*` behaviour itself is in `s3_cloudfront.tf`), and the DLQ / renderer-errors / renderer-duration alarms |
 | `agera5.tf` | Daily reference evaporation (issue #604 R5-E, `ingest/agera5.py`, `ingest/nasapower.py`): with `agera5_enabled` and `ingest_image_tag`, a daily EventBridge rule sending `{"product":"agera5_et0","mode":"monthly"}` (AgERA5 from the CDS, with ERA5-Land's CDS key: no new secret) and its freshness alarm (`mirror-lag-agera5-et0`, over `agera5_lag_alarm_days`, default 50); with `power_et0_enabled`, a daily rule sending `{"product":"power_et0","mode":"recent","days":30}` (NASA POWER's daily weather, no key) and its alarm (`mirror-lag-power-et0`, over `power_et0_lag_alarm_days`, default 10). Both alarms breach on missing data; both off by default. Tests: `tests/agera5.tftest.hcl` |
 | `c3s.tf` | C3S seasonal forecasts and hindcasts (issue #620 step 5, `ingest/c3s_seasonal.py`, [deployment.md § C3S seasonal forecasts](../docs/deployment.md#c3s-seasonal-forecasts)): with `c3s_enabled` (variables.tf, default false) and `ingest_image_tag`, a daily EventBridge rule at 14:20 UTC (the first run after the 6th's and 10th's 12 UTC releases; clear of ECMWF's and IMERG's runs) sending `{"product":"c3s","mode":"monthly"}` to the mirror-ingest function, never retried, with ERA5-Land's CDS key (no new secret), and the essential-tier freshness alarm `mirror-lag-c3s` (`MirrorLagDays{Product=c3s}`: days since the newest init every system is held for, over `c3s_lag_alarm_days`, default 45; breaching on missing data). The hindcast backfill is invoked by hand. Tests: `tests/c3s.tftest.hcl` |
@@ -679,7 +688,7 @@ fixed**, before any model spend, in af-south-1:
 | bedrock-runtime interface endpoint, 1 AZ (`bedrock_endpoint_az_count`; $0.01309/h, ~$7.30 in us-east-1) | 9.56 |
 | Its runtime secret (`secrets.tf`) | 0.40 |
 | Its budget (`water-management-assistant`, a third budget: $0.02/day past the free two) | 0.62 |
-| CloudWatch: 5 essential alarms (errors, throttles, charge-failed, provider-failed, tokens-hourly) and 3 log metrics, 1 more alarm on the full tier (duration p95) | ~0.30–0.40 |
+| CloudWatch: 7 essential alarms (errors, throttles, charge-failed, provider-failed, tokens-hourly, free-pool 50% and 80%) and 5 log metrics, 1 more alarm on the full tier (duration p95) | ~0.30–0.40 |
 | Lambda (`water-management-assistant`, 1 GB arm64: a turn of ~15 s ≈ $0.0003) | ~0 |
 | **Assistant fixed** | **≈ $10.90** |
 
@@ -690,10 +699,10 @@ $0.10 for a typical turn and capped per project, per person and
 deployment-wide in weighted tokens (input + 5 × output, so dollars at the
 input price; [docs/deployment.md § The
 assistant](../docs/deployment.md#the-assistant)). The deployment-wide cap
-defaults to `assistant_budget_monthly_usd` ($50) at that price, and the
-assistant's budget alerts on it. **With the assistant on, raise
-`budget_monthly_usd` to $110 + `assistant_budget_monthly_usd` (≈ $160 on the
-defaults)**: the idle becomes ≈ $88, exactly the $110 budget's ACTUAL 80%
+defaults to `assistant_budget_monthly_usd` ($100, 50 M weighted tokens) at
+that price, and the assistant's budget alerts on it. **With the assistant on,
+raise `budget_monthly_usd` to $110 + `assistant_budget_monthly_usd` (≈ $210
+on the defaults)**: the idle becomes ≈ $88, exactly the $110 budget's ACTUAL 80%
 line, and the model spend counts toward the account total too, so the
 default would alert every month. The worst case AWS bounds is the
 assistant's own Lambda at its reserved concurrency (2 × 1 GB all month,
@@ -719,7 +728,7 @@ alarms are what bound and report a runaway while it happens.
 | Monthly, ACTUAL 80% | the month's spend passes $88 (on the default $110) | Early warning, set above the idle so it doesn't fire every month. |
 | Monthly, ACTUAL 100% | the month's spend passes the budget | |
 | Monthly, FORECASTED 100% | AWS forecasts the month past the budget | Needs ~5 weeks of cost history, so it is silent through the first month. |
-| Assistant, ACTUAL 80% and 100% | the month's AWS Marketplace charges (the model's spend) pass `assistant_budget_monthly_usd` ($50) | Only with `assistant_enabled`. A third budget, ~$0.62 a month. Marketplace charges lag a further 12–24 h; `assistant-tokens-hourly` is the real-time signal. `postapply-check.sh`'s `assistant-budget` confirms the filter catches the charge. |
+| Assistant, ACTUAL 80% and 100% | the month's AWS Marketplace charges (the model's spend) pass `assistant_budget_monthly_usd` ($100) | Only with `assistant_enabled`. A third budget, ~$0.62 a month. Marketplace charges lag a further 12–24 h; `assistant-tokens-hourly` is the real-time signal. `postapply-check.sh`'s `assistant-budget` confirms the filter catches the charge. |
 | Cost Anomaly Detection | one service's spend jumps, total impact ≥ `cost_anomaly_threshold_usd` (off by default; set $10 after the first apply, [§ Operator steps](#operator-steps) step 11) | AWS-services monitor, free, needs ~10 days of history. Off for the first apply because an account holds one services monitor and AWS may have made it already. |
 
 Each topic's policy admits only this account (`aws:SourceAccount`, plus

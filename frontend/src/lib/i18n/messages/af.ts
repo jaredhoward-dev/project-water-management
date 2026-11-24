@@ -41,6 +41,26 @@ export const af: Catalogue = {
 	'a7f2031b': 'Tik ’n vertoonnaam in.',
 	// Use at most 100 characters.
 	'c5951029': 'Gebruik hoogstens 100 karakters.',
+	// Enter the new email address.
+	'697df4f2': 'Tik die nuwe e-posadres in.',
+	// Enter your current password.
+	'f555922c': 'Tik jou huidige wagwoord in.',
+	// Your current password is wrong.
+	'ee4b7db1': 'Jou huidige wagwoord is verkeerd.',
+	// Email address
+	'ae595053': 'E-posadres',
+	// We send a link to the new address. Your account keeps {email} until you open that link.
+	'd1f56198': 'Ons stuur ’n skakel na die nuwe adres. Jou rekening behou {email} totdat jy daardie skakel oopmaak.',
+	// New email address
+	'b9c9efe1': 'Nuwe e-posadres',
+	// Current password
+	'8eedf1f3': 'Huidige wagwoord',
+	// Sending…
+	'967aa5dd': 'Stuur tans…',
+	// Send the link
+	'4a606eac': 'Stuur die skakel',
+	// If {email} can take the change, a link is on its way there. Open it to finish.
+	'19598f0e': 'As {email} vir die verandering gebruik kan word, is ’n skakel op pad daarheen. Maak dit oop om die verandering te voltooi.',
 	// Enter your password.
 	'fed4dc29': 'Tik jou wagwoord in.',
 	// Delete my account
@@ -105,10 +125,6 @@ export const af: Catalogue = {
 	'0dc6b4aa': 'Af',
 	// We emailed you a code. It works for 10 minutes.
 	'd8c6fbd5': 'Ons het vir jou ’n kode ge-e-pos. Dit bly 10 minute geldig.',
-	// Enter your current password.
-	'f555922c': 'Tik jou huidige wagwoord in.',
-	// Your current password is wrong.
-	'ee4b7db1': 'Jou huidige wagwoord is verkeerd.',
 	// Enter the 6-digit code from the email.
 	'8cb9ab8a': 'Tik die 6-syferkode uit die e-pos in.',
 	// Enter the 6-digit code from your authenticator app.
@@ -139,8 +155,6 @@ export const af: Catalogue = {
 	'dc6bee9c': '{app}-herstelkodes vir {email}',
 	// Each code works once, in place of a code from your authenticator app or your email.
 	'49c661fe': 'Elke kode werk een keer, in plaas van ’n kode van jou verifikasie-app of jou e-pos.',
-	// Sending…
-	'967aa5dd': 'Stuur tans…',
 	// Send again (in {n} s)
 	'a875e674': 'Stuur weer (oor {n} s)',
 	// Email me a code
@@ -215,8 +229,6 @@ export const af: Catalogue = {
 	'7baf539a': 'Skakel kodes per e-pos aan',
 	// Set up the authenticator app
 	'e1d327d3': 'Stel die verifikasie-app op',
-	// Current password
-	'8eedf1f3': 'Huidige wagwoord',
 	// Checking…
 	'732bdad5': 'Kontroleer tans…',
 	// Continue
@@ -1175,8 +1187,14 @@ export const af: Catalogue = {
 	'f8bdaee7': '{app}, tuisblad',
 	// See your catchment day by day.
 	'ff101d6d': 'Sien jou opvanggebied dag vir dag.',
+	// Modelling is free on every plan.
+	'90815acd': 'Modellering is gratis op elke plan.',
+	// See plans and prices
+	'68c58c55': 'Sien planne en pryse',
 	// Footer
 	'575cffd2': 'Voetskrif',
+	// Plans and prices
+	'459e7e5c': 'Planne en pryse',
 	// How the model is checked
 	'69391154': 'Hoe die model nagegaan word',
 	// What you get
@@ -1343,6 +1361,80 @@ export const af: Catalogue = {
 	'7f91a8a0': 'As jy in Suid-Afrika woon of daar gevestig is, geld die Suid-Afrikaanse reg en Suid-Afrikaanse howe; andersins die reg en howe van Virginia. In albei gevalle geld jou regte kragtens die verbruikers- en databeskermingsreg van die plek waar jy woon steeds (Voorwaardes §15).',
 	// The Terms are in English; this summary is in your language.
 	'782a6b6b': 'Die Voorwaardes is in Engels; hierdie opsomming is in jou taal.',
+	// Live data feeds, automatic runs, alerts and published farm views on {n} catchment / Live data feeds, automatic runs, alerts and published farm views on {n} catchments
+	'44437a40': { one: 'Lewendige datavoere, outomatiese lopies, waarskuwings en gepubliseerde bladsye vir boere op {n} opvanggebied', other: 'Lewendige datavoere, outomatiese lopies, waarskuwings en gepubliseerde bladsye vir boere op {n} opvanggebiede' },
+	// {n} server PDF report a month / {n} server PDF reports a month
+	'37fcd51e': { one: '{n} PDF-verslag van die bediener per maand', other: '{n} PDF-verslae van die bediener per maand' },
+	// or {price} a year ({n} month free) / or {price} a year ({n} months free)
+	'554d08da': { one: 'of {price} per jaar ({n} maand gratis)', other: 'of {price} per jaar ({n} maande gratis)' },
+	// {n} editor included / {n} editors included
+	'874216a6': { one: '{n} redigeerder ingesluit', other: '{n} redigeerders ingesluit' },
+	// {n} issued evidence pack a month included, then {price} each / {n} issued evidence packs a month included, then {price} each
+	'4a766df4': { one: '{n} uitgereikte bewyspakket per maand ingesluit, daarna {price} elk', other: '{n} uitgereikte bewyspakkette per maand ingesluit, daarna {price} elk' },
+	// Plans and prices: {app}
+	'9543787d': 'Planne en pryse: {app}',
+	// Modelling is free and unlimited on every plan. Pro and Team add live operations on every catchment, more of the assistant, unlimited reports and cheaper evidence packs.
+	'd0d580af': 'Modellering is gratis en onbeperk op elke plan. Pro en Team voeg by: elke opvanggebied lewendig in bedryf, meer van die assistent, onbeperkte verslae en goedkoper bewyspakkette.',
+	// Modelling is never limited, on any plan: catchments, runs, calibration, scenarios, comparisons, the map and exports. The plans differ only in the assistant, running catchments live, server reports and issued evidence packs.
+	'4e9f61c1': 'Modellering word op geen plan ooit beperk nie: opvanggebiede, lopies, kalibrasie, scenario’s, vergelykings, die kaart en uitvoere. Die planne verskil net in die assistent, opvanggebiede wat lewendig loop, verslae van die bediener en uitgereikte bewyspakkette.',
+	// Farmers and viewers are always free.
+	'e756b43c': 'Boere en kykers is altyd gratis.',
+	// Invite as many as you like, on every plan.
+	'54ce3d38': 'Nooi soveel uit as wat jy wil, op elke plan.',
+	// Assessors verify evidence packs free.
+	'e2cd6b4b': 'Beoordelaars kontroleer bewyspakkette gratis.',
+	// Checking a pack’s code needs no account.
+	'78622f5b': 'Om ’n pakket se kode na te gaan, het jy geen rekening nodig nie.',
+	// Plans
+	'88c56053': 'Planne',
+	// Free
+	'1c5c36fb': 'Free',
+	// For study, research and a catchment of your own. Non-commercial use only.
+	'9c6ee3ec': 'Vir studie, navorsing en ’n opvanggebied van jou eie. Net vir nie-kommersiële gebruik.',
+	// Unlimited catchments, runs, calibration, scenarios and exports
+	'c41a330b': 'Onbeperkte opvanggebiede, lopies, kalibrasie, scenario’s en uitvoere',
+	// A small assistant allowance each day and month
+	'40e5d7e3': '’n Klein assistenttoelaag elke dag en maand',
+	// Issued evidence packs at {price} each
+	'36ada872': 'Uitgereikte bewyspakkette teen {price} elk',
+	// Pro
+	'b57fc1f8': 'Pro',
+	// a month
+	'049510fa': 'per maand',
+	// For one hydrologist, including work for clients.
+	'fc900073': 'Vir een hidroloog, ook vir werk vir kliënte.',
+	// Everything in Free, for commercial work
+	'fb6e914d': 'Alles in Free, vir kommersiële werk',
+	// Live data feeds, automatic runs, alerts and published farm views on every catchment
+	'9c7a94e4': 'Lewendige datavoere, outomatiese lopies, waarskuwings en gepubliseerde bladsye vir boere op elke opvanggebied',
+	// Unlimited server PDF reports, and scheduled report emails
+	'39864af3': 'Onbeperkte PDF-verslae van die bediener, en geskeduleerde verslae per e-pos',
+	// About {n} times Free’s assistant allowance
+	'b82cba2c': 'Omtrent {n} keer Free se assistenttoelaag',
+	// Team
+	'2329c92c': 'Team',
+	// For a water user association or a consultancy.
+	'90e43601': 'Vir ’n watergebruikersvereniging of ’n raadgewende firma.',
+	// Everything in Pro, for the whole team
+	'22e54ec8': 'Alles in Pro, vir die hele span',
+	// each further editor {month} a month or {year} a year
+	'fefb599e': 'elke bykomende redigeerder {month} per maand of {year} per jaar',
+	// About {n} times Free’s assistant allowance for each editor, shared by the team
+	'65923867': 'Omtrent {n} keer Free se assistenttoelaag vir elke redigeerder, gedeel deur die span',
+	// Good to know
+	'8d7b3a90': 'Goed om te weet',
+	// Prices are in rand. No VAT is charged.
+	'5a8d016b': 'Pryse is in rand. Daar word geen BTW gehef nie.',
+	// Free is for non-commercial use: work for a paying client, or as part of a business, needs Pro or Team.
+	'83fd18f5': 'Free is vir nie-kommersiële gebruik: werk vir ’n betalende kliënt, of as deel van ’n besigheid, het Pro of Team nodig.',
+	// Your data is never held back by a plan: downloading a project, your data or a run’s spreadsheet is free on every plan, also after a downgrade.
+	'a9de2721': '’n Plan hou nooit jou data terug nie: om ’n projek, jou data of ’n lopie se sigblad af te laai, is gratis op elke plan, ook ná ’n afgradering.',
+	// Results are the same on every plan: calibration, the ecological reserve and the model’s checks are never a paid extra.
+	'9a3aa417': 'Resultate is dieselfde op elke plan: kalibrasie, die ekologiese reserwe en die model se kontroles kos nooit ekstra nie.',
+	// Start free, and change plans when you need to.
+	'c09f0038': 'Begin gratis, en verander van plan wanneer jy dit nodig het.',
+	// Back to the home page
+	'4714b286': 'Terug na die tuisblad',
 	// River flow each month, in m³ a day
 	'a0ddf26e': 'Riviervloei elke maand, in m³ per dag',
 	// Ecological reserve
@@ -1745,6 +1837,14 @@ export const af: Catalogue = {
 	'f8d1f4b2': 'Te veel rekeninge is van jou netwerk af geskep. Probeer weer oor {wait}.',
 	// Sign-up is by invitation only for now. Ask the person who manages your catchment to invite you, then use the link in the invitation email.
 	'9988cf57': 'Jy kan voorlopig net met ’n uitnodiging registreer. Vra die persoon wat jou opvanggebied bestuur om jou uit te nooi, en gebruik dan die skakel in die uitnodigings-e-pos.',
+	// This email address is from a temporary-mail service. Sign up with an address you will keep.
+	'6dbad991': 'Hierdie e-posadres kom van ’n diens vir tydelike e-pos. Registreer met ’n adres wat jy sal hou.',
+	// That is already your email address.
+	'2e8cb06b': 'Dit is reeds jou e-posadres.',
+	// This email address is from a temporary-mail service. Use an address you will keep.
+	'736cb868': 'Hierdie e-posadres kom van ’n diens vir tydelike e-pos. Gebruik ’n adres wat jy sal hou.',
+	// Another account already uses this email address, so yours wasn’t changed.
+	'4ba6ccb7': '’n Ander rekening gebruik reeds hierdie e-posadres, daarom is joune nie verander nie.',
 	// The Terms of use or Privacy notice changed since this page opened. Reload the page and read them again.
 	'b7c3703c': 'Die Gebruiksvoorwaardes of die Privaatheidskennisgewing het verander sedert jy hierdie bladsy oopgemaak het. Herlaai die bladsy en lees hulle weer.',
 	// This notice changed since the page opened. Reload the page and read it again.
@@ -2337,4 +2437,10 @@ export const af: Catalogue = {
 	'44951451': 'Hierdie bevestigingskakel is ongeldig, reeds gebruik of ouer as 48 uur.',
 	// No account yet?
 	'd6cf81c0': 'Nog nie ’n rekening nie?',
+	// Confirm your new email address
+	'1bbd6638': 'Bevestig jou nuwe e-posadres',
+	// Changing your email address…
+	'42f17201': 'Verander tans jou e-posadres…',
+	// Your email address is now {email}. Sign in with it from now on.
+	'9f9fc814': 'Jou e-posadres is nou {email}. Teken voortaan daarmee in.',
 };

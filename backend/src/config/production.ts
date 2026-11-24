@@ -295,6 +295,15 @@ const wholeNumberIn =
 		return Number.isInteger(n) && n >= min && n <= max ? null : `must be a whole number from ${min} to ${max}`;
 	};
 
+/** A dollar amount (e.g. `0.30`) from min to max: the code reads it as is (assistant/config.ts usdMicros). */
+const usdIn =
+	(min: number, max: number): Check =>
+	(v) => {
+		if (!set(v)) return 'is not set';
+		const n = Number(v.trim());
+		return Number.isFinite(n) && n >= min && n <= max ? null : `must be a dollar amount from ${min} to ${max}`;
+	};
+
 /**
  * A Bedrock model id the assistant may name: Anthropic's, in-region
  * (anthropic.…) or through a system inference profile (global., us., eu., …),
@@ -453,6 +462,9 @@ export const SETTINGS: Record<string, Setting> = {
 	},
 	BILLING_ENFORCED: {
 		why: 'Whether plan limits refuse anything. Phase 1 is shadow mode: the code default (false) counts and shows usage and refuses nothing, and the API only reports the value.'
+	},
+	REVERSE_TRIAL: {
+		why: 'Whether a newly verified person gets the 14-day Pro reverse trial (billing/reverseTrial.ts, 342_reverse_trial). Only `true` with BILLING_ENFORCED `true` grants one; the code default (off) grants none and records no claim, and the API only reports the value.'
 	},
 
 	// --- Background jobs -------------------------------------------------------------------
@@ -613,6 +625,20 @@ export const SETTINGS: Record<string, Setting> = {
 	ASSISTANT_KEEPALIVE_SECONDS: {
 		why: 'Seconds between `: keepalive` comments on the stream. CloudFront cuts a response after its origin read timeout with nothing sent (60 s on the assistant’s origin, infra/s3_cloudfront.tf), so production keeps it from 1 to 30 s; unset is the code default (15).',
 		checks: { assistant: optional(wholeNumberIn(1, 30)) }
+	},
+	// The dollar caps (336_assistant_dollar_caps, 337's SAST day, issue #641): refuse only with BILLING_ENFORCED on.
+	// Terraform sets all three on the assistant (infra/assistant.tf), so the assistant requires them, as the token caps.
+	ASSISTANT_FREE_USD_PER_DAY: {
+		why: 'Dollars one person may spend on the assistant a SAST day on a Free account. Terraform var.assistant_free_usd_per_day (0.30).',
+		checks: { assistant: usdIn(0, 15) }
+	},
+	ASSISTANT_FREE_MESSAGES_PER_DAY: {
+		why: 'Messages one person may send the assistant a SAST day on a Free account. Terraform var.assistant_free_messages_per_day (20).',
+		checks: { assistant: wholeNumberIn(1, 500) }
+	},
+	ASSISTANT_FREE_POOL_USD_PER_MONTH: {
+		why: 'Dollars the Free and trial accounts together may spend on the assistant a UTC month, paced per SAST day. Terraform var.assistant_free_pool_usd_per_month (30).',
+		checks: { assistant: usdIn(0, 10_000) }
 	},
 	ASSISTANT_TURN_SECONDS: {
 		why: 'How long one turn may run before it ends with an error event. Terraform sets it below the assistant Lambda’s timeout (var.assistant_timeout_seconds less 15), so a long turn ends cleanly and is charged rather than cut off by the runtime. Checked when set.',

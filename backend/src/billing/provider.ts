@@ -57,6 +57,24 @@ export interface RecordPayload {
 	accountId: string;
 	externalRef: string | null;
 	eventCreated?: string | null;
+	/** invoice.paid for a staff-tool B2B invoice (no subscription): the grant its metadata names (335). */
+	invoice?: InvoiceGrantPayload;
+}
+/** A paid B2B invoice's grant, as the normaliser read it; null where a field didn't parse (app_billing_apply refuses it). */
+export interface InvoiceGrantPayload {
+	/** The provider's invoice id (in_…): the granted subscription's external_ref, so the same invoice grants once. */
+	ref: string | null;
+	planCode: string | null;
+	seats: number | null;
+	interval: string | null;
+	/** ISO: the period paid for (start inclusive, end exclusive). */
+	periodStart: string | null;
+	periodEnd: string | null;
+	/** The invoice's total and currency: the total must cover the amount issued (else the plan table's price); the grant never reads an amount. */
+	totalMinor: number | null;
+	/** The total the staff tool issued the invoice for (metadata amount_minor), or null when absent or unparsable. */
+	issuedMinor: number | null;
+	currency: string | null;
 }
 export type NormalisedEvent =
 	| { eventId: string; type: 'subscription.updated' | 'subscription.deleted'; payload: SubscriptionPayload }

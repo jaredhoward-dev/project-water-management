@@ -511,7 +511,8 @@ prerender and the hydration are in the address's language; `hooks.server.ts`
 alone, since the i18n state is module-wide and the fallback `index.html`
 must not inherit the last page's language. CloudFront's `spa_rewrite` function serves
 `/welcome` from `welcome.html`, `/welcome/af` from `welcome/af.html` (its
-`PRERENDERED` list), and `/privacy`, `/terms`, `/methods` and `/data-sources` from theirs (`infra/s3_cloudfront.tf`, guarded in
+`PRERENDERED` list), the pricing page (issue #641, `routes/welcome/pricing/[[lang=locale]]`, built the same way and treated as a landing route by
+`hooks.server.ts` and the root layout: `LANDING_ROUTES`) from `welcome/pricing.html` and `welcome/pricing/af.html`, and `/privacy`, `/terms`, `/methods` and `/data-sources` from theirs (`infra/s3_cloudfront.tf`, guarded in
 `guardrails.tftest.hcl`, and `infra/scripts/cloudfront-functions.test.mjs`
 checks `PRERENDERED` against the routes and the language table, so a new
 language can't 404 in production only; the e2e static server mirrors it). The absolute URLs in
@@ -3340,8 +3341,13 @@ sequenceDiagram
   (`assistant/routes.test.ts` drives it through the adapter). The keepalive
   comment keeps CloudFront's 35 s gap from cutting a slow tool call off.
 - **No transcript is stored**, and no prompt or answer is logged: the server
-  keeps only the token and message counts (`assistant_usage`, `assistant_rate`)
-  and, while a turn runs, its reservation (`assistant_reservation`). The
+  keeps only the token and message counts (`assistant_usage`, `assistant_rate`),
+  each person's dollars and messages per UTC day (`assistant_day_usage`, 336)
+  and, while a turn runs, its reservation (`assistant_reservation`, now
+  holding its reserved dollars too). The dollar caps and the paced Free pool
+  are checked when the turn begins and charged when it ends
+  (`assistant/dollarCaps.ts`, `app_assistant_begin`; they refuse only while
+  `BILLING_ENFORCED` is on; billing.md § Assistant dollar caps). The
   person's past chats are kept by the page in the browser's IndexedDB, never
   sent anywhere but as a new turn's conversation, and deleted on sign-out
   (docs/ui.md § Assistant).

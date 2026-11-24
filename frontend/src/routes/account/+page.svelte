@@ -1,7 +1,7 @@
 <!-- i18n-section: account -->
 <script lang="ts">
 	// The account page (WP-1.9): display name, email and whether it's
-	// confirmed, language and volume unit (WP-2.5), and changing the password
+	// confirmed, language and volume unit (WP-2.5), changing the email address (re-verified at the new address, 347, ChangeEmail), and changing the password
 	// while signed in, two-step sign-in (issue #282, TwoStepSignIn), a link to the alert emails page (WP-2.13), with a
 	// banner when SES stopped delivering to the address (alert emails paused
 	// until the person turns them back on), "download my data" (POPIA,
@@ -23,6 +23,7 @@
 	import { resumeProblem, suppressedText } from '#lib/components/alerts/words.js';
 	import LanguageSwitch from '#lib/i18n/LanguageSwitch.svelte';
 	import TwoStepSignIn from '#lib/components/account/TwoStepSignIn.svelte';
+	import ChangeEmail from '#lib/components/account/ChangeEmail.svelte';
 	import { t } from '#lib/i18n/locale.svelte.js';
 	import { APP_SHORT_NAME } from '#lib/brand.js';
 	import { errorText } from '#lib/i18n/apiError.js';
@@ -320,6 +321,8 @@
 					</form>
 				</section>
 
+				<!-- Changing the email address (347): a link to the new address, which switches only when opened. -->
+				<ChangeEmail />
 				<TwoStepSignIn />
 				<!-- Self-service deletion (issue #112): a small card; its dialog says what goes and what stays, then asks for the password again. -->
 				<DeleteAccount />
