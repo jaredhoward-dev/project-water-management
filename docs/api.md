@@ -5918,7 +5918,15 @@ holds and where it is kept: [security.md § Client error reports](./security.md#
 ## Billing
 
 Plans and usage, Phase 1: **shadow mode** (issue #641, [billing.md](./billing.md)).
-Usage is counted and shown; nothing is refused, and no route answers `402`.
+Usage is counted and shown, and nothing is refused, except a Team's editor
+seats once `BILLING_ENFORCED` is on (334, [billing.md § Team seats](./billing.md#team-seats)):
+then any route that would give someone a new editor seat on a team past its
+paid seats (`PATCH /teams/:id/members/:userId`, `PATCH
+/projects/:id/members/:userId`, `POST /me/invites/:id/accept`, moving a project
+into a team) answers **`402 { error, code: "plan_limit", params: { limit,
+used, plan } }`**: `limit` the paid seats, `used` the seats the change would
+need. Confirming an email address never answers it: the invite stays
+pending.
 Each answer comes from a `323_billing` definer function run as the caller.
 
 | Method | Path | Body | Response | Who |

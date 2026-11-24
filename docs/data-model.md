@@ -3869,8 +3869,25 @@ never to a farmer, contributor or viewer.
     team's account, `team.editorCount` (the distinct people with editor or
     owner on the team's projects: its members and admins, and direct editors
     and owners of its projects, each once; viewers, contributors and farmers
-    hold no seat); NULL unless the caller is the account's person or an admin of its
+    hold no seat; 334 reads it from `app_team_seats_in_use`); NULL unless the caller is the account's person or an admin of its
     team. Shape in [api.md](./api.md).
+  - `app_team_seats_in_use(team) → bigint` (334): the one definition of a
+    team's editor seats in use: its members and admins and the direct
+    editors and owners of its projects (`team_id` = the team, or billed to
+    the team's account), each once. Owner-only (no grant to `water_app`):
+    `app_account_plan` and the seat guard call it.
+  - Team seat guard (334): `app_team_seat_guard(team)` and the AFTER
+    triggers `team_member_seat_guard` (INSERT or role change to member or
+    admin), `project_member_seat_guard` (INSERT or role change to editor or
+    owner on a team's project) and `project_team_seat_guard` (a project's
+    `team_id` changing to a team). Only for a change that gives someone a
+    seat they don't already hold, and only when the transaction's
+    `app.billing_enforced` is `on`: under
+    `pg_advisory_xact_lock(hashtext('billing:' || account))` it reads the
+    live Team subscription's paid seats (`seats`, never fewer than
+    `seats_included`) and raises `23514` with constraint `plan_limit` when
+    the seats in use pass them. No live subscription, or one on another
+    plan: no cap. Owner-only functions; [billing.md § Team seats](./billing.md#team-seats).
   - `app_entitlements(project) → jsonb`: `{ plan, limits, features,
     status }` for an editor or owner; NULL for anyone else.
   - `app_usage_add(project, kind, qty = 1)`: adds to the project's

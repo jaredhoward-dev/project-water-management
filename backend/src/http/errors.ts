@@ -175,6 +175,14 @@ export const ERROR_CODES = [
  *     account that never checked out), billing_grant_seats (409, POST
  *     /teams/:id/plan/seats on a staff grant, whose seats change by a new
  *     grant; Phase 5).
+ *   plan_limit (402, issue #641 Enforcement design; 334_team_seats): with
+ *     BILLING_ENFORCED on, a change would give a Team account's team more
+ *     editors than its paid seats (adding or promoting a team member or
+ *     admin, a project editor or owner, accepting an invite, moving a
+ *     project into the team). `params` is { limit: paid seats, used: the
+ *     seats in use with the change, plan }. Only seat roles meet it, which
+ *     farmers never hold; the member and invitation pages show it in
+ *     English (docs/api.md § Errors).
  */
 export const MACHINE_ERROR_CODES = [
 	'render_token_refused',
@@ -203,7 +211,8 @@ export const MACHINE_ERROR_CODES = [
 	'billing_unavailable',
 	'billing_provider_error',
 	'billing_no_customer',
-	'billing_grant_seats'
+	'billing_grant_seats',
+	'plan_limit'
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number] | (typeof MACHINE_ERROR_CODES)[number];
 
@@ -221,6 +230,30 @@ export function mustChange(r: { rowCount: number | null }): void {
 /** 409 role_conflict's words (163_licensing_authority): fixed, never the database's text. */
 export const ROLE_CONFLICT_MESSAGE =
 	'someone who edits this project (an editor or owner, directly or through its team) can’t also be in an applying party, own an application or be shared one here: take them out of the party, or keep them below editor';
+
+/** 402 plan_limit's words for Team seats (334_team_seats): fixed, never the database's text. */
+export const PLAN_LIMIT_SEATS_MESSAGE =
+	'every editor seat on this team’s plan is in use: a team admin can add seats on the team’s Plan and usage page, or make someone a viewer';
+
+/**
+ * The plan_limit refusal's numbers, from the DETAIL 334's guard writes
+ * ({"limit", "used", "plan"}): only a whole number for each count and a known
+ * plan code pass, so nothing else from the database reaches the response.
+ */
+export function planLimitParams(err: unknown): Record<string, number | string> {
+	const out: Record<string, number | string> = {};
+	let detail: unknown;
+	try {
+		detail = JSON.parse(String((err as { detail?: unknown }).detail ?? ''));
+	} catch {
+		return out;
+	}
+	if (!detail || typeof detail !== 'object') return out;
+	const d = detail as Record<string, unknown>;
+	for (const k of ['limit', 'used'] as const) if (Number.isSafeInteger(d[k]) && (d[k] as number) >= 0) out[k] = d[k] as number;
+	if (d.plan === 'free' || d.plan === 'pro' || d.plan === 'team') out.plan = d.plan;
+	return out;
+}
 
 /** Postgres SQLSTATE codes we translate into client errors. */
 const PG_UNIQUE = '23505';
@@ -260,6 +293,9 @@ export function handleError(err: unknown, c: Context) {
 	// 163's conflict guard names itself, so the client can say what to change.
 	if (code === PG_CHECK && (err as { constraint?: string }).constraint === 'role_conflict')
 		return c.json({ error: ROLE_CONFLICT_MESSAGE, code: 'role_conflict' satisfies ErrorCode }, 409);
+	// 334's seat guard names itself: 402 plan_limit, with only the numbers it put in its DETAIL.
+	if (code === PG_CHECK && (err as { constraint?: string }).constraint === 'plan_limit')
+		return c.json({ error: PLAN_LIMIT_SEATS_MESSAGE, code: 'plan_limit' satisfies ErrorCode, params: planLimitParams(err) }, 402);
 	if (code === PG_CHECK) return c.json({ error: 'violates a data rule' }, 409);
 	// An exclusion constraint (e.g. one issued evidence pack per application, 112): a conflict with another row.
 	if (code === PG_EXCLUSION) return c.json({ error: 'conflicts with another record' }, 409);

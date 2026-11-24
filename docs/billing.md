@@ -102,8 +102,9 @@ would stand.
 The backend setting `BILLING_ENFORCED` (default `false`; only the exact string
 `true` turns it on) says whether plan limits refuse anything. **Phase 1 only
 reports it**: `GET /account/plan` and `GET /teams/:id/plan` return it as
-`enforced`, so the UI can word the usage bars ("what you would hit") and
-nothing in the code refuses on it yet. Set it in
+`enforced`, so the UI can word the usage bars ("what you would hit"). The
+one limit built to refuse on it is a Team's editor seats
+([§ Team seats](#team-seats)); everything else still only counts. Set it in
 `backend/.env.development.local` to see the enforced wording locally
 ([run-locally.md](./run-locally.md#one-time-setup)).
 
@@ -621,6 +622,64 @@ seat field can start at what the team uses.
   (the interval read and sent), `plan.test.ts` (the total and the starting
   count), and `billing-checkout.spec.ts` (the totals, the starting count).
 
+### Team seats
+
+Migration 334 (#641 Phase 5, "seats over the limit refused under parallel
+invites"; Enforcement design, "Editors per catchment / Team seats").
+
+- **One definition.** `app_team_seats_in_use(team)` is a team's editor
+  seats in use: the distinct people who are its members or admins, or
+  direct editors or owners of its projects. Its projects are those whose
+  `team_id` is the team and those billed to the team's account; the
+  `project_billing_account_set` trigger keeps the two the same (a project
+  can't bill to a team account with `team_id` null), and the function takes
+  both, so the count stays right if they ever part. Viewers, contributors
+  and farmers hold no seat. `app_account_plan`'s `team.editorCount` is this
+  number (334 redefines it from 332).
+- **Paid seats.** The live subscription's `seats`, never fewer than the
+  plan's `seats_included` (Team: 3), as the assistant allowance counts them.
+  **A team with no live subscription (Free), or a live one on another plan,
+  has no seat cap**: Team seats are the Team plan's limit; Free's editor
+  limit is per catchment (`editors_per_project`, a later slice), and capping
+  a Free team at Free's one included seat would lock every existing team.
+- **The refusal.** Any change that gives someone a seat they don't already
+  hold: adding a team member or admin or promoting a viewer, adding a
+  project editor or owner or promoting one on a team's project, accepting
+  an invite (each of these is a row in `team_member` or `project_member`),
+  and moving a project into a team (its direct editors join the team's
+  seats). Triggers on those tables check after the row is written, so every
+  path (routes, `app_accept_invites`, `app_accept_invite`, the owner's own
+  SQL) goes through one check, and an `INSERT … ON CONFLICT DO NOTHING` that
+  inserts nothing is never refused. Someone already holding a seat (a member
+  made admin, an editor made owner or added to another of the team's
+  projects) costs none, so is never refused, even on a team over its seats
+  after they were reduced. The API answers `402 plan_limit` with `{ limit,
+  used, plan }` ([api.md § Billing](./api.md#billing)).
+- **Parallel invites.** The check takes
+  `pg_advisory_xact_lock(hashtext('billing:' || account))` and only then
+  counts, in a fresh statement: two transactions granting the last seat
+  wait for each other, the second counts the first's committed seat, and
+  exactly one passes. Every write runs at READ COMMITTED (withUser's
+  REPEATABLE READ transactions are READ ONLY), which this relies on.
+- **Built but off.** It refuses only when `BILLING_ENFORCED=true`: `db/tx.ts`
+  then sets the transaction-local `app.billing_enforced` to `on` at the start
+  of every transaction (and sets nothing when off, so off costs no round
+  trip). Nothing from a request reaches the setting. The committed dev and
+  e2e env files leave it off.
+- **Confirming an address.** `markVerified` accepts the person's pending
+  invites inside a savepoint: if one would pass a Team's seats, they all stay
+  pending and the address is still confirmed. Accepting on the invitations
+  page then answers `402 plan_limit` until a team admin adds a seat
+  ([§ Changing a Team's seats](#changing-a-teams-seats)) or makes someone a
+  viewer.
+- **Who sees it.** Only seat roles meet it, which a farmer never holds, so
+  `plan_limit` is a workspace (English) code (`MACHINE_ERROR_CODES`).
+- **Tests.** `billing/teamSeats.db.test.ts` (the count and its exclusions,
+  the app role refused the functions, off by default, refused on and passed
+  after a seat is added, existing seat holders, a project moving in, a Free
+  team, the invite left pending, two parallel grants of the last seat) and
+  `http/errors.test.ts` (402 with only the numbers).
+
 ### Trials (decided 2026-11-23)
 
 **Checkout sells no trial**: no `trial_period_days` and no
@@ -875,7 +934,8 @@ none of this is built:
 - **Enforcement** ("Enforcement design"): each limit checked in the
   transaction of the action, under an advisory lock per account, answering
   `402 plan_limit` with `{ limit, used, plan }`; soft warnings at 80%;
-  downgrade and lapse without data loss. (Staff grants are built: [§ Staff grants](#staff-grants).)
+  downgrade and lapse without data loss. (Staff grants are built: [§ Staff grants](#staff-grants);
+  so is the Team seat refusal, off until `BILLING_ENFORCED`: [§ Team seats](#team-seats).)
 - **Billing provider** ("Billing provider"): dunning, refunds and invoices.
   The provider seam, the webhook, checkout and the portal are built
   ([§ Webhooks and providers](#webhooks-and-providers),

@@ -76,8 +76,23 @@ async function requestDevice(c: Context, db: Db, userId: string, email: string):
  */
 export async function markVerified(db: Db, userId: string): Promise<void> {
 	const { rowCount } = await db.query('UPDATE app_user SET email_verified_at = now() WHERE id = $1 AND email_verified_at IS NULL', [userId]);
-	if (rowCount) await db.query('SELECT app_accept_invites($1)', [userId]);
+	if (!rowCount) return;
+	// With BILLING_ENFORCED on, an invite past a Team's paid seats refuses (334_team_seats, plan_limit). Confirming
+	// the address must not fail for it: the invites stay pending, on the invitations page, where accepting one
+	// answers 402 plan_limit until a team admin adds a seat (docs/billing.md § Team seats).
+	await db.query('SAVEPOINT accept_invites');
+	try {
+		await db.query('SELECT app_accept_invites($1)', [userId]);
+		await db.query('RELEASE SAVEPOINT accept_invites');
+	} catch (err) {
+		if (!isPlanLimit(err)) throw err;
+		await db.query('ROLLBACK TO SAVEPOINT accept_invites');
+	}
 }
+
+/** 334's seat guard refusing (SQLSTATE 23514, constraint plan_limit). */
+export const isPlanLimit = (err: unknown): boolean =>
+	(err as { code?: string }).code === '23514' && (err as { constraint?: string }).constraint === 'plan_limit';
 
 /**
  * Issue a verification token and build its email, or say why none was

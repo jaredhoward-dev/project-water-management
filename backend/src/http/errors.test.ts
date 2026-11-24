@@ -4,7 +4,7 @@
 import { Hono } from 'hono';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { JobCollisionError } from '../jobs/queue.js';
-import { ApiError, ERROR_CODES, handleError, MACHINE_ERROR_CODES, mustChange } from './errors.js';
+import { ApiError, ERROR_CODES, handleError, MACHINE_ERROR_CODES, mustChange, planLimitParams } from './errors.js';
 
 function appThrowing(err: unknown) {
 	const app = new Hono();
@@ -60,6 +60,27 @@ describe('handleError: the conflict guard (163_licensing_authority)', () => {
 		const res = await appThrowing(Object.assign(new Error('x'), { code: '23514', constraint: 'scenario_outcome_check' })).request('/');
 		expect(res.status).toBe(409);
 		expect(await res.json()).toEqual({ error: 'violates a data rule' });
+	});
+});
+
+describe('handleError: the Team seat guard (334_team_seats)', () => {
+	const seatError = (detail: unknown) =>
+		Object.assign(new Error('plan_limit: the team’s editor seats are all in use'), { code: '23514', constraint: 'plan_limit', detail });
+
+	it('answers 402 plan_limit with fixed words and only the numbers from its DETAIL', async () => {
+		const res = await appThrowing(seatError('{"limit": 3, "used": 4, "plan": "team"}')).request('/');
+		expect(res.status).toBe(402);
+		const body = (await res.json()) as { code?: string; error: string; params?: unknown };
+		expect(body).toMatchObject({ code: 'plan_limit', params: { limit: 3, used: 4, plan: 'team' } });
+		expect(body.error).toMatch(/editor seat/);
+		expect(JSON.stringify(body)).not.toMatch(/all in use|23514/);
+	});
+
+	it('drops anything in the DETAIL but whole counts and a known plan, and survives no DETAIL', () => {
+		expect(planLimitParams(seatError('{"limit": "3; drop", "used": 4.5, "plan": "<b>x</b>", "email": "a@example.com"}'))).toEqual({});
+		expect(planLimitParams(seatError('not json'))).toEqual({});
+		expect(planLimitParams(seatError(undefined))).toEqual({});
+		expect(planLimitParams(seatError('{"limit": -1, "used": 2, "plan": "team"}'))).toEqual({ used: 2, plan: 'team' });
 	});
 });
 
