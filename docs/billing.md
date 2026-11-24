@@ -223,7 +223,8 @@ pnpm dev:billing:report --show-emails       # operator only: prints the addresse
 ```
 
 It reads two owner-only functions (`325_billing_metrics.sql`; never granted
-to `water_app`, [data-model.md](./data-model.md)) on this checkout's
+to `water_app`, [data-model.md](./data-model.md)) and the owner-only
+`email_gate_refusal` table (348) on this checkout's
 database (`MIGRATION_DATABASE_URL`); in production the operator runs the
 same code through the migrate Lambda's `billing-report` owner action
 (`.github/workflows/billing-admin.yml`, approved in the `production`
@@ -248,6 +249,7 @@ output never goes into an issue, a PR, a chat or an agent's transcript.
 | Sign-ups per day | Per SAST day of the month; the three busiest printed | |
 | Domain clusters | Email domains with 5 or more sign-ups in some 7 days of the month; common providers are marked, not hidden | Escalation (a) |
 | Canonical clusters | Canonical addresses (lower-cased, `+tag` dropped, Gmail's dots dropped, googlemail.com as gmail.com) with more than one account, ever, where one signed up this month; the user ids | Escalation (a) |
+| Disposable-domain refusals | Refusals by the [verified-email gate](#verified-email-on-free) of a disposable-domain address (`email_disposable`) this SAST month, by feature (assistant, feeds), and beside them its unverified refusals (`email_unverified`). Counted per SAST day in the owner-only `email_gate_refusal` (348; counts only: no address, domain, person or project), one autocommit `app_email_gate_refused` call per refusal on its own connection, since the refusal rolls the route's transaction back; each refusal is also logged as `email_gate_refused` with its code and feature. Zero while `BILLING_ENFORCED` is off (the gate is), and no data before 348 | |
 
 The plan is each account's plan **today**; in Phase 1 that is Free for
 everyone. Runs, reports and sign-ups use the SAST month; the assistant's
@@ -259,8 +261,7 @@ trial or limit-message events), churn after the limit (no record of hitting
 one), reverse trial to paid (built in 342, off, and the report doesn't read it yet), the share at the assistant's daily
 cap and the Free pool's burn by day (`assistant_day_usage` keeps each day
 since 336, but the report doesn't read it yet), the share at the live-catchment limit (338 defines live,
-but the report doesn't read it yet), paid seats reaching $15 (spend isn't kept per paid seat), disposable
-rejections (the gate's refusals aren't logged yet), sign-up throttle hits per address
+but the report doesn't read it yet), paid seats reaching $15 (spend isn't kept per paid seat), sign-up throttle hits per address
 (`signup_throttle` keeps only an hour's hashed buckets) and suspensions (no
 suspend action yet).
 
@@ -1243,7 +1244,9 @@ them on together.
   (`backend/src/auth/disposableDomains.ts`, its source, commit, date,
   licence and hash in the header; [data-sources.md §
   disposable-email-domains](./data-sources.md#disposable-email-domains)).
-  Never fetched at runtime. The reverse trial calls it (a disposable address
+  Never fetched at runtime; refreshed monthly by a PR from
+  `.github/workflows/disposable-domains.yml` (`pnpm gen:disposable-domains`,
+  a ±20 % size-change guard). The reverse trial calls it (a disposable address
   gets no trial); sign-up and an email change (#641 item 5) don't yet
   ([followups.md](./followups.md)).
 - **The words.** Workspace English, #641's copy: "Verify your email to use
@@ -1255,10 +1258,17 @@ them on together.
   `frontend/src/lib/components/billing/`), in the assistant panel's foot and
   the Data feeds panel. The API's own words carry no address; the panel
   shows the signed-in person's.
+- **Counted.** Each refusal is logged (`email_gate_refused`, its code and
+  feature, never the address or domain) and counted per SAST day in
+  `email_gate_refusal` (348) for the abuse report
+  ([§ Metrics and the abuse report](#metrics-and-the-abuse-report)).
 - **Tests.** `backend/src/billing/emailGate.db.test.ts` (off allowed; on,
   unverified and disposable refused for the assistant and for attaching and
   switching on a feed; verified, paid and attached-off allowed; a
-  non-member's 404; the function's answers), `backend/src/auth/disposable.test.ts`,
+  non-member's 404; the function's answers; each refusal counted once on
+  the SAST day and logged with no address),
+  `backend/src/auth/disposable.test.ts`,
+  `scripts/guards/disposable_domains.test.mjs` (the refresh),
   `frontend/src/lib/components/billing/emailGate.test.ts`, and the assistant
   panel's and chat's tests.
 

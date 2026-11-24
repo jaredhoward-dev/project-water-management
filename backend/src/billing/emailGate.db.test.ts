@@ -6,9 +6,14 @@
 //    anything is counted;
 //  - a verified person with an ordinary address is allowed (positive control), and so is anyone on a paid account;
 //  - attaching a feed switched off, and saving one already on, are never refused;
-//  - app_free_email_gate answers a non-member NULL, and only ever the caller's own address.
+//  - app_free_email_gate answers a non-member NULL, and only ever the caller's own address;
+//  - 348: each refusal is logged with its code and feature, never the address or its domain, and counted in
+//    email_gate_refusal on today's SAST day, whatever the session's time zone (CLAUDE.md rule 7), although the route's
+//    transaction rolls back; an allowed turn counts nothing; water_app can't read or write the table directly.
+import pg from 'pg';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { app, asOwner, disableFeedsAfterFile, retirePendingJobs, signUp } from '../__tests__/helpers.js';
+import { APP_URL } from '../__tests__/test-db.js';
 import { withUser } from '../db/tx.js';
 import { cellCentre } from '../feeds/cellCache.js';
 
@@ -191,5 +196,81 @@ describe('app_free_email_gate', () => {
 		enforce();
 		expect(await gate(me)).toEqual({ email: me.email, verified: false });
 		expect(await gate(other)).toBeNull();
+	});
+});
+
+describe('348: the gate’s refusals are logged and counted, with no address', () => {
+	const today = async () =>
+		((await asOwner(`SELECT to_char((now() AT TIME ZONE 'Africa/Johannesburg')::date, 'YYYY-MM-DD') AS d`)) as { d: string }[])[0]!.d;
+	const count = async (code: string, feature: string) =>
+		(
+			(await asOwner(
+				`SELECT coalesce(sum(refusals), 0)::int AS n FROM email_gate_refusal
+				 WHERE day = (now() AT TIME ZONE 'Africa/Johannesburg')::date AND code = $1 AND feature = $2`,
+				[code, feature]
+			)) as { n: number }[]
+		)[0]!.n;
+
+	beforeEach(() => vi.stubEnv('ASSISTANT_PROVIDER', 'mock'));
+
+	it('a disposable-domain refusal is counted once and logged without the address; an allowed turn counts nothing', async () => {
+		const throwaway = await disposableUser('CountThrowaway');
+		const verified = await signUp('CountVerified');
+		const pT = await newProject(throwaway, 'Count T');
+		const pV = await newProject(verified, 'Count V');
+		enforce();
+		const before = await count('email_disposable', 'assistant');
+		const info = vi.spyOn(console, 'info');
+		try {
+			expect(await turn(throwaway, pT)).toMatchObject({ status: 403, code: 'email_disposable' });
+			const lines = info.mock.calls.map((c) => (typeof c[0] === 'string' ? c[0] : JSON.stringify(c[0]))).filter((l) => l.includes('email_gate_refused'));
+			expect(lines).toHaveLength(1);
+			expect(JSON.parse(lines[0]!)).toEqual({ event: 'email_gate_refused', code: 'email_disposable', feature: 'assistant' });
+			expect(lines[0]).not.toMatch(/@|mailinator/);
+		} finally {
+			info.mockRestore();
+		}
+		expect(await count('email_disposable', 'assistant')).toBe(before + 1);
+		// Positive control the other way: a verified person's turn goes ahead and counts nothing.
+		const verifiedBefore = await count('email_disposable', 'assistant');
+		expect((await turn(verified, pV)).status).toBe(200);
+		expect(await count('email_disposable', 'assistant')).toBe(verifiedBefore);
+	});
+
+	it('an unverified feed refusal is counted under its own code and feature', async () => {
+		const u = await signUp('CountUnverified', { verified: false });
+		const p = await newProject(u, 'Count feed');
+		enforce();
+		const before = await count('email_unverified', 'feeds');
+		expect((await u.call('POST', `/projects/${p}/feeds`, feedBody(true))).status).toBe(403);
+		expect(await count('email_unverified', 'feeds')).toBe(before + 1);
+	});
+
+	it('counts on the SAST day in any session time zone; water_app may call the function but not touch the table', async () => {
+		const day = await today();
+		for (const tz of ['Pacific/Kiritimati', 'America/Adak']) {
+			const client = new pg.Client({ connectionString: APP_URL });
+			await client.connect();
+			try {
+				await client.query(`SET TIME ZONE '${tz}'`);
+				const before = await count('email_disposable', 'feeds');
+				await client.query(`SELECT app_email_gate_refused('email_disposable', 'feeds')`);
+				expect(await count('email_disposable', 'feeds'), tz).toBe(before + 1);
+				const direct = await client.query('SELECT count(*) FROM email_gate_refusal').then(
+					() => 'ok',
+					(e: { code?: string }) => e.code
+				);
+				expect(direct).toBe('42501');
+				const bad = await client.query(`SELECT app_email_gate_refused('someone@example.com', 'feeds')`).then(
+					() => 'ok',
+					(e: { code?: string }) => e.code
+				);
+				expect(bad).toBe('23514');
+			} finally {
+				await client.end();
+			}
+		}
+		const rows = (await asOwner(`SELECT to_char(max(day), 'YYYY-MM-DD') AS d FROM email_gate_refusal WHERE code = 'email_disposable' AND feature = 'feeds'`)) as { d: string }[];
+		expect(rows[0]!.d).toBe(day);
 	});
 });

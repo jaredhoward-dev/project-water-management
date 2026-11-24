@@ -250,6 +250,31 @@ export function abuseReport(people: PersonRow[]): AbuseReport {
 	return { signupsPerDay, domainClusters, canonicalClusters };
 }
 
+/** One code and feature's refusals by Free's verified-email gate in the month (348 email_gate_refusal, summed by SAST day). */
+export interface GateRefusalRow {
+	code: 'email_unverified' | 'email_disposable';
+	feature: 'assistant' | 'feeds';
+	refusals: number;
+}
+
+export interface GateRefusals {
+	/** "Disposable-domain rejections" (#641): refusals of an address on a disposable domain. */
+	disposable: { assistant: number; feeds: number; total: number };
+	unverified: { assistant: number; feeds: number; total: number };
+}
+
+/**
+ * The month's refusals by the verified-email gate, per code and feature.
+ * Counted only while BILLING_ENFORCED is on (the gate is off otherwise), and
+ * only since 348: a zero before then is no data, not no refusals.
+ */
+export function gateRefusals(rows: GateRefusalRow[]): GateRefusals {
+	const sum = (code: GateRefusalRow['code'], feature?: GateRefusalRow['feature']) =>
+		rows.filter((r) => r.code === code && (feature === undefined || r.feature === feature)).reduce((s, r) => s + r.refusals, 0);
+	const of = (code: GateRefusalRow['code']) => ({ assistant: sum(code, 'assistant'), feeds: sum(code, 'feeds'), total: sum(code) });
+	return { disposable: of('email_disposable'), unverified: of('email_unverified') };
+}
+
 /** The issue's metrics this data can't answer yet, and what each would need. Printed so nobody reads a gap as a zero. */
 export const NOT_YET_MEASURABLE: { metric: string; needs: string }[] = [
 	{ metric: 'Upgrade at the limit (checkout or trial within 7 days of a limit message)', needs: 'no checkout, trial or limit-message events are recorded (Phase 3)' },
@@ -259,7 +284,6 @@ export const NOT_YET_MEASURABLE: { metric: string; needs: string }[] = [
 	{ metric: 'Share of active Free accounts at the live-catchment limit', needs: 'no catchment is marked live yet' },
 	{ metric: 'Free pool burn by day of month', needs: 'assistant_usage is monthly; there is no pool or daily record yet' },
 	{ metric: 'Paid AI: share of seats reaching $15', needs: 'spend is per project and person, not per paid seat; no one is on a paid plan in Phase 1' },
-	{ metric: 'Disposable-domain rejections', needs: "the verified-email gate's refusals aren't logged yet" },
 	{ metric: 'Sign-up throttle hits per address', needs: 'signup_throttle keeps only a hashed bucket for its hour (079)' },
 	{ metric: 'Suspensions', needs: 'no suspend action yet' }
 ];
@@ -274,10 +298,18 @@ export interface Report {
 	newAccountFreeSpend: ReturnType<typeof newAccountFreeSpend>;
 	heaviestFree: ReturnType<typeof heaviestFree>;
 	abuse: AbuseReport;
+	gateRefusals: GateRefusals;
 	notYetMeasurable: typeof NOT_YET_MEASURABLE;
 }
 
-export function buildReport(month: string, now: Date, accounts: AccountRow[], people: PersonRow[], freeLimits: PlanLimits): Report {
+export function buildReport(
+	month: string,
+	now: Date,
+	accounts: AccountRow[],
+	people: PersonRow[],
+	freeLimits: PlanLimits,
+	refusals: GateRefusalRow[] = []
+): Report {
 	return {
 		month,
 		generatedAt: now.toISOString(),
@@ -288,6 +320,7 @@ export function buildReport(month: string, now: Date, accounts: AccountRow[], pe
 		newAccountFreeSpend: newAccountFreeSpend(accounts),
 		heaviestFree: heaviestFree(accounts),
 		abuse: abuseReport(people),
+		gateRefusals: gateRefusals(refusals),
 		notYetMeasurable: NOT_YET_MEASURABLE
 	};
 }
@@ -337,6 +370,10 @@ export function formatReport(r: Report, showEmails: boolean): string {
 		out.push(`    ${c.userIds.length} accounts (${c.inMonth} this month)${showEmails ? `  ${c.canonical}: ${c.emails.join(', ')}` : ''}`);
 		out.push(`      users ${c.userIds.join(', ')}`);
 	}
+	const g = r.gateRefusals;
+	out.push(`  disposable-domain refusals by the verified-email gate: ${g.disposable.total} (assistant ${g.disposable.assistant}, feeds ${g.disposable.feeds})`);
+	out.push(`  unverified-email refusals by the same gate: ${g.unverified.total} (assistant ${g.unverified.assistant}, feeds ${g.unverified.feeds})`);
+	out.push('  (both counted only while BILLING_ENFORCED is on, and only since migration 348)');
 	out.push('', 'Not yet measurable');
 	for (const m of r.notYetMeasurable) out.push(`  ${m.metric}: ${m.needs}`);
 	return out.join('\n');
