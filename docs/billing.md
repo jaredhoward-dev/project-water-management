@@ -968,10 +968,10 @@ since every subscription write fires 341's sync, which takes it.
 
 **3 days before the end** the person gets an email ([§ Plan emails](#plan-emails)).
 
-**Not built yet** ([followups.md § Billing](./followups.md#billing-issue-641)):
-the banner 3 days before the end (on the Plan page and in the workspace), the
-Plan page's Upgrade button during a trial (it offers Manage billing while any subscription is live,
-`billingActions`). The assistant panel shows the two trial codes as caps,
+**On the pages** (round 2026-11-24): the Plan page's Upgrade during a trial
+and the 3-day note on the Plan page and in the workspace are above (§ What the
+pages show). Still open ([followups.md § Billing](./followups.md#billing-issue-641)):
+whether to key `reverse_trial_claim` with an HMAC (operator decision). The assistant panel shows the two trial codes as caps,
 with the server's words and when they're back, never an upsell (the trial is
 Pro already), and its day meter counts the trial's day and its whole $2
 ([§ Assistant dollar caps](#assistant-dollar-caps)).

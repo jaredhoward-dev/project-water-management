@@ -578,8 +578,8 @@ asked to change an account's address to this one and nothing changed on
 either account; if it was them, sign in with this address (with a
 password-reset link) or, for an account never confirmed, confirm it (a
 confirmation link); if not, ignore it. It never names the account that
-asked. Under that address's own cooldown and cap, sent inside the same
-`answerAlike`), after the same time (`answerAlike`) and under the same limits (the link
+asked. It goes under that address's own cooldown and cap), sent inside the
+same `answerAlike`, so after the same time and under the same limits (the link
 is issued, and counted, before the address is looked up), so this reveals no
 more than sign-up. If an account takes the address after the link went out,
 the switch is refused (`409 email_change_taken`) by `app_user`'s unique email;
