@@ -4460,6 +4460,12 @@ turn (up to 6 model calls with tool reads between) runs past the API's
   That timeout is the longest gap between two packets, not the response;
   the stream sends a `: keepalive` comment every 15 s
   (`ASSISTANT_KEEPALIVE_SECONDS`, kept at 1–30 s by the production check).
+  The Free dollar caps' settings (`ASSISTANT_FREE_USD_PER_DAY`,
+  `ASSISTANT_FREE_MESSAGES_PER_DAY`, `ASSISTANT_FREE_POOL_USD_PER_MONTH`)
+  aren't set by Terraform yet, so the code's defaults apply ($0.30, 20
+  messages, $30); the production check validates them only when set, and
+  they refuse a turn only while `BILLING_ENFORCED` is on (billing.md §
+  Assistant dollar caps);
   The status (`GET /api/projects/:id/assistant`) stays on the API, which
   carries the same `ASSISTANT_*` values so it shows what the assistant
   enforces;
@@ -4545,7 +4551,13 @@ a wrong model id, model access not enabled, a quota or IAM problem; the
 invocation is still a 200) and `assistant-tokens-hourly` (the turns'
 weighted tokens summed over an hour above `assistant_tokens_alarm_per_hour`,
 2 M ≈ $4 an hour, about 10× the expected use: the spend signal that doesn't
-wait for billing). Its unhandled 500s count toward `unhandled-error`. On
+wait for billing), and `assistant-free-pool-50` and `assistant-free-pool-80`
+(a turn on a Free or trial account logged an `assistant_free_pool` event:
+the month's Free pool has passed 50% or 80%; they fire whether or not
+`BILLING_ENFORCED` is on. Before day 20, follow #641's order: read the
+staff report's heaviest Free accounts, then raise the pool or move Free to
+a cheaper model; billing.md § Assistant dollar caps). Its unhandled 500s
+count toward `unhandled-error`. On
 the full tier: `assistant-duration-p95` (above 80% of the timeout for 10
 minutes), and its direct-traffic refusals count toward
 `origin-secret-rejected`. Each turn logs one `assistant_turn` line (its

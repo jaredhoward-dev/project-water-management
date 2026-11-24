@@ -3340,8 +3340,13 @@ sequenceDiagram
   (`assistant/routes.test.ts` drives it through the adapter). The keepalive
   comment keeps CloudFront's 35 s gap from cutting a slow tool call off.
 - **No transcript is stored**, and no prompt or answer is logged: the server
-  keeps only the token and message counts (`assistant_usage`, `assistant_rate`)
-  and, while a turn runs, its reservation (`assistant_reservation`). The
+  keeps only the token and message counts (`assistant_usage`, `assistant_rate`),
+  each person's dollars and messages per UTC day (`assistant_day_usage`, 336)
+  and, while a turn runs, its reservation (`assistant_reservation`, now
+  holding its reserved dollars too). The dollar caps and the paced Free pool
+  are checked when the turn begins and charged when it ends
+  (`assistant/dollarCaps.ts`, `app_assistant_begin`; they refuse only while
+  `BILLING_ENFORCED` is on; billing.md § Assistant dollar caps). The
   person's past chats are kept by the page in the browser's IndexedDB, never
   sent anywhere but as a new turn's conversation, and deleted on sign-out
   (docs/ui.md § Assistant).

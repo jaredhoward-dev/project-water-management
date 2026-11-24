@@ -928,6 +928,16 @@ are #641's checklist. Open items from building it:
 - [ ] **Trials have no caps of their own.** A trialing account draws on the
       Free pool and its plan's month; #641's trial is $2 in all and $1 a day.
       Trigger: the reverse trial (Phase 2).
+- [ ] **Every turn's begin sums the month's dollars.** 336's
+      `assistant_dollars_spent` scans the month's `assistant_usage`, today's
+      `assistant_day_usage` and every reservation, and the pool calls
+      `assistant_pool_account` once per account, all under the
+      deployment-wide `assistant_usage:all` lock that serialises begins
+      (264). Correct, and fine at launch's size; it is the slow path as
+      accounts grow. Durable fix: a per-month pool counter row the charge
+      updates, read in O(1), not a wider lock; a `perf-db` budget on begin
+      to pin it. Trigger: begin latency visible in the assistant's p95, or
+      a few hundred active Free accounts.
 - [x] **Webhook events apply in arrival order.** `app_billing_apply` (326)
       ignores the payload's `eventCreated`, and Stripe doesn't guarantee
       delivery order, so an older `customer.subscription.updated` arriving

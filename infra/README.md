@@ -680,7 +680,7 @@ fixed**, before any model spend, in af-south-1:
 | bedrock-runtime interface endpoint, 1 AZ (`bedrock_endpoint_az_count`; $0.01309/h, ~$7.30 in us-east-1) | 9.56 |
 | Its runtime secret (`secrets.tf`) | 0.40 |
 | Its budget (`water-management-assistant`, a third budget: $0.02/day past the free two) | 0.62 |
-| CloudWatch: 5 essential alarms (errors, throttles, charge-failed, provider-failed, tokens-hourly) and 3 log metrics, 1 more alarm on the full tier (duration p95) | ~0.30–0.40 |
+| CloudWatch: 7 essential alarms (errors, throttles, charge-failed, provider-failed, tokens-hourly, free-pool 50% and 80%) and 5 log metrics, 1 more alarm on the full tier (duration p95) | ~0.30–0.40 |
 | Lambda (`water-management-assistant`, 1 GB arm64: a turn of ~15 s ≈ $0.0003) | ~0 |
 | **Assistant fixed** | **≈ $10.90** |
 
