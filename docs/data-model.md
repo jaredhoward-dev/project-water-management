@@ -3767,6 +3767,14 @@ page holds the conversation and sends it with each turn.
   `total_used`; the deployment's is a sum naming no one), reservations
   counted as spent. Spend and reservations are summed in one statement
   (`assistant_month_spent`), so a charge committing alongside is seen once.
+  `app_assistant_day_meter(project, free_usd_micros_per_day,
+  free_messages_per_day)` (350, SECURITY DEFINER, STABLE) answers the
+  status's day meter: one row (`kind` `free` or `trial`, the day's dollars
+  and what's left of them, Free's messages left, the trial's whole allowance
+  left, the account's median question over 30 SAST days) only with billing
+  enforced, on a Free or reverse-trial account, to a viewer and above; no
+  row otherwise ([billing.md § Assistant dollar
+  caps](./billing.md#assistant-dollar-caps)).
 - Each turn's cost (324, issue #641 Phase 1, shadow mode: recorded, no cap
   reads it). The backend prices the turn (`assistant/pricing.ts`: a
   per-model table of USD per million tokens, Bedrock's global-profile prices

@@ -126,9 +126,32 @@ export type AssistantStatus =
 			 */
 			budget: { tokensPerMonth: number; tokensUsed: number; resetsAt: string; scope: 'project' | 'user' | 'total' };
 			rate: { messagesPerHour: number };
+			/**
+			 * Today's assistant for a capped account (Free, or a reverse trial) while BILLING_ENFORCED is on, for the
+			 * panel's "questions left today" meter (usage.ts dayMeter, 350_assistant_day_meter); null otherwise.
+			 */
+			day: AssistantDayMeter | null;
 			/** The report disclaimer (liability/disclaimer.ts DISCLAIMER), shown under the panel. */
 			disclaimer: string;
 	  };
+
+/**
+ * What the caller has left of today's assistant (the SAST day, 00:00 to 24:00 South African time), in micro-USD
+ * (docs/billing.md § Assistant dollar caps). `medianTurnUsdMicros` is the account's median cost of a question over its
+ * last 30 days (null with none yet), which the panel turns into an estimate of questions left.
+ */
+export interface AssistantDayMeter {
+	kind: 'free' | 'trial';
+	usdMicrosPerDay: number;
+	usdMicrosLeft: number;
+	/** Free's messages a day left; null on a trial (no message cap). */
+	messagesLeft: number | null;
+	/** The reverse trial's whole allowance left ($2 over the trial); null on Free. */
+	trialUsdMicrosLeft: number | null;
+	medianTurnUsdMicros: number | null;
+	/** The next 00:00 SAST (ISO): when the day starts again. */
+	resetsAt: string;
+}
 
 /** POST /projects/:id/assistant/messages body. The last message is the user's new one. */
 export interface AssistantRequest {

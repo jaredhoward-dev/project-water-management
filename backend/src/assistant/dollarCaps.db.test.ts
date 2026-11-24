@@ -9,7 +9,9 @@
 //   - a person reads only their own day rows (with a positive control);
 //   - through the route, each refusal is 429 with its code, the issue's words, Retry-After, params.seconds and
 //     params.resetsAt (Retry-After from now); a pool account's turn logs `assistant_free_pool` at 50% and 80% of the
-//     pool's month, and not below.
+//     pool's month, and not below;
+//   - the day meter (350_assistant_day_meter): what a Free person has left today, and the account's median question,
+//     only enforced, only to a member, only on a capped account.
 // The workspace runs under a skewed TZ (CLAUDE.md rule 7); the Free day is the SAST day (00:00 SAST, 22:00 UTC) and
 // every month is UTC, so the days and months are worked out by Postgres, and a row of yesterday or last month is
 // shown not to count.
@@ -17,6 +19,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { app, asOwner, signUp } from '../__tests__/helpers.js';
 import { withUser } from '../db/tx.js';
 import { dayResetsAt, DOLLAR_REFUSAL, poolDayAllowance, type DollarOutcome } from './dollarCaps.js';
+import { dayMeter } from './usage.js';
 
 type User = Awaited<ReturnType<typeof signUp>>;
 let owner: User;
@@ -354,6 +357,62 @@ describe('assistant_day_usage', () => {
 		expect(res!.day).toBe(today);
 		const [d] = await asOwner('SELECT messages FROM assistant_day_usage WHERE billing_account_id = $1 AND user_id = $2 AND day = $3', [account, owner.id, today]);
 		expect(d!.messages).toBe(1);
+	});
+});
+
+describe('the day meter (350): what a capped person has left today', () => {
+	const meter = (u: User, pid: string) => withUser(u.id, (db) => dayMeter(db, pid, { freeUsdMicrosPerDay: DAY_USD, freeMessagesPerDay: DAY_MSGS }));
+
+	it('is null with billing off (the default): no cap refuses, so nothing counts down', async () => {
+		expect(await meter(owner, projectId)).toBeNull();
+	});
+
+	it('a fresh Free person has the whole day and no median yet (positive control)', async () => {
+		enforce();
+		expect(await meter(owner, projectId)).toEqual({
+			kind: 'free',
+			usdMicrosPerDay: DAY_USD,
+			usdMicrosLeft: DAY_USD,
+			messagesLeft: DAY_MSGS,
+			trialUsdMicrosLeft: null,
+			medianTurnUsdMicros: null,
+			resetsAt: dayResetsAt()
+		});
+	});
+
+	it('counts today’s spend, messages and running turns; the median is the account’s last 30 days, no one else’s', async () => {
+		enforce();
+		await dayRow(owner, account, await sastDay(), 4, 80_000); // 20 000 a question
+		await dayRow(owner, account, await sastDay(-1), 2, 60_000); // 30 000
+		await dayRow(editor, account, await sastDay(-3), 1, 10_000); // 10 000: another member of the same account
+		await dayRow(owner, account, await sastDay(-40), 1, 5_000_000); // too old
+		await dayRow(owner, account, await sastDay(-2), 3, 0); // unpriced: not a cost
+		await dayRow(other, otherAccount, await sastDay(), 1, 290_000); // another account
+		const m = await meter(owner, projectId);
+		expect(m).toMatchObject({ kind: 'free', usdMicrosLeft: DAY_USD - 80_000, messagesLeft: DAY_MSGS - 4, medianTurnUsdMicros: 20_000 });
+		// A running turn's reservation counts as spent, as the begin counts it: the begin cut it to what was left.
+		expect((await begin(owner, projectId)).outcome).toBe('ok');
+		expect(await meter(owner, projectId)).toMatchObject({ usdMicrosLeft: 0, messagesLeft: DAY_MSGS - 5 });
+		// Yesterday's spend doesn't count against today.
+		expect((await meter(editor, projectId))?.usdMicrosLeft).toBe(DAY_USD);
+	});
+
+	it('is null on a paid plan and for a stranger, but answers each member of a Free project', async () => {
+		enforce();
+		expect(await meter(editor, projectId)).not.toBeNull();
+		expect(await meter(other, projectId)).toBeNull();
+		await asOwner(`INSERT INTO subscription (billing_account_id, plan_code, status, provider) VALUES ($1, 'pro', 'active', 'manual')`, [account]);
+		expect(await meter(owner, projectId)).toBeNull();
+	});
+
+	it('is the status’s `day`, through the route (enforced), and null there for a paid plan', async () => {
+		vi.stubEnv('ASSISTANT_PROVIDER', 'mock');
+		enforce();
+		const res = await owner.call('GET', `/projects/${projectId}/assistant`);
+		expect(res.status).toBe(200);
+		expect(res.body.day).toMatchObject({ kind: 'free', usdMicrosLeft: DAY_USD, messagesLeft: DAY_MSGS, resetsAt: dayResetsAt() });
+		await asOwner(`INSERT INTO subscription (billing_account_id, plan_code, status, provider) VALUES ($1, 'pro', 'active', 'manual')`, [account]);
+		expect((await owner.call('GET', `/projects/${projectId}/assistant`)).body.day).toBeNull();
 	});
 });
 

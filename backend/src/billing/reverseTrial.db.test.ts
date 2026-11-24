@@ -6,7 +6,7 @@
 //   - an unverified caller gets none (and a verified one does, the positive control);
 //   - the tick expires it to Free, nothing deleted;
 //   - the trial's assistant caps ($2 in all, $1 a SAST day) refuse only with billing enforced, and the Free pool
-//     counts the trial's spend;
+//     counts the trial's spend; the day meter (350) shows what's left of both;
 //   - the claim table is closed to water_app.
 // Runs under the workspace's skewed TZ (CLAUDE.md rule 7): the days are worked out by Postgres.
 import { LEGAL_VERSION } from '@water-management/engine/legal';
@@ -15,6 +15,7 @@ import { anon, app, asOwner, lastMailTo, tokenIn } from '../__tests__/helpers.js
 import { withUser } from '../db/tx.js';
 import { runTick } from '../jobs/runner.js';
 import { TRIAL_CAPS } from '../assistant/dollarCaps.js';
+import { dayMeter } from '../assistant/usage.js';
 import { reverseTrialHash } from './reverseTrial.js';
 
 const ORIGIN = 'http://localhost:7777';
@@ -242,6 +243,25 @@ describe('the trial’s assistant caps', () => {
 			[p.id]
 		);
 		expect(Math.abs(r.wait_seconds - Number(w!.s))).toBeLessThanOrEqual(2);
+	});
+
+	it('the day meter (350) shows the trial’s day and its whole allowance left, never Free’s; null with billing off', async () => {
+		const { p, projectId, account } = await trialist();
+		await backdate(p, 3);
+		await dayRow(p, account, await sastDay(-1), 900_000);
+		await dayRow(p, account, await sastDay(), 300_000);
+		const meter = () => withUser(p.id, (db) => dayMeter(db, projectId, { freeUsdMicrosPerDay: 300_000, freeMessagesPerDay: 20 }));
+		expect(await meter()).toMatchObject({
+			kind: 'trial',
+			usdMicrosPerDay: TRIAL_CAPS.dayUsdMicros,
+			usdMicrosLeft: TRIAL_CAPS.dayUsdMicros - 300_000,
+			messagesLeft: null,
+			trialUsdMicrosLeft: TRIAL_CAPS.totalUsdMicros - 1_200_000,
+			// These rows record no messages, so there is no question to take a median of.
+			medianTurnUsdMicros: null
+		});
+		vi.stubEnv('BILLING_ENFORCED', 'false');
+		expect(await meter()).toBeNull();
 	});
 
 	it('never refuses with billing enforcement off', async () => {
