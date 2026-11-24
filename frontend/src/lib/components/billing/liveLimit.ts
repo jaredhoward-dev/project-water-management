@@ -14,3 +14,16 @@ export const LIVE_LIMIT_TEXT =
 	'Free runs one catchment live: data feeds, automatic runs, alerts and farm views. Another of your catchments is live now. ' +
 	'Switch those off there to make this one live instead, or compare plans. Everything else here keeps working: runs, ' +
 	'calibration, scenarios and exports have no limit on Free.';
+
+/**
+ * A copy or an import of a catchment with automatic runs on, at Free's live
+ * limit, is made with them off and the API's 201 says so (`autoRunsOff:
+ * "live_catchments"`, docs/api.md § Projects): whether this answer did.
+ */
+export const startedAutoRunsOff = (answer: { autoRunsOff?: string | null } | null | undefined): boolean => answer?.autoRunsOff === 'live_catchments';
+
+/** The copy and import dialogs' done-state line for it (AutoRunsOffNotice). */
+export const AUTO_RUNS_OFF_TEXT =
+	'The new project starts with automatic runs off: Free runs one catchment live, and another catchment on this plan is live now. ' +
+	'Everything else in it works: runs, calibration, scenarios and exports. Switch automatic runs on in its settings once the other ' +
+	'one is off, or compare plans.';

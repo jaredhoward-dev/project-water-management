@@ -64,6 +64,7 @@ import type {
 	Ensemble,
 	ImportReport,
 	ImportResult,
+	CopyResult,
 	EnsembleDetail,
 	EnsembleStart,
 	FarmAccessPerson,
@@ -619,8 +620,12 @@ export function createApi(baseUrl: string, fetchFn: FetchFn = (...a) => fetch(..
 						throw e;
 					}
 				),
+			/** `autoRunsOff: "live_catchments"` when Free's live limit made the copy with automatic runs off (docs/api.md § Projects). */
 			copy: (id: string, name: string) =>
-				request<{ project: Project }>('POST', `${p(id)}/copy`, { name }).then((r) => r.project),
+				request<CopyResult>('POST', `${p(id)}/copy`, { name }).then((r) => ({
+					project: r.project,
+					...(r.autoRunsOff ? { autoRunsOff: r.autoRunsOff } : {})
+				})),
 			/**
 			 * Create a project from a project document (docs/api.md § Import a project
 			 * file): one transaction, so a failure creates nothing. `teamId` puts it in
@@ -637,6 +642,7 @@ export function createApi(baseUrl: string, fetchFn: FetchFn = (...a) => fetch(..
 				const body = opts.report ? { ...file, importReport: opts.report } : file;
 				return request<ImportResult>('POST', `/projects/import${q.size ? `?${q}` : ''}`, body).then((r) => ({
 					project: r.project,
+					...(r.autoRunsOff ? { autoRunsOff: r.autoRunsOff } : {}),
 					...(r.runId ? { runId: r.runId } : {}),
 					...(r.runError ? { runError: r.runError } : {})
 				}));

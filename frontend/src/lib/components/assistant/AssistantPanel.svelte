@@ -25,6 +25,7 @@
 	import Fold from '#lib/components/common/Fold.svelte';
 	import AnswerText from './AnswerText.svelte';
 	import EmailGateNotice from '#lib/components/billing/EmailGateNotice.svelte';
+	import { planHref, useBillingTeam } from '#lib/components/billing/planLink.js';
 	import { tick } from 'svelte';
 	import type { AssistantProposal } from '#lib/api/types.js';
 	import { fmtDay, fmtPct, fmtWhen } from '#lib/format/number.js';
@@ -32,7 +33,6 @@
 	import { focusAfterRemove } from '#lib/a11y/focusAfterRemove.js';
 	import { basePath } from '#lib/nav/base.js';
 	import { withSite } from '@water-management/engine';
-	import { resolve } from '$app/paths';
 	import { applicable, capOffersPlans, waitText, type AssistantChat, type AssistantTurn, type ProposalEntry } from './chat.svelte';
 
 	let {
@@ -53,6 +53,9 @@
 	} = $props();
 
 	/** This site's address, for the disclaimer's `{site}` (the Terms link), as liability/Disclaimer.svelte. */
+	/** Compare plans opens the plan that bills this catchment: its team's, else your own (planLink.ts). */
+	const billingTeam = useBillingTeam();
+
 	const site = typeof location === 'undefined' ? basePath() : `${location.origin}${basePath()}`;
 
 	const EXAMPLES = ['Why does the simulated flow at the outlet not respond to rainfall?', 'Which settings would you change to improve the fit at the outlet?'];
@@ -322,7 +325,7 @@
 					{chat.refusal.message}
 					Back {fmtWhen(chat.refusal.resetsAt)} your time.
 					{#if capOffersPlans(chat.refusal) && chat.refusal.code === 'assistant_monthly_cap'}Pro includes about 15 times as much.{/if}
-					{#if capOffersPlans(chat.refusal)}<a class="cap-plans" href={resolve('account/plan')} data-testid="assistant-compare-plans">Compare plans</a>{/if}
+					{#if capOffersPlans(chat.refusal)}<a class="cap-plans" href={planHref(billingTeam(), basePath())} data-testid="assistant-compare-plans">Compare plans</a>{/if}
 				</p>
 			{:else if chat.spent && st}
 				<p class="note warn" role="alert" data-testid="assistant-budget-spent">

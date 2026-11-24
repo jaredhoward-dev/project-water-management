@@ -15,6 +15,7 @@
 	import Dialog from '#lib/components/common/Dialog.svelte';
 	import LoadState from '#lib/components/common/LoadState.svelte';
 	import { loadOnce, peek, prefetch } from '#lib/components/common/lazy.js';
+	import CopyProjectDialog from '#lib/components/projects/CopyProjectDialog.svelte';
 	import GetStarted from '#lib/components/projects/GetStarted.svelte';
 	import { DEFAULT_START, newProjectPath, START_CHOICES, type StartHow } from '#lib/components/projects/newProject.js';
 	import NeedsAttention from '#lib/components/projects/NeedsAttention.svelte';
@@ -132,8 +133,6 @@
 
 	let copyOpen = $state(false);
 	let copySource = $state<ProjectSummary | null>(null);
-	let copyName = $state('');
-	let copying = $state(false);
 
 	// A delete the server refused because the project has nominated evidence (issue #43).
 	let keptOpen = $state(false);
@@ -322,26 +321,8 @@
 
 	function openCopy(p: ProjectSummary) {
 		copySource = p;
-		copyName = `${p.name} (copy)`;
 		actionError = null;
 		copyOpen = true;
-	}
-
-	async function copy(e: SubmitEvent) {
-		e.preventDefault();
-		if (!copySource) return;
-		actionError = workspaceNameProblem(copyName, 'project');
-		if (actionError) return;
-		copying = true;
-		try {
-			await api.projects.copy(copySource.id, cleanName(copyName));
-			copyOpen = false;
-			await load();
-		} catch (err) {
-			actionError = msg(err);
-		} finally {
-			copying = false;
-		}
 	}
 
 	async function remove(p: ProjectSummary) {
@@ -671,29 +652,7 @@
 	{/snippet}
 </Dialog>
 
-<Dialog bind:open={copyOpen} title="Copy project">
-	<form id="copy-form" onsubmit={copy}>
-		{#if actionError}<div class="alert alert-error" role="alert">{actionError}</div>{/if}
-		<p class="muted">
-			The model and time series are copied; model runs are not.
-			{#if copySource?.team?.name}
-				{canAddTo(copySource.team.id)
-					? `The copy stays in ${copySource.team.name}.`
-					: `You're a viewer in ${copySource.team.name}, so the copy is personal.`}
-			{/if}
-		</p>
-		<div class="field">
-			<span class="label"><label for="cp-name">Name of the copy</label> <HelpTip key="project-copy" label="About copying a project" /></span>
-			<input id="cp-name" required maxlength="200" bind:value={copyName} />
-		</div>
-	</form>
-	{#snippet actions()}
-		<button type="button" class="btn" onclick={() => (copyOpen = false)}>Cancel</button>
-		<button type="submit" form="copy-form" class="btn btn-primary" disabled={copying || !copyName.trim()}>
-			{copying ? 'Copying…' : 'Copy project'}
-		</button>
-	{/snippet}
-</Dialog>
+<CopyProjectDialog bind:open={copyOpen} source={copySource} {canAddTo} docopy={(id, name) => api.projects.copy(id, name)} oncopied={() => load()} />
 
 <style>
 	/* The New project dialog's two ways to start (WP-4.10): a radio each, its hint under its label. */

@@ -7,6 +7,7 @@
 // workspace is; a farmer page never shows it.
 import type { Project } from '#lib/api/types.js';
 import { fmtDate } from '#lib/format/number.js';
+import { planHref } from './planLink';
 
 export interface PausedNotice {
 	text: string;
@@ -15,17 +16,6 @@ export interface PausedNotice {
 	/** The link to the plan: planHref(teamId, base). */
 	href: string;
 	linkText: string;
-}
-
-/**
- * The plan a catchment is billed to: `<base>/teams/<encoded team id>/plan` for a
- * team catchment, else `<base>/account/plan`. The head is always a literal
- * app path and the id is encoded, so an id from the API can't leave the app's
- * origin (urlAttributes.security.test.ts calls it with hostile ids). `base` is
- * the app's base path (basePath(), '' at the site root).
- */
-export function planHref(teamId: string | null, base = ''): string {
-	return teamId ? `${base}/teams/${encodeURIComponent(teamId)}/plan` : `${base}/account/plan`;
 }
 
 /** The notice for a paused catchment, or null when it isn't paused (or an older API doesn't say). */
