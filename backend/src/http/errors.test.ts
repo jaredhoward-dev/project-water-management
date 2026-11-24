@@ -81,6 +81,16 @@ describe('handleError: the Team seat guard (334_team_seats)', () => {
 		expect(planLimitParams(seatError('not json'))).toEqual({});
 		expect(planLimitParams(seatError(undefined))).toEqual({});
 		expect(planLimitParams(seatError('{"limit": -1, "used": 2, "plan": "team"}'))).toEqual({ used: 2, plan: 'team' });
+		expect(planLimitParams(seatError('{"limit": 1, "used": 2, "plan": "free", "key": "seats; drop"}'))).toEqual({ limit: 1, used: 2, plan: 'free' });
+	});
+
+	it('words the live-catchment guard (338) by its key, with the key in params', async () => {
+		const res = await appThrowing(seatError('{"limit": 1, "used": 2, "plan": "free", "key": "live_catchments"}')).request('/');
+		expect(res.status).toBe(402);
+		const body = (await res.json()) as { code?: string; error: string };
+		expect(body).toMatchObject({ code: 'plan_limit', params: { limit: 1, used: 2, plan: 'free', key: 'live_catchments' } });
+		expect(body.error).toMatch(/one catchment live/);
+		expect(body.error).not.toMatch(/quota|402|editor seat/i);
 	});
 });
 

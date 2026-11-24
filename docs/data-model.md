@@ -3892,6 +3892,19 @@ never to a farmer, contributor or viewer.
     `seats_included`) and raises `23514` with constraint `plan_limit` when
     the seats in use pass them. No live subscription, or one on another
     plan: no cap. Owner-only functions; [billing.md § Team seats](./billing.md#team-seats).
+  - Live catchments (338): a project is live when it has an enabled
+    `data_feed` or `alert_rule`, `settings.autoRun.enabled` on, or any
+    `run_publication` (derived; no column). `app_project_live_except(project,
+    feed, rule, publication, skip_settings)`, `app_live_catchments_in_use(account)`
+    and `app_live_catchment_guard(project)`, owner-only; the AFTER triggers
+    `data_feed_live_guard`, `alert_rule_live_guard` (INSERT or `enabled` on),
+    `run_publication_live_guard` (INSERT) and `project_auto_run_live_guard`
+    (automatic runs off to on) call the guard only for a change that makes a
+    project live that wasn't, and only when `app.billing_enforced` is `on`:
+    under the account's billing advisory lock it reads the plan's
+    `live_catchments` (no live subscription = Free, 1) and raises `23514`
+    with constraint `plan_limit` (DETAIL key `live_catchments`) past it.
+    [billing.md § Live catchments (Free)](./billing.md#live-catchments-free).
   - `app_entitlements(project) → jsonb`: `{ plan, limits, features,
     status }` for an editor or owner; NULL for anyone else.
   - `app_usage_add(project, kind, qty = 1)`: adds to the project's

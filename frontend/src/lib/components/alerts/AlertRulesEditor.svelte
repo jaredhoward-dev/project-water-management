@@ -11,6 +11,8 @@
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { api, type AlertRule } from '#lib/api/index.js';
 	import AlertFeedbackSummary from './AlertFeedbackSummary.svelte';
+	import LiveLimitNotice from '#lib/components/billing/LiveLimitNotice.svelte';
+	import { isLiveLimit } from '#lib/components/billing/liveLimit.js';
 	import { feedRuleLabel, groupRules, ruleChanges, SERIES_STALE_NAME, seriesRuleLabel, KIND_NAME, THRESHOLD_INPUT, thresholdLabel, thresholdProblem, thresholdToInput } from './alerts';
 
 	let { projectId, onClose, onSaved }: { projectId: string; onClose: () => void; onSaved: () => void } = $props();
@@ -20,6 +22,8 @@
 	let error = $state<string | null>(null);
 	let saving = $state(false);
 	let saved = $state(false);
+	// Free's one live catchment (338): switching the first alert on in a second catchment.
+	let liveLimit = $state(false);
 
 	const toRows = (rules: AlertRule[]): Row[] => rules.map((r) => ({ ...r, input: thresholdToInput(r.kind, r.threshold) }));
 	const groups = $derived(rows ? groupRules(rows) : null);
@@ -41,12 +45,14 @@
 		saving = true;
 		saved = false;
 		error = null;
+		liveLimit = false;
 		try {
 			rows = toRows(await api.alerts.saveRules(projectId, ruleChanges(rows)));
 			saved = true;
 			onSaved();
 		} catch (err) {
-			error = err instanceof Error ? err.message : String(err);
+			if (isLiveLimit(err)) liveLimit = true;
+			else error = err instanceof Error ? err.message : String(err);
 		} finally {
 			saving = false;
 		}
@@ -84,6 +90,7 @@
 		alerts for their own hydrological unit and the restriction notices; each person chooses how often on their account page.
 	</p>
 	{#if error}<div class="alert alert-error" role="alert">{error}</div>{/if}
+	{#if liveLimit}<LiveLimitNotice />{/if}
 	{#if !groups}
 		{#if !error}<p class="muted" role="status">Loading…</p>{/if}
 	{:else}
