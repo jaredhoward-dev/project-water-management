@@ -653,10 +653,8 @@ const NO_WRITE = new Map<string, string>([
 	['POST /auth/login', 'the session is a signed cookie; a correct password leaves the lockout table as it was'],
 	['POST /auth/invite-info', 'reads what an invite is for, so the sign-up page can name it'],
 	['POST /auth/resend-confirmation', 'an address with no account (the sweep’s): the same 202, and nothing to mail'],
-	['POST /me/alerts/resume', 'the owner’s alert emails are not paused, so there is nothing to resume'],
-	// Issue #641 Phase 3: the portal answers a URL to the provider's page and writes nothing (its body is never read).
-	['POST /account/plan/portal', 'answers a URL to the billing portal (the mock’s page); nothing is written until the person acts there'],
-	['POST /teams/:id/plan/portal', 'the same for the team’s account, which its recipe made first']
+	['POST /me/alerts/resume', 'the owner’s alert emails are not paused, so there is nothing to resume']
+	// Not the billing portal (issue #641): it takes no fields, so it refuses the extras (400) and opens on the bare body.
 ]);
 
 /**

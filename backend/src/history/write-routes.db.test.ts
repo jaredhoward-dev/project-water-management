@@ -1334,7 +1334,17 @@ const OTHER_WRITE_ROUTES: OtherEntry[] = [
 	{ route: 'POST /auth/forgot-password', exempt: 'emails a reset link; changes no project and must not reveal whether the account exists' },
 	{ route: 'POST /auth/reset-password', exempt: 'sets a new password from a reset token; changes no project' },
 	{ route: 'POST /auth/invite-info', exempt: 'reads what an invite token is for, to show on the sign-up page; writes nothing' },
-	{ route: 'POST /auth/render-session', exempt: 'exchanges a one-use render token for the report renderer’s read-only session; changes no project' }
+	{ route: 'POST /auth/render-session', exempt: 'exchanges a one-use render token for the report renderer’s read-only session; changes no project' },
+	// Billing (issue #641, docs/billing.md): a billing account's plan, never a project's inputs, results or who reaches it.
+	// Plan state is written only by the webhook (and the staff grant), and kept on the account: billing_event (326) and
+	// billing_grant_log (330), not a project's history.
+	{ route: 'POST /account/plan/checkout', exempt: 'starts a checkout for the caller’s own billing account: a provider URL, at most the account’s customer reference stored (328); no project' },
+	{ route: 'POST /account/plan/portal', exempt: 'a link to the provider’s portal for the caller’s own billing account; writes nothing to the database or any project' },
+	{ route: `POST ${T}/plan/checkout`, exempt: 'starts a checkout for the team’s billing account (its admins only): a provider URL and at most its customer reference (328); no project changes' },
+	{ route: `POST ${T}/plan/portal`, exempt: 'a link to the provider’s portal for the team’s billing account (its admins only); writes nothing to the database or any project' },
+	{ route: 'POST /billing/webhook/:provider', exempt: 'the provider’s signed event, applied by app_billing_apply to an account’s subscription and recorded once on billing_event (326); no project' },
+	{ route: 'POST /billing/mock/checkout', exempt: 'dev-only mock payment page (404 unless BILLING_PROVIDER=mock): posts signed events to the webhook, which records them on billing_event' },
+	{ route: 'POST /billing/mock/portal', exempt: 'dev-only mock portal (404 unless BILLING_PROVIDER=mock): posts a signed cancel event to the webhook, which records it on billing_event' }
 ];
 
 const otherWriteRoutes = [
