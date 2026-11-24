@@ -143,6 +143,17 @@ describe('AssistantChat', () => {
 		expect(c.refusal).toEqual({ kind: 'error', message: 'Too many requests' });
 	});
 
+	it('Free’s verified-email gate (403 email_unverified or email_disposable) is its own refusal, and the box stays open', async () => {
+		for (const code of ['email_unverified', 'email_disposable'] as const) {
+			const c = chatWith(async () => Promise.reject(new ApiError(403, 'Verify your email', undefined, code)), STATUS);
+			await c.load();
+			expect(await c.ask('Q')).toBe(false);
+			expect(c.refusal).toEqual({ kind: 'email', code });
+			expect(c.capped).toBe(false);
+			expect(c.spent).toBe(false);
+		}
+	});
+
 	it('the month’s budget spent: refused before the stream (by code) or as the status says, and nothing is sent', async () => {
 		const send = vi.fn(async (_body: AssistantRequest, _signal: AbortSignal): Promise<ReadableStream<Uint8Array>> => Promise.reject(new ApiError(429, 'Budget spent', undefined, 'assistant_budget_spent')));
 		const c = chatWith(send);

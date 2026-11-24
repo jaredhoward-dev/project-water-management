@@ -65,6 +65,8 @@
 	import type { StationBody, StationField } from './stationApi';
 	import LiveLimitNotice from '#lib/components/billing/LiveLimitNotice.svelte';
 	import { isLiveLimit } from '#lib/components/billing/liveLimit.js';
+	import { emailGateCode, type EmailGateCode } from '#lib/components/billing/emailGate.js';
+	import EmailGateNotice from '#lib/components/billing/EmailGateNotice.svelte';
 
 	/** The weather station API form (issue #784): its own chunk, loaded only when that source is picked. */
 	const loadStationForm = () => import('./StationApiFeedForm.svelte');
@@ -84,6 +86,8 @@
 	let error = $state<string | null>(null);
 	// Free's one live catchment (338): a feed attached or switched on in a second catchment.
 	let liveLimit = $state(false);
+	// Free's verified-email gate (343): a feed attached or switched on by an unverified or temporary-mail address.
+	let emailGate = $state<EmailGateCode | null>(null);
 	let adding = $state(false);
 	let draft = $state<FeedDraft>(emptyDraft());
 	/**
@@ -348,6 +352,7 @@
 		busy = 'add';
 		formError = formField = message = error = null;
 		liveLimit = false;
+		emailGate = null;
 		// Confirming a takeover of a series of another CHIRPS version replaces it whole (issue #40c).
 		const replaceSeries = confirmed && !!asking?.clash;
 		if (!confirmed && data) {
@@ -388,6 +393,7 @@
 			// A station feed's refusal names its field (the server's 400 details): show it there, as the form's own checks do.
 			const p = draft.source === 'station_api' ? (stationForm?.serverProblem(err) ?? null) : null;
 			if (!p && isLiveLimit(err)) liveLimit = true;
+			else if (!p && emailGateCode(err)) emailGate = emailGateCode(err);
 			else {
 				formError = p?.error ?? errorText(err);
 				formField = p?.field ?? null;
@@ -523,6 +529,7 @@
 		busy = f.id;
 		message = error = announce = null;
 		liveLimit = false;
+		emailGate = null;
 		clearFinished();
 		let follow = false;
 		try {
@@ -548,6 +555,7 @@
 			}
 		} catch (e) {
 			if (isLiveLimit(e)) liveLimit = true;
+			else if (emailGateCode(e)) emailGate = emailGateCode(e);
 			else error = errorText(e);
 		}
 		// Also after a failure: it usually means the list is out of date (the
@@ -596,6 +604,7 @@
 		<div role="status" data-testid="feeds-status">{#if message}<p class="muted msg">{message}</p>{/if}{#if announce}<span class="visually-hidden">{announce}</span>{/if}</div>
 		{#if error}<div class="alert alert-error" role="alert">{error}</div>{/if}
 		{#if liveLimit}<LiveLimitNotice />{/if}
+		{#if emailGate}<EmailGateNotice code={emailGate} feature="feeds" />{/if}
 
 		{#if adding}
 			<!-- The add card, above the list (an add form above a long list, not under it), with its own action row. -->

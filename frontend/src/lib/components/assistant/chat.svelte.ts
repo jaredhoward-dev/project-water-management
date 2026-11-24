@@ -13,6 +13,7 @@
 // signed-in person and the project, and the panel's Past chats reopens one.
 // A reopened chat's recommended changes are read-only: ask again for a fresh
 // one. Storage that fails turns history off; the conversation carries on.
+import { emailGateCode, type EmailGateCode } from '#lib/components/billing/emailGate.js';
 import { ApiError } from '#lib/api/client.js';
 import type { AssistantBudgetScope, AssistantRequest, AssistantStatus, AssistantStreamEvent, ChatMessage, AssistantProposal } from '#lib/api/types.js';
 import { readEvents } from './stream';
@@ -71,6 +72,8 @@ export type Refusal =
 	/** A dollar cap (enforced billing only): the server's words say whose and when it's back; `resetsAt` (ISO) is when. */
 	/** `plan` is the refusing account's plan code (`params.plan`, sent on the day and the month), else null. */
 	| { kind: 'cap'; code: DollarCapCode; seconds: number; resetsAt: string; message: string; plan: string | null }
+	/** Free's verified-email gate (enforced billing only; billing/emailGate.ts): the panel words it, with Resend. */
+	| { kind: 'email'; code: EmailGateCode }
 	| { kind: 'error'; message: string };
 
 export interface AssistantDeps {
@@ -425,6 +428,8 @@ export class AssistantChat {
 				this.#liftAfter(seconds, 'rate');
 				return { kind: 'rate', seconds, message: e.message };
 			}
+			const gate = emailGateCode(e);
+			if (gate) return { kind: 'email', code: gate };
 			if (isDollarCap(e.code)) {
 				// When it's back: params.resetsAt, else params.seconds from now (the server sends both, and Retry-After).
 				const at = Date.parse(String(e.params.resetsAt ?? ''));
