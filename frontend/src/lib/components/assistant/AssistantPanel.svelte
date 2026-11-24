@@ -73,7 +73,7 @@
 	const SPENT_WHOSE = { project: 'This project’s', user: 'Your', total: 'This server’s' } as const;
 	const left = $derived(st ? chat.tokensLeft! / Math.max(1, st.budget.tokensPerMonth) : null);
 	const limited = $derived(chat.refusal?.kind === 'rate');
-	const blocked = $derived(chat.spent || limited);
+	const blocked = $derived(chat.spent || limited || chat.capped);
 	const lastTurn = $derived(chat.turns.at(-1));
 	/** What the screen reader hears once a turn ends (the streaming text itself isn't read out word by word). */
 	const announce = $derived.by(() => {
@@ -312,6 +312,12 @@
 			{#if chat.refusal?.kind === 'rate' && st}
 				<p class="note warn" role="alert" data-testid="assistant-rate-limited">
 					You have reached the assistant’s limit of {st.rate.messagesPerHour} messages an hour. Try again in about {waitText(chat.refusal.seconds)}.
+				</p>
+			{:else if chat.refusal?.kind === 'cap'}
+				<!-- A dollar cap (billing enforced): the server's words, then when it's back in the viewer's time; no upgrade prompt (the Free pool's must never have one). -->
+				<p class="note warn" role="alert" data-testid="assistant-cap" data-code={chat.refusal.code}>
+					{chat.refusal.message}
+					Back {fmtWhen(chat.refusal.resetsAt)} your time.
 				</p>
 			{:else if chat.spent && st}
 				<p class="note warn" role="alert" data-testid="assistant-budget-spent">

@@ -1,11 +1,11 @@
 // The assistant's conversation (issue #610): a turn streams text, tool lines
 // and proposals; the conversation sent leaves out unanswered questions; a
-// refusal before the stream (the hourly limit, the budget) puts the question
+// refusal before the stream (the hourly limit, the budget, a dollar cap) puts the question
 // back; Stop keeps what came. Runs with the client runtime (a .svelte.test.ts).
 import { describe, expect, it, vi } from 'vitest';
 import { ApiError } from '#lib/api/client.js';
 import type { AssistantProposal, AssistantRequest, AssistantStatus, AssistantStreamEvent } from '#lib/api/types.js';
-import { AssistantChat, MAX_SENT_MESSAGES, applicable, capMessages, waitText, type AssistantTurn } from './chat.svelte';
+import { AssistantChat, DOLLAR_CAP_CODES, MAX_SENT_MESSAGES, applicable, capMessages, waitText, type AssistantTurn, type Refusal } from './chat.svelte';
 import { ChatHistory, type ChatRecord, type HistoryBackend } from './history';
 
 const STATUS: AssistantStatus = {
@@ -180,6 +180,86 @@ describe('AssistantChat', () => {
 		const used = chatWith(vi.fn(), { ...STATUS, budget: { ...STATUS.budget, tokensUsed: 1000, scope: 'user' } } as AssistantStatus);
 		await used.load();
 		expect(used.spentScope).toBe('user');
+	});
+
+	describe('the dollar caps (billing enforced): refused before the stream, the server’s words kept, lifted once back', () => {
+		const resetsIn = (s: number) => new Date(Date.now() + s * 1000).toISOString();
+		for (const code of DOLLAR_CAP_CODES) {
+			it(code, async () => {
+				const timers: { fn: () => void; ms: number }[] = [];
+				const resetsAt = resetsIn(3600);
+				const send = vi.fn(async (): Promise<ReadableStream<Uint8Array>> =>
+					Promise.reject(new ApiError(429, `Words for ${code}`, undefined, code, { seconds: 3600, resetsAt }))
+				);
+				const c = chatWith(send, STATUS, (fn, ms) => timers.push({ fn, ms }));
+				await c.load();
+				expect(await c.ask('Q')).toBe(false);
+				expect(c.turns).toEqual([]);
+				expect(c.refusal).toEqual({ kind: 'cap', code, seconds: expect.any(Number), resetsAt, message: `Words for ${code}` });
+				expect(c.capped).toBe(true);
+				// Not the token budget's refusal: no budget scope is named.
+				expect(c.spentScope).toBeNull();
+				// Nothing more goes while it holds.
+				expect(await c.ask('Again')).toBe(false);
+				expect(send).toHaveBeenCalledTimes(1);
+				expect(timers).toHaveLength(1);
+				expect(Math.abs(timers[0]!.ms - 3_600_000)).toBeLessThan(5_000);
+				timers[0]!.fn();
+				expect(c.refusal).toBeNull();
+				expect(c.capped).toBe(false);
+			});
+		}
+
+		it('takes params.seconds when resetsAt is missing or unreadable', async () => {
+			const timers: { fn: () => void; ms: number }[] = [];
+			const c = chatWith(async () => Promise.reject(new ApiError(429, 'Day', undefined, 'assistant_daily_cap', { seconds: 120, resetsAt: 'soon' })), STATUS, (fn, ms) => timers.push({ fn, ms }));
+			await c.load();
+			const before = Date.now();
+			await c.ask('Q');
+			expect(c.refusal).toMatchObject({ kind: 'cap', seconds: 120 });
+			const at = Date.parse((c.refusal as Extract<Refusal, { kind: 'cap' }>).resetsAt);
+			expect(at - before).toBeGreaterThanOrEqual(119_000);
+			expect(at - before).toBeLessThan(125_000);
+			expect(timers.map((t) => t.ms)).toEqual([120_000]);
+		});
+
+		it('a wait past setTimeout’s longest (a month’s cap early in the month) holds without a timer that would fire at once', async () => {
+			const timers: { fn: () => void; ms: number }[] = [];
+			const resetsAt = resetsIn(28 * 86_400);
+			const c = chatWith(
+				async () => Promise.reject(new ApiError(429, 'Month', undefined, 'assistant_monthly_cap', { seconds: 28 * 86_400, resetsAt })),
+				STATUS,
+				(fn, ms) => timers.push({ fn, ms })
+			);
+			await c.load();
+			await c.ask('Q');
+			expect(c.refusal).toMatchObject({ kind: 'cap', code: 'assistant_monthly_cap', resetsAt });
+			expect(timers).toEqual([]);
+			expect(c.capped).toBe(true);
+		});
+
+		it('a newer refusal’s timer isn’t cleared by an older one', async () => {
+			const timers: { fn: () => void; ms: number }[] = [];
+			let n = 0;
+			const c = chatWith(
+				async () =>
+					Promise.reject(
+						n++ === 0
+							? new ApiError(429, 'Too many', undefined, 'assistant_rate_limited', { seconds: 60 })
+							: new ApiError(429, 'Pool', undefined, 'assistant_free_pool_spent', { seconds: 600, resetsAt: resetsIn(600) })
+					),
+				STATUS,
+				(fn, ms) => timers.push({ fn, ms })
+			);
+			await c.load();
+			await c.ask('Q');
+			await c.ask('Q');
+			expect(c.refusal).toMatchObject({ kind: 'cap', code: 'assistant_free_pool_spent' });
+			timers[0]!.fn();
+			expect(c.refusal).toMatchObject({ kind: 'cap' });
+			timers[1]!.fn();
+			expect(c.refusal).toBeNull();
+		});
 	});
 
 	it('Stop aborts the fetch and keeps what had come', async () => {

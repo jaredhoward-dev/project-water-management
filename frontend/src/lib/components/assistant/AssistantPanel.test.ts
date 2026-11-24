@@ -2,11 +2,12 @@
 // server renderer from a conversation in each state: the disclaimer and the
 // budget left; tool lines and the streamed text; a proposal's title, changes and
 // reasons, with Apply only for an editor; the hourly limit's wait; the month's
-// budget spent; Stop while a turn streams. The streaming itself is
+// budget spent; a dollar cap's words and when it's back; Stop while a turn streams. The streaming itself is
 // chat.svelte.test.ts's; the panel in the browser is e2e/tests/assistant.spec.ts's.
 import { render } from 'svelte/server';
 import { describe, expect, it, vi } from 'vitest';
 import type { AssistantProposal, AssistantStatus } from '#lib/api/types.js';
+import { fmtWhen } from '#lib/format/number.js';
 import AssistantPanel from './AssistantPanel.svelte';
 import { AssistantChat, type AssistantTurn } from './chat.svelte';
 
@@ -221,6 +222,19 @@ describe('AssistantPanel', () => {
 	it('says whose month is spent when it is the person’s or the server’s', () => {
 		expect(html(chat({ status: { ...STATUS, budget: { ...STATUS.budget, tokensUsed: 1000, scope: 'user' } } }))).toContain('Your assistant budget for the month is used up.');
 		expect(html(chat({ refusal: { kind: 'budget', scope: 'total', message: 'Spent' } }))).toContain('This server’s assistant budget for the month is used up.');
+	});
+
+	it('a dollar cap: the server’s words, when it’s back in the viewer’s time, and the box takes nothing', () => {
+		const words = 'The free assistant has reached its shared limit for today. It’s back tomorrow. This isn’t something you did, and your work isn’t affected.';
+		const out = html(chat({ refusal: { kind: 'cap', code: 'assistant_free_pool_spent', seconds: 3600, resetsAt: '2026-11-25T00:00:00.000Z', message: words } }));
+		expect(out).toContain('data-testid="assistant-cap"');
+		expect(out).toContain('data-code="assistant_free_pool_spent"');
+		expect(out).toContain(words);
+		expect(out).toContain(`Back ${fmtWhen('2026-11-25T00:00:00.000Z')} your time.`);
+		expect(out).toMatch(/<textarea[^>]*disabled/);
+		// Not the token budget's note, and the pool's refusal never prompts an upgrade.
+		expect(out).not.toContain('data-testid="assistant-budget-spent"');
+		expect(out).not.toMatch(/upgrade|Pro plan|pricing/i);
 	});
 
 	it('says chats are kept only in this browser, and offers Past chats with their count once read', () => {
