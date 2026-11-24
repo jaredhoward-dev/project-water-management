@@ -18,6 +18,7 @@ import type { AuthEnv } from '../auth/middleware.js';
 import { withUser, type Db } from '../db/tx.js';
 import { readJson } from '../http/body.js';
 import { ApiError } from '../http/errors.js';
+import { requireFreeVerifiedEmail } from '../billing/emailGate.js';
 import { logEvent } from '../logging/logEvent.js';
 import { rank, requireRole, UUID } from '../projects/access.js';
 import { assistantConfig, weightedTokens, type AssistantConfig } from './config.js';
@@ -154,6 +155,8 @@ export const assistantRoutes = new Hono<AuthEnv>()
 			await requireRole(db, id, 'viewer');
 			const provider = cfg.provider === 'off' ? null : providerFor(cfg);
 			if (!provider) throw off();
+			// Free's verified-email gate (BILLING_ENFORCED only; billing/emailGate.ts): refused before anything is counted.
+			await requireFreeVerifiedEmail(db, id, 'assistant');
 			// The turn's first call needs this much at most (input estimate + a whole call's output): a conversation
 			// it doesn't fit in one turn's budget is refused before anything is counted.
 			const floor = conversation ? turnFloor(cfg, system, turnTools, conversation) : Infinity;

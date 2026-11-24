@@ -188,6 +188,13 @@ export const ERROR_CODES = [
  *     account that never checked out), billing_grant_seats (409, POST
  *     /teams/:id/plan/seats on a staff grant, whose seats change by a new
  *     grant; Phase 5).
+ *   email_unverified, email_disposable (403): Free's verified-email gate
+ *     (billing/emailGate.ts, 343_free_email_gate; only with BILLING_ENFORCED
+ *     on): the caller, on a project whose account is on Free, hasn't verified
+ *     their email, or it is on a disposable domain (auth/disposable.ts). Sent
+ *     by POST …/assistant/messages and by a feed save that switches a feed on
+ *     (POST …/feeds, PATCH …/feeds/:feedId). The workspace's assistant and
+ *     feeds panels word them, with a Resend for the first.
  */
 export const MACHINE_ERROR_CODES = [
 	'render_token_refused',
@@ -220,7 +227,9 @@ export const MACHINE_ERROR_CODES = [
 	'billing_unavailable',
 	'billing_provider_error',
 	'billing_no_customer',
-	'billing_grant_seats'
+	'billing_grant_seats',
+	'email_unverified',
+	'email_disposable'
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number] | (typeof MACHINE_ERROR_CODES)[number];
 
