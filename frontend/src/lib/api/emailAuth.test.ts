@@ -31,6 +31,36 @@ describe('emailAuthApi', () => {
 		expect(call(f, 2)).toEqual({ url: 'http://x/auth/resend-verification', method: 'POST', body: undefined });
 	});
 
+	it('changeEmail posts the new address with the current password and returns where the link went (347)', async () => {
+		const f = mockFetch(202, { sent: true, email: 'new@b.c' });
+		expect(await emailAuthApi(createApi('http://x', f)).changeEmail('new@b.c', 'current pw')).toEqual({ sent: true, email: 'new@b.c' });
+		expect(call(f)).toEqual({ url: 'http://x/auth/change-email', method: 'POST', body: { newEmail: 'new@b.c', currentPassword: 'current pw' } });
+		// A refusal keeps its stable code for the account page (email_change_same, a wrong password, the limits).
+		const err = await emailAuthApi(createApi('', mockFetch(400, { error: 'that is already your email address', code: 'email_change_same' })))
+			.changeEmail('a@b.c', 'pw')
+			.catch((e) => e);
+		expect(err).toBeInstanceOf(ApiError);
+		expect(err.status).toBe(400);
+		expect(err.code).toBe('email_change_same');
+	});
+
+	it('confirmEmailChange posts the link’s token and returns the new address; a used or bad link is ApiError 400', async () => {
+		const f = mockFetch(200, { changed: true, email: 'new@b.c' });
+		expect(await emailAuthApi(createApi('http://x', f)).confirmEmailChange(TOKEN)).toEqual({ changed: true, email: 'new@b.c' });
+		expect(call(f)).toEqual({ url: 'http://x/auth/confirm-email-change', method: 'POST', body: { token: TOKEN } });
+		const err = await emailAuthApi(createApi('', mockFetch(400, { error: 'this link is invalid or has expired', code: 'link_invalid' })))
+			.confirmEmailChange(TOKEN)
+			.catch((e) => e);
+		expect(err).toBeInstanceOf(ApiError);
+		expect(err.status).toBe(400);
+		expect(err.code).toBe('link_invalid');
+		const taken = await emailAuthApi(createApi('', mockFetch(409, { error: 'an account with that email address already exists', code: 'email_change_taken' })))
+			.confirmEmailChange(TOKEN)
+			.catch((e) => e);
+		expect(taken.status).toBe(409);
+		expect(taken.code).toBe('email_change_taken');
+	});
+
 	it('resetPassword resolves on 204 and surfaces an invalid link as ApiError 400', async () => {
 		await expect(emailAuthApi(createApi('', mockFetch(204))).resetPassword(TOKEN, 'longenough')).resolves.toBeUndefined();
 		const err = await emailAuthApi(createApi('', mockFetch(400, { error: 'this link is invalid or has expired' })))
