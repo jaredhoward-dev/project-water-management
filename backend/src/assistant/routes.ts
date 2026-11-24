@@ -26,7 +26,7 @@ import { capConversation, runTurn, turnFloor, type TurnOutcome } from './orchest
 import { systemPrompt } from './prompt.js';
 import { ANTHROPIC_DEFAULT_MODEL } from './providers/anthropic.js';
 import { createProvider } from './providers/index.js';
-import { turnCostUsdMicros } from './pricing.js';
+import { turnCostUsdMicros, usdMicrosPerWeightedToken } from './pricing.js';
 import { sseBody } from './sse.js';
 import { ASSISTANT_TOOLS } from './tools/index.js';
 import type { AssistantProvider, AssistantStatus, AssistantTool, ChatMessage } from './types.js';
@@ -166,7 +166,7 @@ export const assistantRoutes = new Hono<AuthEnv>()
 			}
 			// Before the stream: the message counted and the turn's budget reserved, or a 429 (nothing counted).
 			// Last in the transaction, so nothing after it can roll the reservation back without the turn.
-			return { provider, begun: await beginTurn(c, db, id, cfg, floor) };
+			return { provider, begun: await beginTurn(c, db, id, cfg, floor, usdMicrosPerWeightedToken(provider.name, turnModel(cfg))) };
 		});
 		const usedBefore = begun.used;
 

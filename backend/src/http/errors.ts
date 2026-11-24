@@ -169,7 +169,13 @@ export const ERROR_CODES = [
  *     assistant_budget_spent (429 + Retry-After, the project's tokens this
  *     month), assistant_user_budget_spent (the person's this month, across
  *     projects) and assistant_total_budget_spent (the deployment's this
- *     month; each params.seconds and params.scope), assistant_input_too_large
+ *     month; each params.seconds and params.scope); with BILLING_ENFORCED
+ *     on, the dollar caps (336_assistant_dollar_caps, assistant/dollarCaps.ts;
+ *     429 + Retry-After, params.seconds and params.resetsAt):
+ *     assistant_daily_cap (a Free person's UTC day), assistant_monthly_cap
+ *     (the account's month), assistant_member_cap (a Team member's share of
+ *     it) and assistant_free_pool_spent (the shared Free pool);
+ *     assistant_input_too_large
  *     (413, the newest message alone passes ASSISTANT_MAX_INPUT_CHARS). As a
  *     stream's `error` event (assistant/orchestrator.ts TURN_ERRORS):
  *     assistant_hop_limit, assistant_output_limit, assistant_turn_limit,
@@ -201,6 +207,10 @@ export const MACHINE_ERROR_CODES = [
 	'assistant_budget_spent',
 	'assistant_user_budget_spent',
 	'assistant_total_budget_spent',
+	'assistant_daily_cap',
+	'assistant_monthly_cap',
+	'assistant_member_cap',
+	'assistant_free_pool_spent',
 	'assistant_input_too_large',
 	'assistant_hop_limit',
 	'assistant_output_limit',
