@@ -1,16 +1,35 @@
 // The dollar caps' sums (336_assistant_dollar_caps; docs/billing.md § Assistant dollar caps).
 import { describe, expect, it } from 'vitest';
 import { assistantConfig } from './config.js';
-import { dayResetsAt, daysLeftInMonth, DOLLAR_REFUSAL, poolAlarmShare, poolDayAllowance } from './dollarCaps.js';
+import { dayResetsAt, daysLeftInMonth, DOLLAR_REFUSAL, poolAlarmShare, poolDayAllowance, sastDay } from './dollarCaps.js';
 import { usdMicrosPerWeightedToken } from './pricing.js';
 
 const POOL = 30_000_000; // $30
 
 describe('the paced Free pool', () => {
-	it('counts the days left in the UTC month, the day included', () => {
+	it('counts the SAST days left in the UTC month, the day included', () => {
 		expect(daysLeftInMonth(new Date('2026-11-01T00:00:00Z'))).toBe(30);
-		expect(daysLeftInMonth(new Date('2026-11-30T23:59:59Z'))).toBe(1);
+		expect(daysLeftInMonth(new Date('2026-11-30T21:59:59Z'))).toBe(1);
 		expect(daysLeftInMonth(new Date('2028-02-01T12:00:00Z'))).toBe(29); // a leap February
+		// 22:00 UTC on the 29th is the 30th in South Africa: one day left, not two.
+		expect(daysLeftInMonth(new Date('2026-11-29T21:59:59Z'))).toBe(2);
+		expect(daysLeftInMonth(new Date('2026-11-29T22:00:00Z'))).toBe(1);
+		// From 22:00 UTC on the month's last day the SAST day is the next month's first, while the UTC month isn't over: 1.
+		expect(daysLeftInMonth(new Date('2026-11-30T22:00:00Z'))).toBe(1);
+		expect(daysLeftInMonth(new Date('2026-11-30T23:59:59Z'))).toBe(1);
+		expect(daysLeftInMonth(new Date('2026-12-31T23:00:00Z'))).toBe(1); // the year's end
+		expect(daysLeftInMonth(new Date('2027-01-01T00:00:00Z'))).toBe(31);
+	});
+
+	it('keys the day on SAST: it turns over at 22:00 UTC', () => {
+		expect(sastDay(new Date('2026-11-10T21:59:59.999Z')).toISOString()).toBe('2026-11-10T00:00:00.000Z');
+		expect(sastDay(new Date('2026-11-10T22:00:00.000Z')).toISOString()).toBe('2026-11-11T00:00:00.000Z');
+		expect(sastDay(new Date('2026-12-31T22:30:00Z')).toISOString()).toBe('2027-01-01T00:00:00.000Z');
+		// The next 00:00 SAST, as an instant.
+		expect(dayResetsAt(new Date('2026-11-10T21:59:59Z'))).toBe('2026-11-10T22:00:00.000Z');
+		expect(dayResetsAt(new Date('2026-11-10T22:00:00Z'))).toBe('2026-11-11T22:00:00.000Z');
+		expect(dayResetsAt(new Date('2026-11-10T00:00:00Z'))).toBe('2026-11-10T22:00:00.000Z');
+		expect(dayResetsAt(new Date('2026-11-30T23:00:00Z'))).toBe('2026-12-01T22:00:00.000Z');
 	});
 
 	it('gives a day twice its even share of what was left at its start', () => {
@@ -19,6 +38,8 @@ describe('the paced Free pool', () => {
 		// $27 spent before day 21 of 30: $3 ÷ 10 × 2 = $0.60.
 		expect(poolDayAllowance(POOL, 27_000_000, new Date('2026-11-21T08:00:00Z'))).toBe(600_000);
 		// The last day may spend everything left, twice over (the month's cap still binds in SQL).
+		expect(poolDayAllowance(POOL, 29_000_000, new Date('2026-11-30T12:00:00Z'))).toBe(2_000_000);
+		// The month's last 2 hours (already 1 December in South Africa) are paced as one last day.
 		expect(poolDayAllowance(POOL, 29_000_000, new Date('2026-11-30T23:00:00Z'))).toBe(2_000_000);
 	});
 
@@ -32,11 +53,14 @@ describe('the paced Free pool', () => {
 		expect(poolDayAllowance(1_000_000, 0, new Date('2026-11-28T00:00:00Z'))).toBe(666_666);
 	});
 
-	it('turns over at UTC midnight and on the first of the month', () => {
-		// 23:59 UTC on 31 October is still October's last day: one day left.
+	it('turns the day over at 00:00 SAST and the month on the UTC first', () => {
+		// 21:59 UTC on 30 October is the 30th in South Africa: two days left. At 22:00 it is the 31st: one.
+		expect(poolDayAllowance(POOL, 0, new Date('2026-10-30T21:59:59Z'))).toBe(30_000_000);
+		expect(poolDayAllowance(POOL, 0, new Date('2026-10-30T22:00:00Z'))).toBe(60_000_000);
 		expect(poolDayAllowance(POOL, 0, new Date('2026-10-31T23:59:59Z'))).toBe(60_000_000);
+		// 00:00 UTC on 1 November: November's pool, day 1 of 30.
 		expect(poolDayAllowance(POOL, 0, new Date('2026-11-01T00:00:00Z'))).toBe(2_000_000);
-		expect(dayResetsAt(new Date('2026-10-31T23:59:59Z'))).toBe('2026-11-01T00:00:00.000Z');
+		expect(dayResetsAt(new Date('2026-10-31T21:59:59Z'))).toBe('2026-10-31T22:00:00.000Z');
 	});
 
 	it('names the alarm threshold the month has passed', () => {

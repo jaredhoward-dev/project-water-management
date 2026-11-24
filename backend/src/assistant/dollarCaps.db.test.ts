@@ -1,5 +1,5 @@
 // The assistant's dollar caps and the paced Free pool, reserved before the turn
-// (336_assistant_dollar_caps, issue #641; docs/billing.md § Assistant dollar caps):
+// (336_assistant_dollar_caps, 337_assistant_sast_day, issue #641; docs/billing.md § Assistant dollar caps):
 //   - off (BILLING_ENFORCED unset, the default) nothing new refuses and the budget is 264's, though the dollars are
 //     reserved and the day counted (shadow mode);
 //   - on, each cap refuses past its limit (a Free person's day in dollars or messages, the account's month, a Team
@@ -10,12 +10,13 @@
 //   - through the route, each refusal is 429 with its code, the issue's words, Retry-After, params.seconds and
 //     params.resetsAt (Retry-After from now); a pool account's turn logs `assistant_free_pool` at 50% and 80% of the
 //     pool's month, and not below.
-// The workspace runs under a skewed TZ (CLAUDE.md rule 7); every boundary here is UTC, so the days and months are
-// worked out by Postgres, and a row of yesterday or last month is shown not to count.
+// The workspace runs under a skewed TZ (CLAUDE.md rule 7); the Free day is the SAST day (00:00 SAST, 22:00 UTC) and
+// every month is UTC, so the days and months are worked out by Postgres, and a row of yesterday or last month is
+// shown not to count.
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { app, asOwner, signUp } from '../__tests__/helpers.js';
 import { withUser } from '../db/tx.js';
-import { DOLLAR_REFUSAL, poolDayAllowance, type DollarOutcome } from './dollarCaps.js';
+import { dayResetsAt, DOLLAR_REFUSAL, poolDayAllowance, type DollarOutcome } from './dollarCaps.js';
 
 type User = Awaited<ReturnType<typeof signUp>>;
 let owner: User;
@@ -53,7 +54,8 @@ function begin(u: User, pid: string, opts: { pool?: number | null; price?: numbe
 		return rows[0] as Begun;
 	});
 }
-const utcDay = async (offset = 0) => (await asOwner(`SELECT ((now() AT TIME ZONE 'UTC')::date + $1::int)::text AS d`, [offset]))[0]!.d as string;
+/** The SAST day the Free day is keyed on (337), `offset` days from today's. */
+const sastDay = async (offset = 0) => (await asOwner(`SELECT ((now() AT TIME ZONE 'Africa/Johannesburg')::date + $1::int)::text AS d`, [offset]))[0]!.d as string;
 const utcMonth = async () => (await asOwner(`SELECT date_trunc('month', now() AT TIME ZONE 'UTC')::date::text AS m`))[0]!.m as string;
 /** Record `usd` of spend this month on a project by a person, as a charge would. */
 const spend = async (u: User, pid: string, usd: number, month?: string) =>
@@ -71,7 +73,7 @@ const dayRow = async (u: User, acct: string, day: string, messages: number, usd 
 /** The pool's spend this month and today (every Free account in the test database, other files' too). */
 const poolSpent = async () => {
 	const r = (
-		await asOwner(`SELECT pool_month::float8 AS m, pool_today::float8 AS t FROM assistant_dollars_spent($1::date, $2::date, NULL, NULL)`, [await utcMonth(), await utcDay()])
+		await asOwner(`SELECT pool_month::float8 AS m, pool_today::float8 AS t FROM assistant_dollars_spent($1::date, $2::date, NULL, NULL)`, [await utcMonth(), await sastDay()])
 	)[0]!;
 	return { month: Number(r.m), today: Number(r.t) };
 };
@@ -108,13 +110,13 @@ const enforce = () => vi.stubEnv('BILLING_ENFORCED', 'true');
 describe('off (the default): exactly 264, dollars only recorded', () => {
 	it('never refuses a spent Free month, day or pool, and keeps the token budget', async () => {
 		await spend(owner, projectId, 5_000_000);
-		await dayRow(owner, account, await utcDay(), DAY_MSGS, DAY_USD);
+		await dayRow(owner, account, await sastDay(), DAY_MSGS, DAY_USD);
 		const r = await begin(owner, projectId, { pool: 1 });
 		expect(r.outcome).toBe('ok');
 		expect(r.budget).toBe(MAX);
 		// Shadow mode: the reservation's dollars and the day's message are recorded.
 		expect(r.reserved_usd_micros).toBe(MAX * PRICE);
-		const [d] = await asOwner('SELECT messages FROM assistant_day_usage WHERE billing_account_id = $1 AND user_id = $2 AND day = $3', [account, owner.id, await utcDay()]);
+		const [d] = await asOwner('SELECT messages FROM assistant_day_usage WHERE billing_account_id = $1 AND user_id = $2 AND day = $3', [account, owner.id, await sastDay()]);
 		expect(d!.messages).toBe(DAY_MSGS + 1);
 	});
 
@@ -135,17 +137,20 @@ describe('on: each cap refuses past its limit', () => {
 		expect(r.reserved_usd_micros).toBe(DAY_USD);
 	});
 
-	it('the Free day, in dollars and in messages, until UTC midnight; yesterday doesn’t count', async () => {
+	it('the Free day, in dollars and in messages, until 00:00 SAST; yesterday doesn’t count', async () => {
 		enforce();
-		await dayRow(owner, account, await utcDay(-1), DAY_MSGS, DAY_USD);
+		await dayRow(owner, account, await sastDay(-1), DAY_MSGS, DAY_USD);
 		expect((await begin(owner, projectId)).outcome).toBe('ok');
 		await clear();
 		enforce();
-		await dayRow(owner, account, await utcDay(), DAY_MSGS, 0);
+		await dayRow(owner, account, await sastDay(), DAY_MSGS, 0);
 		const byMessages = await begin(owner, projectId);
 		expect(byMessages.outcome).toBe('day');
 		expect(byMessages.wait_seconds).toBeLessThanOrEqual(86_400);
-		await dayRow(owner, account, await utcDay(), 0, DAY_USD - 2_000);
+		// The wait ends at the next 00:00 SAST, 22:00 UTC.
+		expect(Math.abs(Date.now() + byMessages.wait_seconds * 1000 - Date.parse(dayResetsAt()))).toBeLessThan(60_000);
+		expect(new Date(Date.now() + byMessages.wait_seconds * 1000 + 30_000).getUTCHours()).toBe(22);
+		await dayRow(owner, account, await sastDay(), 0, DAY_USD - 2_000);
 		expect((await begin(owner, projectId)).outcome).toBe('day');
 		// Another person's Free day is their own.
 		expect((await begin(other, otherProject)).outcome).toBe('ok');
@@ -166,7 +171,7 @@ describe('on: each cap refuses past its limit', () => {
 	it('Pro: $15 a month, no Free day', async () => {
 		enforce();
 		await asOwner(`INSERT INTO subscription (billing_account_id, plan_code, status, provider) VALUES ($1, 'pro', 'active', 'manual')`, [account]);
-		await dayRow(owner, account, await utcDay(), DAY_MSGS + 5, 5_000_000);
+		await dayRow(owner, account, await sastDay(), DAY_MSGS + 5, 5_000_000);
 		// The day row's dollars are in the month too only through assistant_usage: $5 here.
 		await spend(owner, projectId, 5_000_000);
 		const ok = await begin(owner, projectId);
@@ -204,7 +209,7 @@ describe('on: each cap refuses past its limit', () => {
 		enforce();
 		// $1 of today's pool spend on another Free account (its own month and day are far from full: the pool binds).
 		await spend(other, otherProject, 200_000);
-		await dayRow(other, otherAccount, await utcDay(), 1, 200_000);
+		await dayRow(other, otherAccount, await sastDay(), 1, 200_000);
 		const base = await poolSpent();
 		const daysLeft = Number((await asOwner(`SELECT ((date_trunc('month', now() AT TIME ZONE 'UTC') + interval '1 month')::date - (now() AT TIME ZONE 'UTC')::date) AS n`))[0]!.n);
 		const before = base.month - base.today;
@@ -221,7 +226,7 @@ describe('on: each cap refuses past its limit', () => {
 		enforce();
 		const r = await begin(owner, projectId, { price: null });
 		expect(r).toMatchObject({ outcome: 'ok', budget: MAX, reserved_usd_micros: null });
-		await dayRow(owner, account, await utcDay(), 1, DAY_USD);
+		await dayRow(owner, account, await sastDay(), 1, DAY_USD);
 		expect((await begin(owner, projectId, { price: null })).outcome).toBe('day');
 	});
 });
@@ -241,7 +246,7 @@ describe('reservations and charges', () => {
 		enforce();
 		const r = await begin(owner, projectId);
 		await withUser(owner.id, (db) => db.query('SELECT * FROM app_assistant_charge($1, $2, 1000, 100, 0, 0, 4000)', [projectId, r.reservation_id]));
-		const [d] = await asOwner('SELECT cost_usd_micros::int AS c FROM assistant_day_usage WHERE billing_account_id = $1 AND user_id = $2 AND day = $3', [account, owner.id, await utcDay()]);
+		const [d] = await asOwner('SELECT cost_usd_micros::int AS c FROM assistant_day_usage WHERE billing_account_id = $1 AND user_id = $2 AND day = $3', [account, owner.id, await sastDay()]);
 		expect(d!.c).toBe(4_000);
 		const next = await begin(owner, projectId);
 		expect(next.budget).toBe(Math.floor((DAY_USD - 4_000) / PRICE));
@@ -253,39 +258,64 @@ describe('reservations and charges', () => {
 		await begin(owner, projectId);
 		const [u] = await asOwner('SELECT cost_usd_micros::float8 AS c, unpriced_turns AS n FROM assistant_usage WHERE project_id = $1 AND user_id = $2', [projectId, owner.id]);
 		expect(u).toEqual({ c: MAX * PRICE, n: 0 });
-		const [d] = await asOwner('SELECT cost_usd_micros::float8 AS c FROM assistant_day_usage WHERE billing_account_id = $1 AND user_id = $2 AND day = $3', [account, owner.id, await utcDay()]);
+		const [d] = await asOwner('SELECT cost_usd_micros::float8 AS c FROM assistant_day_usage WHERE billing_account_id = $1 AND user_id = $2 AND day = $3', [account, owner.id, await sastDay()]);
 		expect(d!.c).toBe(MAX * PRICE);
 	});
 });
 
 describe('assistant_day_usage', () => {
 	it('a person reads their own rows (positive control) and nobody else’s', async () => {
-		await dayRow(owner, account, await utcDay(), 3);
-		await dayRow(other, otherAccount, await utcDay(), 4);
+		await dayRow(owner, account, await sastDay(), 3);
+		await dayRow(other, otherAccount, await sastDay(), 4);
 		const mine = await withUser(owner.id, (db) => db.query('SELECT user_id, messages FROM assistant_day_usage'));
 		expect(mine.rows).toEqual([{ user_id: owner.id, messages: 3 }]);
 		await expect(withUser(owner.id, (db) => db.query('UPDATE assistant_day_usage SET messages = 0'))).rejects.toMatchObject({ code: '42501' });
 	});
 
 	it('is in the person’s Download my data (assistantDays)', async () => {
-		await dayRow(owner, account, await utcDay(), 2, 1_500);
+		await dayRow(owner, account, await sastDay(), 2, 1_500);
 		const r = await owner.call('GET', '/auth/me/export');
 		expect(r.status).toBe(200);
-		expect(r.body.assistantDays).toEqual([expect.objectContaining({ billingAccountId: account, day: await utcDay(), messages: 2, costUsdMicros: 1_500 })]);
+		expect(r.body.assistantDays).toEqual([expect.objectContaining({ billingAccountId: account, day: await sastDay(), messages: 2, costUsdMicros: 1_500 })]);
 	});
 
-	it('paces the pool as dollarCaps.ts poolDayAllowance does, at the month’s turns', async () => {
-		for (const [day, spent] of [
-			['2026-10-31', 0],
-			['2026-11-01', 0],
-			['2026-11-21', 27_000_000],
-			['2026-11-30', 29_000_000],
-			['2028-02-29', 1_234_567],
-			['2026-11-10', 31_000_000]
+	it('paces the pool as dollarCaps.ts poolDayAllowance does, at the SAST day’s and the UTC month’s turns', async () => {
+		for (const [at, spent] of [
+			['2026-10-30T21:59:59Z', 0],
+			['2026-10-30T22:00:00Z', 0],
+			['2026-10-31T23:59:59Z', 0], // already 1 November in South Africa, still October's pool
+			['2026-11-01T00:00:00Z', 0],
+			['2026-11-21T08:00:00Z', 27_000_000],
+			['2026-11-30T12:00:00Z', 29_000_000],
+			['2026-11-30T22:30:00Z', 29_000_000],
+			['2028-02-28T22:00:00Z', 1_234_567], // the 29th of a leap February in South Africa
+			['2026-11-10T00:00:00Z', 31_000_000]
 		] as const) {
-			const [r] = await asOwner('SELECT assistant_pool_day_allowance(30000000, $1, $2::date)::float8 AS a', [spent, day]);
-			expect(r!.a, day).toBe(poolDayAllowance(30_000_000, spent, new Date(`${day}T12:00:00Z`)));
+			const [r] = await asOwner(
+				`SELECT assistant_pool_day_allowance(30000000, $1, assistant_day_of($2::timestamptz), date_trunc('month', $2::timestamptz AT TIME ZONE 'UTC')::date)::float8 AS a`,
+				[spent, at]
+			);
+			expect(r!.a, at).toBe(poolDayAllowance(30_000_000, spent, new Date(at)));
 		}
+	});
+
+	it('keys the day on SAST whatever the session’s time zone: it turns over at 22:00 UTC', async () => {
+		// The session in a zone 14 hours ahead of UTC first (the subquery runs before the row's functions).
+		const [r] = await asOwner(
+			`SELECT assistant_day_of('2026-11-10T21:59:59Z')::text AS before, assistant_day_of('2026-11-10T22:00:00Z')::text AS after
+			 FROM (SELECT set_config('TimeZone', 'Pacific/Kiritimati', false)) s`
+		);
+		expect(r).toEqual({ before: '2026-11-10', after: '2026-11-11' });
+	});
+
+	it('a begin records the SAST day on the day row and the reservation', async () => {
+		const r = await begin(owner, projectId);
+		expect(r.outcome).toBe('ok');
+		const today = await sastDay();
+		const [res] = await asOwner('SELECT day::text AS day FROM assistant_reservation WHERE id = $1', [r.reservation_id]);
+		expect(res!.day).toBe(today);
+		const [d] = await asOwner('SELECT messages FROM assistant_day_usage WHERE billing_account_id = $1 AND user_id = $2 AND day = $3', [account, owner.id, today]);
+		expect(d!.messages).toBe(1);
 	});
 });
 
@@ -307,9 +337,9 @@ async function expectRefusal(res: Response, outcome: DollarOutcome, waitTo: 'day
 	const wait = Number(res.headers.get('retry-after'));
 	expect(wait).toBe(body.params.seconds);
 	expect(body.error).toBe(DOLLAR_REFUSAL[outcome].message(body.params.resetsAt));
-	// resetsAt is the next UTC midnight (the day, a pool day) or the next UTC month (the month, a member's share, a pool month).
+	// resetsAt is the next 00:00 SAST, 22:00 UTC (the day, a pool day) or the next UTC month (the month, a member's share, a pool month).
 	const now = new Date(sent);
-	const boundary = waitTo === 'day' ? Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1) : Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1);
+	const boundary = waitTo === 'day' ? Date.parse(dayResetsAt(now)) : Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1);
 	expect(Math.abs(Date.parse(body.params.resetsAt) - boundary)).toBeLessThan(60_000);
 	expect(Math.abs(sent + wait * 1000 - boundary)).toBeLessThan(60_000);
 	// Nothing counted: no reservation left by the refusal.
@@ -326,8 +356,8 @@ describe('through the route (enforced): 429, the code, Retry-After, params.secon
 		expect((await post(owner, projectId)).status).toBe(200);
 	});
 
-	it('assistant_daily_cap, until UTC midnight', async () => {
-		await dayRow(owner, account, await utcDay(), DAY_MSGS);
+	it('assistant_daily_cap, until 00:00 SAST', async () => {
+		await dayRow(owner, account, await sastDay(), DAY_MSGS);
 		await expectRefusal(await post(owner, projectId), 'day', 'day');
 	});
 
