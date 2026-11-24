@@ -4511,7 +4511,15 @@ readable by anyone. The rules:
   the `CI gate`) and, weekly, the whole history (`secret-scan-sweep.yml`,
   which opens a `secret-scan` issue when it fails); a verified or unknown
   finding fails it, and a reviewed unverified false positive gets a
-  `trufflehog:ignore` comment on its line. For the gitleaks hook, reviewed false positives are
+  `trufflehog:ignore` comment on its line. A synthetic value whose host
+  doesn't resolve (a fixture's `db.example.org`) comes back unknown, since
+  TruffleHog's check tried to connect: tag its line in the change that adds
+  it. A tag can't reach a commit already pushed, so a finding the weekly
+  sweep keeps reporting from history is listed, after reading the line, by
+  its exact commit, file, line and detector in
+  `.github/secret-scan-reviewed.txt` and reported as `reviewed` (a notice);
+  a verified finding fails even when listed, and no path or detector is
+  excluded from the scan (issue #818). For the gitleaks hook, reviewed false positives are
   allowlisted by their exact value in `.gitleaks.toml` (m³/day field names,
   fake test tokens, the mocked-provider Terraform tests' synthetic secrets),
   never by path; add one only after checking the match isn't real.
