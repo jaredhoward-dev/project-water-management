@@ -1213,3 +1213,12 @@ none of this is built except where a bullet says so:
   per-seat sync ([§ Changing a Team's seats](#changing-a-teams-seats)).
 - **Legal and tax prerequisites**: the Terms' fees section, CPA and ECTA
   positions, VAT; all before the first charge.
+- **Phase 4: the pricing page** is built: `/welcome/pricing` and
+  `/welcome/pricing/af`, prerendered (docs/ui.md § Pricing page). A static
+  page can't read `plan`, so its figures are
+  `packages/engine/src/plans.ts` (`PLAN_FIGURES`), which
+  `backend/src/billing/planFigures.db.test.ts` pins to the table: a
+  migration that moves a price or limit updates that file in the same
+  change. Still open in Phase 4: the checkout disclosures and consent tick,
+  Terms §8, the privacy notice (Stripe), the `LEGAL_VERSION` bump and
+  Gate D.

@@ -535,6 +535,35 @@ other signed-out route still goes to `/login?next=`.
   the measured river flow (1 is perfect)"). The art, the motion rules and the
   pipeline that makes them: [design/landing-art.md](./design/landing-art.md).
 
+## Pricing page
+
+`/welcome/pricing` in English and `/welcome/pricing/<code>` in every other
+language (`/welcome/pricing/af`), issue #641 Phase 4
+(`routes/welcome/pricing/[[lang=locale]]`, `lib/components/pricing/`,
+`e2e/tests/pricing.spec.ts`). Prerendered and routed exactly like the
+landing page: public, translated, never asks for the session, the address
+sets the language and a visitor whose language is another goes on to that
+address (`LANDING_ROUTES`, `addressFor` in `lib/auth/session.svelte.ts`).
+
+- **What it says.** Free, Pro and Team side by side, each with its price a
+  month (and a year, with the months saved) and what it includes. Modelling
+  is never limited on any plan; the plans differ only in the assistant, live
+  operations (feeds, automatic runs, alerts, published farm views: 1
+  catchment on Free), server PDF reports and issued evidence packs.
+  "Farmers and viewers are always free" and "Assessors verify evidence
+  packs free" come first; "No VAT is charged", Free's non-commercial rule,
+  and that data is never held back by a plan close it. Never "quota",
+  "abuse" or "402".
+- **Figures from one place.** Every price and limit comes from
+  `@water-management/engine/plans` (`PLAN_FIGURES`), since a static page
+  can't read the `plan` table; `backend/src/billing/planFigures.db.test.ts`
+  fails when a migration moves a figure and that file doesn't follow.
+- **Links.** The landing page's closing panel ("See plans and prices") and
+  its footer, in the page's language. The Plan page's *Compare plans*
+  (assistant panel, live-catchment note) still goes to `/account/plan`.
+- **Not yet.** Checkout's disclosures and consent tick (#641 Phase 4) are on
+  the Plan page's checkout, not here.
+
 ## Legal pages
 
 `/privacy` (the privacy notice) and `/terms` (terms of use),

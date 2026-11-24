@@ -82,7 +82,7 @@ sides share.
   Map search over 150 000 gazetteer places and reading 5,000 allocations).
 - **frontend/**: SvelteKit 3 (Svelte 5) **SPA** (`adapter-static` with a fallback
   `index.html`; `ssr = false`, `prerender = false`, except the public landing
-  page at `/welcome` and `/welcome/af`, prerendered once per language, architecture.md), Vite, TypeScript, uPlot
+  page at `/welcome` and `/welcome/af` and the pricing page at `/welcome/pricing` and `/welcome/pricing/af`, prerendered once per language, architecture.md), Vite, TypeScript, uPlot
   charts, vitest. SvelteKit's config is the `sveltekit({…})` call in
   `vite.config.ts` (the Svelte options in `svelte-options.js`); `#lib/…` is a
   `package.json` `imports` subpath with the file's extension (`#lib/api/index.js`);
