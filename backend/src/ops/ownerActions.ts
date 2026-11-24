@@ -13,6 +13,17 @@
 //   billing-grants     src/billing/staffGrant.ts grantLog / liveGrants (… --list; no target: every live grant)
 //   billing-report     src/billing/gatherReport.ts, redacted  (pnpm dev:billing:report; never --show-emails)
 //   authority-confirm  src/projects/authorityConfirm.ts       (pnpm dev:authority:confirm)
+//   billing-account    src/billing/staffGrant.ts lookupAccount (the ids the workflow takes; direct invoke only)
+//
+// Ids, never addresses, from the workflow. Its runs are in a public repo, and
+// we can't rule out GitHub showing a run's workflow_dispatch inputs (its page,
+// the API, a later change), so a person's address must never be one. The
+// workflow names a billing account, a person, a team or a project by id and
+// marks its payload `via: "workflow"`, which this schema holds to ids only:
+// an `email` field, or the billing-account lookup, is refused. The address
+// forms (and the lookup that turns an address into the ids) are for the
+// operator's own `aws lambda invoke` from their SSO session, which never
+// touches GitHub (docs/deployment.md § Owner actions).
 //
 // An answer never carries an email address or a person's name: ids, plans,
 // dates, counts and the reasons the operator wrote (a grant's reason is
@@ -24,10 +35,12 @@ import type pg from 'pg';
 import { z } from 'zod';
 import { gatherReportOn } from '../billing/gatherReport.js';
 import { redact, type Report } from '../billing/metrics.js';
-import { grantLog, grantPlan, isCalendarDate, liveGrants, revokeGrant, StaffGrantError, type LiveGrant, type LogRow, type Target } from '../billing/staffGrant.js';
+import { grantLog, grantPlan, isCalendarDate, liveGrants, lookupAccount, revokeGrant, StaffGrantError, type LiveGrant, type LogRow, type Owner, type Target } from '../billing/staffGrant.js';
 import { confirmAuthorityDelegate, NoPersonError } from '../projects/authorityConfirm.js';
 
-export const OWNER_ACTIONS = ['billing-grant', 'billing-revoke', 'billing-grants', 'billing-report', 'authority-confirm'] as const;
+export const OWNER_ACTIONS = ['billing-grant', 'billing-revoke', 'billing-grants', 'billing-report', 'authority-confirm', 'billing-account'] as const;
+/** What the billing-admin workflow may send (scripts/release/owner-action.mjs WORKFLOW_ACTIONS): every action but the address lookup. */
+export const WORKFLOW_ACTIONS = ['billing-grants', 'billing-grant', 'billing-revoke', 'billing-report', 'authority-confirm'] as const;
 export type OwnerActionName = (typeof OWNER_ACTIONS)[number];
 
 const uuid = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i).transform((s) => s.toLowerCase());
@@ -43,14 +56,20 @@ const text = (max: number) => z.string().trim().min(1).max(max);
 const by = text(100);
 const day = z.string().refine(isCalendarDate);
 
-/** Exactly one of email and teamId names the account. */
-const target = { email: email.optional(), teamId: uuid.optional() };
-const oneTarget = (v: { email?: string; teamId?: string }) => (v.email === undefined) !== (v.teamId === undefined);
+/** Who: a person by address (direct invoke only) or id, a team by id, or the billing account by id. */
+const target = { email: email.optional(), userId: uuid.optional(), teamId: uuid.optional(), accountId: uuid.optional() };
+type TargetFields = { email?: string; userId?: string; teamId?: string; accountId?: string };
+const targetCount = (v: TargetFields) => [v.email, v.userId, v.teamId, v.accountId].filter((x) => x !== undefined).length;
+const oneTarget = (v: TargetFields) => targetCount(v) === 1;
+const atMostOneTarget = (v: TargetFields) => targetCount(v) <= 1;
+/** The billing-admin workflow marks its payloads; absent on the operator's direct invoke. */
+const via = z.literal('workflow').optional();
 
 export const ownerActionSchema = z.discriminatedUnion('action', [
 	z
 		.strictObject({
 			action: z.literal('billing-grant'),
+			via,
 			...target,
 			plan: z.enum(['pro', 'team']),
 			until: day.nullable().optional(),
@@ -59,18 +78,25 @@ export const ownerActionSchema = z.discriminatedUnion('action', [
 			replace: z.boolean().optional()
 		})
 		.refine(oneTarget),
-	z.strictObject({ action: z.literal('billing-revoke'), ...target, reason: text(500), by }).refine(oneTarget),
-	z.strictObject({ action: z.literal('billing-grants'), ...target }).refine((v) => v.email === undefined || v.teamId === undefined),
+	z.strictObject({ action: z.literal('billing-revoke'), via, ...target, reason: text(500), by }).refine(oneTarget),
+	z.strictObject({ action: z.literal('billing-grants'), via, ...target }).refine(atMostOneTarget),
 	z.strictObject({
 		action: z.literal('billing-report'),
+		via,
 		month: z
 			.string()
 			.regex(/^\d{4}-(0[1-9]|1[0-2])$/)
 			.nullable()
 			.optional()
 	}),
-	z.strictObject({ action: z.literal('authority-confirm'), projectId: uuid, email, reference: text(200) })
-]);
+	z
+		.strictObject({ action: z.literal('authority-confirm'), via, projectId: uuid, email: email.optional(), userId: uuid.optional(), reference: text(200) })
+		.refine((v) => (v.email === undefined) !== (v.userId === undefined)),
+	// The lookup is the operator's alone, from their SSO session: no `via`, so the workflow can't send it.
+	z
+		.strictObject({ action: z.literal('billing-account'), email: email.optional(), userId: uuid.optional(), teamId: uuid.optional() })
+		.refine((v) => [v.email, v.userId, v.teamId].filter((x) => x !== undefined).length === 1)
+]).refine((v) => !('via' in v && v.via === 'workflow' && 'email' in v && v.email !== undefined), { message: 'the workflow names people by id, never by address' });
 export type OwnerAction = z.output<typeof ownerActionSchema>;
 
 export type OwnerActionErrorCode =
@@ -86,9 +112,9 @@ export type OwnerActionErrorCode =
 
 const REASONS: Record<OwnerActionErrorCode, string> = {
 	refused: 'not a known action, or a field is missing, malformed or unknown (docs/deployment.md § Owner actions)',
-	no_person: 'no account has that address',
+	no_person: 'no account has that address or id',
 	no_team: 'no team has that id',
-	no_billing_account: 'the account has no billing account, so no grant',
+	no_billing_account: 'no such billing account, or the account has none, so no grant',
 	live_subscription: 'the account has a live subscription: a Stripe one is cancelled in Stripe first; a manual or mock one needs replace',
 	no_live_grant: 'the account has no live staff grant',
 	invalid: 'the database refused a value (the plan, the end date, the reason or who acts)',
@@ -138,15 +164,23 @@ export function ownerActionCode(err: unknown): OwnerActionErrorCode {
 
 export const ownerActionReason = (code: OwnerActionErrorCode): string => REASONS[code];
 
-const targetOf = (a: { email?: string; teamId?: string }): Target => (a.email !== undefined ? { kind: 'user', email: a.email } : { kind: 'team', teamId: a.teamId! });
+const targetOf = (a: TargetFields): Target =>
+	a.email !== undefined
+		? { kind: 'user', email: a.email }
+		: a.userId !== undefined
+			? { kind: 'user', userId: a.userId }
+			: a.teamId !== undefined
+				? { kind: 'team', teamId: a.teamId }
+				: { kind: 'account', accountId: a.accountId! };
 
 export type OwnerActionResult =
-	| { action: 'billing-grant'; accountId: string; kind: Target['kind']; plan: string; endsAt: string | null; replaced: boolean }
-	| { action: 'billing-revoke'; accountId: string; kind: Target['kind']; plan: string }
-	| { action: 'billing-grants'; kind: Target['kind']; accountId: string | null; planNow: string; log: LogRow[] }
+	| { action: 'billing-grant'; accountId: string; kind: Owner['kind']; plan: string; endsAt: string | null; replaced: boolean }
+	| { action: 'billing-revoke'; accountId: string; kind: Owner['kind']; plan: string }
+	| { action: 'billing-grants'; kind: Owner['kind']; accountId: string | null; planNow: string; log: LogRow[] }
 	| { action: 'billing-grants'; kind: 'all'; grants: LiveGrant[] }
 	| { action: 'billing-report'; report: Report }
-	| { action: 'authority-confirm'; projectId: string; userId: string; confirmed: true };
+	| { action: 'authority-confirm'; projectId: string; userId: string; confirmed: true }
+	| { action: 'billing-account'; kind: Owner['kind']; ownerId: string; accountId: string | null; planNow: string };
 
 /** Run one parsed action on the schema owner's connection. */
 export async function runOwnerAction(client: pg.ClientBase, a: OwnerAction): Promise<OwnerActionResult> {
@@ -154,24 +188,28 @@ export async function runOwnerAction(client: pg.ClientBase, a: OwnerAction): Pro
 		case 'billing-grant': {
 			const t = targetOf(a);
 			const g = await grantPlan(client, { target: t, plan: a.plan, until: a.until ?? null, reason: a.reason, by: a.by, replace: a.replace ?? false });
-			return { action: a.action, accountId: g.accountId, kind: t.kind, plan: g.plan, endsAt: g.endsAt, replaced: g.replaced };
+			return { action: a.action, accountId: g.accountId, kind: g.kind, plan: g.plan, endsAt: g.endsAt, replaced: g.replaced };
 		}
 		case 'billing-revoke': {
 			const t = targetOf(a);
 			const r = await revokeGrant(client, { target: t, reason: a.reason, by: a.by });
-			return { action: a.action, accountId: r.accountId, kind: t.kind, plan: r.plan };
+			return { action: a.action, accountId: r.accountId, kind: r.kind, plan: r.plan };
 		}
 		case 'billing-grants': {
-			if (a.email === undefined && a.teamId === undefined) return { action: a.action, kind: 'all', grants: await liveGrants(client) };
-			const t = targetOf(a);
-			return { action: a.action, kind: t.kind, ...(await grantLog(client, t)) };
+			if (targetCount(a) === 0) return { action: a.action, kind: 'all', grants: await liveGrants(client) };
+			return { action: a.action, ...(await grantLog(client, targetOf(a))) };
 		}
 		case 'billing-report':
 			// Never the addresses: the script's default (no --show-emails), always.
 			return { action: a.action, report: redact(await gatherReportOn(client, a.month ?? null)) };
 		case 'authority-confirm': {
-			const { userId } = await confirmAuthorityDelegate(client, a.projectId, a.email, a.reference);
+			const person = a.email !== undefined ? { email: a.email } : { userId: a.userId! };
+			const { userId } = await confirmAuthorityDelegate(client, a.projectId, person, a.reference);
 			return { action: a.action, projectId: a.projectId, userId, confirmed: true };
+		}
+		case 'billing-account': {
+			const { kind, ownerId, accountId, planNow } = await lookupAccount(client, targetOf(a));
+			return { action: a.action, kind, ownerId, accountId, planNow };
 		}
 	}
 }
