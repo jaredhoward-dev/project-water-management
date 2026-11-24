@@ -224,7 +224,31 @@ export const en = {
 	'mail.renewal.cancel': 'To cancel, or to change to a monthly plan, open your plan page and go to billing from there. If you cancel before {date}, nothing more is charged, and you keep the plan until then.',
 	'mail.renewal.right': 'Under the Consumer Protection Act you can also end a yearly plan at any time, on 20 business days’ notice.',
 	'mail.renewal.action': 'Open your plan',
-	'mail.renewal.why': 'We send this once a year, between 40 and 80 business days before a yearly plan ends, as the Consumer Protection Act asks.'
+	'mail.renewal.why': 'We send this once a year, between 40 and 80 business days before a yearly plan ends, as the Consumer Protection Act asks.',
+
+	// The owners' plan emails (346, billing/planNotices.ts): the grace after a paid plan ends, the pause after it, a trial's end.
+	'mail.plan.account.personal': 'your {product} account ({email})',
+	'mail.plan.account.team': 'the team “{team}”',
+	'mail.plan.grace.subject': 'Some catchments’ automatic updates pause on {date} — {product}',
+	'mail.plan.grace.heading': 'Your plan has ended',
+	'mail.plan.grace.body': 'The paid plan for {account} has ended, and it is now on Free, which includes fewer catchments with automatic updates. Unless you choose otherwise, on {date} the data feeds, alerts and automatic runs of these catchments pause:',
+	'mail.plan.paused.subject': 'Some catchments’ automatic updates have paused — {product}',
+	'mail.plan.paused.heading': 'Automatic updates have paused',
+	'mail.plan.paused.body': 'The paid plan for {account} ended 14 days ago, and it is on Free, which includes fewer catchments with automatic updates. The data feeds, alerts and automatic runs of these catchments have paused:',
+	'mail.plan.others.one': 'and {n} more catchment of the account that you are not a member of.',
+	'mail.plan.others.other': 'and {n} more catchments of the account that you are not a member of.',
+	'mail.plan.keeps': 'These stay on: {list}.',
+	'mail.plan.nothingDeleted': 'Nothing is deleted. Everyone can still open, edit, run and download every catchment. Only the automatic updates stop, and they start again as they were when the account is back on a paid plan.',
+	'mail.plan.choose': 'To keep a different catchment on, choose it on the plan page. To keep them all on, choose a paid plan there.',
+	'mail.plan.action': 'Open the plan page',
+	'mail.plan.grace.why': 'We send this once, when a paid plan ends with more catchments updating automatically than Free includes, to the account’s owners.',
+	'mail.plan.paused.why': 'We send this once, when the 14 days after a paid plan ended are over, to the account’s owners.',
+	'mail.plan.trial.subject': 'Your {plan} trial ends on {date} — {product}',
+	'mail.plan.trial.heading': 'Your trial ends soon',
+	'mail.plan.trial.body': 'Your free {plan} trial for {email} ends on {date}. After that your account is on Free. No card was taken, so nothing is charged.',
+	'mail.plan.trial.after': 'Nothing is deleted when the trial ends. If more of your catchments update automatically than Free includes, you have 14 days to choose the one to keep on before the others’ data feeds, alerts and automatic runs pause.',
+	'mail.plan.trial.keep': 'To keep {plan}, choose a plan on the plan page.',
+	'mail.plan.trial.why': 'We send this once, 3 days before a trial ends.'
 } as const;
 
 export type MailKey = keyof typeof en;
@@ -255,6 +279,8 @@ export const sections: Record<string, string> = {
 		'Email: a six-digit code for two-step sign-in, sent instead of a code from an authenticator app. It goes out when someone signs in with the right password, when they confirm an action that needs a recent code, and when they turn this on from the Account page. The code itself is shown on its own line below the text.',
 	'mail.renewal':
 		'Email: sent once a year to a person who pays for a yearly plan in their own name, about two to three months before the year ends, as South Africa’s Consumer Protection Act asks. {plan} is the plan’s name (“Pro”); {date} is a date like “3 Mar 2027”; {amount} is a price in rand like “R 8 990,00”.',
+	'mail.plan':
+		'Emails to the owners of an account (a person, or a team’s admins) about its plan. “grace” lines: a paid plan ended and the account has more catchments with automatic updates (data feeds, alerts, automatic model runs) than the free plan (Free) includes; in 14 days those of the rest pause. “paused” lines: the 14 days are over and they have paused. “trial” lines: 3 days before a free 14-day trial of a paid plan ends. {account} is one of the “account” lines; {email} an email address; {team} a team’s name; {plan} a plan’s name (“Pro”); {date} a date like “3 Mar 2027”; {list} catchment names joined with “and”. The catchment names follow the body, one per line.',
 	'mail.pack':
 		'Evidence pack emails: sent to the catchment’s editors and to the applicant when an evidence pack (a frozen, signed copy of the evidence report for a water-use licence application) is issued or withdrawn. {version} and {previous} are numbers; {code} is a short code like “3f2a-91bc-07de”; {project} is the catchment; {what} is one of the “what” lines; {name} is the application’s name (or the “name” line, for baseline evidence).'
 };

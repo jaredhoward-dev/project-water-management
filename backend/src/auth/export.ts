@@ -156,6 +156,8 @@ export const USER_FK_COVERAGE: Record<string, { section: string } | { excluded: 
 	'billing_account.user_id': { section: 'billing.account' },
 	// The annual renewal notices sent to them (329, CPA s14): in billing, beside the subscription each is about.
 	'renewal_notice.user_id': { section: 'billing.renewalNotices' },
+	// The plan emails sent to them (346): grace started, pause landed, trial ending; a team's admins get theirs too.
+	'billing_notice.user_id': { section: 'billing.planNotices' },
 	'team.created_by': { excluded: 'the team itself; the membership is in teamMemberships' },
 	'team_member.user_id': { section: 'teamMemberships' },
 	// The person's own display preferences (083): the workspace sections they hid.
@@ -364,6 +366,12 @@ export async function buildSubjectExport(userId: string, now = new Date()) {
 			 FROM renewal_notice WHERE user_id = $1 ORDER BY period_end DESC`,
 			[userId]
 		);
+		// The plan emails sent to them (346), whichever account each was about (theirs, or a team's they administer).
+		const { rows: planNotices } = await db.query(
+			`SELECT kind, about, status, sent_at AS "sentAt", created_at AS "createdAt"
+			 FROM billing_notice WHERE user_id = $1 ORDER BY created_at DESC, kind`,
+			[userId]
+		);
 		// The staff grants of their plan (330): what was granted, until when, why and by whom, as the account reads it.
 		const { rows: grants } = await db.query(
 			`SELECT action, plan_code AS "planCode", until, reason, granted_by AS "grantedBy", created_at AS "createdAt"
@@ -371,7 +379,10 @@ export async function buildSubjectExport(userId: string, now = new Date()) {
 			[billingId]
 		);
 		// A notice is keyed to the person, not the account, so it is exported even if the account were gone.
-		const billing = billingAccount[0] || renewalNotices.length ? { account: billingAccount[0] ?? null, subscriptions, usageCounters, renewalNotices, grants } : null;
+		const billing =
+			billingAccount[0] || renewalNotices.length || planNotices.length
+				? { account: billingAccount[0] ?? null, subscriptions, usageCounters, renewalNotices, planNotices, grants }
+				: null;
 		// Two-step sign-in (150): own rows only under RLS. The authenticator's state, never its sealed secret or the code hashes.
 		const { rows: twoStepSignIn } = await db.query(
 			`SELECT t.created_at AS "createdAt", t.confirmed_at AS "confirmedAt",
