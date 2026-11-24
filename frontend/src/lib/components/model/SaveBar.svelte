@@ -21,6 +21,7 @@
 	import { AREA_WORDS, changedAreas } from './changedAreas';
 	import type { PageDraft, ProblemLink } from './pageDraft';
 	import ProblemLinks from './ProblemLinks.svelte';
+	import LiveLimitNotice from '#lib/components/billing/LiveLimitNotice.svelte';
 
 	let {
 		editor,
@@ -53,6 +54,8 @@
 	const dirty = $derived(editor.dirty || dirtyDrafts.length > 0 || invalid.length > 0);
 	const saving = $derived(editor.saving || drafts.some((d) => d.saving));
 	const saveError = $derived(editor.saveError ?? drafts.find((d) => d.saveError)?.saveError ?? null);
+	// A draft's last save was Free's live-catchment refusal (the settings' automatic runs): an information note, not an error.
+	const liveLimit = $derived(drafts.some((d) => d.liveLimit));
 	const shown = $derived(!readonly && (dirty || !!saveError));
 	let measured = $state(0);
 	$effect(() => {
@@ -163,6 +166,9 @@
 		</div>
 		{#if blocking && !saving}
 			<div class="inner problems-row"><ProblemLinks {problems} id="savebar-problems" /></div>
+		{/if}
+		{#if liveLimit && !saving}
+			<div class="inner problems-row"><LiveLimitNotice /></div>
 		{/if}
 	</div>
 {/if}

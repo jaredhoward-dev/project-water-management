@@ -4740,6 +4740,12 @@ export interface AccountPlan {
 		/** "YYYY-MM", the month in Africa/Johannesburg. */
 		month: string;
 		catchments: UsageCount;
+		/**
+		 * Its live catchments (340, issue #641): projects with a data feed, alerts or automatic runs on, or a farm view
+		 * published; limit 1 on Free, null (unlimited) on Pro and Team. Absent from an API older than 340 (the web
+		 * and the backend release apart).
+		 */
+		liveCatchments?: UsageCount;
 		reports: UsageCount;
 		packsIssued: UsageCount;
 		/** Weighted tokens, kept for reference; the page shows the cost. */

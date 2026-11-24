@@ -72,6 +72,7 @@
 	import type { UnsavedEdits } from '#lib/preview/overlay.js';
 	import IssueList from '#lib/components/model/IssueList.svelte';
 	import SaveBar from '#lib/components/model/SaveBar.svelte';
+	import { isLiveLimit } from '#lib/components/billing/liveLimit.js';
 	import OverviewTab from '#lib/components/overview/OverviewTab.svelte';
 	import { agoText } from '#lib/format/age.js';
 	import { freshness, newDataSinceRun, STALE_DAYS } from '#lib/components/series/freshness.js';
@@ -255,6 +256,9 @@
 		},
 		get saveError() {
 			return settings.saveError;
+		},
+		get liveLimit() {
+			return settings.liveLimit;
 		},
 		// Each panel with a problem, linked to it on its page (Model settings or Calibration, issue #586 round 3): in
 		// place on that page, from any other tab through it.
@@ -683,6 +687,7 @@
 		if (settings.blockers.length || settings.saving) return false;
 		settings.saving = true;
 		settings.saveError = null;
+		settings.liveLimit = false;
 		try {
 			const why = saveReason.trim();
 			const sent = settings.snapshot();
@@ -694,7 +699,9 @@
 			fieldHistory?.refresh();
 			return true;
 		} catch (e) {
-			settings.saveError = e instanceof Error ? e.message : String(e);
+			// Automatic runs switched on in a second live catchment on Free (338): the bar's information note, not an error.
+			if (isLiveLimit(e)) settings.liveLimit = true;
+			else settings.saveError = e instanceof Error ? e.message : String(e);
 			return false;
 		} finally {
 			settings.saving = false;

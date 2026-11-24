@@ -5,7 +5,7 @@
 // where the GR4J parameters came from (the fit's day and in-sample score, or that there is no fit record) and carries
 // "Fit the parameters", a jump to Fit automatically. Synthetic data, plus the invented example catchments for a real
 // fit record.
-import type { Page } from '@playwright/test';
+import type { Page, Route } from '@playwright/test';
 import { expectNoViolations } from '../support/a11y.ts';
 import { addMember, createProject, putModel, sampleModel, updateSettings } from '../support/api.ts';
 import { API_URL } from '../support/env.ts';
@@ -463,4 +463,48 @@ test('every help tip on the page has its own name, and the annual assurance thre
 	const window = page.getByRole('group', { name: /^Curtailment reporting window/ });
 	await expect(window.getByLabel(/^Annual assurance threshold/)).toHaveCount(0);
 	await expect(page.getByLabel(/^Annual assurance threshold/)).toBeVisible();
+});
+
+// Free's one live catchment (338; docs/billing.md § Live catchments (Free)): switching automatic runs on in a second
+// catchment is refused 402 plan_limit when billing is enforced (e2e runs it off, so the refusal is mocked, as
+// data-feeds.spec.ts's refuseLive does). The save bar shows the information note, never the server's words in red.
+test('on Free with another catchment live, saving automatic runs on shows the live-limit note in the save bar, keeps the edit, and saves once allowed', async ({ page, owner }) => {
+	void owner;
+	const project = await createProject(page.request, 'Settings second catchment');
+	const refuse = (route: Route) =>
+		isProjectPatch(route.request().method(), route.request().url())
+			? route.fulfill({
+					status: 402,
+					contentType: 'application/json',
+					body: JSON.stringify({
+						error: 'Free runs one catchment live (data feeds, automatic runs, alerts and published farm views): switch them off in the other catchment, or compare plans',
+						code: 'plan_limit',
+						params: { limit: 1, used: 1, plan: 'free', key: 'live_catchments' }
+					})
+				})
+			: route.fallback();
+	const projectUrl = `${API_URL}/projects/${project.id}`;
+	await page.route(projectUrl, refuse);
+	await openSettings(page, project.id);
+	const auto = page.getByRole('checkbox', { name: 'Re-run the model after new data' });
+	await auto.check();
+	await saveChanges(page).click();
+	const bar = settingsBar(page);
+	const note = bar.getByTestId('live-limit');
+	await expect(note).toBeVisible();
+	await expect(note).toContainText('Free runs one catchment live: data feeds, automatic runs, alerts and farm views.');
+	await expect(note.getByRole('link', { name: 'Compare plans' })).toHaveAttribute('href', /\/account\/plan$/);
+	await expect(bar).not.toContainText('Save failed');
+	await expect(bar.locator('.err')).toHaveCount(0);
+	// Nothing was saved: the edit stays, and the bar still offers Save.
+	await expect(auto).toBeChecked();
+	await expect(saveChanges(page)).toBeEnabled();
+	await expectNoViolations(page);
+
+	// Once the other catchment is switched off (here: the refusal lifted), the same Save goes through and the note goes.
+	await page.unroute(projectUrl, refuse);
+	await saveChanges(page).click();
+	await expect(anySaveBar(page)).toHaveCount(0);
+	await expect(page.getByTestId('live-limit')).toHaveCount(0);
+	await expect(auto).toBeChecked();
 });

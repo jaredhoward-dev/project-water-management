@@ -29,6 +29,24 @@ describe('SettingsDraft', () => {
 		expect(d.kept).toEqual({});
 	});
 
+	it('forgets the live-catchment note (338) with the error: on revert, on a recommended change and on a save', () => {
+		const d = new SettingsDraft();
+		d.load(saved());
+		expect(d.liveLimit).toBe(false);
+		d.s.autoRun.enabled = true;
+		d.liveLimit = true;
+		d.applyPatch({});
+		expect(d.liveLimit).toBe(false);
+		d.liveLimit = true;
+		d.revert();
+		expect(d.liveLimit).toBe(false);
+		d.s.autoRun.enabled = true;
+		d.liveLimit = true;
+		const sent = d.snapshot();
+		d.afterSave(sent, sent);
+		expect(d.liveLimit).toBe(false);
+	});
+
 	it('dirtyBesides leaves the named keys out: picking CCWR A-pan (Hydrological Unit) alone doesn’t hold its Use back', () => {
 		const d = new SettingsDraft();
 		d.load(saved());

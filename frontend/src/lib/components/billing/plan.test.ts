@@ -225,6 +225,19 @@ describe('usageRows', () => {
 			fraction: null
 		});
 	});
+	it('shows live catchments after catchments (340): "1 of 1", at the limit, never an error; unlimited on Pro and Team', () => {
+		const live = withUsage({ liveCatchments: { used: 1, limit: 1 } });
+		expect(live.map((r) => r.key)).toEqual(['catchments', 'liveCatchments', 'reports', 'packsIssued', 'assistantCost']);
+		expect(live[1]!).toMatchObject({ label: 'Live catchments', figures: '1 of 1', status: 'At the limit', fraction: 1, over: false });
+		expect(live[1]!.note).toMatch(/data feeds, alerts or automatic runs on, or a farm view published/);
+		expect(live[1]!.note).not.toMatch(/quota|abuse|402/i);
+		// Past it (live before enforcement, or after a downgrade): counted, the warning colour, not refused.
+		expect(withUsage({ liveCatchments: { used: 2, limit: 1 } })[1]!).toMatchObject({ status: '1 over the limit', over: true });
+		expect(withUsage({ liveCatchments: { used: 4, limit: null } })[1]!).toMatchObject({ figures: '4 used', status: 'Unlimited', fraction: null });
+	});
+	it('leaves live catchments out when an API older than 340 doesn’t send them', () => {
+		expect(rows.some((r) => r.key === 'liveCatchments')).toBe(false);
+	});
 	it('fmtUsdMicros reads millionths of a dollar', () => {
 		expect(fmtUsdMicros(1_500_000)).toBe('$1.50');
 	});
