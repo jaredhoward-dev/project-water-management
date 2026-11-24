@@ -795,6 +795,7 @@ plan stays on the issue. Found while building:
       bounded whole-file pass (one file a dekad, clipped at once) or an
       operator reference load. Trigger: FAO declining WaPOR, or the second
       opinion being wanted.
+      **Decided (round 3, N):** a bounded whole-file pass (data-sources.md § ssebop-eta); the build is its own item below.
 - [ ] **SSEBop's pass isn't built.** The decision and design are in
       data-sources.md § ssebop-eta. Durable fix: the bounded whole-file pass
       as described there (a streamed read capped to SSEBop's prefix, a
@@ -989,7 +990,6 @@ are #641's checklist. Open items from building it:
       direct invoke only.
 
 ## DB tests share the mail outbox (2026-10-02, PR #360)
-      **Decided (round 3, N):** a bounded whole-file pass (data-sources.md § ssebop-eta); the build is its own item below.
 - [x] **Guard pending notices as db-setup.ts guards pending jobs.** The
       tick sends every pending `pack_notice` (133), `erratum_notice` (153)
       and `alert_delivery` (051) in the shared test database, so a notice
