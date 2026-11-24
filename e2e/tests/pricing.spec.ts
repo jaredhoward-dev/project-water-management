@@ -70,7 +70,8 @@ for (const scheme of ['light', 'dark'] as const) {
 		await page.emulateMedia({ colorScheme: scheme });
 		await page.setViewportSize(PHONE);
 		for (const l of [{ code: 'en' }, ...OTHER]) {
-			const w = await words(l.code);
+			// English has no catalogue: a message is its own English words.
+			const w = l.code === 'en' ? (english: string) => english : await words(l.code);
 			await page.goto(l.code === 'en' ? '/welcome/pricing' : `/welcome/pricing/${l.code}`);
 			await expect(h1(page, w(HEADING))).toBeVisible();
 			await expectNoSidewaysScroll(page);
