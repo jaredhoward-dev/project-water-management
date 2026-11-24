@@ -25,6 +25,14 @@ export function emailAuthApi(api: Pick<Api, 'request'>) {
 		resendConfirmation: (email: string) => request<{ ok: true }>('POST', '/auth/resend-confirmation', { email }),
 		/** 202, or ApiError 429 (sent a moment ago) / 409 (already verified). */
 		resendVerification: () => request<{ sent: true }>('POST', '/auth/resend-verification'),
+		/**
+		 * Changing the address (347): 202 with the new address whether or not it can take the change (the server
+		 * never says it has an account); the link goes to it, and nothing changes until it is opened.
+		 */
+		changeEmail: (newEmail: string, currentPassword: string) =>
+			request<{ sent: true; email: string }>('POST', '/auth/change-email', { newEmail, currentPassword }),
+		/** The new address's link: switches the account to it (signed in or out). */
+		confirmEmailChange: (token: string) => request<{ changed: true; email: string }>('POST', '/auth/confirm-email-change', { token }),
 		inviteInfo: (token: string) =>
 			request<{ invite: InviteInfo }>('POST', '/auth/invite-info', { token }).then((r) => r.invite),
 

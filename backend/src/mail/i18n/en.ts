@@ -21,6 +21,16 @@ export const en = {
 	'mail.verify.action': 'Confirm email address',
 	'mail.verify.expires': 'This link expires in 48 hours.',
 	'mail.verify.ignore': "If you didn't create an account, you can ignore this email.",
+	'mail.change.subject': 'Confirm your new email address — {product}',
+	'mail.change.heading': 'Confirm your new email address',
+	'mail.change.body': 'You asked to use {email} as the email address of your {product} account. Confirm it with the button below. Until you do, the account keeps its old address.',
+	'mail.change.action': 'Confirm new address',
+	'mail.change.expires': 'This link expires in 48 hours.',
+	'mail.change.ignore': "If you didn't ask for this, you can ignore this email. Nothing changes.",
+	'mail.changed.subject': 'Your email address was changed — {product}',
+	'mail.changed.heading': 'Your email address was changed',
+	'mail.changed.body': 'The email address of your {product} account is now {newEmail}. You sign in with it, and we send everything about the account there from now on.',
+	'mail.changed.notYou': "If you didn't make this change, someone may know your password. Contact the person who manages your catchment straight away.",
 
 	// Reset your password.
 	'mail.reset.subject': 'Reset your password — {product}',
@@ -237,6 +247,8 @@ export type MailKey = keyof typeof en;
 export const sections: Record<string, string> = {
 	'mail.buttonFallback': 'Every email: the line under the button, followed by the link itself.',
 	'mail.verify': 'Email: confirm your address. Sent after signing up, and again from “Resend email”.',
+	'mail.change': 'Email: confirm a new email address. Sent to the new address when a signed-in person changes the address on their Account page; the account keeps its old address until the link is used. {email} is the new address.',
+	'mail.changed': 'Email: sent to the OLD address once the change of address is confirmed, so its holder knows. {newEmail} is the new address.',
 	'mail.reset': 'Email: reset your password. Sent from “Forgot password?” on the sign-in page.',
 	'mail.exists': 'Email: sent when someone signs up with an address that already has a confirmed account. It says so, and offers a new password in case the owner forgot theirs. The sign-up page itself says the same thing either way (“check your email”), so it can’t be used to find out who has an account.',
 	'mail.farmer':

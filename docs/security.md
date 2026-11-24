@@ -559,6 +559,30 @@ token, a malformed or unknown one, a live invite for another address) is
   `auth/signupClosed.security.db.test.ts`, and the `signup_open` runs in
   `infra/tests/guardrails.tftest.hcl`.
 
+## Changing the email address
+
+Issue #641 item 5 (347_email_change, `auth/email-change-routes.ts`). A
+signed-in person asks with the new address and their **current password**
+(checked through the sign-in lockout, as changing the password is, so a
+stolen session alone can't move the account). A link goes to the **new**
+address (the email-token pattern: 32 random bytes, only the SHA-256 stored in
+`email_change`, single use, 48 h, one pending change per account, a newer one
+replaces it); the account's address switches **only** when that link is used,
+and the **old** address then gets a notice naming the new one. Until then
+nothing about the account changes. Limits: the verification email's one-a-minute
+cooldown and the account's daily cap of reset, verification and change emails
+(078's `account_mail_quota`). **No enumeration:** the answer is the same `202`
+whether or not the new address has an account (a taken address gets no
+mail), after the same time (`answerAlike`) and under the same limits (the link
+is issued, and counted, before the address is looked up), so this reveals no
+more than sign-up. If an account takes the address after the link went out,
+the switch is refused (`409 email_change_taken`) by `app_user`'s unique email;
+only the holder of that inbox can see it. On the switch the address is marked
+verified, a bounce suppression (the old address's) is cleared, and outstanding
+verify and reset links to the old address are dropped. Sessions are kept. A
+disposable new address is refused only with `BILLING_ENFORCED` on, as at
+sign-up ([billing.md § Verified email on Free](./billing.md#verified-email-on-free)).
+
 ## Password reset, email verification and invites
 
 - **Tokens** are 32 bytes from `crypto.randomBytes`, mailed as base64url. The

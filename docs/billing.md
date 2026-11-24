@@ -1236,6 +1236,21 @@ them on together.
   `frontend/src/lib/components/billing/emailGate.test.ts`, and the assistant
   panel's and chat's tests.
 
+- **Sign-up and changing the address (round 10).** With `BILLING_ENFORCED`
+  on, sign-up refuses an address on a disposable domain (`400
+  signup_disposable`, `auth/routes.ts` `/register`, after the sign-up
+  throttle and before the address is looked up, so it tells nothing about
+  accounts), and so does changing the address (`400 email_change_disposable`).
+  Off, both take any address, like every other Free rule: #641 builds
+  anti-abuse into Phases 1–2 and Phase 2 switches the limits on together.
+  An invite sign-up is no exception: the address is still the account's. A person refused here, or by the
+  gate above, fixes it on the Account page's **Email address** card (POST
+  `/auth/change-email`): a link goes to the new address and the account
+  switches only when it is used ([security.md § Changing the email
+  address](./security.md#changing-the-email-address)). Changing a verified
+  address never starts a reverse trial (`markVerified` runs only for an
+  account that was never verified), so a new address can't mint one.
+
 ## Staff grants
 
 `backend/migrations/330_staff_grant.sql`, `backend/scripts/billing-grant.ts`

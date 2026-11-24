@@ -104,6 +104,7 @@ export const USER_FK_COVERAGE: Record<string, { section: string } | { excluded: 
 	// An evidence pack (112_evidence_pack): who drafted and issued it is in the audit events (pack.drafted, pack.issued), exported with them.
 	'evidence_pack.created_by': { excluded: 'the project’s evidence pack; its maker only, and the drafting is an exported audit event' },
 	'evidence_pack.issued_by': { excluded: 'the project’s evidence pack; its issuer only, and the issue is an exported audit event' },
+	'email_change.user_id': { excluded: 'a pending change of address (347): the new address, not yet proven, and a link hash, 48 hours at most' },
 	'email_token.user_id': { excluded: 'secrets (verify / reset token hashes), a week at most' },
 	// The "known engine bug" emails sent to the person as an owner (153_erratum_notices), 30 days.
 	'erratum_notice.user_id': { section: 'erratumNotices' },

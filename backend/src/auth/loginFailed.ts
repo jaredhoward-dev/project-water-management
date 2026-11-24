@@ -36,6 +36,9 @@ export type LoginFailureRoute =
 	| '/auth/me'
 	| '/auth/reset-password'
 	| '/auth/verify-email'
+	// Changing the email address (347): `bad_password`/`locked` on the request, `invalid_link` on a dead link.
+	| '/auth/change-email'
+	| '/auth/confirm-email-change'
 	| '/auth/mfa/verify'
 	| '/auth/mfa/totp/enrol'
 	| '/auth/mfa/totp/confirm'

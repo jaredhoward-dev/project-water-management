@@ -17,6 +17,8 @@ const PUBLIC = new Set([
 	'POST /auth/forgot-password',
 	'POST /auth/reset-password',
 	'POST /auth/verify-email',
+	// The emailed link to a new address is the credential (347).
+	'POST /auth/confirm-email-change',
 	// "Send the link again" on the sign-in page (issue #57): the same 202 for any address.
 	'POST /auth/resend-confirmation',
 	'POST /auth/invite-info',

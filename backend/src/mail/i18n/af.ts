@@ -29,6 +29,26 @@ export const af: Partial<Record<MailKey, string>> = {
 	'mail.verify.expires': 'Hierdie skakel verval oor 48 uur.',
 	// If you didn't create an account, you can ignore this email.
 	'mail.verify.ignore': 'As jy nie ’n rekening geskep het nie, kan jy hierdie e-pos ignoreer.',
+	// Confirm your new email address — {product}
+	'mail.change.subject': 'Bevestig jou nuwe e-posadres — {product}',
+	// Confirm your new email address
+	'mail.change.heading': 'Bevestig jou nuwe e-posadres',
+	// You asked to use {email} as the email address of your {product} account. Confirm it with the button below. Until you do, the account keeps its old address.
+	'mail.change.body': 'Jy het gevra om {email} as die e-posadres van jou {product}-rekening te gebruik. Bevestig dit met die knoppie hieronder. Totdat jy dit doen, behou die rekening sy ou adres.',
+	// Confirm new address
+	'mail.change.action': 'Bevestig nuwe adres',
+	// This link expires in 48 hours.
+	'mail.change.expires': 'Hierdie skakel verval oor 48 uur.',
+	// If you didn't ask for this, you can ignore this email. Nothing changes.
+	'mail.change.ignore': 'As jy nie hiervoor gevra het nie, kan jy hierdie e-pos ignoreer. Niks verander nie.',
+	// Your email address was changed — {product}
+	'mail.changed.subject': 'Jou e-posadres is verander — {product}',
+	// Your email address was changed
+	'mail.changed.heading': 'Jou e-posadres is verander',
+	// The email address of your {product} account is now {newEmail}. You sign in with it, and we send everything about the account there from now on.
+	'mail.changed.body': 'Die e-posadres van jou {product}-rekening is nou {newEmail}. Jy teken daarmee in, en ons stuur voortaan alles oor die rekening daarheen.',
+	// If you didn't make this change, someone may know your password. Contact the person who manages your catchment straight away.
+	'mail.changed.notYou': 'As jy nie hierdie verandering gemaak het nie, ken iemand dalk jou wagwoord. Kontak dadelik die persoon wat jou opvanggebied bestuur.',
 	// Reset your password — {product}
 	'mail.reset.subject': 'Stel jou wagwoord terug — {product}',
 	// Reset your password

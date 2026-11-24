@@ -374,6 +374,8 @@ const APP_USER_ON_DELETE: Record<string, 'cascade' | 'set null' | 'restrict'> = 
 	// A count for the elevation-model cap; goes with the account (184_dem_attempt).
 	'dem_attempt.user_id': 'cascade',
 	'email_token.user_id': 'cascade',
+	// A pending change of address (347) goes with the account.
+	'email_change.user_id': 'cascade',
 	// An evidence pack is the project's evidence; it stays with who drafted or issued it cleared (112_evidence_pack.sql).
 	'evidence_pack.created_by': 'set null',
 	'evidence_pack.issued_by': 'set null',
