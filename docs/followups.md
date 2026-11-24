@@ -1053,9 +1053,13 @@ are #641's checklist. Open items from building it:
       (Free)). Still to do: (1) the Plan page's usage bar "live catchments
       1/1" (`app_account_plan` doesn't return the count yet; add it from
       `app_live_catchments_in_use` in the migration that next redefines it);
-      (2) the picker at the end of the reverse trial, and stopping automatic
-      runs and alerts on the other catchments after the 14-day grace
-      (#641 § Downgrade; the job tick doesn't check live yet); (3) a project
+      (2) the picker at the end of the reverse trial (341 pauses the other
+      catchments' operations after the 14-day grace and keeps
+      `app_billing_keep_catchment`'s choice, but no route or Plan page
+      control calls it yet), the owners' email when the grace starts and
+      when the pause lands, and a workspace banner on a paused catchment
+      linking to Plan and usage (billing.md § Pausing after a downgrade);
+      (3) a project
       moved to another billing account (a team move) isn't checked against
       the new account's limit; (4) the abuse report's "share at the
       live-catchment limit" can now be measured from 338's count; (5) the

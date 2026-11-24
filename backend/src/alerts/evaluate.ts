@@ -171,7 +171,11 @@ export const seriesLabel = (kind: string, name: string) => seriesDisplayName(kin
 
 /** Whether any alert is switched on for the project (as the caller, RLS). */
 export async function alertsOn(db: Db, projectId: string): Promise<boolean> {
-	const { rows } = await db.query<{ on: boolean }>('SELECT EXISTS (SELECT 1 FROM alert_rule WHERE project_id = $1 AND enabled) AS on', [projectId]);
+	// A catchment paused past Free's limit (341) keeps its rules but isn't checked until it resumes.
+	const { rows } = await db.query<{ on: boolean }>(
+		'SELECT EXISTS (SELECT 1 FROM alert_rule WHERE project_id = $1 AND enabled) AND app_project_plan_paused($1) IS NULL AS on',
+		[projectId]
+	);
 	return rows[0]?.on === true;
 }
 
