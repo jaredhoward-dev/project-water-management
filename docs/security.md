@@ -1957,7 +1957,13 @@ In short:
   `app_billing_apply` (326), the provider webhook's function, which runs
   with no user and refuses (`42501`) inside a user's or an API key's
   transaction; `billing_event`, its de-duplication, is owner-only
-  (`apply.db.test.ts`).
+  (`apply.db.test.ts`). The billing write routes follow the same rule: a
+  team's `POST /teams/:id/plan/checkout`, `/portal` and `/seats` answer
+  `404` to anyone but a team admin before any provider call, and seat
+  changes never write `subscription.seats` (the webhook brings them back
+  through `app_billing_apply`; `seats.db.test.ts`, 333's
+  `app_billing_live_subscription_ref` answers only the account's person or
+  team admins).
 - **Accounts under RLS** (`068_app_user_rls.sql`). `app_user` had no RLS
   (sign-in reads it before anyone is signed in), so any `water_app`
   transaction, an API key's or the job tick's included, could read every
