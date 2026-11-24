@@ -986,9 +986,9 @@ a second one when `BILLING_ENFORCED` is on.
   exactly one passes.
 - **Never switched off.** A change in a catchment already live is never
   refused, even on an account past its limit (live before enforcement, or
-  after a downgrade), and nothing already on is turned off. Stopping
-  automatic runs on the other catchments after a grace (#641 § Downgrade)
-  is a later slice ([followups.md](./followups.md)). A copy or an import of
+  after a downgrade), and nothing already on is turned off. Pausing
+  operations on the other catchments after a downgrade's 14-day grace is
+  [§ Pausing after a downgrade](#pausing-after-a-downgrade). A copy or an import of
   a catchment with automatic runs on isn't refused either: refusing it
   would ration copying and importing, which Free never limits (the durable
   fix is in followups.md).
@@ -1010,6 +1010,49 @@ a second one when `BILLING_ENFORCED` is on.
   and a publication is refused in a second catchment and passes in the
   first; switching the first off frees the slot; past the limit nothing is
   refused in a live catchment; Pro is never refused; the race.
+
+## Pausing after a downgrade
+
+`backend/migrations/341_plan_pause.sql` (issue #641 § Downgrade or lapse).
+Built but off: nothing is paused unless `BILLING_ENFORCED` is on.
+
+- **When.** An account that has had a subscription (paid, trial or staff
+  grant) and now has none live (canceled, expired, a lapsed grant) is on
+  Free. If it then holds more live catchments than Free's
+  `live_catchments` (338's derived "live"), `billing_account.over_free_since`
+  records when that was first seen: the subscription trigger stamps it as
+  the plan ends, and the job tick (`app_plan_pause_tick`, every 5 minutes)
+  catches any path the trigger misses. An account that never had a plan is
+  never paused (its extra live catchments predate enforcement).
+- **The grace.** For 14 days nothing changes. After them, with billing
+  enforced, the tick pauses every live catchment past Free's limit and keeps
+  one: the one the owner chose (`billing_account.kept_project_id`, set by
+  `app_billing_keep_catchment(project)`, the account's person or a team
+  admin; the pause moves at once), else the most recently active (the
+  project's `updated_at` or its newest run).
+- **What a pause is.** A marker row, `project_plan_pause`, and nothing else:
+  the catchment's feeds, alert rules and automatic-runs setting stay exactly
+  as the user left them, and nothing is deleted. The feed scheduler
+  (`app_due_feeds`), the automatic re-run (`app_enqueue_rerun`), the forecast
+  run (`enqueueForecastRun`) and the alert checks (`app_alert_schedule`,
+  `alertsOn`) pass a paused catchment by. Everyone can still read, export,
+  run and edit it (Free never limits modelling), and its published farm
+  views stay up with their last publication. `app_project_plan_paused(project)`
+  answers when it was paused, or null.
+- **Resuming.** A live subscription again (the subscription trigger, at
+  once), switching the extra catchments' operations off so the account is
+  back within Free, or enforcement turned off: the markers go and the grace
+  ends. Everything runs again as it was.
+- **Not yet.** The owners' email, the picker on the Plan page and the
+  workspace banner on a paused catchment ([followups.md](./followups.md)).
+- **Tests.** `backend/src/billing/planPause.db.test.ts`: the grace recorded
+  on a lapse and nothing paused within it; nothing paused with enforcement
+  off; past it, enforced, two of three catchments paused, the most recent
+  kept, nothing deleted or switched off; the paused one's feeds, re-runs,
+  forecast run and alert checks skipped and the kept one's still scheduled
+  (positive control); members read the marker, strangers don't; the owner's
+  choice moves the pause and a stranger's is refused; an upgrade resumes
+  everything; a never-paid account isn't paused; only the worker sweeps.
 
 ## Staff grants
 
