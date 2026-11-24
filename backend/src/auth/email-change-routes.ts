@@ -19,8 +19,9 @@ import { isDisposable } from './disposable.js';
 import { markVerified } from './email-routes.js';
 import { logLoginFailed } from './loginFailed.js';
 import { requireUser, type AuthEnv } from './middleware.js';
-import { checkPasswordAgain } from './routes.js';
+import { checkPasswordAgain, takenAddressMail } from './routes.js';
 import { issueDevice } from './device.js';
+import { issueSession, readSessionClaims } from './session.js';
 import { ACCOUNT_MAIL_CAP, ACCOUNT_MAIL_WINDOW, newToken, parseToken, RESEND_COOLDOWN, TOKEN_TTL } from './tokens.js';
 
 const ChangeEmailBody = z.object({
@@ -37,7 +38,9 @@ export const emailChangeRoutes = new Hono<AuthEnv>()
 	// a taken address gets no link (app_user's email is unique) and nothing is
 	// said, after the same time (answerAlike) and under the same limits (the
 	// link is issued before the address is looked up), so this can't find
-	// accounts any better than sign-up can. Refused outright, before anything is looked up:
+	// accounts any better than sign-up can. As at sign-up, the taken address's
+	// holder is told instead (takenAddressMail: "you already have an account",
+	// or a fresh confirmation link), under that address's own cooldown and cap. Refused outright, before anything is looked up:
 	// the account's own address (email_change_same) and, with BILLING_ENFORCED
 	// on, a disposable domain (email_change_disposable; auth/disposable.ts, the
 	// same rule as sign-up's). The link's cooldown and the daily cap are the
@@ -53,8 +56,8 @@ export const emailChangeRoutes = new Hono<AuthEnv>()
 			throw ApiError.coded(400, 'email_change_disposable', 'use a permanent email address: this one is from a temporary-mail service');
 		}
 		let refused: 'cooldown' | 'capped' | null = null;
-		await answerAlike(() =>
-			withUser(userId, async (db): Promise<Mail | null> => {
+		await answerAlike(async () => {
+			const linkOrTaken = await withUser(userId, async (db): Promise<Mail | 'taken' | null> => {
 				// Issued (and the cooldown and cap counted) before the address is looked up, so a taken
 				// address and a free one meet the same limits: otherwise which one answers 429 would tell.
 				const { token, hash } = newToken();
@@ -70,10 +73,14 @@ export const emailChangeRoutes = new Hono<AuthEnv>()
 				// The one-address lookup (068), signed in: a taken address gets no link (its pending row is
 				// unusable: nobody has the token, and app_user's unique email would refuse it anyway).
 				const { rows } = await db.query<{ id: string }>('SELECT id FROM app_auth_account($1)', [body.newEmail]);
-				if (rows[0]) return null;
+				if (rows[0]) return 'taken';
 				return emailChangeMail(body.newEmail, siteLink('/verify-email/change', token), account.locale);
-			})
-		);
+			});
+			if (linkOrTaken !== 'taken') return linkOrTaken;
+			// The holder's mail, in its own transaction once the requester's has ended (one pooled connection at a
+			// time), as no user until the lookup names the holder. Inside answerAlike, so it costs no visible time.
+			return withoutUser((db) => takenAddressMail(db, body.newEmail));
+		});
 		// The limits are the account's own, not the new address's, so saying so reveals nothing about it.
 		if (refused === 'capped')
 			throw ApiError.coded(429, 'verification_limit', 'too many confirmation emails were sent today — check your inbox, or try again tomorrow');
@@ -86,6 +93,10 @@ export const emailChangeRoutes = new Hono<AuthEnv>()
 	// marks it verified (the first verification of an unconfirmed account does
 	// what confirming does: invites, the reverse trial; markVerified), clears a
 	// bounce suppression that was the old address's, and mails the old address.
+	// Every session of the account is signed out, as a password change does
+	// (sessions_revoked_at): a session someone kept on the old address goes with
+	// it. The browser that confirms keeps its own if it is signed in to this
+	// account (a fresh cookie, issued after the watermark, signed in the way it was).
 	.post('/confirm-email-change', async (c) => {
 		const body = ConfirmBody.parse(await readJson(c));
 		const hash = parseToken(body.token);
@@ -94,7 +105,11 @@ export const emailChangeRoutes = new Hono<AuthEnv>()
 			return ApiError.coded(400, 'link_invalid', 'this link is invalid or has expired — request a new one');
 		};
 		if (!hash) throw invalid();
-		let outcome: { email: string; old: string; locale: string | null; watermark: Date | null } | null;
+		// Read before the watermark moves: whether this browser is signed in to the account the link changes.
+		const current = await readSessionClaims(c);
+		// From this server's clock, the one that stamps session iat_ms.
+		const watermark = new Date();
+		let outcome: { userId: string; email: string; old: string; locale: string | null } | null;
 		try {
 			outcome = await withoutUser(async (db) => {
 				const { rows } = await db.query<{ user_id: string; new_email: string }>('SELECT * FROM app_consume_email_change($1)', [hash]);
@@ -107,16 +122,17 @@ export const emailChangeRoutes = new Hono<AuthEnv>()
 				);
 				if (!before[0]) return null;
 				// Under app_user's own-row policy (068); its unique email refuses an address taken since.
-				const { rows: after } = await db.query<{ sessions_revoked_at: Date | null }>(
+				await db.query(
 					`UPDATE app_user SET email = $2, mail_suppressed_at = NULL, mail_suppressed_reason = NULL,
-					   email_verified_at = CASE WHEN email_verified_at IS NULL THEN NULL ELSE now() END
-					 WHERE id = $1 RETURNING sessions_revoked_at`,
-					[change.user_id, change.new_email]
+					   email_verified_at = CASE WHEN email_verified_at IS NULL THEN NULL ELSE now() END,
+					   sessions_revoked_at = $3
+					 WHERE id = $1`,
+					[change.user_id, change.new_email, watermark]
 				);
 				// Links mailed to the old address die with it.
 				await db.query('DELETE FROM email_token WHERE user_id = $1', [change.user_id]);
 				if (!before[0].verified) await markVerified(db, change.user_id);
-				return { email: change.new_email, old: before[0].email, locale: before[0].locale, watermark: after[0]?.sessions_revoked_at ?? null };
+				return { userId: change.user_id, email: change.new_email, old: before[0].email, locale: before[0].locale };
 			});
 		} catch (err) {
 			// The link's holder has the new inbox, so telling them it now has an account reveals nothing.
@@ -125,7 +141,11 @@ export const emailChangeRoutes = new Hono<AuthEnv>()
 		}
 		if (!outcome) throw invalid();
 		await trySendMail(emailChangedMail(outcome.old, outcome.email, outcome.locale));
+		// This browser's own session, if it is this account's (not a render session), stays signed in, as change-password's does.
+		if (current && !current.scope && current.userId.toLowerCase() === outcome.userId.toLowerCase()) {
+			await issueSession(c, outcome.userId, undefined, current.amr);
+		}
 		// The link proved the new inbox: this browser signs in on its own lockout record for it (auth/device.ts).
-		issueDevice(c, outcome.email, outcome.watermark);
+		issueDevice(c, outcome.email, watermark);
 		return c.json({ changed: true as const, email: outcome.email });
 	});

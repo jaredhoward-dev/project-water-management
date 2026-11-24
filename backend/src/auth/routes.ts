@@ -215,13 +215,14 @@ async function inviteNames(inviteHash: Buffer, address: string): Promise<boolean
 }
 
 /**
- * The email for a sign-up with an address that already has an account: a
- * fresh confirmation link if the account was never confirmed, else "you
- * already have an account" with a password-reset link. Null when the
- * address's cooldown or daily cap holds it back (the sign-up answer is the
- * same either way).
+ * The email for a sign-up (or an email change, email-change-routes.ts) to an
+ * address that already has an account: a fresh confirmation link if the
+ * account was never confirmed, else "you already have an account" with a
+ * password-reset link. Null when the address's cooldown or daily cap holds it
+ * back (the answer is the same either way). Run in a withoutUser transaction:
+ * from here on it acts as the address's holder.
  */
-async function takenAddressMail(db: Db, address: string): Promise<Mail | null> {
+export async function takenAddressMail(db: Db, address: string): Promise<Mail | null> {
 	const { rows } = await db.query<{ id: string; email: string; locale: Locale | null }>('SELECT id, email, locale FROM app_auth_account($1)', [address]);
 	const owner = rows[0];
 	if (!owner) return null;

@@ -5,12 +5,20 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LEGAL_VERSION } from '@water-management/engine/legal';
 import { withUser } from '../db/tx.js';
+import { SESSION_COOKIE } from './session.js';
 import { anon, asOwner, lastMailTo, mailCount, signUp, tokenIn } from '../__tests__/helpers.js';
 
 const PASSWORD = 'correct horse';
 const fresh = (name: string) => `${name}-${crypto.randomUUID()}@example.com`;
 
 afterEach(() => vi.unstubAllEnvs());
+
+/** The session cookie a response set, as a Cookie header. */
+function sessionOf(res: { headers: Headers }): string {
+	const m = (res.headers.get('set-cookie') ?? '').match(new RegExp(`${SESSION_COOKIE}=([^;,]+)`));
+	expect(m, 'a session cookie').not.toBeNull();
+	return `${SESSION_COOKIE}=${m![1]}`;
+}
 
 async function login(email: string, password = PASSWORD) {
 	return anon('POST', '/auth/login', { email, password });
@@ -92,10 +100,13 @@ describe('changing the email address', () => {
 		const ok = await anon('POST', '/auth/confirm-email-change', { token });
 		expect(ok.status).toBe(200);
 		expect(ok.body).toEqual({ changed: true, email: next });
-		const me = (await u.call('GET', '/auth/me')).body.user;
+		// Confirming signs the account's sessions out (this one was signed out: no cookie came back with it).
+		expect((await u.call('GET', '/auth/me')).status).toBe(401);
+		const signedIn = await login(next);
+		expect(signedIn.status).toBe(200);
+		const me = (await anon('GET', '/auth/me', undefined, sessionOf(signedIn))).body.user;
 		expect(me.email).toBe(next);
 		expect(me.emailVerified).toBe(true);
-		expect((await login(next)).status).toBe(200);
 		expect((await login(u.email)).status).toBe(401);
 
 		const notice = lastMailTo(u.email);
@@ -106,6 +117,35 @@ describe('changing the email address', () => {
 		const again = await anon('POST', '/auth/confirm-email-change', { token });
 		expect(again.status).toBe(400);
 		expect(again.body.code).toBe('link_invalid');
+	});
+
+	it('signs out every other session; the browser that confirms, signed in to the account, stays signed in', async () => {
+		const u = await signUp('Sessions');
+		const elsewhere = sessionOf(await login(u.email));
+		expect((await anon('GET', '/auth/me', undefined, elsewhere)).status).toBe(200);
+		const next = fresh('sessions');
+		await u.call('POST', '/auth/change-email', { newEmail: next, currentPassword: PASSWORD });
+		const ok = await anon('POST', '/auth/confirm-email-change', { token: tokenIn(lastMailTo(next)) }, u.cookie);
+		expect(ok.status).toBe(200);
+		// Positive control: this browser, with its re-issued cookie, is still signed in (as the new address).
+		const mine = sessionOf(ok);
+		expect((await anon('GET', '/auth/me', undefined, mine)).body.user.email).toBe(next);
+		// The other session, and this browser's old cookie, are signed out.
+		expect((await anon('GET', '/auth/me', undefined, elsewhere)).status).toBe(401);
+		expect((await u.call('GET', '/auth/me')).status).toBe(401);
+	});
+
+	it('confirmed signed out (or as someone else), every session of the account is signed out and none is issued', async () => {
+		const u = await signUp('SessionsAnon');
+		const bystander = await signUp('Bystander');
+		const next = fresh('anon-sessions');
+		await u.call('POST', '/auth/change-email', { newEmail: next, currentPassword: PASSWORD });
+		const ok = await anon('POST', '/auth/confirm-email-change', { token: tokenIn(lastMailTo(next)) }, bystander.cookie);
+		expect(ok.status).toBe(200);
+		expect(ok.headers.get('set-cookie') ?? '').not.toContain(`${SESSION_COOKIE}=`);
+		expect((await u.call('GET', '/auth/me')).status).toBe(401);
+		// The bystander's own session is untouched.
+		expect((await bystander.call('GET', '/auth/me')).status).toBe(200);
 	});
 
 	it('refuses an expired link and leaves the address as it was', async () => {
@@ -161,19 +201,34 @@ describe('changing the email address', () => {
 		expect(mailCount(temp)).toBe(1);
 	});
 
-	it('answers a taken address the same as a free one, sends it nothing, and counts it under the same limits', async () => {
+	it('answers a taken address the same as a free one, tells its holder instead (no link), and counts it under the same limits', async () => {
 		const u = await signUp('Asker');
 		const other = await signUp('Holder');
 		const before = mailCount(other.email);
 		const taken = await u.call('POST', '/auth/change-email', { newEmail: other.email, currentPassword: PASSWORD });
 		expect(taken.status).toBe(202);
 		expect(taken.body).toEqual({ sent: true, email: other.email });
-		expect(mailCount(other.email)).toBe(before);
+		// The holder gets sign-up's "you already have an account" (a password-reset link), never a change link.
+		expect(mailCount(other.email)).toBe(before + 1);
+		const told = lastMailTo(other.email)!;
+		expect(told.kind).toBe('account_exists');
+		expect(told.text).toContain('http://localhost:7777/reset-password?token=');
+		expect(told.text).not.toContain('/verify-email/change');
 		expect((await other.call('GET', '/auth/me')).body.user.email).toBe(other.email);
 		// The cooldown holds after a taken address exactly as after a free one, so a 429 tells nothing.
 		const next = await u.call('POST', '/auth/change-email', { newEmail: fresh('after'), currentPassword: PASSWORD });
 		expect(next.status).toBe(429);
 		expect(next.body.code).toBe('verification_sent_recently');
+	});
+
+	it('the holder’s mail keeps to the holder’s own cooldown: a second try straight after mails nothing more', async () => {
+		const a = await signUp('TryOne');
+		const b = await signUp('TryTwo');
+		const holder = await signUp('Held');
+		expect((await a.call('POST', '/auth/change-email', { newEmail: holder.email, currentPassword: PASSWORD })).status).toBe(202);
+		const after = mailCount(holder.email);
+		expect((await b.call('POST', '/auth/change-email', { newEmail: holder.email, currentPassword: PASSWORD })).status).toBe(202);
+		expect(mailCount(holder.email)).toBe(after);
 	});
 
 	it('refuses the switch if the address was taken after the link went out', async () => {
@@ -200,7 +255,8 @@ describe('changing the email address', () => {
 		expect((await u.call('POST', '/auth/change-email', { newEmail: second, currentPassword: PASSWORD })).status).toBe(202);
 		expect((await anon('POST', '/auth/confirm-email-change', { token: firstToken })).status).toBe(400);
 		expect((await anon('POST', '/auth/confirm-email-change', { token: tokenIn(lastMailTo(second)) })).status).toBe(200);
-		expect((await u.call('GET', '/auth/me')).body.user.email).toBe(second);
+		// Confirming signed out signs every session out: the new address signs in.
+		expect((await anon('GET', '/auth/me', undefined, sessionOf(await login(second)))).body.user.email).toBe(second);
 	});
 
 	it('RLS: a person sees only their own pending change (positive control: their own row)', async () => {
