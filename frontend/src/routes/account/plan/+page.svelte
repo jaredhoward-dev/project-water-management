@@ -63,6 +63,8 @@
 					whose="your account"
 					checkout={(interval) => api.billing.checkout(interval)}
 					portal={() => api.billing.portal()}
+					liveCatchments={() => api.billing.liveCatchments()}
+					keepCatchment={(projectId) => api.billing.keepCatchment(projectId)}
 					{reload}
 					returned={page.url.searchParams.get('checkout')}
 				/>{/if}

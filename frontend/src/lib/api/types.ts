@@ -284,6 +284,11 @@ export interface Project extends ProjectSummary {
 	requireMfa?: boolean;
 	/** Whether its owners' actions need two-step sign-in: its setting or its team's. Absent from an older API. */
 	mfaRequired?: boolean;
+	/**
+	 * When its feeds, alerts and automatic runs were paused because its billing account's plan ended past Free's live
+	 * catchments (341, docs/billing.md § Pausing after a downgrade), ISO; null when not paused. Absent from an older API.
+	 */
+	planPausedAt?: string | null;
 }
 
 /** What a series merge or replace answers: the series, and when the automatic re-run it queued is due (null: none queued). */
@@ -4760,6 +4765,30 @@ export interface AccountPlan {
 
 export type BillingProviderName = 'mock' | 'manual' | 'stripe';
 export type BillingInterval = 'month' | 'year';
+/** One live catchment on the Plan page's picker (345). */
+export interface LiveCatchment {
+	id: string;
+	name: string;
+	/** The owner chose it to stay live (POST …/plan/keep). */
+	chosen: boolean;
+	/** It stays live under 341's order: the chosen one, else the most recently active. */
+	staysLive: boolean;
+	/** When its operations were paused, ISO; null while it runs. */
+	pausedAt: string | null;
+}
+
+/** GET …/plan/live-catchments and POST …/plan/keep (the account's person or a team admin; 404 otherwise; 345). */
+export interface LiveCatchments {
+	/** Free's live catchments (1); null if Free had no limit. */
+	freeLimit: number | null;
+	/** When the account, with its plan ended, went past Free's live catchments (the grace's start); null when within. */
+	overFreeSince: string | null;
+	/** 14 days after overFreeSince: when, with billing enforced, the extra ones pause; null when within. */
+	pausesFrom: string | null;
+	/** The live catchments, the ones that stay live first. */
+	catchments: LiveCatchment[];
+}
+
 /** POST …/plan/checkout and …/plan/portal: where to send the person (the provider's page, or the mock's local one). */
 export interface BillingRedirect {
 	url: string;

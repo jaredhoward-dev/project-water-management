@@ -48,6 +48,7 @@
 	import { afterNavigate, goto } from '$app/navigation';
 	import { trackClose } from '#lib/nav/closeNav.js';
 	import { resolve } from '$app/paths';
+	import { pausedNotice } from '#lib/components/billing/planPause.js';
 	import { page } from '$app/state';
 	import type { SeriesMeta } from '@water-management/engine';
 	import { headlineView } from '#lib/calibration/zones.js';
@@ -1129,8 +1130,16 @@
 <!-- The notices: one slim line under the header, not full-width banners. -->
 {#snippet headerNotices()}
 	{@const behind = !banner && behindRun.length > 0 && tab !== 'runs'}
-	{#if !canEdit || banner || behind || rerunError}
+	{@const paused = pausedNotice(project)}
+	{#if !canEdit || banner || behind || rerunError || paused}
 		<div class="notice-line" data-testid="notice-line">
+			{#if paused}
+				<!-- 341: operations paused past Free's live catchments (billing/planPause.ts); an information note, not an error. -->
+				<span class="note note-info" role="note" data-testid="plan-paused">
+					<span class="note-text">{paused.text}</span>
+					<a href={paused.teamId ? resolve(`teams/${paused.teamId}/plan`) : resolve('account/plan')}>{paused.linkText}</a>
+				</span>
+			{/if}
 			{#if !canEdit}
 				<span class="note readonly-note" role="note">
 					<svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">

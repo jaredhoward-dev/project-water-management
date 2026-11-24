@@ -1169,8 +1169,14 @@ Built but off: nothing is paused unless `BILLING_ENFORCED` is on.
   once), switching the extra catchments' operations off so the account is
   back within Free, or enforcement turned off: the markers go and the grace
   ends. Everything runs again as it was.
-- **Not yet.** The owners' email, the picker on the Plan page and the
-  workspace banner on a paused catchment ([followups.md](./followups.md)).
+- **In the workspace.** A paused catchment's section header says so in its
+  notice line, an information note, not an error (`project.planPausedAt` on
+  `GET /projects/:id`; `billing/planPause.ts`): its feeds, alerts and
+  automatic runs are paused since that date because the plan it is billed to
+  ended, nothing is lost, and a link to the plan (the team's Plan page for a
+  team catchment, else *Plan and usage*). Every member sees it.
+- **Not yet.** The owners' email when the grace starts and when the pause
+  lands ([followups.md](./followups.md)).
 - **Tests.** `backend/src/billing/planPause.db.test.ts`: the grace recorded
   on a lapse and nothing paused within it; nothing paused with enforcement
   off; past it, enforced, two of three catchments paused, the most recent
@@ -1179,6 +1185,41 @@ Built but off: nothing is paused unless `BILLING_ENFORCED` is on.
   (positive control); members read the marker, strangers don't; the owner's
   choice moves the pause and a stranger's is refused; an upgrade resumes
   everything; a never-paid account isn't paused; only the worker sweeps.
+
+### Choosing the catchment to keep
+
+`backend/migrations/345_plan_keep_picker.sql`, the Plan page's picker over
+341's choice.
+
+- **The list.** `GET /account/plan/live-catchments` (your account) and `GET
+  /teams/:id/plan/live-catchments` (a team admin; 404 to anyone else) read
+  `app_billing_live_catchments(account)`: Free's live limit, when the account
+  went past it with its plan ended (`overFreeSince`, the grace's start; null
+  within it or never on a plan) and `pausesFrom` (14 days on), and each live
+  catchment in 341's order with its name, whether the owner chose it, whether
+  it stays live and when it was paused. It names every catchment billed to
+  the account, whoever's project it is: the account pays for them, and its
+  owner can only choose among what they can name.
+- **The choice.** `POST …/plan/keep { projectId }` calls
+  `app_billing_keep_live(account, project)`: false (the route's 404) unless
+  the caller may read the account and the project is one of its live
+  catchments; else 341's `app_billing_keep_catchment`, under the account's
+  lock, and the pause moves at once (past the grace, enforced). It answers
+  the list as it now stands.
+- **On the Plan page.** On Free past its live catchments (`usage.liveCatchments`
+  over its limit, no live subscription), Plan and usage reads the list, and
+  once the plan has ended (`overFreeSince`) shows a *Live catchments* card
+  (`KeepLive.svelte`, words from `plan.ts`): what Free keeps live, what pauses
+  on the others and when (or that it already has; with limits not yet
+  enforced, that it would), that nothing is lost, each catchment's state, and
+  *Keep live* on each other one, asked through the app's confirm dialog. An
+  account that never had a plan sees no card.
+- **Tests.** `backend/src/billing/keepPicker.db.test.ts` (the owner lists and
+  chooses and the pause moves, enforced past the grace; a stranger, a team
+  member and a project that isn't live all get 404; a bad body 400; every
+  member reads `planPausedAt`); `plan.test.ts` and `planPause.test.ts`; e2e
+  `billing-keep-live.spec.ts` (the API answered with `page.route`, since e2e
+  can't reach a pause).
 
 ## Verified email on Free
 

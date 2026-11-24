@@ -82,6 +82,8 @@
 				whose="this team"
 				checkout={(interval, seats) => api.teams.checkout(teamId, interval, seats)}
 				portal={() => api.teams.portal(teamId)}
+				liveCatchments={() => api.teams.liveCatchments(teamId)}
+				keepCatchment={(projectId) => api.teams.keepCatchment(teamId, projectId)}
 				{reload}
 				returned={page.url.searchParams.get('checkout')}
 			>
