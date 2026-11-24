@@ -907,11 +907,13 @@ are #641's checklist. Open items from building it:
       wants SAST: key `assistant_day_usage.day` and the pool's pacing on
       the SAST day in a forward migration, with tests under a skewed TZ.
       Trigger: the operator's answer, before `BILLING_ENFORCED` is on.
-- [ ] **A team admin can't raise the member share.** 336 adds
+- [x] **A team admin can't raise the member share.** 336 adds
       `billing_account.assistant_member_max_pct` (50) but no route or page
-      sets it. Durable fix: a team-admin route and a control on the team's
-      Plan page, with a DB test. Trigger: before `BILLING_ENFORCED` is on for
-      Team accounts.
+      sets it. Fixed in round 8: `app_team_set_assistant_share` (339), `POST
+      /teams/:id/plan/assistant-share` (team admins; 404 to anyone else) and
+      *Assistant share* in the team's Plan card
+      (`billing/assistantShare.db.test.ts`, the e2e case in
+      `billing-seats.spec.ts`).
 - [ ] **The assistant panel has no upgrade button or meter for the dollar
       caps.** The panel maps the four codes (round 7: the server's words,
       when it's back, the box closed until then), but has no *Compare

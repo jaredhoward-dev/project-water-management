@@ -3177,7 +3177,23 @@ The page is two cards, side by side where they fit and stacked on a phone:
   to reload in a minute (`seatChangeNotice`). A refusal shows inline in
   English, as the buttons above do, and the field keeps the count typed
   ([billing.md § Changing a Team's seats](./billing.md#changing-a-teams-seats);
-  `e2e/tests/billing-seats.spec.ts`). While `enforced` is false, a note says nothing is refused:
+  `e2e/tests/billing-seats.spec.ts`). After the subscription lines, a
+  team's card has **Assistant share** (`AssistantShare.svelte`, a sub-heading;
+  on every team plan, and only team admins reach the page): the most of the
+  team's monthly assistant dollars one member may use, a whole-percent
+  `NumberInput` (*Most one member may use (%)*, 1 to 100, starting at the
+  share now, 50 by default) and a *Change share* button, `aria-disabled`
+  while the value is invalid or the current one. The line under it says the
+  share in dollars on Team, *One member may use up to 50% of the team's
+  assistant dollars a month ($22.50 of $45.00).*, and off Team that it
+  applies once the team is on Team (`assistantShare.ts`). The confirm dialog
+  (*Change the assistant share?*, confirm button *Change share*) says *From
+  50% to 80%: one member may use up to $36.00 of the team's $45.00 a month.
+  It applies from each member's next question.*; confirmed, it calls `POST
+  /teams/:id/plan/assistant-share`, says *Saved: one member may now use up
+  to 80%.* in a live region and re-reads the plan
+  ([billing.md § Assistant dollar caps](./billing.md#assistant-dollar-caps)).
+  While `enforced` is false, a note says nothing is refused:
   with no buttons, that plans aren't charged yet; beside them (which can
   charge), only that limits aren't enforced yet (`plan.ts` `shadowNote`). Each
   button asks the API for a URL (`POST …/plan/checkout` or `…/plan/portal`)

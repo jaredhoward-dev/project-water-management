@@ -123,7 +123,7 @@ turns run at once (begins are serialised by 264's deployment lock).
 | --- | --- | --- | --- |
 | Day | A person on a Free account | `ASSISTANT_FREE_USD_PER_DAY` ($0.30) **or** `ASSISTANT_FREE_MESSAGES_PER_DAY` (20) a UTC day, whichever first | `assistant_daily_cap`, until UTC midnight |
 | Month | The account | The plan's `assistant_usd_micros_per_month` (Free $1, Pro $15), or `assistant_usd_micros_per_seat_month` × seats (Team, $15 each, the live subscription's seats, never fewer than 3) | `assistant_monthly_cap`, until the UTC month ends |
-| Member | A person on a per-seat (Team) account | `billing_account.assistant_member_max_pct` of the account's month (50%) | `assistant_member_cap`, until the month ends |
+| Member | A person on a per-seat (Team) account | `billing_account.assistant_member_max_pct` of the account's month (50% unless a team admin changes it, below) | `assistant_member_cap`, until the month ends |
 | Pool | Free and trialing accounts together | `ASSISTANT_FREE_POOL_USD_PER_MONTH` ($30) a UTC month, and on any day at most (pool left at the day's start ÷ days left, today included) × 2 | `assistant_free_pool_spent`, until UTC midnight (or the month's end, when the month's pool is spent) |
 
 Checked in that order, the person's own caps first, so a refusal names the
@@ -160,10 +160,21 @@ shadow mode too. A log-metric alarm was chosen over a scheduled job because
 the assistant's other spend alarms already work that way and it needs no
 new job or table.
 
-**Not built yet** ([followups.md](./followups.md#billing-issue-641)): a
-team admin's control to raise the member share (the column is there, no
-route sets it), the trial's own $2 / $1-a-day caps (no trials yet; a trial
-draws on the pool), the "questions left today" meter, and Haiku on Free.
+**The member share.** A team's admins set it, from 1% to 100% (100: no
+per-member limit), with *Assistant share* in the team's Plan card ([ui.md §
+Plan and usage](./ui.md#plan-and-usage)), which posts `POST
+/teams/:id/plan/assistant-share` ([api.md § Billing](./api.md#billing)).
+The only writer is `app_team_set_assistant_share` (339, SECURITY DEFINER,
+as every `billing_account` write): NULL to anyone but the team's admins (the
+route's 404), and 23514 outside 1–100. `GET /teams/:id/plan` shows it as
+`team.assistantMemberMaxPct`. The share binds from each member's next turn,
+and only on a per-seat plan; on Free or Pro it is kept for when the team
+moves to Team. Like the other caps, nothing refuses past it unless billing is
+enforced.
+
+**Not built yet** ([followups.md](./followups.md#billing-issue-641)): the
+trial's own $2 / $1-a-day caps (no trials yet; a trial draws on the pool),
+the "questions left today" meter, and Haiku on Free.
 
 ## Metrics and the abuse report
 
