@@ -70,8 +70,9 @@
 -- 1. reverse_trial_claim
 -- ---------------------------------------------------------------------------
 CREATE TABLE reverse_trial_claim (
-	-- SHA-256 (hex) of the canonical address; never the address.
-	email_hash text PRIMARY KEY CHECK (email_hash ~ '^[0-9a-f]{64}$'),
+	-- SHA-256 of the canonical address, as its 32 bytes (the repo's rule for any digest of a
+	-- credential-like value, account-tokens.security.db.test.ts); never the address.
+	email_hash bytea PRIMARY KEY CHECK (octet_length(email_hash) = 32),
 	claimed_at timestamptz NOT NULL DEFAULT now()
 );
 COMMENT ON TABLE reverse_trial_claim IS
@@ -136,7 +137,7 @@ CREATE FUNCTION app_reverse_trial_start(p_email_hash text) RETURNS text
 		IF EXISTS (SELECT 1 FROM subscription WHERE billing_account_id = v_account AND status IN ('trialing', 'active', 'past_due')) THEN
 			RETURN 'live';
 		END IF;
-		INSERT INTO reverse_trial_claim (email_hash) VALUES (p_email_hash) ON CONFLICT (email_hash) DO NOTHING;
+		INSERT INTO reverse_trial_claim (email_hash) VALUES (decode(p_email_hash, 'hex')) ON CONFLICT (email_hash) DO NOTHING;
 		IF NOT FOUND THEN
 			RETURN 'claimed';
 		END IF;

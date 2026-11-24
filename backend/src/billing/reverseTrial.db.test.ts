@@ -79,7 +79,7 @@ describe('granting the reverse trial', () => {
 		vi.stubEnv('REVERSE_TRIAL', 'true');
 		const b = await person(`${local()}@example.com`);
 		expect(await liveSub(b)).toBeUndefined();
-		const claims = await asOwner('SELECT 1 FROM reverse_trial_claim WHERE email_hash = ANY($1)', [[reverseTrialHash(a.email), reverseTrialHash(b.email)]]);
+		const claims = await asOwner(`SELECT 1 FROM reverse_trial_claim WHERE encode(email_hash, 'hex') = ANY($1)`, [[reverseTrialHash(a.email), reverseTrialHash(b.email)]]);
 		expect(claims).toEqual([]);
 	});
 
@@ -94,9 +94,9 @@ describe('granting the reverse trial', () => {
 		const log = await asOwner(`SELECT l.action, l.granted_by FROM billing_grant_log l JOIN billing_account a ON a.id = l.billing_account_id WHERE a.user_id = $1`, [p.id]);
 		expect(log).toEqual([{ action: 'grant', granted_by: 'reverse trial' }]);
 		// The claim is the canonical address's hash, never the address.
-		const [claim] = await asOwner('SELECT email_hash FROM reverse_trial_claim WHERE email_hash = $1', [reverseTrialHash(p.email)]);
+		const [claim] = await asOwner(`SELECT encode(email_hash, 'hex') AS email_hash FROM reverse_trial_claim WHERE email_hash = decode($1, 'hex')`, [reverseTrialHash(p.email)]);
 		expect(claim!.email_hash).toMatch(/^[0-9a-f]{64}$/);
-		expect(await asOwner('SELECT 1 FROM reverse_trial_claim WHERE email_hash LIKE $1', [`%${p.email}%`])).toEqual([]);
+		expect(await asOwner(`SELECT 1 FROM reverse_trial_claim WHERE encode(email_hash, 'escape') LIKE $1`, [`%${p.email}%`])).toEqual([]);
 	});
 
 	it('once per canonical email: a Gmail duplicate (dots, +tag, googlemail.com) gets none, nor does the address after deletion', async () => {
@@ -109,7 +109,7 @@ describe('granting the reverse trial', () => {
 		expect(await accountOf(dup)).not.toBeNull(); // the account exists; it is simply Free
 		// Deleting the first account keeps the claim (no address, no account link), so signing up again gets none.
 		await asOwner('DELETE FROM app_user WHERE id = $1', [first.id]);
-		expect(await asOwner('SELECT 1 FROM reverse_trial_claim WHERE email_hash = $1', [reverseTrialHash(first.email)])).toHaveLength(1);
+		expect(await asOwner(`SELECT 1 FROM reverse_trial_claim WHERE email_hash = decode($1, 'hex')`, [reverseTrialHash(first.email)])).toHaveLength(1);
 		const again = await person(`${l}+two@gmail.com`);
 		expect(await liveSub(again)).toBeUndefined();
 	});
@@ -121,7 +121,7 @@ describe('granting the reverse trial', () => {
 		// Called directly as the unverified person: refused, nothing claimed.
 		const r = await withUser(p.id, (db) => db.query('SELECT app_reverse_trial_start($1) AS o', [reverseTrialHash(email)]));
 		expect(r.rows[0].o).toBe('unverified');
-		expect(await asOwner('SELECT 1 FROM reverse_trial_claim WHERE email_hash = $1', [reverseTrialHash(email)])).toEqual([]);
+		expect(await asOwner(`SELECT 1 FROM reverse_trial_claim WHERE email_hash = decode($1, 'hex')`, [reverseTrialHash(email)])).toEqual([]);
 		expect(await liveSub(p)).toBeUndefined();
 		expect((await anon('POST', '/auth/verify-email', { token: tokenIn(lastMailTo(email)) })).status).toBe(200);
 		expect((await liveSub(p))?.status).toBe('trialing');
@@ -134,7 +134,7 @@ describe('granting the reverse trial', () => {
 		on();
 		const r = await withUser(p.id, (db) => db.query('SELECT app_reverse_trial_start($1) AS o', [reverseTrialHash(p.email)]));
 		expect(r.rows[0].o).toBe('live');
-		expect(await asOwner('SELECT 1 FROM reverse_trial_claim WHERE email_hash = $1', [reverseTrialHash(p.email)])).toEqual([]);
+		expect(await asOwner(`SELECT 1 FROM reverse_trial_claim WHERE email_hash = decode($1, 'hex')`, [reverseTrialHash(p.email)])).toEqual([]);
 	});
 
 	it('the tick ends it: back to Free, expired and logged, nothing deleted; only the worker may run the expiry', async () => {

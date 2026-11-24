@@ -93,7 +93,7 @@ describe('email verification', () => {
 			expect(
 				await asOwner('SELECT s.id FROM subscription s JOIN billing_account b ON b.id = s.billing_account_id WHERE b.user_id = $1', [u.id])
 			).toEqual([]);
-			expect(await asOwner('SELECT 1 FROM reverse_trial_claim WHERE email_hash = $1', [reverseTrialHash(u.email)])).toEqual([]);
+			expect(await asOwner(`SELECT 1 FROM reverse_trial_claim WHERE email_hash = decode($1, 'hex')`, [reverseTrialHash(u.email)])).toEqual([]);
 			const failed = lines.map((l) => JSON.parse(l) as Record<string, unknown>).filter((l) => l.event === 'reverse_trial_start_failed');
 			expect(failed).toEqual([{ event: 'reverse_trial_start_failed', userId: u.id, error: 'error', code: '22023' }]);
 			expect(lines.join('\n')).not.toContain(u.email);
