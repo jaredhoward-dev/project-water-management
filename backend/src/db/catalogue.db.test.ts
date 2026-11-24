@@ -27,7 +27,7 @@ const NO_RLS = new Set(['schema_migrations']);
 // written only through app_et_load_marks, app_et_load_mark_write and the et_parcels_changed trigger.
 // assistant_reservation (264): a turn's reserved budget, read and written only by the assistant's definer functions.
 // billing_event (326): the billing webhook's de-duplication, written only by app_billing_apply from a session with no user.
-const OWNER_ONLY = new Set(['assistant_reservation', 'billing_event', 'erasure_log', 'reference_load', 'mfa_reset_cancel', 'mfa_reset_quota', 'allocation_holder_salt', 'run_allocation_holder', 'dam_observation_load_mark', 'et_observation_load_mark']);
+const OWNER_ONLY = new Set(['assistant_reservation', 'reverse_trial_claim', 'billing_event', 'erasure_log', 'reference_load', 'mfa_reset_cancel', 'mfa_reset_quota', 'allocation_holder_salt', 'run_allocation_holder', 'dam_observation_load_mark', 'et_observation_load_mark']);
 /**
  * Views that may run with their owner's rights (security_invoker off), each
  * with why. An owner-rights view reads its tables as the schema owner, so RLS

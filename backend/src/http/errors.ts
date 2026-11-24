@@ -172,7 +172,8 @@ export const ERROR_CODES = [
  *     month; each params.seconds and params.scope); with BILLING_ENFORCED
  *     on, the dollar caps (336_assistant_dollar_caps, assistant/dollarCaps.ts;
  *     429 + Retry-After, params.seconds and params.resetsAt):
- *     assistant_daily_cap (a Free person's UTC day), assistant_monthly_cap
+ *     assistant_daily_cap (a Free person's SAST day), assistant_trial_cap and
+ *     assistant_trial_daily_cap (a reverse trial's $2 in all and $1 a day, 342), assistant_monthly_cap
  *     (the account's month), assistant_member_cap (a Team member's share of
  *     it) and assistant_free_pool_spent (the shared Free pool);
  *     assistant_input_too_large
@@ -208,6 +209,8 @@ export const MACHINE_ERROR_CODES = [
 	'assistant_user_budget_spent',
 	'assistant_total_budget_spent',
 	'assistant_daily_cap',
+	'assistant_trial_cap',
+	'assistant_trial_daily_cap',
 	'assistant_monthly_cap',
 	'assistant_member_cap',
 	'assistant_free_pool_spent',

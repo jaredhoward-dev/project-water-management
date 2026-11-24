@@ -17,6 +17,7 @@ import { issueDevice, trustedDevice } from './device.js';
 import { ACCOUNT_MAIL_CAP, ACCOUNT_MAIL_WINDOW, newToken, parseToken, RESEND_COOLDOWN, TOKEN_TTL } from './tokens.js';
 import { readJson } from '../http/body.js';
 import { logLoginFailed, type LoginFailureRoute } from './loginFailed.js';
+import { startReverseTrial } from '../billing/reverseTrial.js';
 
 const email = z.string().trim().toLowerCase().email().max(254);
 const token = z.string().max(200);
@@ -88,6 +89,9 @@ export async function markVerified(db: Db, userId: string): Promise<void> {
 		if (!isPlanLimit(err)) throw err;
 		await db.query('ROLLBACK TO SAVEPOINT accept_invites');
 	}
+	// The first verification is what starts the reverse trial (342, billing/reverseTrial.ts): only with
+	// REVERSE_TRIAL and BILLING_ENFORCED on, once per canonical email; off, it reads and writes nothing.
+	await startReverseTrial(db, userId);
 }
 
 /** 334's seat guard refusing (SQLSTATE 23514, constraint plan_limit). */

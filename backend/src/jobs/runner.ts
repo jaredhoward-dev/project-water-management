@@ -248,6 +248,8 @@ export interface TickResult {
 	billingEventsPurged: number;
 	/** Staff grants past their end moved to expired, the account back to Free (330_staff_grant). */
 	staffGrantsExpired: number;
+	/** Reverse trials past their end moved to expired, the account back to Free (342_reverse_trial). */
+	reverseTrialsExpired: number;
 	claimed: number;
 	done: number;
 	failed: number;
@@ -327,6 +329,7 @@ export async function runTick(o: TickOptions = {}): Promise<TickResult> {
 		assistantPurged: 0,
 		billingEventsPurged: 0,
 		staffGrantsExpired: 0,
+		reverseTrialsExpired: 0,
 		claimed: 0,
 		done: 0,
 		failed: 0,
@@ -360,6 +363,8 @@ export async function runTick(o: TickOptions = {}): Promise<TickResult> {
 	);
 	// A staff grant past its end: expired (never deleted), the account back to Free.
 	result.staffGrantsExpired = await withoutUser(async (db) => (await db.query<{ n: number }>('SELECT app_staff_grant_expire() AS n')).rows[0]?.n ?? 0);
+	// A reverse trial past its end (342): expired (never deleted), the account back to Free.
+	result.reverseTrialsExpired = await withoutUser(async (db) => (await db.query<{ n: number }>('SELECT app_reverse_trial_expire() AS n')).rows[0]?.n ?? 0);
 	const noticesPurged = await purgePackNotices();
 	const erratumPurged = await purgeErratumNotices();
 	if (o.feeds !== false) {

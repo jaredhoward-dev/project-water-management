@@ -19,7 +19,7 @@ import { ApiError } from '../http/errors.js';
 import { logEvent } from '../logging/logEvent.js';
 import { safeError } from '../logging/safeError.js';
 import type { AssistantConfig } from './config.js';
-import { DOLLAR_REFUSAL, poolAlarmShare, type DollarOutcome } from './dollarCaps.js';
+import { DOLLAR_REFUSAL, isDollarOutcome, poolAlarmShare, type DollarOutcome } from './dollarCaps.js';
 
 /** When this UTC month's budget starts again: the first instant of next month, ISO. */
 export function monthResetsAt(now = new Date()): string {
@@ -168,14 +168,14 @@ export async function beginTurn(
 			seconds: r.wait_seconds
 		});
 	}
-	if (r.outcome === 'day' || r.outcome === 'month' || r.outcome === 'member' || r.outcome === 'pool') {
+	if (isDollarOutcome(r.outcome)) {
 		const refusal = DOLLAR_REFUSAL[r.outcome];
 		const resetsAt = new Date(Date.now() + r.wait_seconds * 1000).toISOString();
 		c.header('Retry-After', String(r.wait_seconds));
 		// The plan whose allowance refused (`params.plan`), so the panel can offer Compare plans on Free's day and month
 		// only: the day refuses a Free person only; the month is the project's account's, read as app_account_plan
 		// answers the caller (null, so left out, when they may not read that account). The member share and the pool
-		// never upsell, so they carry none.
+		// never upsell, so they carry none; nor do a reverse trial's caps (342): the person is on Pro already.
 		const plan = r.outcome === 'day' ? 'free' : r.outcome === 'month' ? await accountPlanCode(db, projectId) : null;
 		throw ApiError.coded(429, refusal.code, refusal.message(resetsAt), { seconds: r.wait_seconds, resetsAt, ...(plan ? { plan } : {}) });
 	}
