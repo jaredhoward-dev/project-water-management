@@ -90,7 +90,14 @@ export const ERROR_CODES = [
 	'mfa_email_wait',
 	'mfa_email_failed',
 	// A comment through a share link (166_public_participation, share/routes.ts): 10 an hour per account.
-	'comment_throttled'
+	'comment_throttled',
+	// 402 (issue #641 Enforcement design, 334_team_seats): with BILLING_ENFORCED on, a change would give a Team account's
+	// team more editors than its paid seats (adding or promoting a team member or admin, a project editor or owner,
+	// accepting an invite, moving a project into the team). params { limit: paid seats, used: the seats in use with the
+	// change, plan }. Only seat roles meet it, which farmers never hold, but accepting an invite on the translated
+	// Invitations page (/account/invitations) words it from this code; the team and project member pages (workspace)
+	// show the English text.
+	'plan_limit'
 ] as const;
 
 /**
@@ -175,14 +182,6 @@ export const ERROR_CODES = [
  *     account that never checked out), billing_grant_seats (409, POST
  *     /teams/:id/plan/seats on a staff grant, whose seats change by a new
  *     grant; Phase 5).
- *   plan_limit (402, issue #641 Enforcement design; 334_team_seats): with
- *     BILLING_ENFORCED on, a change would give a Team account's team more
- *     editors than its paid seats (adding or promoting a team member or
- *     admin, a project editor or owner, accepting an invite, moving a
- *     project into the team). `params` is { limit: paid seats, used: the
- *     seats in use with the change, plan }. Only seat roles meet it, which
- *     farmers never hold; the member and invitation pages show it in
- *     English (docs/api.md § Errors).
  */
 export const MACHINE_ERROR_CODES = [
 	'render_token_refused',
@@ -211,8 +210,7 @@ export const MACHINE_ERROR_CODES = [
 	'billing_unavailable',
 	'billing_provider_error',
 	'billing_no_customer',
-	'billing_grant_seats',
-	'plan_limit'
+	'billing_grant_seats'
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number] | (typeof MACHINE_ERROR_CODES)[number];
 

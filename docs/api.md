@@ -5925,8 +5925,9 @@ paid seats (`PATCH /teams/:id/members/:userId`, `PATCH
 /projects/:id/members/:userId`, `POST /me/invites/:id/accept`, moving a project
 into a team) answers **`402 { error, code: "plan_limit", params: { limit,
 used, plan } }`**: `limit` the paid seats, `used` the seats the change would
-need. Confirming an email address never answers it: the invite stays
-pending.
+need. `plan_limit` is in `ERROR_CODES`, since the Invitations page (a
+translated page) words it from the code ([§ Errors](#errors)). Confirming
+an email address never answers it: the invite stays pending.
 Each answer comes from a `323_billing` definer function run as the caller.
 
 | Method | Path | Body | Response | Who |

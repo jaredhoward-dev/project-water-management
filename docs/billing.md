@@ -672,13 +672,20 @@ invites"; Enforcement design, "Editors per catchment / Team seats").
   page then answers `402 plan_limit` until a team admin adds a seat
   ([§ Changing a Team's seats](#changing-a-teams-seats)) or makes someone a
   viewer.
-- **Who sees it.** Only seat roles meet it, which a farmer never holds, so
-  `plan_limit` is a workspace (English) code (`MACHINE_ERROR_CODES`).
+- **Who sees it.** Only seat roles meet it, which a farmer never holds. The
+  team and project member pages (workspace) show the server's English text;
+  the Invitations page (`/account/invitations`), a translated page, words it
+  from its code, so `plan_limit` is in `ERROR_CODES` with words in
+  `frontend/src/lib/i18n/apiError.ts` (English and Afrikaans).
 - **Tests.** `billing/teamSeats.db.test.ts` (the count and its exclusions,
   the app role refused the functions, off by default, refused on and passed
   after a seat is added, existing seat holders, a project moving in, a Free
-  team, the invite left pending, two parallel grants of the last seat) and
-  `http/errors.test.ts` (402 with only the numbers).
+  team, the invite left pending, any other refusal on confirming rethrown,
+  a project billed to the team's account with no `team_id`, two parallel
+  grants of the last seat), `auth/email-routes.test.ts` (`isPlanLimit`
+  matches only the seat guard), `db/tx.db.test.ts` (the flag set only for
+  `BILLING_ENFORCED=true`) and `http/errors.test.ts` (402 with only the
+  numbers).
 
 ### Trials (decided 2026-11-23)
 
