@@ -18,6 +18,7 @@
 	import { onMount, untrack } from 'svelte';
 	import { replaceState } from '$app/navigation';
 	import { page } from '$app/state';
+	import { PUBLIC_API_URL } from '$app/env/public';
 	import { api } from '#lib/api/index.js';
 	import NumberInput from '#lib/components/common/NumberInput.svelte';
 	import { provideInvalidFields } from '#lib/components/common/invalidFields.svelte.js';
@@ -25,6 +26,7 @@
 	import {
 		CONFIRM_DELAYS_MS,
 		billingActions,
+		billingRedirect,
 		checkoutNotice,
 		editorsHint,
 		monthName,
@@ -149,7 +151,11 @@
 		actionError = null;
 		try {
 			const { url } = await start();
-			window.location.assign(url);
+			// Only the provider's page leaves the app: Stripe's checkout or billing host on https, or the
+			// mock's page on our own API (plan.ts billingRedirect). Anything else is refused with the page's error.
+			const target = billingRedirect(url, PUBLIC_API_URL, window.location.href);
+			if (!target) throw new Error('the billing provider answered with an address this page won’t open');
+			window.location.assign(target);
 		} catch (e) {
 			actionError = `Couldn’t open billing: ${e instanceof Error ? e.message : String(e)}`;
 			busy = false;
@@ -314,6 +320,14 @@
 		flex-wrap: wrap;
 		gap: 0.5rem;
 		margin-top: 0.85rem;
+	}
+	/* A priced label ("Upgrade to Team, monthly (R 3 497.00 a month for 5 editor seats)") is wider than a
+	   phone: app.css keeps .btn on one line, so here the words wrap inside the button and it never
+	   outgrows the card (no sideways scroll at 360 px). */
+	.billing-actions .btn {
+		white-space: normal;
+		max-width: 100%;
+		text-align: start;
 	}
 	.seats {
 		margin-top: 0.85rem;

@@ -100,9 +100,16 @@ test('a team buys Team with 5 editor seats: the field prices the buttons, the mo
 	await expect(plan.locator('[data-action="upgrade-month"]')).toHaveAccessibleName('Upgrade to Team, monthly');
 	await expect(plan.locator('[data-action="upgrade-year"]')).toHaveAccessibleName('Upgrade to Team, yearly');
 	await expectNoViolations(page);
-	await expect(plan.locator('[data-action="upgrade-month"]')).toHaveAttribute('aria-disabled', 'true');
-	await plan.locator('[data-action="upgrade-month"]').click();
+	// aria-disabled keeps the button focusable (ui-playbook § 4), so a keyboard user can still press it: Enter
+	// must do nothing. (Playwright's click() refuses an aria-disabled element as not enabled, so it can't press it.)
+	const month = plan.locator('[data-action="upgrade-month"]');
+	await expect(month).toHaveAttribute('aria-disabled', 'true');
+	await month.focus();
+	await expect(month).toBeFocused();
+	await page.keyboard.press('Enter');
 	await expect(page).toHaveURL(new RegExp(`/teams/${team.id}/plan$`));
+	await expect(month).toBeFocused();
+	await expect(plan.locator('[data-billing-error]')).toHaveCount(0);
 
 	// Cleared, the field stays empty with its message (no default put back); an exponent or a decimal comma is refused, not read.
 	await seats.fill('');

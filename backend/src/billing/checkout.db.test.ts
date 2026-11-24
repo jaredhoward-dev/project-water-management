@@ -78,6 +78,19 @@ describe('who may start checkout and the portal', () => {
 		expect((await farmer.call('POST', '/account/plan/checkout', { plan: 'pro', interval: 'month' })).status).toBe(200);
 		expect((await stranger.call('POST', '/account/plan/checkout', { plan: 'team', interval: 'month' })).status).toBe(400);
 	});
+
+	it('the portal takes no fields: a body sent is checked (400), none or an empty one opens it (positive control)', async () => {
+		expect((await stranger.call('POST', '/account/plan/portal')).status).toBe(200);
+		expect((await stranger.call('POST', '/account/plan/portal', {})).status).toBe(200);
+		expect((await stranger.call('POST', '/account/plan/portal', { plan: 'pro' })).status).toBe(400);
+		const nul = await app.request('/account/plan/portal', {
+			method: 'POST',
+			headers: { cookie: stranger.cookie, origin: 'http://localhost:7777', 'content-type': 'application/json' },
+			body: JSON.stringify({ note: 'a\u0000b' })
+		});
+		expect(nul.status).toBe(400);
+		expect(await nul.json()).toMatchObject({ code: 'body_refused' });
+	});
 });
 
 describe('the mock checkout, end to end', () => {

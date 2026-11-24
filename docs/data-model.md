@@ -3797,7 +3797,7 @@ page holds the conversation and sends it with each turn.
   turn still running keeps counting with its `user_id` cleared, until it is
   charged or expires.
 
-### Billing (323_billing.sql)
+### Billing (323_billing.sql, 331_billing_rls_order.sql)
 
 Plans, who each project bills to, and monthly usage, in **shadow mode**
 (issue #641 Phase 1): everything is counted, nothing is refused, and no
@@ -3807,7 +3807,7 @@ never to a farmer, contributor or viewer.
 
 | Table | Holds |
 | --- | --- |
-| `plan` | The tiers, `code` (`free`, `pro`, `team`) primary key, `name`, `price_monthly_minor`, `price_annual_minor` (ZAR cents), `currency` (`ZAR`), `limits`, `features`, `trial_days`, `active`. Written only by migrations; anyone reads it |
+| `plan` | The tiers, `code` (`free`, `pro`, `team`) primary key, `name`, `price_monthly_minor`, `price_annual_minor` (ZAR cents), `currency` (`ZAR`), `limits`, `features`, `trial_days`, `active`. Written only by migrations; a signed-in person reads it (331; the public pricing route through `app_billing_plans()`) |
 | `billing_account` | A person's or a team's: `id`, `kind` (`user`, `team`), `user_id` (cascade) or `team_id` (cascade), exactly one set and each unique (which covers both keys), `projects_created` (every project it has ever billed, Free's lifetime count), `external_customer_ref` (328: the payment provider's customer, Stripe's `cus_…`, unique, NULL until the first Stripe checkout; written only by `app_billing_set_customer_ref`), `created_at` |
 | `subscription` | An account's plan over time: `billing_account_id` (cascade), `plan_code`, `status` (`trialing`, `active`, `past_due`, `canceled`, `expired`), `seats`, `period_start`, `period_end`, `trial_end`, `cancel_at_period_end`, `provider` (`mock`, `manual`, `stripe`), `external_ref` (unique per provider), `created_at`, `billing_interval` (332: `month` or `year`, null before 332, for the staff grant and when the provider's isn't a plain month or year). A partial unique index, `subscription_one_live_per_account`, allows one live (trialing, active, past_due) row per account; canceled and expired rows stay as history, so an account can take the same plan again. **No live subscription means Free** |
 | `usage_counter` | Monthly counts per account: (`billing_account_id`, `kind` (`reports`, `packs_issued`), `month`) primary key, `qty`. `month` is the first day of the month in Africa/Johannesburg (`app_billing_month()`) |
@@ -3828,8 +3828,13 @@ never to a farmer, contributor or viewer.
   and on a move into or out of a team by `project_billing_account_set`
   (SECURITY DEFINER; it makes the account if missing and counts the project
   on it). `water_app` can't write the column itself
-  (`project_billing_account_guard`, `42501`).
-- `water_app` has SELECT only on all four tables. RLS: `plan` for everyone;
+  (`project_billing_account_guard`, `42501`). Before it, as `water_app`,
+  `project_billing_account_admit` (331, caller's rights, `42501`) refuses a
+  new project whose maker isn't the signed-in person, or one landing in a
+  team they have no role in, so the definer trigger never makes an account
+  for a row RLS would refuse (and RLS's refusal stays a 403, not the
+  account's foreign key).
+- `water_app` has SELECT only on all four tables. RLS: `plan` for any signed-in person (331; not an API key's session);
   `billing_account` for its person and its team's admins;
   `subscription` and `usage_counter` through `app_billing_account_readable`
   (the same rule). Writes go through SECURITY DEFINER functions only.
