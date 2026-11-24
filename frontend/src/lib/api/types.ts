@@ -4730,8 +4730,12 @@ export interface AccountPlan {
 	plan: Plan;
 	/** No live subscription: the account is on Free. */
 	subscription: Subscription | null;
-	/** A team account's editor seats in use (332): the distinct people with editor or owner on its projects; null on a person's account. */
-	team: { editorCount: number } | null;
+	/**
+	 * A team account's editor seats in use (332): the distinct people with editor or owner on its projects; and the
+	 * share (1–100 %) of its monthly assistant dollars one member may use on a per-seat plan (339; default 50, a team
+	 * admin sets it with POST …/plan/assistant-share). null on a person's account.
+	 */
+	team: { editorCount: number; assistantMemberMaxPct: number } | null;
 	usage: {
 		/** "YYYY-MM", the month in Africa/Johannesburg. */
 		month: string;

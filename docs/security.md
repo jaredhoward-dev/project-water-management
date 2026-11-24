@@ -1958,8 +1958,10 @@ In short:
   with no user and refuses (`42501`) inside a user's or an API key's
   transaction; `billing_event`, its de-duplication, is owner-only
   (`apply.db.test.ts`). The billing write routes follow the same rule: a
-  team's `POST /teams/:id/plan/checkout`, `/portal` and `/seats` answer
-  `404` to anyone but a team admin before any provider call, and seat
+  team's `POST /teams/:id/plan/checkout`, `/portal`, `/seats` and
+  `/assistant-share` answer `404` to anyone but a team admin before any
+  provider call or body read (`app_team_set_assistant_share`, 339, answers
+  NULL to anyone else; `assistantShare.db.test.ts`), and seat
   changes never write `subscription.seats` (the webhook brings them back
   through `app_billing_apply`; `seats.db.test.ts`, 333's
   `app_billing_live_subscription_ref` answers only the account's person or

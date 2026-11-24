@@ -1184,6 +1184,7 @@ const inTeam = (c: TeamCtx) => c.teamProjects;
 
 const OTHER_WRITE_ROUTES: OtherEntry[] = [
 	// --- teams: who reaches the team's projects ------------------------------------------
+	{ route: `POST ${T}/plan/assistant-share`, exempt: 'a Team member’s share of the assistant dollars (issue #641, 339): billing settings, not project data; teams keep no history' },
 	{ route: `POST ${T}/plan/seats`, exempt: 'a Team’s editor seats (issue #641 Phase 5): billing, not project data; the seats land through the provider’s webhook (app_billing_apply), and billing keeps its own event log' },
 	{ route: `POST ${T}/members`, exempt: 'an invite (issue #136) grants nothing and teams keep no history; accepting it records team_member.added (below)' },
 	{

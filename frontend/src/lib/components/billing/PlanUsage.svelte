@@ -50,7 +50,8 @@
 		portal,
 		reload,
 		returned = null,
-		seatChange
+		seatChange,
+		assistantShare
 	}: {
 		plan: AccountPlan;
 		whose: 'your account' | 'this team';
@@ -64,6 +65,8 @@
 		returned?: string | null;
 		/** Shown under the subscription's seats line (a team's Change seats, SeatChange.svelte; the team plan route passes it). */
 		seatChange?: Snippet;
+		/** Shown after the subscription lines (a team's Assistant share, AssistantShare.svelte; the team plan route passes it). */
+		assistantShare?: Snippet;
 	} = $props();
 
 	const actions = $derived(billingActions(plan));
@@ -194,6 +197,7 @@
 		{:else}
 			<p class="muted sub" data-subscription="none">No subscription: {whose} is on {plan.plan.name}.</p>
 		{/if}
+		{@render assistantShare?.()}
 		{#if note}
 			<p class="note" data-shadow>{note}</p>
 		{/if}

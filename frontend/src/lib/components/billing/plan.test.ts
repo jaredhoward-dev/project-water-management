@@ -145,7 +145,7 @@ describe('subscriptionTotalLine', () => {
 		limits: { seats_included: 3 },
 		features: { extra_seat_monthly_minor: 49_900, extra_seat_annual_minor: 499_000 }
 	};
-	const team = (s: Partial<Subscription> | null) => plan({ account: { id: 't1', kind: 'team' }, plan: teamPlan, subscription: s === null ? null : sub(s), team: { editorCount: 5 } });
+	const team = (s: Partial<Subscription> | null) => plan({ account: { id: 't1', kind: 'team' }, plan: teamPlan, subscription: s === null ? null : sub(s), team: { editorCount: 5, assistantMemberMaxPct: 50 } });
 	const pro = (s: Partial<Subscription>) =>
 		plan({ plan: { ...plan().plan, code: 'pro', name: 'Pro', priceMonthlyMinor: 89_900, priceAnnualMinor: 899_000, limits: { seats_included: 1 } }, subscription: sub(s) });
 

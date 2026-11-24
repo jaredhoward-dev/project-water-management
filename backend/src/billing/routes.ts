@@ -203,6 +203,35 @@ async function changeSeats(c: Context<AuthEnv>, teamId: string) {
 	return c.json({ seats: body.seats });
 }
 
+const assistantShareBody = z.object({ pct: z.number().int().min(1).max(100) }).strict();
+
+/**
+ * POST /teams/:id/plan/assistant-share (docs/billing.md § Assistant dollar caps):
+ * the share of the team's monthly assistant dollars one member may use
+ * (billing_account.assistant_member_max_pct, 336; default 50%). For the team's
+ * admins only, through app_team_set_assistant_share (339), which answers NULL to
+ * anyone else: 404, so the route doesn't say the team exists. 400 for a body
+ * other than `{ pct: <whole number 1…100> }`. Answers `{ pct }`, the share now
+ * stored; it binds from the member's next turn (refused past only when billing
+ * is enforced).
+ */
+async function setAssistantShare(c: Context<AuthEnv>, teamId: string) {
+	if (!UUID.test(teamId)) throw new ApiError(404, 'not found');
+	// Access first, so a stranger meets 404 whatever the body.
+	const isAdmin = await withUser(c.get('userId'), async (db) => (await teamAccountId(db, teamId)) !== null);
+	if (!isAdmin) throw new ApiError(404, 'not found');
+	const body = assistantShareBody.parse(await readJson(c));
+	const pct = await withUser(c.get('userId'), async (db) => {
+		const { rows } = await db.query<{ pct: number | null }>('SELECT app_team_set_assistant_share($1, $2) AS pct', [teamId, body.pct]);
+		return rows[0]?.pct ?? null;
+	});
+	// No longer an admin between the two transactions.
+	if (pct === null) throw new ApiError(404, 'not found');
+	logEvent('info', { event: 'billing_assistant_share', pct });
+	c.header('Cache-Control', 'no-store');
+	return c.json({ pct });
+}
+
 /** GET /account/plan: the caller's own billing account, created on first ask (app_my_billing_account); POST …/checkout and …/portal for it. */
 export const accountPlanRoutes = new Hono<AuthEnv>()
 	.post('/plan/checkout', (c) => checkout(c, myAccountId, '/account/plan'))
@@ -220,11 +249,12 @@ const teamResolver = (id: string) => {
 	return (db: Db) => teamAccountId(db, id);
 };
 
-/** GET /teams/:id/plan: the team's billing account, for its admins only; POST …/checkout, …/portal and …/seats for it. */
+/** GET /teams/:id/plan: the team's billing account, for its admins only; POST …/checkout, …/portal, …/seats and …/assistant-share for it. */
 export const teamPlanRoutes = new Hono<AuthEnv>()
 	.post('/:id/plan/checkout', async (c) => checkout(c, teamResolver(c.req.param('id')), `/teams/${c.req.param('id')}/plan`))
 	.post('/:id/plan/portal', async (c) => portal(c, teamResolver(c.req.param('id')), `/teams/${c.req.param('id')}/plan`))
 	.post('/:id/plan/seats', async (c) => changeSeats(c, c.req.param('id')))
+	.post('/:id/plan/assistant-share', async (c) => setAssistantShare(c, c.req.param('id')))
 	.get('/:id/plan', async (c) => {
 		const id = c.req.param('id');
 		if (!UUID.test(id)) throw new ApiError(404, 'not found');

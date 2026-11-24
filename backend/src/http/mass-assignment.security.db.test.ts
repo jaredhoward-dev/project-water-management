@@ -426,6 +426,11 @@ const RECIPE: Record<string, () => Promise<Req> | Req> = {
 		await ok(ctx.owner.call('GET', `/teams/${ctx.teamId}/plan`));
 		return { params: { id: ctx.teamId }, body: { seats: 5 } };
 	},
+	// A team member's share of the assistant dollars (339): the owner is the sweep team's admin.
+	'POST /teams/:id/plan/assistant-share': async () => {
+		await ok(ctx.owner.call('GET', `/teams/${ctx.teamId}/plan`));
+		return { params: { id: ctx.teamId }, body: { pct: 60 } };
+	},
 	// The mock's pages: a token for the owner's account (signed with the dev key the sweep stubs), and a choice that
 	// writes nothing (cancels; the portal's cancel with no subscription). Their bodies are never read.
 	'POST /billing/mock/checkout': async () => ({ query: { t: await mockToken('checkout'), outcome: 'cancels' } }),

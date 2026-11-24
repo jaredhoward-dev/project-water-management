@@ -12,6 +12,7 @@
 	import LoadState from '#lib/components/common/LoadState.svelte';
 	import PlanUsage from '#lib/components/billing/PlanUsage.svelte';
 	import SeatChange from '#lib/components/billing/SeatChange.svelte';
+	import AssistantShare from '#lib/components/billing/AssistantShare.svelte';
 
 	const teamId = $derived(page.params.id ?? '');
 
@@ -86,6 +87,9 @@
 			>
 				{#snippet seatChange()}
 					{#if plan}<SeatChange {plan} change={(n) => api.teams.changeSeats(teamId, n)} {reload} />{/if}
+				{/snippet}
+				{#snippet assistantShare()}
+					{#if plan}<AssistantShare {plan} change={(n) => api.teams.setAssistantShare(teamId, n)} {reload} />{/if}
 				{/snippet}
 			</PlanUsage>
 		{/if}
