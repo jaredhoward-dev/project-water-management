@@ -11,7 +11,10 @@
 //  - a project moving into a full team brings its editors and is refused; a Free team (no subscription) has no cap;
 //  - two parallel grants of the last seat: exactly one wins;
 //  - confirming an address whose invite would pass the seats still confirms it, the invite stays pending, and
-//    accepting it on the invitations page answers 402 plan_limit.
+//    accepting it on the invitations page answers 402 plan_limit; any other refusal there (role_conflict) is rethrown,
+//    so nothing is confirmed or joined;
+//  - a project billed to the team's account with no team_id (only the schema owner can make one) counts toward the
+//    team's seats and is refused past them.
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
@@ -212,6 +215,52 @@ describe('the seat guard (334)', () => {
 		expect(r.status).toBe(402);
 		expect(r.body).toMatchObject({ code: 'plan_limit' });
 		await asOwner('DELETE FROM invite WHERE id = $1', [inviteId]);
+	});
+
+	it('confirming an address rethrows any refusal but plan_limit (role_conflict here): nothing is confirmed or joined', async () => {
+		// Billing off, so the seat guard can't be what refuses: 163's conflict guard does (also 23514, another
+		// constraint), since the invited person is in an applying party on one of the team's projects.
+		const invited = await signUp('SeatConflict', { verified: false });
+		await projectRole(projectA, invited, 'contributor');
+		await asOwner(`UPDATE project_member SET party = 'Seat party' WHERE project_id = $1 AND user_id = $2`, [projectA, invited.id]);
+		const inviteId = (
+			(await asOwner(
+				`INSERT INTO invite (email, team_id, team_role, invited_by, token_hash, expires_at)
+				 VALUES ($1, $2, 'member', $3, decode($4, 'hex'), now() + interval '7 days') RETURNING id`,
+				[invited.email, teamId, admin.id, randomUUID().replaceAll('-', '').repeat(2)]
+			)) as { id: string }[]
+		)[0]!.id;
+		await expect(withUser(invited.id, (db) => markVerified(db, invited.id))).rejects.toMatchObject({ code: '23514', constraint: 'role_conflict' });
+		const [row] = (await asOwner(
+			`SELECT u.email_verified_at IS NOT NULL AS verified,
+				EXISTS (SELECT 1 FROM team_member WHERE team_id = $2 AND user_id = u.id) AS joined,
+				EXISTS (SELECT 1 FROM invite WHERE id = $3) AS pending
+			 FROM app_user u WHERE u.id = $1`,
+			[invited.id, teamId, inviteId]
+		)) as { verified: boolean; joined: boolean; pending: boolean }[];
+		expect(row).toEqual({ verified: false, joined: false, pending: true });
+		await asOwner('DELETE FROM invite WHERE id = $1', [inviteId]);
+		await asOwner('DELETE FROM project_member WHERE project_id = $1 AND user_id = $2', [projectA, invited.id]);
+	});
+
+	it('a project billed to the team’s account with no team_id still counts toward its seats and is refused past them', async () => {
+		// Only the schema owner can set this (323's guard refuses water_app); the seat count and guard follow the
+		// billing account as well as team_id (334), so it is covered rather than a way round the cap.
+		const loose = ((await asOwner('INSERT INTO project (name, created_by) VALUES ($1, $2) RETURNING id', ['Seats loose', admin.id])) as { id: string }[])[0]!.id;
+		await asOwner('UPDATE project SET billing_account_id = $2 WHERE id = $1', [loose, account]);
+		const [p] = (await asOwner('SELECT team_id, billing_account_id FROM project WHERE id = $1', [loose])) as { team_id: string | null; billing_account_id: string }[];
+		expect(p).toEqual({ team_id: null, billing_account_id: account });
+		const before = await inUse();
+		await setSeats(before);
+		const newcomer = await signUp('SeatLoose');
+		expect(await refusal(enforced(`INSERT INTO project_member (project_id, user_id, role) VALUES ($1, $2, 'editor')`, [loose, newcomer.id]))).toBe('23514/plan_limit');
+		expect(await inUse()).toBe(before);
+		// Positive control: one more paid seat and the same editor counts on the team.
+		await setSeats(before + 1);
+		await enforced(`INSERT INTO project_member (project_id, user_id, role) VALUES ($1, $2, 'editor')`, [loose, newcomer.id]);
+		expect(await inUse()).toBe(before + 1);
+		await asOwner('DELETE FROM project WHERE id = $1', [loose]);
+		expect(await inUse()).toBe(before);
 	});
 
 	it('two parallel grants of the last seat: exactly one wins', async () => {
