@@ -13944,6 +13944,20 @@ with read-only tools over the project's data. It never changes anything.
   streams) inside its border; under it one quiet line with the share of the
   project's monthly budget left, when it starts again, and **New
   conversation** once there is one; then the disclaimer the server sends.
+  For a person on a capped account (Free, or a reverse trial) with billing
+  enforced, a line of its own above the budget says how many questions are
+  left today (`data-testid="assistant-day-meter"`, `chat.svelte.ts`
+  `dayMeterText`, from the status's `day`, api.md § Assistant): what's left
+  of the SAST day (and of the trial's whole allowance, when that's less) ÷
+  the account's median question, "About 6 questions left today, at what your
+  questions usually cost (an estimate)." ("… today on your trial" on a
+  trial). Free never shows more than its messages left, which is a count, so
+  it says "Up to 3 questions left today."; with no median yet Free says its
+  messages left and a trial the share of its day left; "No questions left
+  today." once either is spent. The status is read again after each turn,
+  so the line counts down (a failed read keeps the line). Paid plans and
+  billing off have no line. `AssistantPanel.test.ts`,
+  `chat.svelte.test.ts`, `assistant.spec.ts`.
   Its first paragraph ("The assistant's answers are advice, not model
   output, and they can be wrong.") is the line of a `common/Fold.svelte`,
   always in view; the reports' `DISCLAIMER` paragraphs fold under it
@@ -14029,6 +14043,7 @@ with read-only tools over the project's data. It never changes anything.
   monthly caps, docs/api.md § Assistant) and when it starts again, and the
   box takes nothing. The share left under the box is of the cap nearest its
   end. With billing enforced, a dollar cap (`assistant_daily_cap`,
+  `assistant_trial_cap`, `assistant_trial_daily_cap`,
   `assistant_monthly_cap`, `assistant_member_cap`,
   `assistant_free_pool_spent`; billing.md § Assistant dollar caps) shows the
   server's words and "Back … your time." from `params.resetsAt`, and the box
@@ -14037,7 +14052,8 @@ with read-only tools over the project's data. It never changes anything.
   ends with a **Compare plans** link to the Plan page (`/account/plan`,
   `data-testid="assistant-compare-plans"`), the month's after "Pro includes
   about 15 times as much." (Free $1, Pro $15 a month, 323's plan limits).
-  The Free pool never upsells (it isn't the person's doing), nor does a paid
+  The Free pool never upsells (it isn't the person's doing), nor does a
+  reverse trial's cap (the trial is Pro already), a paid
   account's month or a Team member's share, whose words say a team admin
   can raise it; an editor who can't read the owner's account gets no plan,
   so no link (`chat.svelte.ts` `capOffersPlans`). The issue's *OK* button is

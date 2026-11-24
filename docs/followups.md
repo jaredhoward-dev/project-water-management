@@ -931,7 +931,7 @@ are #641's checklist. Open items from building it:
       *Assistant share* in the team's Plan card
       (`billing/assistantShare.db.test.ts`, the e2e case in
       `billing-seats.spec.ts`).
-- [ ] **The assistant panel has no meter for the dollar caps.** The panel
+- [x] **The assistant panel has no meter for the dollar caps.** The panel
       maps the four codes (round 7: the server's words, when it's back, the
       box closed until then) and, since round 8, offers *Compare plans* on
       Free's day and month from the 429's `params.plan` (ui.md § Assistant),
@@ -939,6 +939,14 @@ are #641's checklist. Open items from building it:
       the account's median turn cost (the status would need the Free day's
       dollars left), with an e2e case in `e2e/tests/assistant.spec.ts`.
       Trigger: before `BILLING_ENFORCED` is on.
+      *Done (2026-11-24): `350_assistant_day_meter.sql`
+      (`app_assistant_day_meter`) gives the status a `day` (Free's or the
+      trial's SAST day left, Free's messages left, the trial's whole
+      allowance left, the account's median question over 30 days), and the
+      panel says "About N questions left today …" as an estimate
+      (billing.md § Assistant dollar caps, ui.md § Assistant;
+      `dollarCaps.db.test.ts`, `reverseTrial.db.test.ts`,
+      `chat.svelte.test.ts`, `AssistantPanel.test.ts`, `assistant.spec.ts`).*
 - [x] **Terraform doesn't set the dollar-cap settings.** The assistant
       Lambda ran on the code's defaults ($0.30, 20 messages, a $30 pool),
       and the production check didn't require `ASSISTANT_FREE_*`.
@@ -970,10 +978,11 @@ are #641's checklist. Open items from building it:
       page and the workspace);
       ~~(3) the live-catchment picker at the end and pausing the others~~
       (345's picker and 341's pause after the 14-day grace, which a trial's
-      end starts like any lapse); (4) the assistant panel's
-      words for `assistant_trial_cap` and `assistant_trial_daily_cap`
-      (`frontend/.../assistant/chat.svelte.ts` `DOLLAR_CAP_CODES` doesn't
-      list them, so they show as a plain error); (5) the abuse report's
+      end starts like any lapse); ~~(4) the assistant panel's
+      words for `assistant_trial_cap` and `assistant_trial_daily_cap`~~
+      (done 2026-11-24: `DOLLAR_CAP_CODES` lists them, so the panel shows the
+      server's words and when they're back, with no Compare plans; ui.md §
+      Assistant); (5) the abuse report's
       "reverse trial → paid within 30 days" from `billing_grant_log`'s
       `reverse trial` grants; (6) whether to key `reverse_trial_claim` with an
       HMAC under a server secret rather than a bare SHA-256 (a bare hash can be

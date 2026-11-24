@@ -15,7 +15,7 @@
 // one. Storage that fails turns history off; the conversation carries on.
 import { emailGateCode, type EmailGateCode } from '#lib/components/billing/emailGate.js';
 import { ApiError } from '#lib/api/client.js';
-import type { AssistantBudgetScope, AssistantRequest, AssistantStatus, AssistantStreamEvent, ChatMessage, AssistantProposal } from '#lib/api/types.js';
+import type { AssistantBudgetScope, AssistantDayMeter, AssistantRequest, AssistantStatus, AssistantStreamEvent, ChatMessage, AssistantProposal } from '#lib/api/types.js';
 import { readEvents } from './stream';
 import type { ChatHistory, ChatSummary } from './history';
 
@@ -100,10 +100,18 @@ const BUDGET_SPENT: Record<string, AssistantBudgetScope> = {
 const RATE_LIMITED = 'assistant_rate_limited';
 /**
  * The dollar caps, refused only with billing enforced (backend/src/assistant/dollarCaps.ts DOLLAR_REFUSAL;
- * docs/billing.md § Assistant dollar caps): a Free person's day, the account's month, a Team member's share, the
- * shared Free pool. Each comes with the issue's words and `params.seconds` / `params.resetsAt`.
+ * docs/billing.md § Assistant dollar caps): a Free person's day, a reverse trial's whole allowance and its day, the
+ * account's month, a Team member's share, the shared Free pool. Each comes with the issue's words and
+ * `params.seconds` / `params.resetsAt`.
  */
-export const DOLLAR_CAP_CODES = ['assistant_daily_cap', 'assistant_monthly_cap', 'assistant_member_cap', 'assistant_free_pool_spent'] as const;
+export const DOLLAR_CAP_CODES = [
+	'assistant_daily_cap',
+	'assistant_trial_cap',
+	'assistant_trial_daily_cap',
+	'assistant_monthly_cap',
+	'assistant_member_cap',
+	'assistant_free_pool_spent'
+] as const;
 export type DollarCapCode = (typeof DOLLAR_CAP_CODES)[number];
 const isDollarCap = (code: string | null | undefined): code is DollarCapCode => (DOLLAR_CAP_CODES as readonly (string | null | undefined)[]).includes(code);
 
@@ -114,6 +122,29 @@ const isDollarCap = (code: string | null | undefined): code is DollarCapCode => 
 export function capOffersPlans(r: Refusal | null): boolean {
 	return r?.kind === 'cap' && r.plan === 'free' && (r.code === 'assistant_daily_cap' || r.code === 'assistant_monthly_cap');
 }
+/**
+ * The "questions left today" line for a capped account (Free, or a reverse trial; the status's `day`, docs/ui.md §
+ * Assistant), or null with nothing to show. The questions are an estimate: what's left of the day (and of the trial,
+ * when that's less) ÷ the account's median question, never more than Free's messages left. With no median yet, Free
+ * says its message cap ("Up to"), and a trial the share of its day.
+ */
+export function dayMeterText(day: AssistantDayMeter | null | undefined): string | null {
+	if (!day) return null;
+	const usd = Math.min(day.usdMicrosLeft, day.trialUsdMicrosLeft ?? Infinity);
+	const what = day.kind === 'trial' ? 'today on your trial' : 'today';
+	if (usd <= 0 || day.messagesLeft === 0) return `No questions left ${what}.`;
+	const median = day.medianTurnUsdMicros;
+	if (median && median > 0) {
+		const byCost = Math.floor(usd / median);
+		if (day.messagesLeft !== null && day.messagesLeft <= byCost) return `Up to ${questions(day.messagesLeft)} left ${what}.`;
+		if (byCost < 1) return `Less than one question left ${what}, at what your questions usually cost (an estimate).`;
+		return `About ${questions(byCost)} left ${what}, at what your questions usually cost (an estimate).`;
+	}
+	if (day.messagesLeft !== null) return `Up to ${questions(day.messagesLeft)} left ${what}.`;
+	return `${Math.max(1, Math.floor((usd / Math.max(1, day.usdMicrosPerDay)) * 100))}% of ${what === 'today' ? 'today’s' : 'today’s trial'} assistant allowance left.`;
+}
+const questions = (n: number) => (n === 1 ? '1 question' : `${n} questions`);
+
 /** setTimeout's longest wait (2^31 − 1 ms, about 24.8 days); a longer one would fire at once. */
 const MAX_TIMER_MS = 2_147_483_647;
 const budgetScopeOf = (code: string | null | undefined): AssistantBudgetScope | null => (code && Object.hasOwn(BUDGET_SPENT, code) ? BUDGET_SPENT[code]! : null);
@@ -187,6 +218,11 @@ export class AssistantChat {
 	get tokensLeft(): number | null {
 		if (this.status?.available !== true) return null;
 		return Math.max(0, this.status.budget.tokensPerMonth - this.status.budget.tokensUsed);
+	}
+
+	/** The "questions left today" line for a capped account (Free, a reverse trial), else null. */
+	get dayMeter(): string | null {
+		return this.status?.available === true ? dayMeterText(this.status.day) : null;
 	}
 
 	/** A dollar cap refused the last message: nothing can be sent until it's back (`refusal.resetsAt`). */
@@ -267,9 +303,21 @@ export class AssistantChat {
 			// A tool still running when the turn ended didn't finish.
 			for (const t of turn.tools) if (t.status === 'start' && (turn.stopped || turn.error)) t.status = 'error';
 		}
+		// The day meter counts down: read today's allowance again now the turn is charged (only for a capped account).
+		if (this.status?.available && this.status.day) void this.#refreshDay();
 		// Kept unless the conversation was left meanwhile (New conversation, a past chat reopened: #leave kept it).
 		if (this.turns.includes(turn)) await this.persist();
 		return true;
+	}
+
+	/** Read the status's `day` again; a failure keeps the one shown (the meter is an estimate, never a gate). */
+	async #refreshDay(): Promise<void> {
+		try {
+			const s = await this.#deps.status();
+			if (s.available && this.status?.available) this.status.day = s.day ?? null;
+		} catch {
+			// Kept as it was.
+		}
 	}
 
 	/** This browser's history, opened once (null and `historyOff` when there is none). */

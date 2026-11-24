@@ -4,8 +4,8 @@
 // back; Stop keeps what came. Runs with the client runtime (a .svelte.test.ts).
 import { describe, expect, it, vi } from 'vitest';
 import { ApiError } from '#lib/api/client.js';
-import type { AssistantProposal, AssistantRequest, AssistantStatus, AssistantStreamEvent } from '#lib/api/types.js';
-import { AssistantChat, DOLLAR_CAP_CODES, MAX_SENT_MESSAGES, applicable, capMessages, capOffersPlans, waitText, type AssistantTurn, type Refusal } from './chat.svelte';
+import type { AssistantDayMeter, AssistantProposal, AssistantRequest, AssistantStatus, AssistantStreamEvent } from '#lib/api/types.js';
+import { AssistantChat, DOLLAR_CAP_CODES, MAX_SENT_MESSAGES, applicable, capMessages, capOffersPlans, dayMeterText, waitText, type AssistantTurn, type Refusal } from './chat.svelte';
 import { ChatHistory, type ChatRecord, type HistoryBackend } from './history';
 
 const STATUS: AssistantStatus = {
@@ -221,6 +221,15 @@ describe('AssistantChat', () => {
 			});
 		}
 
+		it('maps a reverse trial’s two caps as caps, not a plain error (342)', async () => {
+			expect(DOLLAR_CAP_CODES).toContain('assistant_trial_cap');
+			expect(DOLLAR_CAP_CODES).toContain('assistant_trial_daily_cap');
+			const c = chatWith(async () => Promise.reject(new ApiError(429, 'That’s today’s assistant use on your trial.', undefined, 'assistant_trial_daily_cap', { seconds: 60, resetsAt: resetsIn(60) })), STATUS, () => {});
+			await c.load();
+			await c.ask('Q');
+			expect(c.refusal).toMatchObject({ kind: 'cap', code: 'assistant_trial_daily_cap', message: 'That’s today’s assistant use on your trial.' });
+		});
+
 		it('takes params.seconds when resetsAt is missing or unreadable', async () => {
 			const timers: { fn: () => void; ms: number }[] = [];
 			const c = chatWith(async () => Promise.reject(new ApiError(429, 'Day', undefined, 'assistant_daily_cap', { seconds: 120, resetsAt: 'soon' })), STATUS, (fn, ms) => timers.push({ fn, ms }));
@@ -265,6 +274,9 @@ describe('AssistantChat', () => {
 			expect(capOffersPlans(await refusalFor('assistant_monthly_cap'))).toBe(false);
 			expect(capOffersPlans(await refusalFor('assistant_member_cap', 'team'))).toBe(false);
 			expect(capOffersPlans(await refusalFor('assistant_free_pool_spent', 'free'))).toBe(false);
+			// A reverse trial's caps are its own words, never an upsell (the trial is Pro already).
+			expect(capOffersPlans(await refusalFor('assistant_trial_cap'))).toBe(false);
+			expect(capOffersPlans(await refusalFor('assistant_trial_daily_cap'))).toBe(false);
 			expect(capOffersPlans({ kind: 'rate', seconds: 60, message: 'x' })).toBe(false);
 			expect(capOffersPlans(null)).toBe(false);
 		});
@@ -331,6 +343,76 @@ describe('AssistantChat', () => {
 // Past chats in this browser (history.ts): each turn is kept when it ends, under the person and project; a
 // reopened chat continues with the existing send path; its changes are read-only; storage that fails turns
 // history off and the conversation carries on.
+describe('the day meter (a capped account, billing enforced)', () => {
+	const FREE: AssistantDayMeter = {
+		kind: 'free',
+		usdMicrosPerDay: 300_000,
+		usdMicrosLeft: 300_000,
+		messagesLeft: 20,
+		trialUsdMicrosLeft: null,
+		medianTurnUsdMicros: 25_000,
+		resetsAt: '2026-11-24T22:00:00.000Z'
+	};
+	const TRIAL: AssistantDayMeter = { ...FREE, kind: 'trial', usdMicrosPerDay: 1_000_000, usdMicrosLeft: 1_000_000, messagesLeft: null, trialUsdMicrosLeft: 2_000_000 };
+
+	it('estimates questions left from the median question, worded as an estimate', () => {
+		expect(dayMeterText({ ...FREE, usdMicrosLeft: 200_000 })).toBe('About 8 questions left today, at what your questions usually cost (an estimate).');
+		expect(dayMeterText({ ...FREE, usdMicrosLeft: 30_000 })).toBe('About 1 question left today, at what your questions usually cost (an estimate).');
+		expect(dayMeterText({ ...FREE, usdMicrosLeft: 10_000 })).toBe('Less than one question left today, at what your questions usually cost (an estimate).');
+	});
+
+	it('never says more than Free’s messages left, which is a count, not an estimate', () => {
+		expect(dayMeterText({ ...FREE, messagesLeft: 3 })).toBe('Up to 3 questions left today.');
+		expect(dayMeterText({ ...FREE, messagesLeft: 0 })).toBe('No questions left today.');
+		expect(dayMeterText({ ...FREE, usdMicrosLeft: 0 })).toBe('No questions left today.');
+	});
+
+	it('with no median yet: Free’s message cap, a trial’s share of its day', () => {
+		expect(dayMeterText({ ...FREE, medianTurnUsdMicros: null, messagesLeft: 17 })).toBe('Up to 17 questions left today.');
+		expect(dayMeterText({ ...TRIAL, medianTurnUsdMicros: null, usdMicrosLeft: 400_000 })).toBe('40% of today’s trial assistant allowance left.');
+	});
+
+	it('a trial reads the less of its day and its whole allowance left', () => {
+		expect(dayMeterText({ ...TRIAL, usdMicrosLeft: 1_000_000, trialUsdMicrosLeft: 100_000 })).toBe(
+			'About 4 questions left today on your trial, at what your questions usually cost (an estimate).'
+		);
+		expect(dayMeterText({ ...TRIAL, trialUsdMicrosLeft: 0 })).toBe('No questions left today on your trial.');
+	});
+
+	it('is nothing without a day (billing off, a paid plan, an older server)', () => {
+		expect(dayMeterText(null)).toBeNull();
+		expect(dayMeterText(undefined)).toBeNull();
+	});
+
+	it('reads the status again after a turn, so the line counts down; a status that fails keeps the line', async () => {
+		let left = 300_000;
+		let fail = false;
+		const status = vi.fn(async (): Promise<AssistantStatus> => {
+			if (fail) throw new ApiError(500, 'down');
+			return { ...STATUS, day: { ...FREE, usdMicrosLeft: left } };
+		});
+		const c = new AssistantChat({ status, send: async () => streamOf(sse([{ type: 'text', delta: 'Hi' }, { type: 'done' }])) });
+		await c.load();
+		expect(c.dayMeter).toBe('About 12 questions left today, at what your questions usually cost (an estimate).');
+		left = 50_000;
+		await c.ask('Q');
+		await vi.waitFor(() => expect(c.dayMeter).toBe('About 2 questions left today, at what your questions usually cost (an estimate).'));
+		fail = true;
+		await c.ask('Q2');
+		await vi.waitFor(() => expect(status).toHaveBeenCalledTimes(3));
+		expect(c.dayMeter).toBe('About 2 questions left today, at what your questions usually cost (an estimate).');
+	});
+
+	it('doesn’t read the status again when there is no day to count down', async () => {
+		const status = vi.fn(async () => structuredClone(STATUS));
+		const c = new AssistantChat({ status, send: async () => streamOf(sse([{ type: 'done' }])) });
+		await c.load();
+		await c.ask('Q');
+		expect(c.dayMeter).toBeNull();
+		expect(status).toHaveBeenCalledTimes(1);
+	});
+});
+
 describe('AssistantChat past chats', () => {
 	function memory(): HistoryBackend & { rows: Map<string, ChatRecord> } {
 		const rows = new Map<string, ChatRecord>();
