@@ -1038,6 +1038,18 @@ run "on" {
 
   assert {
     condition = (
+      length(aws_cloudwatch_metric_alarm.assistant_free_pool) == 2 &&
+      aws_cloudwatch_log_metric_filter.assistant_free_pool["50"].log_group_name == "/aws/lambda/water-management-assistant" &&
+      aws_cloudwatch_log_metric_filter.assistant_free_pool["50"].pattern == "{ $.message.event = \"assistant_free_pool\" && $.message.share >= 50 }" &&
+      aws_cloudwatch_log_metric_filter.assistant_free_pool["80"].pattern == "{ $.message.event = \"assistant_free_pool\" && $.message.share >= 80 }" &&
+      aws_cloudwatch_metric_alarm.assistant_free_pool["80"].metric_name == aws_cloudwatch_log_metric_filter.assistant_free_pool["80"].metric_transformation[0].name &&
+      aws_cloudwatch_metric_alarm.assistant_free_pool["50"].threshold == 0
+    )
+    error_message = "The Free pool pages at 50% and at 80% of its month (assistant_free_pool lines, usage.ts beginTurn)."
+  }
+
+  assert {
+    condition = (
       aws_cloudwatch_log_metric_filter.assistant_tokens[0].log_group_name == "/aws/lambda/water-management-assistant" &&
       aws_cloudwatch_log_metric_filter.assistant_tokens[0].pattern == "{ $.message.event = \"assistant_turn\" }" &&
       aws_cloudwatch_log_metric_filter.assistant_tokens[0].metric_transformation[0].value == "$.message.weightedTokens" &&

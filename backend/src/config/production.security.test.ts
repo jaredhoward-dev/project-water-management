@@ -602,6 +602,11 @@ describe('each Lambda refuses a missing or local-default setting', () => {
 			['assistant', 'ASSISTANT_MAX_OUTPUT_TOKENS', '100000'],
 			['assistant', 'ASSISTANT_MAX_TOOL_RESULT_CHARS', '999'],
 			['assistant', 'ASSISTANT_MAX_INPUT_CHARS', '1000000'],
+			// The dollar caps (336): checked when set.
+			['assistant', 'ASSISTANT_FREE_USD_PER_DAY', '-0.3'],
+			['assistant', 'ASSISTANT_FREE_USD_PER_DAY', 'lots'],
+			['assistant', 'ASSISTANT_FREE_MESSAGES_PER_DAY', '0'],
+			['assistant', 'ASSISTANT_FREE_POOL_USD_PER_MONTH', '10001'],
 			['assistant', 'DB_POOL_MAX', undefined],
 			['assistant', 'ALLOWED_ORIGINS', 'http://localhost:7777'],
 			['assistant', 'CLOUDFRONT_SHARED_SECRET', undefined],

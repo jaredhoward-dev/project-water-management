@@ -895,6 +895,39 @@ are #641's checklist. Open items from building it:
       checked. Durable fix: read the Bedrock price for the model id the
       deployment calls and update the table and its test. Trigger:
       `assistant_free_model_id` (or any setting) pointing at Haiku 5.5.
+- [ ] **Drop the 8-argument `app_assistant_begin`.** Migration 336 keeps
+      264's form as a wrapper (no price, no Free day or pool) so a backend
+      released before 336 keeps beginning turns. Durable fix: a forward
+      migration that drops it once nothing calls it. Trigger: the
+      `backend@` release carrying 336 is in production and no older
+      backend can be rolled back to.
+- [ ] **The Free day resets at UTC midnight, not 00:00 SAST.** #641 states
+      SAST; 336 uses UTC like `assistant_usage`'s month, so the day and the
+      month turn over together (02:00 SAST). Durable fix, if the operator
+      wants SAST: key `assistant_day_usage.day` and the pool's pacing on
+      the SAST day in a forward migration, with tests under a skewed TZ.
+      Trigger: the operator's answer, before `BILLING_ENFORCED` is on.
+- [ ] **A team admin can't raise the member share.** 336 adds
+      `billing_account.assistant_member_max_pct` (50) but no route or page
+      sets it. Durable fix: a team-admin route and a control on the team's
+      Plan page, with a DB test. Trigger: before `BILLING_ENFORCED` is on for
+      Team accounts.
+- [ ] **The assistant panel doesn't word the dollar refusals or show a
+      meter.** The API returns stable codes and #641's English text (the
+      workspace stays English, so no catalogue entry); the panel shows the
+      text, but has no *Compare plans* button and no "questions left today"
+      meter. Durable fix: map the four codes in the panel, with the meter
+      from the account's median turn cost. Trigger: before
+      `BILLING_ENFORCED` is on.
+- [ ] **Terraform doesn't set the dollar-cap settings.** The assistant
+      Lambda runs on the code's defaults ($0.30, 20 messages, a $30 pool);
+      `ASSISTANT_FREE_*` are checked when set (config/production.ts).
+      Durable fix: variables in infra/variables.tf passed in
+      infra/assistant.tf, and #641's assistant budget raised to $30 pool +
+      $15 × paid seats + a margin. Trigger: before `BILLING_ENFORCED` is on.
+- [ ] **Trials have no caps of their own.** A trialing account draws on the
+      Free pool and its plan's month; #641's trial is $2 in all and $1 a day.
+      Trigger: the reverse trial (Phase 2).
 - [x] **Webhook events apply in arrival order.** `app_billing_apply` (326)
       ignores the payload's `eventCreated`, and Stripe doesn't guarantee
       delivery order, so an older `customer.subscription.updated` arriving

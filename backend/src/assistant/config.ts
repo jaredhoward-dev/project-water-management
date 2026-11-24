@@ -60,6 +60,18 @@ export interface AssistantConfig {
 	 * Lambda's timeout, so the turn ends cleanly and its tokens are charged.
 	 */
 	turnSeconds: number;
+	/** Micro-USD one person may spend a UTC day on a Free account (336_assistant_dollar_caps; enforced only with BILLING_ENFORCED). */
+	freeUsdMicrosPerDay: number;
+	/** Messages one person may send a UTC day on a Free account (as above). */
+	freeMessagesPerDay: number;
+	/** Micro-USD the Free and trial accounts together may spend a UTC month: the paced Free pool (as above). */
+	poolUsdMicrosPerMonth: number;
+}
+
+/** A dollar amount (e.g. `0.30`) as whole micro-USD, or the fallback when unset or not a number ≥ 0. */
+function usdMicros(v: string | undefined, fallbackUsd: number): number {
+	const n = Number(v);
+	return Math.round((v !== undefined && v.trim() !== '' && Number.isFinite(n) && n >= 0 ? n : fallbackUsd) * 1e6);
 }
 
 function int(v: string | undefined, fallback: number): number {
@@ -89,6 +101,10 @@ export function assistantConfig(env: Record<string, string | undefined> = proces
 		maxToolResultChars: int(env.ASSISTANT_MAX_TOOL_RESULT_CHARS, 12_000),
 		maxInputChars: int(env.ASSISTANT_MAX_INPUT_CHARS, 40_000),
 		keepaliveSeconds: int(env.ASSISTANT_KEEPALIVE_SECONDS, 15),
-		turnSeconds: int(env.ASSISTANT_TURN_SECONDS, 100)
+		turnSeconds: int(env.ASSISTANT_TURN_SECONDS, 100),
+		// Issue #641, accepted 2026-10-29: $0.30 or 20 messages a day on Free, a $30 Free pool a month.
+		freeUsdMicrosPerDay: usdMicros(env.ASSISTANT_FREE_USD_PER_DAY, 0.3),
+		freeMessagesPerDay: int(env.ASSISTANT_FREE_MESSAGES_PER_DAY, 20),
+		poolUsdMicrosPerMonth: usdMicros(env.ASSISTANT_FREE_POOL_USD_PER_MONTH, 30)
 	};
 }

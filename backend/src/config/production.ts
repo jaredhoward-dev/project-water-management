@@ -295,6 +295,15 @@ const wholeNumberIn =
 		return Number.isInteger(n) && n >= min && n <= max ? null : `must be a whole number from ${min} to ${max}`;
 	};
 
+/** A dollar amount (e.g. `0.30`) from min to max: the code reads it as is (assistant/config.ts usdMicros). */
+const usdIn =
+	(min: number, max: number): Check =>
+	(v) => {
+		if (!set(v)) return 'is not set';
+		const n = Number(v.trim());
+		return Number.isFinite(n) && n >= min && n <= max ? null : `must be a dollar amount from ${min} to ${max}`;
+	};
+
 /**
  * A Bedrock model id the assistant may name: Anthropic's, in-region
  * (anthropic.…) or through a system inference profile (global., us., eu., …),
@@ -613,6 +622,20 @@ export const SETTINGS: Record<string, Setting> = {
 	ASSISTANT_KEEPALIVE_SECONDS: {
 		why: 'Seconds between `: keepalive` comments on the stream. CloudFront cuts a response after its origin read timeout with nothing sent (60 s on the assistant’s origin, infra/s3_cloudfront.tf), so production keeps it from 1 to 30 s; unset is the code default (15).',
 		checks: { assistant: optional(wholeNumberIn(1, 30)) }
+	},
+	// The dollar caps (336_assistant_dollar_caps, issue #641): refuse only with BILLING_ENFORCED on; unset is the
+	// issue's figure (assistant/config.ts). Not set by Terraform yet, so checked only when set.
+	ASSISTANT_FREE_USD_PER_DAY: {
+		why: 'Dollars one person may spend on the assistant a UTC day on a Free account (default 0.30). Checked when set.',
+		checks: { assistant: optional(usdIn(0, 15)) }
+	},
+	ASSISTANT_FREE_MESSAGES_PER_DAY: {
+		why: 'Messages one person may send the assistant a UTC day on a Free account (default 20). Checked when set.',
+		checks: { assistant: optional(wholeNumberIn(1, 500)) }
+	},
+	ASSISTANT_FREE_POOL_USD_PER_MONTH: {
+		why: 'Dollars the Free and trial accounts together may spend on the assistant a UTC month, paced per day (default 30). Checked when set.',
+		checks: { assistant: optional(usdIn(0, 10_000)) }
 	},
 	ASSISTANT_TURN_SECONDS: {
 		why: 'How long one turn may run before it ends with an error event. Terraform sets it below the assistant Lambda’s timeout (var.assistant_timeout_seconds less 15), so a long turn ends cleanly and is charged rather than cut off by the runtime. Checked when set.',

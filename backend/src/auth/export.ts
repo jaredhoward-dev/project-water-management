@@ -85,6 +85,8 @@ export const USER_FK_COVERAGE: Record<string, { section: string } | { excluded: 
 	'start_proposal.decided_by': { excluded: 'the project’s start-from-the-map proposal; who decided it only, and map.start_applied / _discarded are in auditEvents' },
 	// The assistant (262_assistant_usage): the person's tokens and messages per project and month; the hourly count is a cap's only.
 	'assistant_usage.user_id': { section: 'assistantUsage' },
+	// 336: the person's assistant messages and dollars per billing account and UTC day (the Free day's cap).
+	'assistant_day_usage.user_id': { section: 'assistantDays' },
 	'assistant_rate.user_id': { excluded: 'a count of assistant messages for the hourly cap, an hour at most' },
 	// 264: settled into assistantUsage when the turn ends, or charged there in full when it expires.
 	'assistant_reservation.user_id': { excluded: 'a running turn’s reserved budget, minutes at most; settled into assistantUsage' },
@@ -334,6 +336,12 @@ export async function buildSubjectExport(userId: string, now = new Date()) {
 			 FROM assistant_usage WHERE user_id = $1 ORDER BY month DESC, project_id`,
 			[userId]
 		);
+		// Their assistant days (336_assistant_dollar_caps): messages and dollars per billing account and UTC day; own rows under RLS.
+		const { rows: assistantDays } = await db.query(
+			`SELECT billing_account_id AS "billingAccountId", day::text AS day, messages, cost_usd_micros::float8 AS "costUsdMicros", updated_at AS "updatedAt"
+			 FROM assistant_day_usage WHERE user_id = $1 ORDER BY day DESC, billing_account_id`,
+			[userId]
+		);
 		// Their own billing account (323_billing; kind 'user', never a team's), its subscriptions and its monthly counters: own rows under RLS.
 		// null when they never needed one.
 		const { rows: billingAccount } = await db.query<{ id: string }>(
@@ -422,6 +430,7 @@ export async function buildSubjectExport(userId: string, now = new Date()) {
 			erratumNotices,
 			preferences: prefs,
 			assistantUsage,
+			assistantDays,
 			billing,
 			twoStepSignIn,
 			twoStepSignInResets,
