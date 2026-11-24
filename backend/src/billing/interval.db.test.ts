@@ -126,14 +126,14 @@ describe('team.editorCount (332)', () => {
 	it('counts team members and admins and direct editors and owners of the team’s projects, each once (positive control: the admin reads it)', async () => {
 		// admin, member (also a direct editor), directEditor (on two projects), directOwner: 4.
 		const plan = await planOf(admin, teamAccount);
-		expect(plan?.team).toEqual({ editorCount: 4 });
+		expect(plan?.team).toMatchObject({ editorCount: 4 });
 	});
 
 	it('excludes team viewers, project viewers, contributors and farmers, until one is made an editor', async () => {
 		await projectRole(await teamProject(teamId, 'Interval team C'), teamViewer, 'editor');
-		expect((await planOf(admin, teamAccount))?.team).toEqual({ editorCount: 5 });
+		expect((await planOf(admin, teamAccount))?.team).toMatchObject({ editorCount: 5 });
 		await asOwner(`DELETE FROM project_member WHERE user_id = $1`, [teamViewer.id]);
-		expect((await planOf(admin, teamAccount))?.team).toEqual({ editorCount: 4 });
+		expect((await planOf(admin, teamAccount))?.team).toMatchObject({ editorCount: 4 });
 	});
 
 	it('a team member, a direct editor and an outsider read no plan, so no count', async () => {

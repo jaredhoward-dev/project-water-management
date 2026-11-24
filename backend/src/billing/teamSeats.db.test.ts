@@ -118,7 +118,7 @@ describe('app_team_seats_in_use (334)', () => {
 	it('counts team members, admins and direct editors once, not viewers or farmers, and is app_account_plan’s editorCount', async () => {
 		expect(await inUse()).toBe(3);
 		const plan = await withUser(admin.id, async (db) => (await db.query<{ v: { team: unknown } }>('SELECT app_account_plan($1) AS v', [account])).rows[0]!.v);
-		expect(plan.team).toEqual({ editorCount: 3 });
+		expect(plan.team).toEqual({ editorCount: 3, assistantMemberMaxPct: 50 });
 	});
 
 	it('the app role can’t call it, nor the guard', async () => {
