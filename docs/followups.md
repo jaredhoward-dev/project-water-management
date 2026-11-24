@@ -1100,9 +1100,8 @@ are #641's checklist. Open items from building it:
       there is no email change route at all, so a person whose address is
       disposable has no way to fix it in the app (the refusal says only that
       the address is temporary); durable fix: refuse at sign-up with its own
-      code, then an email change that re-verifies; (2) the reverse trial
-      (#641) is to call `isDisposable` before granting (wired at round 9's
-      merge); (3) the list's monthly refresh is by hand: a scheduled workflow
+      code, then an email change that re-verifies; ~~(2) the reverse trial calls `isDisposable` before granting~~ (done at
+      round 9's merge: `disposable`, nothing claimed); (3) the list's monthly refresh is by hand: a scheduled workflow
       that fetches the pinned upstream file, refuses a size change past
       ±20 % and opens a PR (#641: "refreshed monthly with a size-change
       guard"); (4) the abuse report's "disposable rejections" count, which

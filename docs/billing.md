@@ -832,7 +832,9 @@ sign-up through an invite for that address), the backend hashes the
 address's canonical form (`canonicalEmail` in `billing/metrics.ts`:
 lower-cased, `+tag` dropped, Gmail's dots dropped, googlemail.com as
 gmail.com) with SHA-256 and calls `app_reverse_trial_start(hash)` as the
-person. It answers `unverified` (no verified address: nothing claimed),
+person, unless the address is on a disposable domain (`auth/disposable.ts`,
+[§ Verified email on Free](#verified-email-on-free)): then `disposable`, no
+trial and nothing claimed. It answers `unverified` (no verified address: nothing claimed),
 `live` (the account already has a live plan, a staff grant or a paid one:
 nothing claimed, so the trial stays for later), `claimed` (this canonical
 email had its trial, on this or any earlier account) or `started`. Started,
