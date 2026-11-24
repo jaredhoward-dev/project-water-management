@@ -211,8 +211,13 @@ describe('on: each cap refuses past its limit', () => {
 		await spend(other, otherProject, 200_000);
 		await dayRow(other, otherAccount, await sastDay(), 1, 200_000);
 		const base = await poolSpent();
-		const daysLeft = Number((await asOwner(`SELECT ((date_trunc('month', now() AT TIME ZONE 'UTC') + interval '1 month')::date - (now() AT TIME ZONE 'UTC')::date) AS n`))[0]!.n);
-		const before = base.month - base.today;
+		// SAST days left in the UTC month, at least 1, as 337's allowance counts them: a UTC day here made the pool a
+		// day's share too big from 22:00 to 24:00 UTC (the SAST day already tomorrow), and the begin went through.
+		const daysLeft = Number(
+			(await asOwner(`SELECT greatest(1, (date_trunc('month', now() AT TIME ZONE 'UTC') + interval '1 month')::date - assistant_day_of(now())) AS n`))[0]!.n
+		);
+		// The begin floors the month's spend before today at 0 (from 00:00 to 02:00 UTC on the 1st, today holds last month's 2 hours).
+		const before = Math.max(0, base.month - base.today);
 		// A pool whose share today is what has been spent today: nothing left for today.
 		const pool = before + Math.floor((base.today * daysLeft) / 2);
 		const r = await begin(owner, projectId, { pool });
@@ -297,6 +302,39 @@ describe('assistant_day_usage', () => {
 			);
 			expect(r!.a, at).toBe(poolDayAllowance(30_000_000, spent, new Date(at)));
 		}
+	});
+
+	it('at the month’s turn, reads the pool’s spend as the begin does: the SAST day’s rows, the UTC month’s, before today floored at 0', async () => {
+		// Far-future dates, so no other test's pool spend shares them. The other (Free) account spent $0.40 on
+		// earlier days of November 2031, then $0.15 from 22:00 UTC on 30 November: SAST 1 December's row, November's usage.
+		await spend(other, otherProject, 400_000, '2031-11-01');
+		await spend(other, otherProject, 150_000, '2031-11-01');
+		await dayRow(other, otherAccount, '2031-12-01', 1, 150_000);
+		const POOL = 30_000_000;
+		// The begin's sum (337): the allowance of (month's pool spend − today's, floored at 0) for the SAST day in the UTC month.
+		const atInstant = async (at: string) =>
+			(
+				await asOwner(
+					`SELECT s.pool_month::float8 AS m, s.pool_today::float8 AS t,
+					        assistant_pool_day_allowance($1, greatest(0, s.pool_month - s.pool_today), assistant_day_of($2::timestamptz),
+					                                     date_trunc('month', $2::timestamptz AT TIME ZONE 'UTC')::date)::float8 AS a
+					 FROM assistant_dollars_spent(date_trunc('month', $2::timestamptz AT TIME ZONE 'UTC')::date, assistant_day_of($2::timestamptz), NULL, NULL) s`,
+					[POOL, at]
+				)
+			)[0]! as { m: number; t: number; a: number };
+
+		// 22:30 UTC on the UTC month's last day: already 1 December in South Africa, still November's pool, 1 day left.
+		const late = await atInstant('2031-11-30T22:30:00Z');
+		expect(late).toMatchObject({ m: 550_000, t: 150_000 });
+		expect(late.a).toBe(poolDayAllowance(POOL, 400_000, new Date('2031-11-30T22:30:00Z')));
+		expect(late.a).toBe((POOL - 400_000) * 2);
+
+		// 01:00 UTC on the 1st: December's pool has no spend, but today's row holds the 2 hours before it. Before today
+		// counts as 0 (never negative, which would grow the share), over December's 31 SAST days.
+		const early = await atInstant('2031-12-01T01:00:00Z');
+		expect(early).toMatchObject({ m: 0, t: 150_000 });
+		expect(early.a).toBe(poolDayAllowance(POOL, 0, new Date('2031-12-01T01:00:00Z')));
+		expect(early.a).toBe(Math.floor((POOL / 31) * 2));
 	});
 
 	it('keys the day on SAST whatever the session’s time zone: it turns over at 22:00 UTC', async () => {
