@@ -447,7 +447,7 @@ describe('route auth inventory', () => {
 	// Billing, Phase 3 (issue #641): checkout and the portal are auth-gated (billing/checkout.db.test.ts: a team's is 404
 	// to all but its admins); the mock's own pages are public, their signed token the credential.
 	it('inventories checkout and the portal as auth-gated and the mock pages as public', () => {
-		for (const r of ['POST /account/plan/checkout', 'POST /account/plan/portal', 'POST /teams/:id/plan/checkout', 'POST /teams/:id/plan/portal']) {
+		for (const r of ['POST /account/plan/checkout', 'POST /account/plan/portal', 'POST /teams/:id/plan/checkout', 'POST /teams/:id/plan/portal', 'POST /teams/:id/plan/seats']) {
 			expect(routes).toContain(r);
 			expect(PUBLIC.has(r)).toBe(false);
 		}

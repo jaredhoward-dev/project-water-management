@@ -8,6 +8,17 @@
 //   POST /v1/checkout/sessions         a hosted Checkout session for one plan and interval
 //   POST /v1/billing_portal/sessions   a Customer Portal session for the customer
 //
+// and, to change a Team's seats (docs/billing.md § Changing a Team's seats):
+//
+//   GET    /v1/subscriptions/:id                  its items, each price's product expanded
+//   POST   /v1/products                           the extra-seat product, made once under a fixed id
+//   POST   /v1/subscription_items                 add the extra-seat item (price_data names a product id)
+//   POST   /v1/subscription_items/:id             its new quantity
+//   DELETE /v1/subscription_items/:id             remove it, back to the included seats
+//
+// Each change sends proration_behavior=create_prorations (Stripe's default, written
+// out so a change of default never changes ours) and an idempotency key.
+//
 // The answer is read for its id or url only. A failure throws StripeApiError
 // carrying Stripe's HTTP status and error type/code, never the key and never
 // the request; the route answers it as the app's own coded 503.
@@ -48,16 +59,24 @@ export function formEncode(params: Record<string, unknown>): string {
 }
 
 async function post(o: StripeClientOptions, path: string, params: Record<string, unknown>, idempotencyKey?: string): Promise<Record<string, unknown>> {
+	return send(o, 'POST', path, params, idempotencyKey);
+}
+
+async function send(o: StripeClientOptions, method: 'GET' | 'POST' | 'DELETE', path: string, params: Record<string, unknown>, idempotencyKey?: string): Promise<Record<string, unknown>> {
 	const headers: Record<string, string> = {
 		Authorization: `Bearer ${o.secretKey}`,
-		'Content-Type': 'application/x-www-form-urlencoded',
 		'Stripe-Version': STRIPE_API_VERSION
 	};
+	const encoded = formEncode(params);
+	// GET and DELETE carry their parameters in the query, as Stripe's own clients send them.
+	const inQuery = method !== 'POST';
+	if (!inQuery) headers['Content-Type'] = 'application/x-www-form-urlencoded';
 	if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
-	const res = await (o.fetch ?? fetch)(`${o.base ?? STRIPE_API_BASE}${path}`, {
-		method: 'POST',
+	const url = `${o.base ?? STRIPE_API_BASE}${path}${inQuery && encoded ? `?${encoded}` : ''}`;
+	const res = await (o.fetch ?? fetch)(url, {
+		method,
 		headers,
-		body: formEncode(params),
+		...(inQuery ? {} : { body: encoded }),
 		signal: AbortSignal.timeout(STRIPE_TIMEOUT_MS)
 	});
 	let body: unknown = null;
@@ -141,4 +160,101 @@ export async function createCheckoutSession(o: StripeClientOptions, p: StripeChe
 export async function createPortalSession(o: StripeClientOptions, customer: string, returnUrl: string): Promise<string> {
 	const s = await post(o, '/v1/billing_portal/sessions', { customer, return_url: returnUrl });
 	return field(s, 'url', STRIPE_URL);
+}
+
+const SUBSCRIPTION_ID = /^sub_[A-Za-z0-9]{1,250}$/;
+const ITEM_ID = /^si_[A-Za-z0-9]{1,250}$/;
+/** How the extra-seat item's product is named, at checkout (product_data) and here: `IC-WBT <plan>: extra editor seat`. */
+export const EXTRA_SEAT_SUFFIX = ': extra editor seat';
+/** The extra-seat product this code makes when it first adds the item (a fixed id, so it is made once per plan). */
+export const extraSeatProductId = (planCode: string) => `wm_${planCode}_extra_seat`;
+
+/** One subscription item as the seat change reads it. */
+export interface SeatItem {
+	id: string;
+	quantity: number;
+	/** Whether it is the extra-seat item (its product named `…: extra editor seat`, or ours by id). */
+	extraSeat: boolean;
+	interval: 'month' | 'year' | null;
+	currency: string | null;
+}
+
+/** The subscription's items, each price's product expanded so the extra-seat item can be told from the plan's. */
+export async function getSubscriptionItems(o: StripeClientOptions, subscriptionId: string, planCode: string): Promise<SeatItem[]> {
+	if (!SUBSCRIPTION_ID.test(subscriptionId)) throw new StripeApiError(400, 'invalid_request', 'subscription');
+	const sub = await send(o, 'GET', `/v1/subscriptions/${subscriptionId}`, { expand: ['items.data.price.product'] });
+	const items = typeof sub.items === 'object' && sub.items !== null && Array.isArray((sub.items as { data?: unknown }).data) ? ((sub.items as { data: unknown[] }).data as Record<string, unknown>[]) : null;
+	if (!items) throw new StripeApiError(502, 'unexpected_response', 'items');
+	return items.map((item) => {
+		const id = field(item, 'id', ITEM_ID);
+		const quantity = typeof item.quantity === 'number' && Number.isInteger(item.quantity) && item.quantity >= 0 ? item.quantity : 1;
+		const price = typeof item.price === 'object' && item.price !== null ? (item.price as Record<string, unknown>) : {};
+		const product = typeof price.product === 'object' && price.product !== null ? (price.product as Record<string, unknown>) : {};
+		const recurring = typeof price.recurring === 'object' && price.recurring !== null ? (price.recurring as Record<string, unknown>) : {};
+		const extraSeat = product.id === extraSeatProductId(planCode) || (typeof product.name === 'string' && product.name.endsWith(EXTRA_SEAT_SUFFIX));
+		const interval = recurring.interval === 'month' || recurring.interval === 'year' ? recurring.interval : null;
+		return { id, quantity, extraSeat, interval, currency: typeof price.currency === 'string' ? price.currency : null };
+	});
+}
+
+/** The extra-seat product, made under a fixed id the first time; Stripe's resource_already_exists means it is there. */
+export async function ensureExtraSeatProduct(o: StripeClientOptions, planCode: string, planName: string): Promise<string> {
+	const id = extraSeatProductId(planCode);
+	try {
+		await post(o, '/v1/products', { id, name: `IC-WBT ${planName}${EXTRA_SEAT_SUFFIX}` }, `wm-product-${id}`);
+	} catch (e) {
+		if (!(e instanceof StripeApiError && e.code === 'resource_already_exists')) throw e;
+	}
+	return id;
+}
+
+export interface SeatChangeParams {
+	subscriptionId: string;
+	/** The extra-seat item when the subscription has one. */
+	itemId: string | null;
+	/** Extra seats wanted: 0 removes the item. */
+	extraSeats: number;
+	/** For a new item: its product, price, currency and interval. */
+	productId?: string;
+	extraSeatMinor?: number;
+	currency?: string;
+	interval?: 'month' | 'year';
+	/** Makes the idempotency key: the same change asked twice (a double click) is one change at Stripe. */
+	idempotencyKey: string;
+}
+
+/**
+ * Stripe's proration setting for every seat change: its default, written out.
+ * Adding a seat mid-period charges the rest of the period on the next invoice;
+ * removing one credits it. docs/billing.md records it as a decision for the
+ * operator to confirm.
+ */
+export const SEAT_PRORATION = 'create_prorations';
+
+/** Update, add or remove the extra-seat item. */
+export async function changeSeatItem(o: StripeClientOptions, p: SeatChangeParams): Promise<void> {
+	if (p.itemId !== null && !ITEM_ID.test(p.itemId)) throw new StripeApiError(400, 'invalid_request', 'item');
+	if (p.extraSeats === 0) {
+		if (p.itemId === null) return;
+		await send(o, 'DELETE', `/v1/subscription_items/${p.itemId}`, { proration_behavior: SEAT_PRORATION }, p.idempotencyKey);
+		return;
+	}
+	if (p.itemId !== null) {
+		await post(o, `/v1/subscription_items/${p.itemId}`, { quantity: p.extraSeats, proration_behavior: SEAT_PRORATION }, p.idempotencyKey);
+		return;
+	}
+	if (!SUBSCRIPTION_ID.test(p.subscriptionId) || !p.productId || p.extraSeatMinor === undefined || !p.currency || !p.interval) {
+		throw new StripeApiError(400, 'invalid_request', 'price');
+	}
+	await post(
+		o,
+		'/v1/subscription_items',
+		{
+			subscription: p.subscriptionId,
+			quantity: p.extraSeats,
+			price_data: { currency: p.currency.toLowerCase(), product: p.productId, unit_amount: p.extraSeatMinor, recurring: { interval: p.interval } },
+			proration_behavior: SEAT_PRORATION
+		},
+		p.idempotencyKey
+	);
 }
