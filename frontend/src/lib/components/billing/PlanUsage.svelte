@@ -15,7 +15,7 @@
 	// any of it. The figures and words come from plan.ts. Team's seat field starts at
 	// the team's editors when they pass the included seats, and says how many there
 	// are; a subscription with a recorded interval says what it costs (332).
-	import { onMount, untrack } from 'svelte';
+	import { onMount, untrack, type Snippet } from 'svelte';
 	import { replaceState } from '$app/navigation';
 	import { page } from '$app/state';
 	import { PUBLIC_API_URL } from '$app/env/public';
@@ -49,7 +49,8 @@
 		checkout,
 		portal,
 		reload,
-		returned = null
+		returned = null,
+		seatChange
 	}: {
 		plan: AccountPlan;
 		whose: 'your account' | 'this team';
@@ -61,6 +62,8 @@
 		reload?: () => Promise<void>;
 		/** `?checkout=` on coming back from checkout; read once, then taken off the address. */
 		returned?: string | null;
+		/** Shown under the subscription's seats line (a team's Change seats, SeatChange.svelte; the team plan route passes it). */
+		seatChange?: Snippet;
 	} = $props();
 
 	const actions = $derived(billingActions(plan));
@@ -187,6 +190,7 @@
 			<p class="sub" class:warn={sub.warn} data-subscription={plan.subscription?.status}>{sub.text}</p>
 			{#if totalLine}<p class="muted sub" data-subscription-total>{totalLine}</p>{/if}
 			{#if seatsLine}<p class="muted sub" data-subscription-seats>{seatsLine}</p>{/if}
+			{@render seatChange?.()}
 		{:else}
 			<p class="muted sub" data-subscription="none">No subscription: {whose} is on {plan.plan.name}.</p>
 		{/if}

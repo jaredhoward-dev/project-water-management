@@ -1,6 +1,7 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { AccountPlan } from '#lib/api/types.js';
-import { seatChangeLine, seatChangeState, seatChangeValid } from './seatChange';
+import { seatChangeLine, seatChangeNotice, seatChangeState, seatChangeValid } from './seatChange';
 
 const TEAM = {
 	provider: 'mock',
@@ -43,6 +44,33 @@ describe('seatChangeLine', () => {
 	it('says the monthly or yearly difference when the interval is known', () => {
 		expect(seatChangeLine({ ...st, interval: 'month' }, 5)).toBe('From 3 to 5 editor seats: R 998.00 more a month. The difference for the rest of this period is prorated on the next invoice.');
 		expect(seatChangeLine({ ...st, current: 6, interval: 'year' }, 4)).toMatch(/^From 6 to 4 editor seats: R 9[\s  ]?980.00 less a year\./);
+	});
+});
+
+describe('seatChangeLine with editors and proration', () => {
+	const st = seatChangeState(TEAM)!;
+	it('says how many editors would have no seat when the count drops below them', () => {
+		expect(seatChangeLine({ ...st, current: 6 }, 4, 5)).toBe(
+			'From 6 to 4 editor seats. The difference for the rest of this period is prorated on the next invoice. This team has 5 editors: 1 would have no seat.'
+		);
+		expect(seatChangeLine({ ...st, current: 6, interval: 'month' }, 4, 9)).toMatch(/This team has 9 editors: 5 would have no seat\.$/);
+		for (const editors of [4, 2, null, undefined]) expect(seatChangeLine({ ...st, current: 6 }, 4, editors)).not.toMatch(/no seat/);
+	});
+	// The sentence says the provider prorates the change: true only while the backend asks Stripe for
+	// create_prorations (backend/src/billing/provider/stripeApi.ts SEAT_PRORATION, docs/billing.md). The frontend
+	// can't import the backend, so this reads its source, as history/timeline.test.ts does.
+	it('says "prorated" only while the backend’s seat change prorates', () => {
+		const src = readFileSync(new URL('../../../../../backend/src/billing/provider/stripeApi.ts', import.meta.url), 'utf8');
+		expect(/export const SEAT_PRORATION = '([a-z_]+)';/.exec(src)?.[1]).toBe('create_prorations');
+		expect(seatChangeLine(st, 5)).toContain('prorated on the next invoice');
+	});
+});
+
+describe('seatChangeNotice', () => {
+	it('says waiting, confirmed or unconfirmed as checkout’s notice does', () => {
+		expect(seatChangeNotice(5, 'waiting')).toBe('Asked for 5 editor seats. Waiting for the payment provider to confirm…');
+		expect(seatChangeNotice(5, 'confirmed')).toBe('The team now has 5 editor seats.');
+		expect(seatChangeNotice(5, 'unconfirmed')).toBe('Asked for 5 editor seats, but the payment provider hasn’t confirmed them yet. Reload the page in a minute.');
 	});
 });
 

@@ -1184,7 +1184,11 @@ export const GUIDES: Guide[] = [
 					},
 					{
 						type: 'p',
-						text: 'A team’s plan covers every catchment in it. Its admins see the plan and this month’s usage (catchments, reports, evidence packs issued and the assistant’s spend) from **Plan and usage** on the team’s page; your own catchments’ plan is under **Plan and usage** on your Account page. Where billing is set up, the page has **Upgrade** (to Pro for you, to Team for a team, monthly or yearly, each with its price; on a team you first choose the editor seats, 3 included, and the buttons show the price for them) or, once there is a subscription, **Manage billing** to change or cancel it. Limits aren’t enforced yet: usage is counted, and nothing is refused.'
+						text: 'A team’s plan covers every catchment in it. Its admins see the plan and this month’s usage (catchments, reports, evidence packs issued and the assistant’s spend) from **Plan and usage** on the team’s page; your own catchments’ plan is under **Plan and usage** on your Account page. Where billing is set up, the page has **Upgrade** (to Pro for you, to Team for a team, monthly or yearly, each with its price; on a team you first choose the editor seats, 3 included, and the buttons show the price for them) or, once there is a subscription, **Manage billing** to change or cancel it. On a team, the editor seats start at the team’s editors when there are more than the 3 included, and the page says how many editors the team has.'
+					},
+					{
+						type: 'p',
+						text: 'Once a team has a subscription, the Plan card says what it costs (the price for its seats, monthly or yearly) and how many editor seats it has. To change them, type the new count under **Change seats** in the card and press **Change seats**: the question says the difference a month or a year, that the rest of this period is prorated on the next invoice, and how many editors would have no seat if you go below them. The new count shows once the payment provider confirms it, usually within seconds. Limits aren’t enforced yet: usage is counted, and nothing is refused.'
 					}
 				]
 			}

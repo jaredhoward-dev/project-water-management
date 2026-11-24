@@ -3153,21 +3153,29 @@ The page is two cards, side by side where they fit and stacked on a phone:
   before migration 332, has no interval and shows no total rather than a
   guessed one. A team's line under that says its seats: *5 editor
   seats (3 included, 2 extra)*, or *3 editor seats (all included)*
-  (`subscriptionSeatsLine`). Below the plan card, a
-  team's page has **Change seats** (`SeatChange.svelte`, mounted by the team
+  (`subscriptionSeatsLine`). Under that line, inside the Plan card, a
+  team's page has **Change seats** (`SeatChange.svelte`, a sub-heading in a
+  `.panel-head`, passed to `PlanUsage` as its `seatChange` snippet by the team
   plan route only, for a live Team subscription under `mock` or `stripe`):
   a NumberInput (`whole`, the included 3 to 50, *Choose a whole number of
-  seats from 3 to 50.* for anything else) and a *Change seats* button,
-  `aria-disabled` while the count is invalid or the current one. It opens a
-  confirm step that says the change, *From 3 to 5 editor seats: R 998.00
-  more a month.* when the plan carries the subscription's interval, else
-  only *From 3 to 5 editor seats.*, and that the rest of the period is
-  prorated on the next invoice (`seatChange.ts` `seatChangeLine`), with
-  *Confirm the change* and *Cancel*, both `aria-disabled` while the request
-  runs. Confirmed, it calls `POST /teams/:id/plan/seats`, re-reads the plan
-  in place, and says in a live region either *The team now has 5 editor
-  seats.* or, when the provider's webhook hasn't landed yet, to reload in a
-  minute. A refusal shows inline in English, as the buttons above do
+  seats from 3 to 50.* for anything else; it starts at the seats now the
+  first time a live subscription shows, so one that a checkout's re-read
+  brings fills it too), the team's editors (*This team has 4 editors.*,
+  `editorsHint`) and a *Change seats* button, `aria-disabled` while the
+  count is invalid or the current one. It asks in the app's confirm dialog
+  (`confirmDialog`, *Change editor seats?*, confirm button *Change seats*),
+  whose line says the change, *From 3 to 5 editor seats: R 998.00 more a
+  month.* when the plan carries the subscription's interval, else only
+  *From 3 to 5 editor seats.*, that the rest of the period is prorated on
+  the next invoice, and, below the team's editors, *This team has 5
+  editors: 1 would have no seat.* (`seatChange.ts` `seatChangeLine`).
+  Closing the dialog hands the focus back to the button. Confirmed, it calls
+  `POST /teams/:id/plan/seats`, then re-reads the plan on checkout's
+  `CONFIRM_DELAYS_MS` until the new seats show, and says in a live region
+  *Asked for 5 editor seats. Waiting for the payment provider to confirm…*,
+  then *The team now has 5 editor seats.* or, if they still haven't landed,
+  to reload in a minute (`seatChangeNotice`). A refusal shows inline in
+  English, as the buttons above do, and the field keeps the count typed
   ([billing.md § Changing a Team's seats](./billing.md#changing-a-teams-seats);
   `e2e/tests/billing-seats.spec.ts`). While `enforced` is false, a note says nothing is refused:
   with no buttons, that plans aren't charged yet; beside them (which can
