@@ -94,16 +94,22 @@
 
 <style>
 	/* The Account page's card look (routes/account/+page.svelte), as DeleteAccount.svelte repeats it. */
+	/* Contained like the page's own cards: in the page's one-column grid (under 52rem) a card's min-content sets
+	   the column, and this one's (the email input's and the password field's own widths, a long address) pushed
+	   every card 5 to 15 px past a 320 px window. Contained, the card takes the column's width and its fields fit it. */
 	.panel {
 		padding: 1rem 1.1rem 0.75rem;
+		container: card / inline-size;
 	}
 	h2 {
 		margin: 0 0 0.75rem;
 		font-size: 1.05rem;
 	}
+	/* Both lines hold an address, one long word: break it anywhere rather than run out of the card. */
 	.intro {
 		margin: 0 0 0.75rem;
 		max-width: 60ch;
+		overflow-wrap: anywhere;
 	}
 	.field {
 		max-width: 36rem;
@@ -116,6 +122,8 @@
 	}
 	.status {
 		margin: 0;
+		min-width: 0;
+		overflow-wrap: anywhere;
 		font-size: 13px;
 		color: var(--text-2);
 	}
