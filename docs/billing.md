@@ -228,7 +228,7 @@ checkout. Every payload carries the event's `created` time as `eventCreated`
 | `invoice.payment_failed` | `invoice.payment_failed` | recorded only (Stripe moves the subscription to `past_due` and sends `customer.subscription.updated`) |
 
 The subscription payload is `{ accountId, planCode, status, seats,
-periodStart, periodEnd, trialEnd, cancelAtPeriodEnd, externalRef,
+periodStart, periodEnd, trialEnd, cancelAtPeriodEnd, externalRef, interval?,
 eventCreated? }`, with times as ISO 8601 in UTC (`…Z`); `eventCreated` is
 absent (or `null`) from the mock and `manual` providers (§ Event order). `seats` is the
 metadata's `seats_included` (1 when absent) plus every item's quantity past
@@ -238,7 +238,9 @@ so the sum needs no telling which item is which, in whatever order Stripe
 lists them, and a one-item subscription without `seats_included` reads as its
 item's quantity, as before (`seatsOf`). The period is read from the first
 subscription item (API `2025-03-31.basil` moved it there), else from the
-subscription itself (older versions). An invoice's subscription is read from
+subscription itself (older versions). `interval` is the items' price
+`recurring.interval` (`intervalOf`; [§ Billing interval and editor
+count](#billing-interval-and-editor-count)). An invoice's subscription is read from
 `parent.subscription_details` (basil), else `subscription_details`.
 
 Stripe's statuses map as follows:
@@ -317,6 +319,7 @@ invented, and their account is a placeholder UUID that `--account` replaces.
 The fixtures are `checkout-completed`, `subscription-created` (trialing),
 `subscription-updated` (active), `subscription-past-due`,
 `subscription-deleted`, `subscription-team-seats` (Team, 5 seats as two items),
+`subscription-team-yearly` (the same, billed yearly),
 `invoice-paid` and `invoice-payment-failed`.
 
 ### Tests
@@ -505,6 +508,44 @@ Checkout sells them:
   subscription that has none, so until then the operator changes a Team's
   seats in Stripe's dashboard (the webhook syncs them). A follow-up item in
   [followups.md](./followups.md) (§ Billing) tracks it.
+
+### Billing interval and editor count
+
+Migration 332, so the plan page can say what a subscription costs and Team's
+seat field can start at what the team uses.
+
+- **The interval.** `subscription.billing_interval` (`month` or `year`;
+  named so because `INTERVAL` is a type keyword) is written by
+  `app_billing_apply`, redefined from 327, from the payload's `interval`:
+  absent keeps the stored value (an older sender), `null` clears it, `month`
+  or `year` sets it, anything else is `invalid` and changes nothing. The
+  normaliser reads it from the items' prices (`price.recurring.interval`):
+  every item must say the same plain month or year (`interval_count` 1 or
+  absent), else it sends `null` (a quarter as 3 months, a week, items that
+  disagree); items with no price at all send none, so the stored value
+  stays. The mock puts the checkout's interval on each item's price, and its
+  portal's cancel event carries the subscription's. A staff grant (330) and
+  any row from before 332 have none.
+- **The total.** `app_account_plan`, redefined from 324, adds the
+  subscription's `interval`. The plan page works out the total from it, the
+  seats and the plan's prices, as checkout prices them (the base plus each
+  seat past the included ones at the interval's extra-seat price): *R 3 497.00
+  a month for 5 editor seats*. With no interval it shows no total
+  (`plan.ts` `subscriptionTotalLine`; [ui.md § Plan and usage](./ui.md#plan-and-usage)).
+- **The editor count.** On a team's account `app_account_plan` also returns
+  `team.editorCount`: the distinct people with editor or owner role on the
+  team's projects (#641 § Who the plan belongs to): team members and admins
+  (a team viewer is a viewer), and direct editors and owners of the team's
+  projects, each counted once. Viewers, contributors and farmers hold no
+  seat. Only who may read the plan (a team admin) sees it. Team's seat field
+  starts at the larger of it and the included seats, with *This team has N
+  editors.* beside it. Nothing refuses a checkout below the count: shadow
+  mode counts and never blocks.
+- **Tests.** `billing/interval.db.test.ts` (the interval from monthly and
+  yearly events, kept, cleared and refused; the count with its positive
+  control and exclusions), `provider/stripe.test.ts` and `provider/mock.test.ts`
+  (the interval read and sent), `plan.test.ts` (the total and the starting
+  count), and `billing-checkout.spec.ts` (the totals, the starting count).
 
 ### Trials (decided 2026-11-23)
 

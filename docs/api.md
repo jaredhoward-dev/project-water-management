@@ -5939,8 +5939,9 @@ Each answer comes from a `323_billing` definer function run as the caller.
   `reports_per_month`, `packs_included_per_month`, `seats_included`,
   `assistant_usd_micros_per_month`, `assistant_usd_micros_per_seat_month`);
   `null` is unlimited.
-- `AccountPlan = { account: { id, kind: 'user' \| 'team' }, plan: { code, name, priceMonthlyMinor, priceAnnualMinor, currency, limits, features }, subscription, usage, enforced, provider }`:
-  - `subscription`: `null` (Free; always in Phase 1) or `{ status, seats, periodStart, periodEnd, trialEnd, cancelAtPeriodEnd }`.
+- `AccountPlan = { account: { id, kind: 'user' \| 'team' }, plan: { code, name, priceMonthlyMinor, priceAnnualMinor, currency, limits, features }, subscription, team, usage, enforced, provider }`:
+  - `subscription`: `null` (Free) or `{ status, seats, periodStart, periodEnd, trialEnd, cancelAtPeriodEnd, interval }`; `interval` is `'month'`, `'year'` or `null` when not recorded (a staff grant, a subscription from before migration 332; [billing.md § Billing interval and editor count](./billing.md#billing-interval-and-editor-count)).
+  - `team`: `null` on a person's account; on a team's, `{ editorCount }`, the distinct people with editor or owner on the team's projects (its members and admins, and direct editors and owners of its projects, each once; viewers, contributors and farmers hold no seat).
   - `usage = { month: 'YYYY-MM', catchments, reports, packsIssued, assistantTokens, assistantCost }`,
     each but `assistantCost` `{ used, limit }` (`limit` `null` = unlimited). `catchments.used`
     is the account's active projects; `reports` and `packsIssued` are this

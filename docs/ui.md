@@ -3139,14 +3139,21 @@ The page is two cards, side by side where they fit and stacked on a phone:
   (*1e1*) stays as typed, marks the field `aria-invalid` with *Choose a whole
   number of seats from 3 to 50.* under it, and leaves the buttons
   `aria-disabled` and unpriced (*Upgrade to Team, monthly*), so no price for
-  some other count shows. It always starts at the included seats, not the
-  team's current editors: `AccountPlan` has no member count (`plan.ts`
+  some other count shows. It starts at the larger of the included seats and
+  the team's editors (`AccountPlan.team.editorCount`, capped at 50), so a team
+  with more editors than that doesn't check out fewer seats than it uses, and
+  a line above the price hint says *This team has 4 editors.*, named by the
+  field's `aria-describedby` too (`plan.ts` `startingSeats`, `editorsHint`,
   `seatOffer`, `upgradeLabel`, `checkoutTotalMinor`;
   [billing.md § Team seats at checkout](./billing.md#team-seats-at-checkout)).
-  Once a team has a subscription, a line under it says its seats: *5 editor
+  Once there is a subscription with a recorded interval, a line under it
+  says what it costs, from the interval, the seats and the plan's prices:
+  *R 3 497.00 a month for 5 editor seats* on a team, *R 899.00 a month* on a
+  person's (`subscriptionTotalLine`). A staff grant, or a subscription from
+  before migration 332, has no interval and shows no total rather than a
+  guessed one. A team's line under that says its seats: *5 editor
   seats (3 included, 2 extra)*, or *3 editor seats (all included)*
-  (`subscriptionSeatsLine`). It shows no total, since `Subscription` doesn't
-  record whether it is billed monthly or yearly. While `enforced` is false, a note says nothing is refused:
+  (`subscriptionSeatsLine`). While `enforced` is false, a note says nothing is refused:
   with no buttons, that plans aren't charged yet; beside them (which can
   charge), only that limits aren't enforced yet (`plan.ts` `shadowNote`). Each
   button asks the API for a URL (`POST …/plan/checkout` or `…/plan/portal`)
