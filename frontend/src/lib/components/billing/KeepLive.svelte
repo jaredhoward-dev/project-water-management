@@ -76,8 +76,15 @@
 							<span class="state" data-keep-state>{keepRowState(c, list)}</span>
 						</div>
 						{#if !c.staysLive}
-							<button type="button" class="btn btn-sm" aria-disabled={busy} data-action="keep-live" onclick={() => choose(c.id, c.name)}
-								>Keep live<span class="visually-hidden">: {c.name}</span></button
+							<!-- An aria-label, not a visually hidden span: Chromium reads the absolutely positioned span as a block
+							     and the name came out "Keep live : Catchment A" (ui-playbook.md, issue #611). -->
+							<button
+								type="button"
+								class="btn btn-sm"
+								aria-label="Keep live: {c.name}"
+								aria-disabled={busy}
+								data-action="keep-live"
+								onclick={() => choose(c.id, c.name)}>Keep live</button
 							>
 						{/if}
 					</li>
