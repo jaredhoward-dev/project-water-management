@@ -31,6 +31,14 @@ export const en = {
 	'mail.changed.heading': 'Your email address was changed',
 	'mail.changed.body': 'The email address of your {product} account is now {newEmail}. You sign in with it, and we send everything about the account there from now on.',
 	'mail.changed.notYou': "If you didn't make this change, someone may know your password. Contact the person who manages your catchment straight away.",
+	'mail.changeTaken.subject': 'This address already has an account — {product}',
+	'mail.changeTaken.heading': 'This address already has an account',
+	'mail.changeTaken.body': 'Someone asked to change the email address of an {product} account to {email}. This address already has an account of its own, so nothing was changed, on either account.',
+	'mail.changeTaken.signIn': 'If it was you, the account you want is already here: sign in to it with this address. If you’ve forgotten its password, choose a new one:',
+	'mail.changeTaken.resetAction': 'Choose a new password',
+	'mail.changeTaken.confirm': 'If it was you, the account you want is already here, but its address isn’t confirmed yet. Confirm it, then sign in with this address:',
+	'mail.changeTaken.confirmAction': 'Confirm email address',
+	'mail.changeTaken.ignore': "If it wasn't you, you can ignore this email. Nothing has changed on your account, and no other account can take this address.",
 
 	// Reset your password.
 	'mail.reset.subject': 'Reset your password — {product}',
@@ -273,6 +281,8 @@ export const sections: Record<string, string> = {
 	'mail.verify': 'Email: confirm your address. Sent after signing up, and again from “Resend email”.',
 	'mail.change': 'Email: confirm a new email address. Sent to the new address when a signed-in person changes the address on their Account page; the account keeps its old address until the link is used. {email} is the new address.',
 	'mail.changed': 'Email: sent to the OLD address once the change of address is confirmed, so its holder knows. {newEmail} is the new address.',
+	'mail.changeTaken':
+		'Email: sent to an address that already has an account when someone signed in to a different account asks to change their address to it. The change is refused without saying so (the Account page answers the same either way, so it can’t be used to find out who has an account), and this email tells the address’s holder instead. It never names the other account. “signIn” and “resetAction” go to a confirmed account; “confirm” and “confirmAction” to one whose address was never confirmed. {email} is this address.',
 	'mail.reset': 'Email: reset your password. Sent from “Forgot password?” on the sign-in page.',
 	'mail.exists': 'Email: sent when someone signs up with an address that already has a confirmed account. It says so, and offers a new password in case the owner forgot theirs. The sign-up page itself says the same thing either way (“check your email”), so it can’t be used to find out who has an account.',
 	'mail.farmer':

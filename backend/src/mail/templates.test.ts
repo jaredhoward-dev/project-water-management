@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { accountDeletedMail, erratumNoticeMail, licenceRecordMail, mfaCodeMail, mfaResetMail, resetWhen, escapeHtml, farmerInviteMail, inviteMail, listText, packNoticeMail, reportReadyMail, resetPasswordMail, roleName, siteLink, sitePage, verifyEmailMail } from './templates.js';
+import { accountDeletedMail, accountExistsMail, emailChangeTakenMail, erratumNoticeMail, licenceRecordMail, mfaCodeMail, mfaResetMail, resetWhen, escapeHtml, farmerInviteMail, inviteMail, listText, packNoticeMail, reportReadyMail, resetPasswordMail, roleName, siteLink, sitePage, verifyEmailMail } from './templates.js';
 import { en } from './i18n/en.js';
 
 const TOKEN = 'abcDEF123_-abcDEF123_-abcDEF123_-abcDEF1234';
@@ -26,6 +26,9 @@ describe('email templates', () => {
 		['verify', verifyEmailMail('ann@example.com', url), /Confirm your email address — IC-WBT/, /48 hours/],
 		['verify (no locale chosen: English)', verifyEmailMail('ann@example.com', url, null), /Confirm your email address — IC-WBT/, /48 hours/],
 		['reset', resetPasswordMail('ann@example.com', url), /Reset your password — IC-WBT/, /1 hour/],
+		['account exists (sign-up to a taken address)', accountExistsMail('ann@example.com', url), /You already have an account — IC-WBT/, /1 hour/],
+		['email change to a taken address (confirmed holder)', emailChangeTakenMail('ann@example.com', { kind: 'reset', url }), /This address already has an account — IC-WBT/, /1 hour/],
+		['email change to a taken address (unconfirmed holder)', emailChangeTakenMail('ann@example.com', { kind: 'confirm', url }), /This address already has an account — IC-WBT/, /48 hours/],
 		[
 			'invite',
 			inviteMail('ann@example.com', url, 'Ben', { kind: 'project', name: 'Kloof', role: 'viewer' }),
@@ -95,6 +98,42 @@ describe('email templates', () => {
 
 	it('escapeHtml covers the five HTML metacharacters', () => {
 		expect(escapeHtml(`<a href="x" title='y'>&</a>`)).toBe('&lt;a href=&quot;x&quot; title=&#39;y&#39;&gt;&amp;&lt;/a&gt;');
+	});
+});
+
+describe('the email to a taken address’s holder (#641 item 5)', () => {
+	const url = `http://localhost:7777/reset-password?token=${TOKEN}`;
+
+	it('sign-up and an email change each say what was tried, in their own words', () => {
+		const signUp = accountExistsMail('ann@example.com', url);
+		const change = emailChangeTakenMail('ann@example.com', { kind: 'reset', url });
+		expect(signUp.kind).toBe('account_exists');
+		expect(signUp.text).toMatch(/tried to create an IC-WBT account for ann@example\.com/);
+		expect(change.kind).toBe('email_change_taken');
+		expect(change.text).toMatch(/asked to change the email address of an IC-WBT account to ann@example\.com/);
+		expect(change.text).not.toMatch(/create an/);
+	});
+
+	it('an email change: nothing changed, sign in or reset if it was you, ignore it if not', () => {
+		const m = emailChangeTakenMail('ann@example.com', { kind: 'reset', url });
+		expect(m.text).toMatch(/nothing was changed, on either account/);
+		expect(m.text).toMatch(/If it was you, .*sign in to it with this address\. If you’ve forgotten its password, choose a new one:/);
+		expect(m.text).toContain(`Choose a new password: ${url}`);
+		expect(m.text).toMatch(/If it wasn't you, you can ignore this email\. Nothing has changed on your account/);
+	});
+
+	it('an unconfirmed holder is asked to confirm instead, with the verification link’s expiry', () => {
+		const m = emailChangeTakenMail('ann@example.com', { kind: 'confirm', url });
+		expect(m.text).toMatch(/isn’t confirmed yet\. Confirm it, then sign in with this address:/);
+		expect(m.text).toContain(`Confirm email address: ${url}`);
+		expect(m.text).not.toMatch(/forgotten/);
+		expect(m.text).toMatch(/48 hours/);
+	});
+
+	it('names only the holder’s own address: nothing about the account that asked', () => {
+		const m = emailChangeTakenMail('ann@example.com', { kind: 'reset', url });
+		const addresses = new Set(m.text.match(/[\w.+-]+@[\w.-]+\.\w+/g));
+		expect([...addresses]).toEqual(['ann@example.com']);
 	});
 });
 
