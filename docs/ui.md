@@ -553,7 +553,9 @@ address (`LANDING_ROUTES`, `addressFor` in `lib/auth/session.svelte.ts`).
   "Farmers and viewers are always free" and "Assessors verify evidence
   packs free" come first; "No VAT is charged", Free's non-commercial rule,
   and that data is never held back by a plan close it. Never "quota",
-  "abuse" or "402".
+  "abuse" or "402". It says nothing about the reverse trial on purpose: the
+  trial is off (`REVERSE_TRIAL`), and a page offering what isn't on would
+  mislead ([followups.md](./followups.md)).
 - **Figures from one place.** Every price and limit comes from
   `@water-management/engine/plans` (`PLAN_FIGURES`), since a static page
   can't read the `plan` table; `backend/src/billing/planFigures.db.test.ts`
@@ -3291,7 +3293,9 @@ and for a team member who isn't an admin, a farmer-only user sent back to
 both widths, the team's Upgrade to Team with its seat field, the two priced
 buttons wrapping at 360 px); `auth/redirect.test.ts` keeps `/account/plan` English. The
 frontend calls `GET /billing/plans` only for the Upgrade buttons' prices
-(the planned pricing page will too).
+(the public pricing page doesn't: it is prerendered, and its figures are
+`PLAN_FIGURES` in `packages/engine/src/plans.ts`, pinned to the plan table by
+`planFigures.db.test.ts`).
 
 ## Network
 

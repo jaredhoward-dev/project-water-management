@@ -894,6 +894,11 @@ are #641's checklist. Open items from building it:
       put to the client's reviewer: "lewendig" for live, "gepubliseerde
       bladsye vir boere" for published farm views, "assistenttoelaag".
       Trigger: the next Afrikaans review round.
+- [ ] **The pricing page doesn't mention the reverse trial.** Deliberate
+      while `REVERSE_TRIAL` is off (ui.md § Pricing page). Durable fix: a
+      "14 days of Pro, no card" line from `plan.trial_days` added to
+      `PLAN_FIGURES`, through the i18n flow (English and Afrikaans).
+      Trigger: before `REVERSE_TRIAL` goes on.
 - [ ] **Drop the 4-argument `app_assistant_charge`.** Migration 324 keeps
       it as a wrapper (charged as unpriced) so a backend released before
       324 keeps charging during the rollout. Durable fix: a forward
@@ -961,7 +966,7 @@ are #641's checklist. Open items from building it:
       transaction it writes the paid row; trigger: before `REVERSE_TRIAL` goes
       on; (2) the banner 3 days before the end and the end-of-trial email;
       (3) the live-catchment picker at the end and stopping automatic runs on
-      the others 7 days later (the 338 item above); (4) the assistant panel's
+      the others 7 days later (the 338 item below); (4) the assistant panel's
       words for `assistant_trial_cap` and `assistant_trial_daily_cap`
       (`frontend/.../assistant/chat.svelte.ts` `DOLLAR_CAP_CODES` doesn't
       list them, so they show as a plain error); (5) the abuse report's

@@ -1,8 +1,14 @@
 # Billing
 
 Paid plans for IC-WBT ([issue #641](https://github.com/jaredhoward-dev/project-water-management/issues/641)).
-This page covers **Phase 1, shadow mode**: every plan, limit and count exists
-and is shown, and **nothing is refused** (no `402`). Phase 3's provider
+This page covers **Phase 1, shadow mode** (every plan, limit and count exists
+and is shown) and **Phase 2's enforcement, built but off**: the seat and
+live-catchment limits (`402 plan_limit`), the assistant's dollar caps, the
+pause after a downgrade, the reverse trial and Free's verified-email gate all
+refuse only while `BILLING_ENFORCED` is on, which it isn't in production
+([§ Live catchments (Free)](#live-catchments-free), [§ Pausing after a
+downgrade](#pausing-after-a-downgrade), [§ Verified email on
+Free](#verified-email-on-free)). Phase 3's provider
 seam, webhook, checkout and portal are built and run locally behind the mock
 provider; production runs `manual` until the Stripe account exists
 (Terraform's `billing_provider` switch; the operator's steps are
@@ -201,8 +207,7 @@ moves to Team. Like the other caps, nothing refuses past it unless billing is
 enforced.
 
 **Not built yet** ([followups.md](./followups.md#billing-issue-641)): the
-trial's own $2 / $1-a-day caps (no trials yet; a trial draws on the pool),
-the "questions left today" meter, and Haiku on Free.
+"questions left today" meter, and Haiku on Free.
 
 ## Metrics and the abuse report
 
@@ -255,7 +260,7 @@ one), reverse trial to paid (built in 342, off, and the report doesn't read it y
 cap and the Free pool's burn by day (`assistant_day_usage` keeps each day
 since 336, but the report doesn't read it yet), the share at the live-catchment limit (338 defines live,
 but the report doesn't read it yet), paid seats reaching $15 (spend isn't kept per paid seat), disposable
-rejections (no blocklist yet), sign-up throttle hits per address
+rejections (the gate's refusals aren't logged yet), sign-up throttle hits per address
 (`signup_throttle` keeps only an hour's hashed buckets) and suspensions (no
 suspend action yet).
 
@@ -843,8 +848,7 @@ a `subscription` with `provider = 'manual'`, `period_end = trial_end`,
 `cancel_at_period_end` true (so the renewal notice skips it), logged in
 `billing_grant_log` as a `grant` by `reverse trial`. A reverse trial is
 exactly a `manual` + `trialing` row (staff and invoice grants are `active`,
-Stripe trials are `stripe`). Only a verified address qualifies; the
-disposable-domain blocklist is another lane's and is not checked here.
+Stripe trials are `stripe`). Only a verified address qualifies.
 
 **Once per canonical email.** `reverse_trial_claim` keeps the SHA-256 of the
 canonical address and when, never the address and no link to the account,
@@ -1051,9 +1055,11 @@ a second one when `BILLING_ENFORCED` is on.
   with what is actually running (a feed fetching in a catchment marked not
   live). The owner moves the live catchment by switching its feeds, alerts
   and automatic runs off there; a publication can't be taken back, so a
-  catchment that published stays the live one. When the reverse trial ends
-  (a later slice), the picker on the Plan page can do exactly that: switch
-  the others' operations off, deleting nothing.
+  catchment that published stays the live one. After a downgrade, or a
+  reverse trial's end (a lapse like any other), 341 pauses the others'
+  operations after a 14-day grace, deleting nothing ([§ Pausing after a
+  downgrade](#pausing-after-a-downgrade)); the Plan page's picker for which
+  one stays live is still to build ([followups.md](./followups.md)).
 - **One definition.** `app_project_live_except(project, …)` (whether a
   project is live through anything but the named row) and
   `app_live_catchments_in_use(account)` (its billed projects that are live).
@@ -1137,7 +1143,10 @@ Built but off: nothing is paused unless `BILLING_ENFORCED` is on.
   records when that was first seen: the subscription trigger stamps it as
   the plan ends, and the job tick (`app_plan_pause_tick`, every 5 minutes)
   catches any path the trigger misses. An account that never had a plan is
-  never paused (its extra live catchments predate enforcement).
+  never paused (its extra live catchments predate enforcement). A reverse
+  trial's end (342, `app_reverse_trial_expire`) is a lapse like any other,
+  so it starts the same grace. Auto-calibration on new data isn't paused:
+  it refits a model, which is modelling, and Free never limits modelling.
 - **The grace.** For 14 days nothing changes. After them, with billing
   enforced, the tick pauses every live catchment past Free's limit and keeps
   one: the one the owner chose (`billing_account.kept_project_id`, set by
@@ -1205,8 +1214,9 @@ them on together.
   (`backend/src/auth/disposableDomains.ts`, its source, commit, date,
   licence and hash in the header; [data-sources.md §
   disposable-email-domains](./data-sources.md#disposable-email-domains)).
-  Never fetched at runtime. Sign-up and an email change (#641 item 5) and
-  the reverse trial don't call it yet ([followups.md](./followups.md)).
+  Never fetched at runtime. The reverse trial calls it (a disposable address
+  gets no trial); sign-up and an email change (#641 item 5) don't yet
+  ([followups.md](./followups.md)).
 - **The words.** Workspace English, #641's copy: "Verify your email to use
   the assistant. We sent a link to name@example.com." with *Resend* (the
   feeds panel's says "switch on a live data feed"); a disposable address:

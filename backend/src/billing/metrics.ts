@@ -259,7 +259,7 @@ export const NOT_YET_MEASURABLE: { metric: string; needs: string }[] = [
 	{ metric: 'Share of active Free accounts at the live-catchment limit', needs: 'no catchment is marked live yet' },
 	{ metric: 'Free pool burn by day of month', needs: 'assistant_usage is monthly; there is no pool or daily record yet' },
 	{ metric: 'Paid AI: share of seats reaching $15', needs: 'spend is per project and person, not per paid seat; no one is on a paid plan in Phase 1' },
-	{ metric: 'Disposable-domain rejections', needs: 'no blocklist yet' },
+	{ metric: 'Disposable-domain rejections', needs: "the verified-email gate's refusals aren't logged yet" },
 	{ metric: 'Sign-up throttle hits per address', needs: 'signup_throttle keeps only a hashed bucket for its hour (079)' },
 	{ metric: 'Suspensions', needs: 'no suspend action yet' }
 ];
