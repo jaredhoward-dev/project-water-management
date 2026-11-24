@@ -542,9 +542,11 @@ seats* control ([ui.md § Plan and usage](./ui.md#plan-and-usage)):
 - `GET /v1/subscriptions/:id?expand[]=items.data.price.product` reads the
   items. The extra-seat item is the one whose product is named `IC-WBT
   <plan>: extra editor seat` (checkout's `product_data`) or is ours by id;
-  the other is the plan. Two extra-seat items, or an item neither, means
-  someone edited the subscription in the dashboard: nothing is changed and
-  the answer is `503 billing_provider_error`.
+  the other is the plan. A subscription edited by hand in the dashboard is
+  refused: two extra-seat items, an item that is neither, the plan item at a
+  quantity other than 1 (the seat count assumes 1, `seatsOf`), or an
+  extra-seat item whose price bills at another interval than the plan's.
+  Nothing is changed and the answer is `503 billing_provider_error`.
 - **Update**: `POST /v1/subscription_items/:id` with the new extra
   `quantity`.
 - **Add** (no extra-seat item yet): a subscription item's `price_data`

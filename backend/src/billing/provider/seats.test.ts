@@ -115,8 +115,13 @@ describe('stripe: changeSeats', () => {
 		expect(calls[1]!.headers['Content-Type']).toBeUndefined();
 	});
 
-	it('changes nothing on items it can’t place (two extra-seat items, or an unknown one), answering billing_provider_error', async () => {
-		for (const items of [[BASE, EXTRA(1), item('si_Extra2', 1, 'IC-WBT Team: extra editor seat')], [BASE, item('si_Odd1', 2, 'Something else')]]) {
+	it('changes nothing on a hand-edited subscription (two extra-seat items, an unknown one, the plan item at quantity 2, an extra-seat item at another interval), answering billing_provider_error', async () => {
+		for (const items of [
+			[BASE, EXTRA(1), item('si_Extra2', 1, 'IC-WBT Team: extra editor seat')],
+			[BASE, item('si_Odd1', 2, 'Something else')],
+			[item('si_Base1', 2, 'IC-WBT Team')],
+			[BASE, item('si_Extra1', 2, 'IC-WBT Team: extra editor seat', 'month')]
+		]) {
 			const { provider, calls } = fakeStripe(items);
 			await expect(provider.changeSeats(change(6))).rejects.toMatchObject({ status: 503, code: 'billing_provider_error' });
 			expect(calls).toHaveLength(1);

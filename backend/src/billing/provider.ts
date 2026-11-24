@@ -314,9 +314,12 @@ function stripeProvider(webhookSecret: string | undefined, secretKey: string | u
 				const items = await getSubscriptionItems(o, change.externalRef, change.plan.code);
 				const extras = items.filter((i) => i.extraSeat);
 				const base = items.find((i) => !i.extraSeat);
-				// Two extra-seat items, or an item we can't place: someone edited it in the dashboard. Change nothing.
+				// Hand-edited in the dashboard: two extra-seat items, an item we can't place, a plan item
+				// at a quantity other than 1 (seatsOf counts the plan as 1, so the route's checks would be
+				// off), or an extra-seat item billed at another interval than the plan. Change nothing.
 				if (extras.length > 1 || !base || items.length - extras.length !== 1) throw new StripeApiError(502, 'unexpected_response', 'items');
 				const extra = extras[0] ?? null;
+				if (base.quantity !== 1 || (extra !== null && extra.interval !== base.interval)) throw new StripeApiError(502, 'unexpected_response', 'items');
 				const interval = base.interval;
 				const extraSeatMinor = interval === 'year' ? change.plan.extraSeatAnnualMinor : change.plan.extraSeatMonthlyMinor;
 				if (!interval || extraSeatMinor === null) throw new StripeApiError(502, 'unexpected_response', 'interval');
