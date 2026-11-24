@@ -188,9 +188,10 @@ describe('route auth inventory', () => {
 
 	// The account page (WP-1.9): renaming and changing the password need a session (auth/auth.db.test.ts),
 	// and so does "download my data" (POPIA; auth/export.db.test.ts), accepting new terms (auth/auth.db.test.ts),
-	// and "delete my account" (issue #112; auth/delete-me.db.test.ts).
+	// "delete my account" (issue #112; auth/delete-me.db.test.ts), and asking to change the email address
+	// (347; auth/email-change.db.test.ts; the link that confirms it is public, above).
 	it('inventories the account routes as auth-gated', () => {
-		for (const r of ['PATCH /auth/me', 'DELETE /auth/me', 'POST /auth/change-password', 'GET /auth/me/export', 'POST /auth/me/farm-notice', 'POST /auth/me/accept-terms']) {
+		for (const r of ['PATCH /auth/me', 'DELETE /auth/me', 'POST /auth/change-password', 'POST /auth/change-email', 'GET /auth/me/export', 'POST /auth/me/farm-notice', 'POST /auth/me/accept-terms']) {
 			expect(routes).toContain(r);
 			expect(PUBLIC.has(r)).toBe(false);
 		}
@@ -597,6 +598,7 @@ describe('route auth inventory', () => {
 		'POST /auth/forgot-password',
 		'POST /auth/reset-password',
 		'POST /auth/verify-email',
+		'POST /auth/confirm-email-change',
 		'POST /auth/resend-confirmation',
 		'POST /auth/invite-info',
 		'POST /auth/render-session',
