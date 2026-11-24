@@ -16,6 +16,15 @@
 //   POST   /v1/subscription_items/:id             its new quantity
 //   DELETE /v1/subscription_items/:id             remove it, back to the included seats
 //
+// and, for a B2B invoice from the staff tool (docs/billing.md § B2B invoices):
+//
+//   GET    /v1/invoices?customer=…                the customer's invoices, to find one this key already made
+//   POST   /v1/invoices                           a draft: send_invoice, days_until_due 30, the PO number as a custom field
+//   POST   /v1/invoiceitems                       its lines (invoice=<id>), each an amount, a description and a period
+//   POST   /v1/invoices/:id/finalize              open it (auto_advance=false: nothing advances without us)
+//   POST   /v1/invoices/:id/send                  email it to the customer
+//   POST   /v1/invoices/:id                       metadata wm_sent=true, so a later retry never emails it twice
+//
 // Each change sends proration_behavior=create_prorations (Stripe's default, written
 // out so a change of default never changes ours) and an idempotency key.
 //
@@ -257,4 +266,138 @@ export async function changeSeatItem(o: StripeClientOptions, p: SeatChangeParams
 		},
 		p.idempotencyKey
 	);
+}
+
+const INVOICE_ID = /^in_[A-Za-z0-9]{1,250}$/;
+/** Days a B2B invoice gives the customer to pay (net 30; issue #641 Phase 5). */
+export const INVOICE_DAYS_UNTIL_DUE = 30;
+/** The custom field the PO number goes in, printed on the invoice and its PDF (Stripe: up to 4 fields, name ≤ 40, value ≤ 140). */
+export const PO_FIELD_NAME = 'PO number';
+
+export interface InvoiceLine {
+	/** The line's total in minor units (quantity × unit price, worked out by the caller). */
+	amountMinor: number;
+	/** What the customer reads on the line, quantity included ("IC-WBT Team: 3 editor seats, 1 year"). */
+	description: string;
+}
+
+export interface StripeInvoiceParams {
+	customer: string;
+	accountId: string;
+	planCode: string;
+	seats: number;
+	interval: 'month' | 'year';
+	currency: string;
+	poNumber: string;
+	/** The period the invoice pays for, as unix seconds (start inclusive, end exclusive), printed on each line. */
+	periodStart: number;
+	periodEnd: number;
+	lines: InvoiceLine[];
+	/** Our key for this invoice: in its metadata (wm_invoice_key), to find it again, and the stem of every idempotency key. */
+	key: string;
+}
+
+export interface StripeInvoiceResult {
+	invoiceId: string;
+	/** Stripe's invoice number once finalized (e.g. ABCD1234-0001). */
+	number: string | null;
+	status: string;
+	totalMinor: number;
+	/** Unix seconds. */
+	dueDate: number | null;
+	/** An invoice this key had already made and sent: nothing new was made or emailed. */
+	reused: boolean;
+}
+
+const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+const meta = (o: Record<string, unknown>): Record<string, unknown> => (typeof o.metadata === 'object' && o.metadata !== null ? (o.metadata as Record<string, unknown>) : {});
+
+/** The customer's invoice this key made, if any (void ones left out: voided means the operator cancelled it). */
+async function findInvoice(o: StripeClientOptions, customer: string, key: string): Promise<Record<string, unknown> | null> {
+	const list = await send(o, 'GET', '/v1/invoices', { customer, limit: 100 });
+	const data = Array.isArray(list.data) ? (list.data as Record<string, unknown>[]) : null;
+	if (!data) throw new StripeApiError(502, 'unexpected_response', 'data');
+	return data.find((inv) => meta(inv).wm_invoice_key === key && inv.status !== 'void') ?? null;
+}
+
+/**
+ * A B2B invoice, made once per key and sent once: a send_invoice draft due in
+ * INVOICE_DAYS_UNTIL_DUE days with the PO number as a custom field, its lines,
+ * finalized and emailed. Every POST carries an idempotency key from `key` (a
+ * retry within Stripe's 24 hours answers the same object), and the invoice
+ * carries `key` in its metadata, so a retry after that finds it instead of
+ * making a second one: a draft is completed, an open one not yet sent is sent,
+ * a sent one is answered as it is (`reused`).
+ */
+export async function createInvoice(o: StripeClientOptions, p: StripeInvoiceParams): Promise<StripeInvoiceResult> {
+	if (!CUSTOMER_ID.test(p.customer)) throw new StripeApiError(400, 'invalid_request', 'customer');
+	if (p.lines.length === 0 || p.lines.some((l) => !Number.isInteger(l.amountMinor) || l.amountMinor <= 0)) throw new StripeApiError(400, 'invalid_request', 'lines');
+	const k = `wm-invoice-${p.key}`;
+	const expected = p.lines.reduce((a, l) => a + l.amountMinor, 0);
+	const metadata = {
+		billing_account_id: p.accountId,
+		plan_code: p.planCode,
+		seats: String(p.seats),
+		interval: p.interval,
+		period_start: String(p.periodStart),
+		period_end: String(p.periodEnd),
+		wm_invoice_key: p.key
+	};
+	let inv = await findInvoice(o, p.customer, p.key);
+	const reused = inv !== null && inv.status !== 'draft' && meta(inv).wm_sent === 'true';
+	if (!inv) {
+		inv = await post(
+			o,
+			'/v1/invoices',
+			{
+				customer: p.customer,
+				collection_method: 'send_invoice',
+				days_until_due: INVOICE_DAYS_UNTIL_DUE,
+				currency: p.currency.toLowerCase(),
+				custom_fields: [{ name: PO_FIELD_NAME, value: p.poNumber }],
+				pending_invoice_items_behavior: 'exclude',
+				auto_advance: false,
+				metadata
+			},
+			k
+		);
+	}
+	const id = field(inv, 'id', INVOICE_ID);
+	if (inv.status === 'draft') {
+		// A draft this key made earlier may already hold its lines (a retry after a failure past this step).
+		const total = num(inv.total) ?? 0;
+		if (total !== 0 && total !== expected) throw new StripeApiError(502, 'unexpected_response', 'total');
+		if (total === 0) {
+			for (const [i, l] of p.lines.entries()) {
+				await post(
+					o,
+					'/v1/invoiceitems',
+					{
+						customer: p.customer,
+						invoice: id,
+						currency: p.currency.toLowerCase(),
+						amount: l.amountMinor,
+						description: l.description,
+						period: { start: p.periodStart, end: p.periodEnd },
+						metadata: { billing_account_id: p.accountId, wm_invoice_key: p.key }
+					},
+					`${k}-item-${i}`
+				);
+			}
+		}
+		inv = await post(o, `/v1/invoices/${id}/finalize`, { auto_advance: false }, `${k}-finalize`);
+	}
+	if (!reused) {
+		if (inv.status !== 'open') throw new StripeApiError(502, 'unexpected_response', 'status');
+		inv = await post(o, `/v1/invoices/${id}/send`, {}, `${k}-send`);
+		inv = await post(o, `/v1/invoices/${id}`, { metadata: { wm_sent: 'true' } }, `${k}-sent`);
+	}
+	return {
+		invoiceId: id,
+		number: typeof inv.number === 'string' ? inv.number : null,
+		status: typeof inv.status === 'string' ? inv.status : 'unknown',
+		totalMinor: num(inv.total) ?? expected,
+		dueDate: num(inv.due_date),
+		reused
+	};
 }

@@ -24,7 +24,7 @@ import { logEvent } from '../logging/logEvent.js';
 import { UUID } from '../projects/access.js';
 import { accountPlan, listPlans, myAccountId, teamAccountId } from './entitlements.js';
 import type { PublicPlan } from './entitlements.js';
-import { BILLING_INTERVALS, BillingGrantSeatsError, BillingUnavailableError, billingProvider, MAX_CHECKOUT_SEATS, type CheckoutPlan, type LiveSubscription, type ReturnUrls } from './provider.js';
+import { BILLING_INTERVALS, BillingGrantSeatsError, BillingUnavailableError, billingProvider, checkoutPlanOf, MAX_CHECKOUT_SEATS, PURCHASABLE, type CheckoutPlan, type LiveSubscription, type ReturnUrls } from './provider.js';
 
 /** GET /billing/plans: anyone, signed in or not. The plans are public prices, not anyone's data. */
 export const billingPublicRoutes = new Hono().get('/plans', async (c) => {
@@ -32,29 +32,12 @@ export const billingPublicRoutes = new Hono().get('/plans', async (c) => {
 	return c.json({ plans });
 });
 
-/** Which plan each kind of account can buy: Pro is a person's, Team a team's (docs/billing.md § Who the plan belongs to). */
-export const PURCHASABLE: Record<'user' | 'team', string> = { user: 'pro', team: 'team' };
+// PURCHASABLE and checkoutPlanOf live in provider.ts (the staff tool's invoice, billing/invoice.ts, prices with them too).
+export { checkoutPlanOf, PURCHASABLE } from './provider.js';
 
 const checkoutBody = z
 	.object({ plan: z.string().min(1).max(32), interval: z.enum(BILLING_INTERVALS), seats: z.number().int().min(1).max(MAX_CHECKOUT_SEATS).optional() })
 	.strict();
-
-const minor = (v: unknown): number | null => (typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : null);
-
-/** A public plan as checkout prices it: its included seats (limits.seats_included) and extra-seat prices (features.extra_seat_*_minor). */
-export function checkoutPlanOf(p: PublicPlan): CheckoutPlan {
-	const included = p.limits.seats_included;
-	return {
-		code: p.code,
-		name: p.name,
-		priceMonthlyMinor: p.priceMonthlyMinor,
-		priceAnnualMinor: p.priceAnnualMinor,
-		currency: p.currency,
-		seatsIncluded: typeof included === 'number' && Number.isInteger(included) && included >= 1 ? included : 1,
-		extraSeatMonthlyMinor: minor(p.features.extra_seat_monthly_minor),
-		extraSeatAnnualMinor: minor(p.features.extra_seat_annual_minor)
-	};
-}
 
 /**
  * The seats a checkout sells: the plan's included ones when the body names none; else

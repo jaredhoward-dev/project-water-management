@@ -5,6 +5,8 @@
 import { describe, expect, it } from 'vitest';
 import { StaffGrantError } from '../billing/staffGrant.js';
 import { NoPersonError } from '../projects/authorityConfirm.js';
+import { InvoiceError } from '../billing/invoice.js';
+import { BillingProviderError, BillingUnavailableError } from '../billing/provider.js';
 import { buildPayload } from '../../../scripts/release/owner-action.mjs';
 import { OwnerActionError, ownerActionCode, ownerActionReason, OWNER_ACTIONS, parseOwnerAction, WORKFLOW_ACTIONS } from './ownerActions.js';
 
@@ -152,7 +154,8 @@ describe('ids only from the workflow (its runs are in a public repo)', () => {
 			if (!('payload' in built)) throw new Error(`the workflow refused ${JSON.stringify(inputs)}: ${built.errors.join('; ')}`);
 			expect(parseOwnerAction(built.payload)).toMatchObject({ action: inputs.action, via: 'workflow' });
 		}
-		expect([...WORKFLOW_ACTIONS].sort()).toEqual(OWNER_ACTIONS.filter((a) => a !== 'billing-account').sort());
+		// Not the address lookup, and not the invoice: its PO number may identify the client.
+		expect([...WORKFLOW_ACTIONS].sort()).toEqual(OWNER_ACTIONS.filter((a) => a !== 'billing-account' && a !== 'billing-invoice').sort());
 	});
 
 	it('never echoes the address of a refused workflow payload', () => {
@@ -174,6 +177,34 @@ describe('ownerActionCode', () => {
 		expect(ownerActionCode(Object.assign(new Error('bad plan'), { code: '22023' }))).toBe('invalid');
 		expect(ownerActionCode(Object.assign(new Error('not an editor'), { code: '23514' }))).toBe('not_editor');
 		expect(ownerActionCode(new Error('connect ECONNREFUSED'))).toBe('action_failed');
-		for (const code of ['refused', 'no_person', 'live_subscription', 'action_failed'] as const) expect(ownerActionReason(code)).not.toMatch(/@/);
+		expect(ownerActionCode(new InvoiceError('the PO number is …', 'invalid'))).toBe('invalid');
+		expect(ownerActionCode(new InvoiceError('live Stripe', 'live_subscription'))).toBe('live_subscription');
+		expect(ownerActionCode(new BillingUnavailableError())).toBe('billing_unavailable');
+		expect(ownerActionCode(new BillingProviderError())).toBe('billing_provider_error');
+		for (const code of ['refused', 'no_person', 'live_subscription', 'action_failed', 'billing_unavailable', 'billing_provider_error'] as const) expect(ownerActionReason(code)).not.toMatch(/@/);
+	});
+});
+
+describe('billing-invoice (direct invoke only)', () => {
+	const ACCOUNT = '5c4d3e2f-1a0b-4c9d-8e7f-6a5b4c3d2e1f';
+	const ok = { action: 'billing-invoice', teamId: TEAM, plan: 'team', interval: 'year', poNumber: ' PO-2026/0042 ' };
+
+	it('takes a team, a person or an account by id, a plan, an interval, optional seats and start, and a PO number (trimmed)', () => {
+		expect(parseOwnerAction(ok)).toEqual({ ...ok, poNumber: 'PO-2026/0042' });
+		expect(parseOwnerAction({ ...ok, teamId: undefined, accountId: ACCOUNT, seats: 5, from: '2027-01-01' })).toMatchObject({ accountId: ACCOUNT, seats: 5, from: '2027-01-01' });
+		expect(parseOwnerAction({ ...ok, teamId: undefined, email: 'Billing@Example.org', plan: 'pro', interval: 'month' })).toMatchObject({ email: 'billing@example.org' });
+	});
+
+	it('refuses the workflow’s mark outright, and a bad PO number, seats, interval, date or target', () => {
+		expect(refused({ ...ok, via: 'workflow' })).toBe('refused');
+		for (const poNumber of ['', 'PO<1>', 'PO\n1', 'x'.repeat(65), 'a@b.org']) expect(refused({ ...ok, poNumber }), poNumber).toBe('refused');
+		expect(refused({ ...ok, poNumber: undefined })).toBe('refused');
+		expect(refused({ ...ok, seats: 0 })).toBe('refused');
+		expect(refused({ ...ok, seats: 51 })).toBe('refused');
+		expect(refused({ ...ok, interval: 'week' })).toBe('refused');
+		expect(refused({ ...ok, from: '2027-02-30' })).toBe('refused');
+		expect(refused({ ...ok, plan: 'free' })).toBe('refused');
+		expect(refused({ ...ok, accountId: ACCOUNT })).toBe('refused'); // two targets
+		expect(refused({ ...ok, amountMinor: 1 })).toBe('refused'); // the price is the plan table's
 	});
 });

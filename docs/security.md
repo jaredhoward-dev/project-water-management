@@ -4839,7 +4839,8 @@ key there would let any read-only principal forge any user's session.
   domains too. Its **inputs are ids only** (§ Public repo hygiene, "No
   personal information in Actions inputs"): the address forms and the
   `billing-account` lookup run only through the operator's own `aws lambda
-  invoke`.
+  invoke`, and so does `billing-invoice`, whose PO number may identify a
+  client (its answer leaves the PO out).
 - **Reference loads run as the schema owner**, so they are gated like a
   deploy: `load-reference.yml` reaches AWS only in the `production`
   environment (a required reviewer, then OIDC), from `main` only, after a
