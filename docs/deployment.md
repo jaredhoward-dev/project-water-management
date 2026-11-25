@@ -3377,7 +3377,15 @@ key goes into a chat, an issue or a CI log.
    `invoice.paid`, `invoice.payment_failed`. Reveal its signing secret
    (`whsec_…`). Until step 5's apply the API answers this endpoint `404`
    (`manual`), and Stripe retries a failed delivery for up to three days, so
-   do steps 4–5 the same day.
+   do steps 4–5 the same day. **One webhook endpoint per environment:** a
+   staging or test deployment on the same Stripe account gets its own
+   endpoint pointing at its own site, never this one. Each deployment
+   cancels and refunds an orphan (a subscription whose account is gone)
+   only when the subscription carries its own `BILLING_ENVIRONMENT` tag,
+   which Terraform sets to the site's domain (`infra/lambda.tf`; the
+   production check refuses it unset or `local` under `stripe`), so one
+   deployment never refunds another's subscriptions ([billing.md § The
+   route](./billing.md#the-route), "Only this deployment's").
 4. **Put both in sops:**
    `cd ~/github/infra-secrets && AWS_PROFILE=water-management sops water-management/prod.sops.yaml`,
    adding `stripe_secret_key: "<rk_live_…>"` and
@@ -3391,7 +3399,8 @@ key goes into a chat, an issue or a CI log.
    and `AWS_PROFILE=water-management ./scripts/tf.sh apply <plan>`. Expect:
    the Stripe egress module's resources and the backend function's
    `vpc_config` moving to its subnets,
-   `BILLING_PROVIDER` going from `manual` to `stripe` on the backend function,
+   `BILLING_PROVIDER` going from `manual` to `stripe` on the backend function
+   (`BILLING_ENVIRONMENT`, the site's domain, is there already),
    and every runtime secret version rewritten (the sops edit moved
    `runtime_secret_version`, so every Lambda cold-starts). Nothing else.
    A plan that fails on `var.billing_provider` names the missing or

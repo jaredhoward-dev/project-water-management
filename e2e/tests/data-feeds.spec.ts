@@ -593,7 +593,9 @@ test('on Free with another catchment live, attaching or switching on a feed show
 // Compare plans in a team catchment (docs/billing.md § Who the plan belongs to): only a team admin reads the team's
 // plan (GET /teams/:id/plan is 404 to anyone else), so the admin's link opens it, and a team member, or someone shared
 // the catchment directly outside the team, gets the public price list with whose plan it is and to ask a team admin.
-test('in a team catchment, Compare plans opens the team’s plan for its admin, and the price list with “ask a team admin” for a member or a direct editor', async ({ page, owner, signIn }) => {
+// Only a project owner attaches a feed, so the member and the outsider are made the project's owners too: the link
+// follows their team role (app_team_role), not their project role.
+test('in a team catchment, Compare plans opens the team’s plan for its admin, and the price list with “ask a team admin” for a member or a direct owner', async ({ page, owner, signIn }) => {
 	void owner;
 	const team = (await (await page.request.post(`${API_URL}/teams`, { data: { name: 'Feeds Plan WUA' } })).json()) as { team: { id: string } };
 	const made = await page.request.post(`${API_URL}/projects`, { data: { name: 'Feeds team plan', teamId: team.team.id } });
@@ -602,8 +604,9 @@ test('in a team catchment, Compare plans opens the team’s plan for its admin, 
 	const member = await signIn('Feeds team member');
 	expect((await page.request.post(`${API_URL}/teams/${team.team.id}/members`, { data: { email: member.user.email, role: 'member' } })).status()).toBe(201);
 	expect(await acceptInvites(member.user.email, team.team.id)).toBe(1);
-	const direct = await signIn('Feeds direct editor');
-	await addMember(page.request, projectId, direct.user.email, 'editor');
+	await addMember(page.request, projectId, member.user.email, 'owner');
+	const direct = await signIn('Feeds direct owner');
+	await addMember(page.request, projectId, direct.user.email, 'owner');
 
 	const attachRefused = async (p: Page) => {
 		await refuseLive(p, 'POST', /\/projects\/[^/]+\/feeds$/);

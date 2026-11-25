@@ -2,7 +2,7 @@
 // live call. What each request sends (path, headers, form body) and how each
 // answer is read or refused.
 import { describe, expect, it, vi } from 'vitest';
-import { cancelSubscription, orphanCancelAndRefund, createCheckoutSession, createCustomer, expireCheckoutSession, listOpenCheckoutSessions, listOpenSubscriptions, createInvoice, createPortalSession, formEncode, STRIPE_API_VERSION, StripeApiError } from './stripeApi.js';
+import { cancelSubscription, ORPHAN_REFUND_WINDOW_SECONDS, orphanCancelAndRefund, createCheckoutSession, createCustomer, expireCheckoutSession, listOpenCheckoutSessions, listOpenSubscriptions, createInvoice, createPortalSession, formEncode, STRIPE_API_VERSION, StripeApiError } from './stripeApi.js';
 
 const KEY = 'test-only-not-a-stripe-key';
 const ACCOUNT = '22222222-2222-4222-8222-222222222222';
@@ -62,6 +62,7 @@ describe('createCheckoutSession', () => {
 		extraSeats: 0,
 		extraSeatMinor: 0,
 		interval: 'month' as const,
+		environment: 'icwbt.example.com',
 		successUrl: 'https://site.example/account/plan?checkout=done',
 		cancelUrl: 'https://site.example/account/plan?checkout=cancelled'
 	};
@@ -82,9 +83,12 @@ describe('createCheckoutSession', () => {
 			'metadata[billing_account_id]': ACCOUNT,
 			'metadata[plan_code]': 'pro',
 			'metadata[seats_included]': '1',
+			'metadata[wm_environment]': 'icwbt.example.com',
 			'subscription_data[metadata][billing_account_id]': ACCOUNT,
 			'subscription_data[metadata][plan_code]': 'pro',
 			'subscription_data[metadata][seats_included]': '1',
+			// The deployment that sold it: the webhook refunds an orphan only when this is its own (webhook.ts).
+			'subscription_data[metadata][wm_environment]': 'icwbt.example.com',
 			success_url: params.successUrl,
 			cancel_url: params.cancelUrl
 		});
@@ -369,11 +373,26 @@ function routedFetch(routes: Record<string, (init: RequestInit, url: URL) => { s
 	});
 	return { f: f as unknown as typeof fetch, calls };
 }
-const paidInvoice = { status: 200, body: { object: 'list', has_more: false, data: [{ id: 'in_Paid1', amount_paid: 4900, status: 'paid' }] } };
+/** "Now" for the orphan tests, in ms; the refund window runs back ORPHAN_REFUND_WINDOW_SECONDS from it. */
+const NOW_MS = Date.UTC(2026, 10, 24, 12);
+const NOW_S = NOW_MS / 1000;
+const WINDOW_START = NOW_S - ORPHAN_REFUND_WINDOW_SECONDS;
+/** A paid invoice of the subscription: its first (subscription_create) unless `reason` says otherwise, paid `agoS` seconds before NOW. */
+const invoice = (id: string, agoS: number, reason = 'subscription_create', amountPaid = 4900) => ({
+	id,
+	amount_paid: amountPaid,
+	status: 'paid',
+	billing_reason: reason,
+	created: NOW_S - agoS - 5,
+	status_transitions: { paid_at: NOW_S - agoS }
+});
+const invoices = (...data: unknown[]) => ({ status: 200, body: { object: 'list', has_more: false, data } });
+const paidInvoice = invoices(invoice('in_Paid1', 60));
 const paidPayment = { status: 200, body: { object: 'list', has_more: false, data: [{ id: 'inpay_1', status: 'paid', payment: { type: 'payment_intent', payment_intent: 'pi_Paid1' } }] } };
+const run = (f: typeof fetch, sub = 'sub_Orphan1') => orphanCancelAndRefund({ secretKey: KEY, fetch: f }, sub, ACCOUNT, NOW_MS);
 
 describe('orphanCancelAndRefund (a subscription whose account is gone)', () => {
-	it('reads the subscription, cancels it now, lists its paid invoices and their payments, and refunds each whole under a key per payment', async () => {
+	it('reads the subscription, lists its recent paid invoices, cancels it now, and refunds the first invoice’s payments whole under a key per payment', async () => {
 		const { f, calls } = routedFetch({
 			'GET /v1/subscriptions/sub_Orphan1': () => ({ status: 200, body: { id: 'sub_Orphan1', status: 'active' } }),
 			'DELETE /v1/subscriptions/sub_Orphan1': () => ({ status: 200, body: { id: 'sub_Orphan1', status: 'canceled' } }),
@@ -381,11 +400,11 @@ describe('orphanCancelAndRefund (a subscription whose account is gone)', () => {
 			'GET /v1/invoice_payments': () => paidPayment,
 			'POST /v1/refunds': () => ({ status: 200, body: { id: 're_1', object: 'refund', amount: 4900, status: 'succeeded' } })
 		});
-		expect(await orphanCancelAndRefund({ secretKey: KEY, fetch: f }, 'sub_Orphan1', ACCOUNT)).toEqual({ cancelled: true, refunds: 1, refundedMinor: 4900 });
+		expect(await run(f)).toEqual({ cancelled: true, refunds: 1, refundedMinor: 4900, skipped: false });
 		expect(calls.map((c) => c.method + ' ' + c.url)).toEqual([
 			'GET https://api.stripe.com/v1/subscriptions/sub_Orphan1',
+			`GET https://api.stripe.com/v1/invoices?subscription=sub_Orphan1&status=paid&created%5Bgte%5D=${WINDOW_START}&limit=100`,
 			'DELETE https://api.stripe.com/v1/subscriptions/sub_Orphan1?invoice_now=false&prorate=false',
-			'GET https://api.stripe.com/v1/invoices?subscription=sub_Orphan1&status=paid&limit=100',
 			'GET https://api.stripe.com/v1/invoice_payments?invoice=in_Paid1&status=paid&limit=100',
 			'POST https://api.stripe.com/v1/refunds'
 		]);
@@ -401,14 +420,95 @@ describe('orphanCancelAndRefund (a subscription whose account is gone)', () => {
 		expect(String(refund.body)).not.toMatch(/@|email/);
 	});
 
-	it('does not cancel one already ended (a redelivery after the cancel), and refunds a charge payment by its charge', async () => {
+	it('refunds only the create invoice: never a renewal, an update’s proration or any other paid invoice', async () => {
+		const { f, calls } = routedFetch({
+			'GET /v1/subscriptions/sub_Orphan1': () => ({ status: 200, body: { status: 'active' } }),
+			'DELETE /v1/subscriptions/sub_Orphan1': () => ({ status: 200, body: { status: 'canceled' } }),
+			'GET /v1/invoices': () => invoices(invoice('in_Cycle1', 30, 'subscription_cycle'), invoice('in_Update1', 40, 'subscription_update', 1200), invoice('in_First1', 50)),
+			'GET /v1/invoice_payments': () => paidPayment,
+			'POST /v1/refunds': () => ({ status: 200, body: { amount: 4900, status: 'succeeded' } })
+		});
+		expect(await run(f)).toEqual({ cancelled: true, refunds: 1, refundedMinor: 4900, skipped: false });
+		const listed = calls.filter((c) => c.url.includes('/v1/invoice_payments'));
+		expect(listed.map((c) => new URL(c.url).searchParams.get('invoice'))).toEqual(['in_First1']);
+		expect(calls.filter((c) => c.url.endsWith('/v1/refunds'))).toHaveLength(1);
+	});
+
+	it('leaves an ended subscription whose first invoice is older than the window alone: no cancel, no refund, skipped (a late event about one its account used)', async () => {
+		// Positive control first: the same ended subscription with its first invoice inside the window is refunded.
+		const recent = routedFetch({
+			'GET /v1/subscriptions/sub_Orphan1': () => ({ status: 200, body: { status: 'canceled' } }),
+			'GET /v1/invoices': () => invoices(invoice('in_First1', ORPHAN_REFUND_WINDOW_SECONDS - 60)),
+			'GET /v1/invoice_payments': () => paidPayment,
+			'POST /v1/refunds': () => ({ status: 200, body: { amount: 4900, status: 'succeeded' } })
+		});
+		expect(await run(recent.f)).toEqual({ cancelled: false, refunds: 1, refundedMinor: 4900, skipped: false });
+		for (const old of [
+			invoices(), // Stripe's created[gte] filter left the old first invoice out
+			invoices(invoice('in_Cycle9', 3600, 'subscription_cycle')), // only a recent renewal: never refunded
+			invoices(invoice('in_First1', ORPHAN_REFUND_WINDOW_SECONDS + 60)) // created inside, but paid before the window
+		]) {
+			const { f, calls } = routedFetch({
+				'GET /v1/subscriptions/sub_Orphan1': () => ({ status: 200, body: { status: 'canceled' } }),
+				'GET /v1/invoices': () => old
+			});
+			expect(await run(f)).toEqual({ cancelled: false, refunds: 0, refundedMinor: 0, skipped: true });
+			expect(calls.map((c) => c.method)).toEqual(['GET', 'GET']);
+		}
+		// One Stripe no longer has, with an old first invoice: skipped too.
+		const gone = routedFetch({
+			'GET /v1/subscriptions/sub_Gone1': () => ({ status: 404, body: { error: { type: 'invalid_request_error', code: 'resource_missing' } } }),
+			'GET /v1/invoices': () => invoices()
+		});
+		expect(await run(gone.f, 'sub_Gone1')).toEqual({ cancelled: false, refunds: 0, refundedMinor: 0, skipped: true });
+	});
+
+	it('cancels a live one whose first invoice is older than the window (nothing should charge again) but refunds nothing', async () => {
+		const { f, calls } = routedFetch({
+			'GET /v1/subscriptions/sub_Orphan1': () => ({ status: 200, body: { status: 'active' } }),
+			'DELETE /v1/subscriptions/sub_Orphan1': () => ({ status: 200, body: { status: 'canceled' } }),
+			'GET /v1/invoices': () => invoices()
+		});
+		expect(await run(f)).toEqual({ cancelled: true, refunds: 0, refundedMinor: 0, skipped: false });
+		expect(calls.some((c) => c.url.includes('/v1/refunds') || c.url.includes('/v1/invoice_payments'))).toBe(false);
+	});
+
+	it('a retry after a cancel whose refund failed refunds once: the ended subscription’s recent first invoice, under the same key', async () => {
+		let refundAttempts = 0;
+		let live = true;
+		const routes = {
+			'GET /v1/subscriptions/sub_Orphan1': () => ({ status: 200, body: { status: live ? 'active' : 'canceled' } }),
+			'DELETE /v1/subscriptions/sub_Orphan1': () => {
+				live = false;
+				return { status: 200, body: { status: 'canceled' } };
+			},
+			'GET /v1/invoices': () => paidInvoice,
+			'GET /v1/invoice_payments': () => paidPayment,
+			'POST /v1/refunds': () => {
+				refundAttempts += 1;
+				return refundAttempts === 1 ? { status: 500, body: { error: { type: 'api_error' } } } : { status: 200, body: { amount: 4900, status: 'succeeded' } };
+			}
+		};
+		const first = routedFetch(routes);
+		await expect(run(first.f)).rejects.toMatchObject({ status: 500, step: 'refund' });
+		const retry = routedFetch(routes);
+		expect(await run(retry.f)).toEqual({ cancelled: false, refunds: 1, refundedMinor: 4900, skipped: false });
+		expect(retry.calls.some((c) => c.method === 'DELETE')).toBe(false);
+		const keys = [...first.calls, ...retry.calls].filter((c) => c.url.endsWith('/v1/refunds')).map((c) => headers(c.init)['Idempotency-Key']);
+		expect(keys).toEqual(['wm-orphan-refund-pi_Paid1', 'wm-orphan-refund-pi_Paid1']);
+		// A third delivery: Stripe says it's refunded already, so nothing more is refunded.
+		const third = routedFetch({ ...routes, 'POST /v1/refunds': () => ({ status: 400, body: { error: { type: 'invalid_request_error', code: 'charge_already_refunded' } } }) });
+		expect(await run(third.f)).toEqual({ cancelled: false, refunds: 0, refundedMinor: 0, skipped: false });
+	});
+
+	it('refunds a charge payment by its charge', async () => {
 		const { f, calls } = routedFetch({
 			'GET /v1/subscriptions/sub_Orphan1': () => ({ status: 200, body: { id: 'sub_Orphan1', status: 'canceled' } }),
 			'GET /v1/invoices': () => paidInvoice,
 			'GET /v1/invoice_payments': () => ({ status: 200, body: { data: [{ status: 'paid', payment: { type: 'charge', charge: 'ch_Paid1' } }] } }),
 			'POST /v1/refunds': () => ({ status: 200, body: { id: 're_1', amount: 4900, status: 'pending' } })
 		});
-		expect(await orphanCancelAndRefund({ secretKey: KEY, fetch: f }, 'sub_Orphan1', ACCOUNT)).toEqual({ cancelled: false, refunds: 1, refundedMinor: 4900 });
+		expect(await run(f)).toEqual({ cancelled: false, refunds: 1, refundedMinor: 4900, skipped: false });
 		expect(calls.some((c) => c.method === 'DELETE')).toBe(false);
 		expect(form(calls.at(-1)!.init).charge).toBe('ch_Paid1');
 		expect(headers(calls.at(-1)!.init)['Idempotency-Key']).toBe('wm-orphan-refund-ch_Paid1');
@@ -422,27 +522,18 @@ describe('orphanCancelAndRefund (a subscription whose account is gone)', () => {
 				'GET /v1/invoice_payments': () => paidPayment,
 				'POST /v1/refunds': () => ({ status: 400, body: { error: { type: 'invalid_request_error', code } } })
 			});
-			expect(await orphanCancelAndRefund({ secretKey: KEY, fetch: f }, 'sub_Orphan1', ACCOUNT)).toEqual({ cancelled: false, refunds: 0, refundedMinor: 0 });
+			expect(await run(f)).toEqual({ cancelled: false, refunds: 0, refundedMinor: 0, skipped: false });
 		}
 		const { f, calls } = routedFetch({
 			'GET /v1/subscriptions/sub_Trial1': () => ({ status: 200, body: { status: 'trialing' } }),
 			'DELETE /v1/subscriptions/sub_Trial1': () => ({ status: 200, body: { status: 'canceled' } }),
-			'GET /v1/invoices': () => ({ status: 200, body: { data: [{ id: 'in_Zero1', amount_paid: 0 }] } })
+			'GET /v1/invoices': () => invoices(invoice('in_Zero1', 60, 'subscription_create', 0))
 		});
-		expect(await orphanCancelAndRefund({ secretKey: KEY, fetch: f }, 'sub_Trial1', ACCOUNT)).toEqual({ cancelled: true, refunds: 0, refundedMinor: 0 });
+		expect(await run(f, 'sub_Trial1')).toEqual({ cancelled: true, refunds: 0, refundedMinor: 0, skipped: false });
 		expect(calls.some((c) => c.url.includes('/v1/refunds'))).toBe(false);
 	});
 
-	it('takes a subscription Stripe doesn’t have as nothing to cancel, and still refunds what its invoices were paid', async () => {
-		const { f, calls } = routedFetch({
-			'GET /v1/subscriptions/sub_Gone1': () => ({ status: 404, body: { error: { type: 'invalid_request_error', code: 'resource_missing' } } }),
-			'GET /v1/invoices': () => ({ status: 200, body: { data: [] } })
-		});
-		expect(await orphanCancelAndRefund({ secretKey: KEY, fetch: f }, 'sub_Gone1', ACCOUNT)).toEqual({ cancelled: false, refunds: 0, refundedMinor: 0 });
-		expect(calls.some((c) => c.method === 'DELETE')).toBe(false);
-	});
-
-	it('throws on any other failure (so the webhook answers non-2xx), a malformed answer, more pages, or a bad id, never calling with one', async () => {
+	it('throws on any other failure (so the webhook answers non-2xx), tagged with its step, on a malformed answer, more pages, or a bad id, never calling with one', async () => {
 		const base = {
 			'GET /v1/subscriptions/sub_Orphan1': () => ({ status: 200, body: { status: 'active' } }),
 			'DELETE /v1/subscriptions/sub_Orphan1': () => ({ status: 200, body: { status: 'canceled' } }),
@@ -450,20 +541,23 @@ describe('orphanCancelAndRefund (a subscription whose account is gone)', () => {
 			'GET /v1/invoice_payments': () => paidPayment,
 			'POST /v1/refunds': () => ({ status: 200, body: { amount: 4900, status: 'succeeded' } })
 		};
-		const failing: Record<string, () => { status: number; body: unknown }>[] = [
-			{ 'DELETE /v1/subscriptions/sub_Orphan1': () => ({ status: 500, body: { error: { type: 'api_error' } } }) },
-			{ 'POST /v1/refunds': () => ({ status: 402, body: { error: { type: 'card_error', code: 'balance_insufficient' } } }) },
-			{ 'POST /v1/refunds': () => ({ status: 200, body: { status: 'failed' } }) },
-			{ 'GET /v1/invoices': () => ({ status: 200, body: { data: [], has_more: true } }) },
-			{ 'GET /v1/invoice_payments': () => ({ status: 200, body: { data: [{ payment: { type: 'payment_intent', payment_intent: 'pi_../x' } }] } }) },
-			{ 'GET /v1/invoice_payments': () => ({ status: 200, body: { data: [{ payment: { type: 'out_of_band_payment' } }] } }) },
-			{ 'GET /v1/subscriptions/sub_Orphan1': () => ({ status: 401, body: { error: { type: 'invalid_request_error' } } }) }
+		const failing: [string, Record<string, () => { status: number; body: unknown }>][] = [
+			['cancel', { 'DELETE /v1/subscriptions/sub_Orphan1': () => ({ status: 500, body: { error: { type: 'api_error' } } }) }],
+			['refund', { 'POST /v1/refunds': () => ({ status: 402, body: { error: { type: 'card_error', code: 'balance_insufficient' } } }) }],
+			['refund', { 'POST /v1/refunds': () => ({ status: 200, body: { status: 'failed' } }) }],
+			['list', { 'GET /v1/invoices': () => ({ status: 200, body: { data: [], has_more: true } }) }],
+			['refund', { 'GET /v1/invoice_payments': () => ({ status: 200, body: { data: [{ payment: { type: 'payment_intent', payment_intent: 'pi_../x' } }] } }) }],
+			['refund', { 'GET /v1/invoice_payments': () => ({ status: 200, body: { data: [{ payment: { type: 'out_of_band_payment' } }] } }) }],
+			['payments', { 'GET /v1/invoice_payments': () => ({ status: 503, body: { error: { type: 'api_error' } } }) }],
+			['read', { 'GET /v1/subscriptions/sub_Orphan1': () => ({ status: 401, body: { error: { type: 'invalid_request_error' } } }) }]
 		];
-		for (const over of failing) {
-			await expect(orphanCancelAndRefund({ secretKey: KEY, fetch: routedFetch({ ...base, ...over }).f }, 'sub_Orphan1', ACCOUNT)).rejects.toBeInstanceOf(StripeApiError);
+		for (const [step, over] of failing) {
+			const e = await run(routedFetch({ ...base, ...over }).f).catch((x: unknown) => x);
+			expect(e, step).toBeInstanceOf(StripeApiError);
+			expect((e as { step?: string }).step, JSON.stringify(Object.keys(over))).toBe(step);
 		}
 		const { f, calls } = routedFetch(base);
-		await expect(orphanCancelAndRefund({ secretKey: KEY, fetch: f }, 'sub_../x', ACCOUNT)).rejects.toBeInstanceOf(StripeApiError);
+		await expect(run(f, 'sub_../x')).rejects.toBeInstanceOf(StripeApiError);
 		expect(calls).toEqual([]);
 	});
 });

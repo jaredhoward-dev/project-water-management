@@ -91,6 +91,7 @@ const PROD: Record<Role, Record<string, string>> = {
 		SIGNUP_OPEN: 'false',
 		// Stripe (the stricter side; Terraform's default is manual, var.billing_provider): the API then needs both Stripe secrets.
 		BILLING_PROVIDER: 'stripe',
+		BILLING_ENVIRONMENT: 'icwbt.example.com',
 		MAIL_TRANSPORT: 'ses',
 		MAIL_FROM: 'IC-WBT <no-reply@water.example.org>',
 		SITE_URL: SITE,
@@ -811,6 +812,11 @@ describe('each Lambda refuses a missing or local-default setting', () => {
 		// stripe without a real secret: unset, short, or the committed dev key.
 		for (const v of [undefined, 'short', 'dev-only-billing-webhook-secret-00000000000'])
 			expect(problemNames('api', prod('api', { BILLING_PROVIDER: 'stripe', BILLING_WEBHOOK_SECRET: v })), String(v)).toContain('BILLING_WEBHOOK_SECRET');
+		// The deployment's billing tag (the orphan check's): set, tag-shaped and not the local default once stripe; anything under manual.
+		expect(problemNames('api', prod('api', {}))).not.toContain('BILLING_ENVIRONMENT');
+		for (const v of [undefined, '', 'local', 'has space', 'x'.repeat(101), '-leading'])
+			expect(problemNames('api', prod('api', { BILLING_ENVIRONMENT: v })), String(v)).toContain('BILLING_ENVIRONMENT');
+		expect(problemNames('api', prod('api', { BILLING_PROVIDER: 'manual', BILLING_ENVIRONMENT: undefined }))).not.toContain('BILLING_ENVIRONMENT');
 	});
 
 	it('takes a contact address on a real domain for the fetcher, and needs none elsewhere (positive control for the FEEDS_CONTACT refusals)', () => {

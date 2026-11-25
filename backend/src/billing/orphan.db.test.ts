@@ -9,10 +9,10 @@
 import { readFileSync } from 'node:fs';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { app, asOwner, signUp } from '../__tests__/helpers.js';
-import { withUser } from '../db/tx.js';
+import { withoutUser, withUser } from '../db/tx.js';
 import { signPayload } from './provider/signature.js';
 
-const orphan = vi.hoisted(() => ({ asked: [] as { accountId: string; subscriptionRef: string }[], fail: false }));
+const orphan = vi.hoisted(() => ({ asked: [] as { accountId: string; subscriptionRef: string }[], fail: false, skipped: false }));
 vi.mock('./provider.js', async (importOriginal) => {
 	const real = await importOriginal<typeof import('./provider.js')>();
 	return {
@@ -25,6 +25,8 @@ vi.mock('./provider.js', async (importOriginal) => {
 				async cancelOrphan(req: { accountId: string; subscriptionRef: string }) {
 					orphan.asked.push(req);
 					if (orphan.fail) throw new real.BillingProviderError();
+					// Stripe's answer for an ended subscription whose first invoice is past the refund window.
+					if (orphan.skipped) return { cancelled: false, refunds: 0, refundedMinor: 0, skipped: true };
 					return p.cancelOrphan(req);
 				}
 			};
@@ -55,6 +57,8 @@ beforeAll(() => {
 afterEach(() => {
 	orphan.asked.length = 0;
 	orphan.fail = false;
+	orphan.skipped = false;
+	vi.stubEnv('BILLING_ENVIRONMENT', undefined);
 });
 afterAll(() => vi.unstubAllEnvs());
 
@@ -103,6 +107,31 @@ describe('a subscription for an account that is gone', () => {
 		expect(await outcome(`evt_orph_d_${run}`)).toBe('unknown_account');
 	});
 
+	it('one Stripe had ended, with its first invoice past the refund window, is recorded orphan_skipped_old, and its redelivery is a plain duplicate', async () => {
+		const body = event('subscription-updated', crypto.randomUUID(), { id: `evt_orph_f_${run}`, sub: `sub_orph_f_${run}` });
+		orphan.skipped = true;
+		expect(await (await post(body)).json()).toEqual({ received: true, result: 'orphan_skipped_old' });
+		expect(await outcome(`evt_orph_f_${run}`)).toBe('orphan_skipped_old');
+		expect(await (await post(body)).json()).toEqual({ received: true, result: 'duplicate' });
+		expect(orphan.asked).toHaveLength(1);
+	});
+
+	it('another deployment’s subscription (its wm_environment isn’t ours) is never claimed or cancelled: unknown_account, as before', async () => {
+		vi.stubEnv('BILLING_ENVIRONMENT', 'icwbt.example.com');
+		const res = await post(event('subscription-updated', crypto.randomUUID(), { id: `evt_orph_g_${run}`, sub: `sub_orph_g_${run}` }));
+		expect(await res.json()).toEqual({ received: true, result: 'unknown_account' });
+		expect(orphan.asked).toEqual([]);
+		expect(await outcome(`evt_orph_g_${run}`)).toBe('unknown_account');
+	});
+
+	it('app_billing_orphan_done takes only its two outcomes', async () => {
+		const body = event('subscription-updated', crypto.randomUUID(), { id: `evt_orph_h_${run}`, sub: `sub_orph_h_${run}` });
+		orphan.fail = true;
+		expect((await post(body)).status).toBe(503);
+		await expect(withoutUser((db) => db.query('SELECT app_billing_orphan_done($1, $2, $3)', ['mock', `evt_orph_h_${run}`, 'applied']))).rejects.toMatchObject({ code: '22023' });
+		expect(await outcome(`evt_orph_h_${run}`)).toBe('orphan_pending');
+	});
+
 	it('a known account applies and records as before, asking no cancel (positive control); its redelivery after the account goes is a plain duplicate', async () => {
 		const owner = await signUp('OrphanControl');
 		const accountId = (await owner.call('GET', '/account/plan')).body.account.id as string;
@@ -122,6 +151,6 @@ describe('a subscription for an account that is gone', () => {
 	it('the orphan functions run with no user only', async () => {
 		const owner = await signUp('OrphanGuard');
 		await expect(withUser(owner.id, (db) => db.query("SELECT app_billing_orphan_claim('mock', 'evt_x', true)"))).rejects.toMatchObject({ code: '42501' });
-		await expect(withUser(owner.id, (db) => db.query("SELECT app_billing_orphan_done('mock', 'evt_x')"))).rejects.toMatchObject({ code: '42501' });
+		await expect(withUser(owner.id, (db) => db.query("SELECT app_billing_orphan_done('mock', 'evt_x', 'orphan_refunded')"))).rejects.toMatchObject({ code: '42501' });
 	});
 });

@@ -25,6 +25,10 @@
 // `assistant` is the AI assistant's own Lambda (lambda-assistant.ts, issue
 // #610): the API's bundle and app, serving only the assistant's routes, with a
 // longer timeout and the one role that may call the model (infra/assistant.tf).
+/** billing/provider/environment.ts's BILLING_ENVIRONMENT_SHAPE and local default, repeated since this module imports nothing (environment.test.ts keeps them equal). */
+export const BILLING_ENVIRONMENT_TAG = /^[A-Za-z0-9][A-Za-z0-9.-]{0,99}$/;
+export const BILLING_ENVIRONMENT_LOCAL = 'local';
+
 export const ROLES = ['api', 'worker', 'fetcher', 'renderer', 'migrate', 'assistant'] as const;
 export type Role = (typeof ROLES)[number];
 
@@ -458,6 +462,21 @@ export const SETTINGS: Record<string, Setting> = {
 						: /^(sk|rk)_live_[A-Za-z0-9]{16,}$/.test(v.trim())
 							? null
 							: 'must be a live Stripe key (sk_live_… or rk_live_…) in production'
+		}
+	},
+	BILLING_ENVIRONMENT: {
+		why: 'This deployment’s billing tag (billing/provider/environment.ts): checkout stamps it into the subscription’s metadata, and the webhook cancels and refunds an orphan only when the event carries the same one, so two deployments on one Stripe account never refund each other’s subscriptions. Terraform sets it to the site’s domain; once the provider is stripe it must be set, tag-shaped and not the local default.',
+		checks: {
+			api: (v, env) =>
+				env?.BILLING_PROVIDER?.trim() !== 'stripe'
+					? null
+					: !set(v)
+						? 'is not set'
+						: !BILLING_ENVIRONMENT_TAG.test(v.trim())
+							? 'must be a short tag (letters, digits, dots, hyphens), such as the site’s domain'
+							: v.trim() === BILLING_ENVIRONMENT_LOCAL
+								? 'must not be the local default in production'
+								: null
 		}
 	},
 	BILLING_ENFORCED: {

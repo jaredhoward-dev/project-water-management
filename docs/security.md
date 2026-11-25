@@ -2009,7 +2009,8 @@ In short:
   transaction; `billing_event`, its de-duplication, is owner-only
   (`apply.db.test.ts`), and 352's `app_billing_orphan_claim` and
   `app_billing_orphan_done`, which mark a subscription for a deleted account
-  pending and then cancelled and refunded, refuse a user the same way
+  pending and then cancelled and refunded (or skipped, when it is a late
+  event about one its account used), refuse a user the same way
   (`orphan.db.test.ts`). The billing write routes follow the same rule: a
   team's `POST /teams/:id/plan/checkout`, `/portal`, `/seats` and
   `/assistant-share` answer `404` to anyone but a team admin before any

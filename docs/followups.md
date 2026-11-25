@@ -909,11 +909,17 @@ are #641's checklist. Open items from building it:
       refunds its first invoice, logged; a webhook test with faked Stripe
       HTTP. Trigger: before the first charge (`BILLING_PROVIDER=stripe`).
       *Done (round 2026-11-24 r3): the webhook cancels such a subscription
-      at Stripe now and refunds every payment made for it, once across
-      redeliveries (an idempotency key per payment), answering `503` so
-      Stripe retries when either fails; the event row records
-      `orphan_pending` then `orphan_refunded` (352; billing.md § The route,
-      "An orphan", and § Deleting an account).*
+      at Stripe now and refunds its first invoice (`subscription_create`)
+      only when that was paid within 4 days (Stripe's 3-day retries plus a
+      day), once across redeliveries (an idempotency key per payment),
+      answering `503` so Stripe retries when either fails; an already-ended
+      one with an older first invoice (a late event about a used
+      subscription) is left alone, `orphan_skipped_old`; only a subscription
+      carrying this deployment's `BILLING_ENVIRONMENT` tag is touched, so a
+      staging deployment sharing the Stripe account never refunds
+      production's; the event row records `orphan_pending` then
+      `orphan_refunded` or `orphan_skipped_old` (352; billing.md § The
+      route, "An orphan", and § Deleting an account).*
 - [x] **The Plan page's "Compare plans" could link the public pricing
       page.** `/welcome/pricing` (Phase 4) now shows the three plans side by
       side; the Plan page (`PlanUsage.svelte`) and its Compare plans links

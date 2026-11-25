@@ -430,7 +430,9 @@ How each result of `app_billing_apply` is answered:
 | `conflict`, `unknown_account` | `200` (a retry wouldn't change them) | warn, for the operator to read |
 | `invalid` | `400` (326 doesn't record it, so a corrected retry under the same id still applies) | warn |
 | an orphan, cancelled and refunded | `200 { received: true, result: 'orphan_refunded' }` | warn, with `cancelled`, `refunds`, `refundedMinor` |
-| an orphan whose cancel or refund failed | `503 { error }` (the event stays `orphan_pending`; Stripe redelivers it) | error, `result: 'orphan_failed'` |
+| an orphan already ended whose first invoice is past the refund window | `200 { received: true, result: 'orphan_skipped_old' }` (nothing cancelled or refunded) | warn, with `cancelled`, `refunds`, `refundedMinor` (all nothing) |
+| an orphan another deployment sold (its `wm_environment` isn't ours, or it has none) | `200` with `app_billing_apply`'s result (`unknown_account` or `recorded`); nothing claimed, cancelled or refunded | warn, `orphan: 'other_environment'` |
+| an orphan whose cancel or refund failed | `503 { error }` (the event stays `orphan_pending`; Stripe redelivers it) | error, `result: 'orphan_failed'`, with `step` (`read`, `list`, `cancel`, `payments` or `refund`), Stripe's HTTP `status` and error `code`, and the error's class name; never its message or Stripe's payload |
 
 A database error is the app's generic `500`, which Stripe retries. Each answer
 logs one line (`billing_webhook` or `billing_webhook_rejected`) with the
@@ -444,8 +446,13 @@ account](#deleting-an-account)). It is a live `subscription.updated`
 `unknown_account`, or a `checkout.completed` it records with no account. In
 the same transaction, `app_billing_orphan_claim` marks the event row
 `orphan_pending`. The provider's `cancelOrphan` then cancels the
-subscription now and refunds what was paid for it, and
-`app_billing_orphan_done` marks the row `orphan_refunded`. A redelivery is a
+subscription now and refunds the checkout's payment (its first invoice, and
+only when that was paid within the refund window; [§ Deleting an
+account](#deleting-an-account)), and `app_billing_orphan_done` marks the row
+`orphan_refunded`. One Stripe has already ended whose first invoice is older
+than the window is a late or out-of-order event about a subscription its
+account used (cancelled when the account was deleted), so nothing is done
+and the row becomes `orphan_skipped_old`. A redelivery is a
 `duplicate` to `app_billing_apply`, but the claim still finds a pending row
 and tries again; a finished one is a plain `duplicate`. Only a row that was
 unknown when its own first delivery applied can become pending, so a
@@ -453,6 +460,22 @@ redelivered event whose account was deleted afterwards (and whose plan the
 delete already cancelled) is never refunded. An unknown account's
 `subscription.deleted`, an ended status, an `invoice.*` event and a
 `subscription.pending` stay `unknown_account` or `recorded`, as before.
+
+**Only this deployment's.** Checkout stamps the deployment's tag,
+`BILLING_ENVIRONMENT`, into the session's and the subscription's metadata
+(`wm_environment`, `provider/environment.ts`; `local` when unset, so local
+dev and tests need nothing; Terraform sets the site's domain, and the
+production check refuses it unset or `local` once the provider is `stripe`).
+The normaliser carries it beside the payload (never into
+`app_billing_apply`), and the route claims an orphan only when the tag is
+its own. A staging or e2e deployment sharing a Stripe account with
+production (in the same mode) sees every one of production's subscriptions
+as an unknown account; without the tag it would cancel and refund them.
+With it, a foreign or missing tag is logged (`orphan: 'other_environment'`)
+and answered as `app_billing_apply` did. Give each deployment its own
+webhook endpoint as well ([deployment.md § Turning on
+Stripe](./deployment.md#turning-on-stripe)). A subscription sold before the
+tag existed has none, so it is never treated as an orphan.
 
 ### Event order
 
@@ -1740,19 +1763,41 @@ payment provider. So the route cancels the plan there first
 - **A subscription that arrives after the account is gone** (352) is
   cancelled and refunded by the webhook ([§ The route](#the-route), "An
   orphan"). Under Stripe (`provider/stripeApi.ts` `orphanCancelAndRefund`):
-  `GET /v1/subscriptions/:id` for its status, `DELETE
-  /v1/subscriptions/:id` (now, no final invoice, no proration) unless it has
-  ended already, `GET /v1/invoices?subscription=…&status=paid`, each paid
-  invoice's `GET /v1/invoice_payments?invoice=…&status=paid` (API
-  2025-03-31.basil moved the payment off the invoice), and `POST
-  /v1/refunds` for the whole of each payment (by its `payment_intent`, or
-  `charge`), `reason=requested_by_customer`, metadata
+  `GET /v1/subscriptions/:id` for its status, `GET
+  /v1/invoices?subscription=…&status=paid&created[gte]=<window start>` for
+  its recent paid invoices, `DELETE /v1/subscriptions/:id` (now, no final
+  invoice, no proration) unless it has ended already, then for its first
+  invoice only (`billing_reason=subscription_create`, picked from the list
+  since Stripe's list filters no `billing_reason`) and only when its
+  `status_transitions.paid_at` is within the refund window, `GET
+  /v1/invoice_payments?invoice=…&status=paid` (API 2025-03-31.basil moved
+  the payment off the invoice) and `POST /v1/refunds` for the whole of each
+  payment (by its `payment_intent`, or `charge`), `reason=requested_by_customer`, metadata
   `wm_reason=account_deleted` and the billing account's random id, under
   the `Idempotency-Key` `wm-orphan-refund-<payment>`. A payment refunded
   already (`charge_already_refunded`, after the key's 24 hours) or charged
   back (`charge_disputed`, `refund_disputed_payment`) is skipped, and a
   trial (nothing paid) is only cancelled. So the session's and the
-  subscription's events, and every redelivery, refund once. Any other
+  subscription's events, and every redelivery, refund once; a retry after a
+  cancel whose refund failed finds it ended, with a recent first invoice,
+  and refunds it.
+  **What is protected.** The refund window is
+  `ORPHAN_REFUND_WINDOW_SECONDS`, 4 days: Stripe's automatic webhook
+  retries in live mode (up to 3 days) plus a day's margin for a delivery at
+  the very end of them, clock skew and a prompt manual resend. A checkout
+  paid after its account was deleted reaches us inside it. No renewal
+  (`subscription_cycle`) or proration (`subscription_update`) invoice is
+  ever refunded, so a late first delivery of an old subscription's event
+  (an outage, or out of order within the retries) can never refund months
+  the account used: if Stripe has that subscription ended and its first
+  invoice is older than the window, nothing is cancelled or refunded
+  (`orphan_skipped_old`). A live one is always cancelled (its account is
+  gone, so nothing should charge again) and refunded only inside the
+  window. What the window doesn't tell apart: a subscription bought less
+  than 4 days before its account was deleted, whose event first reaches us
+  after the delete, has its first payment refunded (the customer's favour,
+  at most one period). A resend from Stripe's dashboard (15 days) or CLI
+  (30 days) past the window refunds nothing. Any other
   failure answers `503` and Stripe retries (for up to 3 days); past that
   the row stays `orphan_pending` for the operator to finish in the
   dashboard. The mock has nothing to cancel or refund and answers at once,
@@ -1836,9 +1881,15 @@ team's own deletion, the same race, and no cancel asked for by a
 non-admin); `e2e/tests/account-delete.spec.ts` (the dialog's words for
 `account_plan_not_cancelled`, still signed in). The orphan:
 `provider/stripeApi.test.ts` (faked HTTP: the calls in order, the refund's
-key and metadata, an ended or missing subscription, already refunded,
-failures), `provider.test.ts` (the mock makes no call), `webhook.test.ts`
-(claim, cancel, done; a redelivery; the `503`) and `orphan.db.test.ts`.
+key and metadata, only the create invoice refunded, an ended subscription
+with an old first invoice left alone, a live one cancelled but not
+refunded, a retry after a failed refund refunding once, an ended or missing
+subscription, already refunded, failures tagged with their step),
+`provider.test.ts` (the mock makes no call), `provider/environment.test.ts`
+(the tag and its local default), `webhook.test.ts` (claim, cancel, done; a
+redelivery; `orphan_skipped_old`; another deployment's or no tag; the
+`503` and its log fields) and `orphan.db.test.ts` (the outcomes against
+352, the tag, `app_billing_orphan_done`'s two outcomes).
 
 ## Later phases
 
