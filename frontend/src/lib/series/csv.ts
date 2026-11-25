@@ -131,14 +131,14 @@ const BOUNDARY_MINUTES: Record<DayBoundary, number> = { '00:00': 0, '08:00': 480
  * 08:00 on the 5th → 08:00 on the 6th, booked to the 5th, the day it starts
  * (the manual-gauge convention); with '00:00', midnight closes the day before.
  */
-/** The instant (minutes since the epoch) a booked day's window opens; the window is (start, start + 1440]. */
-function windowStart(day: number, boundary: DayBoundary): number {
-	return day * 1440 + BOUNDARY_MINUTES[boundary];
-}
-
 export function bookedDay(date: string, minutes: number, boundary: DayBoundary): number {
 	const instant = toEpochDay(date) * 1440 + minutes;
 	return Math.floor((instant - BOUNDARY_MINUTES[boundary] - 1e-6) / 1440);
+}
+
+/** The instant (minutes since the epoch) a booked day's window opens; the window is (start, start + 1440]. */
+function windowStart(day: number, boundary: DayBoundary): number {
+	return day * 1440 + BOUNDARY_MINUTES[boundary];
 }
 
 /**

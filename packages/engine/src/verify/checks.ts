@@ -60,6 +60,12 @@ const seriesMap = (out: ModelOutput): SeriesMap => new Map(out.series.map((s) =>
  * - the catchment balance closes over the run: opening storage + runoff =
  *   outflow + consumptive use + closing storage.
  */
+/** Each day's calendar month (1–12), monthOfEpochDay(day0 + t), for a day loop that reads it many times. */
+function calendarMonths(day0: number, days: number): Uint8Array {
+	const m = new Uint8Array(days);
+	for (let t = 0; t < days; t++) m[t] = monthOfEpochDay(day0 + t);
+	return m;
+}
 // ewr_rule (engine ≥ 0.21.0) is NaN outside complete calendar months: a part
 // month at either end of the run is not assessed against the Reserve rules.
 // ewr_binding_site (engine ≥ 1.5.0) is NaN on a day the farm isn't charged: no site set a charge.
@@ -67,12 +73,6 @@ const seriesMap = (out: ModelOutput): SeriesMap => new Map(out.series.map((s) =>
 // rain_source (every run with rain from engine 1.27.0) is NaN where no source has a value, as rain_final is.
 // observed_flow_filled / observed_flow_other_filled (engine ≥ 1.23.0) are NaN on every day the gap fill didn't fill.
 // rain_chirps_mapped (engine ≥ 1.53.0, the CHIRPS gap map) is NaN where rain_chirps_corrected is (checkChirpsGapMap).
-/** Each day's calendar month (1–12), monthOfEpochDay(day0 + t), for a day loop that reads it many times. */
-function calendarMonths(day0: number, days: number): Uint8Array {
-	const m = new Uint8Array(days);
-	for (let t = 0; t < days; t++) m[t] = monthOfEpochDay(day0 + t);
-	return m;
-}
 /**
  * A cap's room and left columns are blank (NaN) on a day the source isn't capped, none of the unit's
  * allocations of it being in force (engine ≥ 1.70.0); checkAllocations holds them finite on every other day.
