@@ -2679,8 +2679,19 @@ your own personal project through `POST /projects/import?run=1` and opened
 on its first run (*Initial run (import)*) on Runs & results. If that run
 fails the project is still created, and the card says so instead of opening
 it ("The example was created, but the model didn’t run: …", with **Open the
-example**), as the import dialog does. A user who leaves the list while it
-works isn't pulled into the project when it lands. The document is
+example**), as the import dialog does. When Free's live limit started it
+with automatic runs off (the answer's `autoRunsOff: "live_catchments"`;
+billing.md § Live catchments (Free)) the card doesn't open it either: it
+says "The example is ready, with its first run." with **Open the example**,
+then the copy and import dialogs' line, why, with **Compare plans** to the
+person's own plan (the example is personal; `billing/AutoRunsOffNotice.svelte`),
+under the run-failed warning when both happen (`opensStraightAway` in
+`projects/example.ts` decides). The card rather than the workspace, because
+the workspace has no place for an import's one-off news and its settings
+already show automatic runs off without saying why. Today's example has
+automatic runs off, so the answer can't say so yet; this keeps an example
+that gains them from opening silently at the limit. A user who leaves the
+list while it works isn't pulled into the project when it lands. The document is
 `projects/exampleCatchment.generated.json`, the same data `pnpm
 seed:examples` seeds for Kleinberg, written by `pnpm gen:example`
 (`backend/scripts/example-file.ts`; synthetic only, the repo is public). It

@@ -180,6 +180,30 @@ test('an example whose run failed is created, and the card says so with the way 
 	await expect(page.getByTestId('project-name').filter({ hasText: 'Example · Kleinberg (winter rainfall)' })).toBeVisible();
 });
 
+// Free's live limit (340; docs/billing.md § Live catchments (Free)): an example the limit started with automatic runs
+// off doesn't open straight away; the card says it's ready, why automatic runs are off, with Compare plans for the
+// person's own plan (the example is personal). The example itself has automatic runs off, and billing isn't enforced in
+// e2e, so the real answer is given the API's `autoRunsOff` here (the guard for an example that gains them).
+test('an example Free’s live limit started with automatic runs off says why on the card, with the way in', async ({ page, owner, fetchRoute }) => {
+	void owner;
+	await fetchRoute(page, /\/projects\/import\?run=1$/, async (route) => {
+		const res = await route.fetch();
+		await route.fulfill({ response: res, json: { ...((await res.json()) as object), autoRunsOff: 'live_catchments' } });
+	});
+	await page.goto('/');
+	await page.getByRole('button', { name: 'Start from an example' }).click();
+	const ready = page.getByTestId('example-ready');
+	await expect(ready).toHaveText('The example is ready, with its first run. Open the example');
+	await expect(page).toHaveURL(/\/$/);
+	const note = page.getByTestId('auto-runs-off');
+	await expect(note).toContainText('The new project starts with automatic runs off: Free runs one catchment live');
+	await expect(note.getByRole('link', { name: 'Compare plans' })).toHaveAttribute('href', '/account/plan');
+	await expectNoViolations(page);
+	await ready.getByRole('link', { name: 'Open the example' }).click();
+	await expect(page).toHaveURL(/\/projects\/[0-9a-f-]{36}\?tab=runs&run=[0-9a-f-]{36}$/);
+	await expect(page.getByTestId('project-name').filter({ hasText: 'Example · Kleinberg (winter rainfall)' })).toBeVisible();
+});
+
 test('on a phone the example block stacks under the steps, with nothing scrolling sideways', async ({ page, owner }) => {
 	void owner;
 	await page.setViewportSize({ width: 390, height: 844 });
