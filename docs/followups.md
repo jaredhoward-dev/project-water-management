@@ -3324,15 +3324,17 @@ Still open:
       written into §2.3a, §2.5a and §2.7g (no engine change); drought
       restrictions are now refused by `unsupported()` instead of silently
       disagreeing ([verify/README.md § What phase 2b covers so far](../verify/README.md#what-phase-2b-covers-so-far)).
-      **Left:** drought restrictions (§2.7i, with a Priority user's fixed
-      restriction %), Reserve rule tables A1–A7 (§2.9c–d), forecast mode
+      **Done (2026-11-25):** drought restrictions (§2.7i, with a Priority
+      user's fixed restriction % and a new dam's first filling; the
+      scenario-only EWR trigger and snapshot resumes stay out), agreeing
+      with `runModel`; the points the docs left open written into §2.7i.
+      **Left:** Reserve rule tables A1–A7 (§2.9c–d), forecast mode
       (§2.4f), calibration (§2.10, §2.10b), rain-source periods (§2.4e), the
       areal correction (§2.4g), CHIRPS fit ranges (§2.4b), the CHIRPS
       quantile map (CR-23), keep-dry and listed accumulations (§2.4c–d), the
       non-default data-quality limits (§2.10a), scenario ops other than
       `climate.delta`, the outlook-only settings and the pinned factors.
-      Suggested next slice: drought restrictions (the largest daily
-      behaviour left), then rain-source periods and CHIRPS fit ranges. **Trigger:** the
+      Suggested next slice: rain-source periods and CHIRPS fit ranges. **Trigger:** the
       next engine change to any of these features (its PR adds that feature
       to `verify/` first, so the change lands against an independent
       reading), #258 merging (drought restrictions), or before the first

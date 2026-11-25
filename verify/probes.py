@@ -2166,6 +2166,83 @@ def development(kind: str) -> dict:
     return {"settings": s, "model": m, "series": {"rain_catchment_mm": {"startDate": start.isoformat(), "values": rain}}}
 
 
+def drought(kind: str) -> dict:
+    """Drought restrictions (§2.7i, engine >= 1.54.0) on a year of invented
+    rain from 1 October 2019: two farms with dams low enough to reach both
+    levels, a domestic object with a basic-needs floor and crops on the lower
+    one, a Priority user below them with a fixed restriction %, and a
+    surface allocation cap on the lower farm. Pins what the docs left open
+    (settled from runModel's outputs, written into §2.7i): a unit's
+    `crop_requirement` and `object_demand@` stay the unrestricted demand's, as
+    `demand` and `deficit` do, and the allocation summary's `limitBound`
+    counts a day on the unrestricted demand's shortfall; and that a project's
+    own rule carrying an `ewrTrigger` runs without it. `first-review`: the
+    latest date before the first day is a review (15 September), so the first
+    day is decided from the starting storage; `first-lift`: a lift (20
+    September) falls after that review, so the run starts unrestricted;
+    `filling`: the upper dam (no crops) comes into service on 10 October 2019
+    and fills past the slowly filling lower one, reviewed every few days,
+    each review read both ways (total basis); `own`: the same under `own`,
+    each unit its own dam, the lower one starting exactly at a level's
+    belowPct (not below it); `dams`: the `dams` basis reading the upper dam
+    alone, cutting it only (a user and a gauge in its lists left out)."""
+    start = dt.date(2019, 10, 1)
+    n = 366
+    rain = _wave(start, n, 2, 0.9)
+    crops, areas = _crop("f", 120000)
+    areas.append({"nodeId": "g", "cropId": "c", "areaM2": 60000})
+    s = _settings(apanMm=[150, 180, 220, 230, 190, 160, 110, 70, 50, 55, 80, 110], lakeEvapFactor=0.8,
+                  effectiveRainFraction=0.6, effectiveRainStoreMm=30,
+                  gr4j={"x1": 250, "x2": 0, "x3": 70, "x4": 1.6, "warmupDays": 60})
+    reviews = ["09-15", "12-01", "03-01"]
+    lifts = ["06-01"]
+    if kind == "first-lift":
+        reviews, lifts = ["09-01", "12-01", "03-01"], ["09-20", "06-01"]
+    elif kind in ("filling", "own"):
+        reviews = ["09-15", "10-12", "10-14", "10-16", "10-18", "10-20", "10-24", "10-28", "12-01", "03-01"]
+    rule = {
+        "reviewDates": reviews, "liftDates": lifts,
+        "levels": [
+            {"label": "Watch", "belowPct": 0.8, "cuts": {"crops": 0}},
+            {"label": "Level 1", "belowPct": 0.5, "cuts": {"crops": 0.3, "domestic": 0.2}},
+            {"label": "Level 2", "belowPct": 0.25, "cuts": {"crops": 0.6, "domestic": 1.0, "livestock": 0.5}},
+        ],
+        "ewrTrigger": {"siteNodeId": None, "level": 3},
+    }
+    if kind == "own":
+        rule["basis"] = "own"
+    elif kind == "dams":
+        # A dam that isn't listed, and ids that aren't farm dams or farms, left out.
+        rule.update(basis="dams", damNodeIds=["g", "u"], nodeIds=["g", "u", "o"])
+    s["droughtRestriction"] = rule
+    s["allocationMode"] = "cap"
+    f_kw: dict = dict(areaKm2=4, damCapacityM3=25000, damInitialPct=0.3, pctRunoffToDam=0.5, damAreaFullM2=8000)
+    g_kw: dict = dict(areaKm2=3, damCapacityM3=20000, damInitialPct=0.7, pctRunoffToDam=0.7, damAreaFullM2=6000)
+    if kind in ("filling", "own"):
+        # The new dam fills fast with no crops on it, past the lower dam, which fills slowly: reviews read it
+        # both below and above the lower dam's share, and (under own) between half of θ and θ.
+        g_kw.update(damInServiceFrom="2019-10-10", pctRunoffToDam=1)
+        f_kw["pctRunoffToDam"] = 0.1
+        areas = areas[:1]
+    if kind == "own":
+        # Exactly at the first level's belowPct on the first day: not below it.
+        f_kw["damInitialPct"] = 0.5
+    nodes = [
+        _node("o", "gauge", None),
+        _node("u", "user", "o", userDemandM3Day=[400] * 12, userPriority="senior", userReturnPct=0, userRestrictionPct=0.25),
+        _node("f", "farm", "u", **f_kw),
+        _node("g", "farm", "f", **g_kw),
+    ]
+    objs = [{"id": "d", "nodeId": "f", "name": "houses", "category": "domestic", "sizing": "perUnit", "monthlyM3Day": None,
+             "count": 200, "litresPerUnitDay": 150, "lossPct": 0, "monthlyFactor": None, "population": 200,
+             "returnPct": 0, "priority": "first", "destination": "internal", "enabled": True, "note": ""}]
+    alloc = [{"id": "a", "nodeId": "f", "waterSource": "surface", "volumeM3PerYear": 60000, "storageM3": None,
+              "validFrom": None, "validTo": None, "months": [], "maxRateM3s": 300 / 86400}]
+    m = {"nodes": nodes, "crops": crops, "cropAreas": areas, "transfers": [], "demandObjects": objs,
+         "boreholes": [], "allocations": alloc}
+    return {"settings": s, "model": m, "series": {"rain_catchment_mm": {"startDate": start.isoformat(), "values": rain}}}
+
+
 def _zone(gauge: str, gr4j: dict | None, enabled: bool = True) -> dict:
     return {
         "nodeId": gauge, "enabled": enabled, "calibrationStart": None, "calibrationEnd": None, "calibrationFlowKind": None,
@@ -2447,6 +2524,12 @@ PROBES = {
     "development-abstraction": development("abstraction"),
     "development-abstraction-gap-year": development("abstraction-gap-year"),
     "development-rate-no-survey": development("rate-no-survey"),
+    # Phase 2b: drought restrictions (§2.7i).
+    "drought-first-review": drought("first-review"),
+    "drought-first-lift": drought("first-lift"),
+    "drought-filling": drought("filling"),
+    "drought-own": drought("own"),
+    "drought-dams": drought("dams"),
     # The forecast-conditioned outlook's member (issue #620 step 6).
     "forecast-member-rescaled": forecast_member_rescaled(),
     # Future climate (issue #621, §2.17): the op on a dam, then on the per-unit rules (the MAPs by the annual

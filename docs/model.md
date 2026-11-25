@@ -7100,6 +7100,20 @@ each **pending the hydrologist**, listed in
   raised. Only the day before is read, not a count of recent days, and not
   the Reserve rule tables' monthly compliance.
 
+**What the docs left open, settled from `runModel`** (verify/ phase 2b,
+probes `drought-*`, no engine change): a unit's `crop_requirement` and
+`object_demand@<id>` stay the unrestricted demand's, as `demand` and
+`deficit` do (the cut shows only in `restricted_demand`); the allocation
+summary's `limitBound` (§2.12a) counts a capped day on the unrestricted
+demand's shortfall, so a cut that leaves the restricted demand met still
+counts when the cap bound; the river and the dam side ask for the cut
+demand, and a Priority user's cut claim is what passes the farms upstream
+for it (`senior_requirement`); a junior user's `userRestrictionPct` is
+ignored; and a project's own rule carrying an `ewrTrigger` runs as if it
+had none. A fresh run's first day reads the latest review or lift date
+strictly before it (a first day that is itself a review or lift date is
+that day); a share exactly at a level's `belowPct` is not below it.
+
 **Outputs.** On the catchment, `restriction_level` (the level in force each
 day, 0 = none; under `own` the deepest any unit is at) and, under a shared
 basis, `restriction_cut@<part>` (that day's cut, 0–1, for each part some

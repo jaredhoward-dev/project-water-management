@@ -44,7 +44,7 @@ returns. It imports the engine by path and the example catchments from
 ## Running it
 
 ```bash
-pnpm test:verify                                   # the guard: ~11 min locally on 4 workers (examples, probes, 12 random + 12 dense networks, 266 mutants)
+pnpm test:verify                                   # the guard: ~11 min locally on 4 workers (examples, probes, 12 random + 12 dense networks, 290 mutants)
 VERIFY_TEST_RANDOM=200 VERIFY_TEST_DENSE=200 pnpm test:verify   # what CI runs: agreement on 200 of each
 VERIFY_SHARD=2/3 pnpm test:verify                  # one of CI's 3 shards: every 3rd mutant from the 2nd (shard 1 also runs the agreement sweep)
 python3 verify/diff.py --random 100 --dense 100 --seed 1000     # the report; --keep DIR keeps the inputs and outputs, --verbose lists engine-only series
@@ -64,7 +64,7 @@ no network. CI runs it as the `verify` job (`.github/workflows/ci.yml`), in
 case is `model.py`'s run plus `diff.compare` over every column and day
 (about half each; 0.1–2 s a case), while the engine runs all ~90 default
 cases in one tsx process in about 5 s. The mutation self-test is the bulk:
-266 mutants, each running the cases in order until its first disagreement
+290 mutants, each running the cases in order until its first disagreement
 (about a third of them on average), about 35 min on one core, against about
 3 min for the agreement sweep of 200 + 200 networks. So the engine runs,
 the agreement sweep and the mutants run on `VERIFY_WORKERS` processes
@@ -563,6 +563,33 @@ of a seed is unchanged), with probes and mutants:
   maximum, split 20/30/50, beside a one-curve rule and one with an
   incomplete month).
 
+- **Drought restrictions** (§2.7i, engine ≥ 1.54.0; a Priority user's
+  fixed restriction %, 1.86.0; a new dam's first filling, 1.70.0;
+  `generate.py` `add_drought_restriction`, 30 % of the random networks and
+  70 % of the dense ones; `model.py` `drought_rule`, `drought_day_kind`,
+  `drought_share_level` and the start of each day): the level decided on
+  review dates from the storage the day starts with (Σ storage ÷ Σ the day's
+  capacity over every farm dam, the listed ones or the unit's own, dams with
+  no capacity today left out), the deepest level whose `belowPct` the share
+  is below, held until the next review or lift; a fresh run's first day
+  reviewing when the latest date before it is a review; a dam in service
+  after the first day filling until it starts a day at θ, each review read
+  with every filling dam out and in and the milder applied; per cut unit
+  F′ = F(1 − c_crops), each object d(1 − c_cat) floored at MIN(B, d), the
+  sources, the dam side, transfers' room and demand-sized off-takes on
+  D′; a Priority user's demand × (1 − its %) on days its shared level cuts
+  some part, its claims upstream following; `demand`, `deficit`,
+  `crop_requirement` and `object_demand@` unrestricted; the columns
+  `restriction_level`, `restriction_cut@<part>` and `restricted_demand`.
+  The EWR trigger runs only in a scenario (§2.9g), so a project rule's
+  `ewrTrigger` is ignored, and snapshot resumes stay out (verify/ runs fresh
+  runs only). Probes `drought-first-review`, `-first-lift`, `-filling`,
+  `-own` (a share exactly at `belowPct`), `-dams`; 24 mutants. What the docs
+  left open (the output columns that stay unrestricted, `limitBound` on the
+  unrestricted shortfall, a junior user's % and a project rule's trigger
+  ignored) was settled from `runModel` and written into §2.7i. No
+  disagreement with the engine was found.
+
 ## Phase 2b (not covered yet)
 
 `model.unsupported()` names each of these, and the generator never produces
@@ -579,8 +606,9 @@ docs/followups.md § Verification ("`verify/` phase 2b").
   *is* covered), §2.4f;
 - calibration (the fit itself; the calibration statistics);
 - the `demand.scale` scenario op itself (its factors, by part and dated,
-  are covered as the node fields it writes), and drought restrictions
-  (with a Priority user's fixed restriction %, engine 1.86.0, §2.7i);
+  are covered as the node fields it writes), and a scenario's drought
+  restriction with its EWR trigger (§2.9g; the project's rule is covered,
+  § What phase 2b covers so far);
 - rain-source periods (§2.4e), the areal rainfall correction (§2.4g),
   CHIRPS fit ranges (§2.4b), the CHIRPS quantile
   map (CR-23), keep-dry periods and the keep-dry guard, listed and kept
@@ -629,10 +657,10 @@ empty, and no other disagreement is allowed.
 ## The mutation self-test
 
 Agreement only means something if the cases exercise the rules. So
-`test_verify.py` breaks `model.py` one documented rule at a time (260
-mutants; phase 2b's 43 are listed under its features in `mutants.py`:
+`test_verify.py` breaks `model.py` one documented rule at a time (290
+mutants; phase 2b's 67 are listed under its features in `mutants.py`:
 the daily A-pan record's 7, the demand factors by part and dated windows' 8,
-land cover's 9 and development during a run's 19). Phase 1's 23 (the band-and-room order mutant went in engine 1.70.0, whose order is the one it tested): the receiver's room ignored; one
+land cover's 9, development during a run's 19 and drought restrictions' 24). Phase 1's 23 (the band-and-room order mutant went in engine 1.70.0, whose order is the one it tested): the receiver's room ignored; one
 reserve pool for all rules (N6); the room without the dam's losses, or
 counting what the receiver sent; no soil-water store; zero runs as recorded;
 accumulations not spread, or tested over the whole run; raw CHIRPS; the
@@ -963,7 +991,7 @@ networks:
   one): `unsupported()` didn't name `settings.droughtRestriction` (§2.7i),
   so an input carrying the rule would have run in `model.py` without it and
   disagreed rather than being refused. It is named now
-  (`test_drought_restrictions_are_refused`); modelling it stays in phase 2b.
+  (`test_drought_restrictions_are_refused`, since renamed `test_drought_restrictions_are_in_scope`: modelled 2026-11-25, § What phase 2b covers so far).
 - **Land cover** (§2.5a): agrees on every column. Two points the docs left
   open, settled from `runModel`'s reductions (q backed out of a day above
   the threshold, LOW_u from a day below it) and written into §2.5a: Q75 is
