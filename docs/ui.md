@@ -3115,7 +3115,12 @@ settings. **Members** is the side column (below on a narrow page): each
 member is a row of two lines (issue #520), the name with the email under it
 beside the role, then the row's **Reset two-step** and **Remove** on a line of
 their own under both, so the narrow column never clips them (a third column
-cut them to "Reset two-" and "Rem" at 1440). Each row is a grid with the table
+cut them to "Reset two-" and "Rem" at 1440). **Remove** asks first
+(*Remove this member?*): "They lose their access to its projects, including
+the ones they created. The team's owners keep them." (`lib/teams/removeConfirm.ts`;
+2026-11-24: their direct roles on the team's projects go with the team, and
+a project they alone owned passes to a team owner, security.md §
+Authorization). Each row is a grid with the table
 roles kept explicitly; your own row has no actions line. The email wraps at
 its `@` first, then only after a `.` (`EmailText` with `breakAfter="."`,
 `format/email.ts` `emailGroups`): "demo" / "@example.com", never
@@ -3135,7 +3140,10 @@ personal copy (the Copy dialog says so).
 for a member who can't get a code and lost their recovery codes. Never on
 an admin's row (operator decision, 2026-10-08: another admin uses the
 sign-in page's reset or the operator; the API refuses it too, `403
-mfa_reset_admin`). A confirm dialog says to do it only when sure it's them
+mfa_reset_admin`). A member who is an admin of another team shows the button
+(the page can't see other teams), and the API refuses them the same way
+(359, 2026-11-24): the error line says they use the sign-in page's reset or
+ask the operator. A confirm dialog says to do it only when sure it's them
 asking (in person, on a call), and what it does: the member's
 authenticator app, codes by email and recovery codes stop working, they're signed out everywhere, anyone with their password can
 sign in as them until they set it up again, and they get an email; it is
@@ -3155,7 +3163,9 @@ in the team's projects, POPIA s18(1)(b), 168: admins edit *Name or office*,
 the farm menu and invitations name it), **Two-step sign-in** (204: the
 same **Require two-step sign-in** switch as the Project page's, for admins,
 saying that members who manage the team need an authenticator app; members
-read *On* / *Off* and "Only owners can change it."), and **Leave or delete** (*Leave team* for everyone, the only admin
+read *On* / *Off* and "Only owners can change it."), and **Leave or delete** (*Leave team* for everyone, which asks first:
+"You lose your access to its projects, including the ones you created. The
+team's owners keep them."; the only admin
 told "You are the only owner…" and to hand over first; *Delete team* for admins, which closes the sheet
 and asks in a confirmation dialog). The URL opens it (the project list's
 team note, "Change them on the team page", links there), and closing it drops the

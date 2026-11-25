@@ -3474,6 +3474,25 @@ only read. `project_insert` and `project_update` enforce this (008);
 edit a project whose team they only view. A viewer copying a team project gets
 a personal copy.
 
+**Leaving a team takes its projects with it** (operator decision,
+2026-11-24; `backend/src/teams/leaveProjects.ts`). When someone leaves a
+team or a team admin removes them, their direct `project_member` rows on the
+team's projects go in the same transaction, the projects they created
+included (a `farmer` row stays: it reaches only their own farm). Where they
+were a project's only direct owner, the keep-owner trigger would refuse
+that, so direct ownership is handed to a team admin first: the admin
+removing them, or, when they leave themselves, the team's longest-standing
+other admin (`team_member.added_at`). That admin gets a direct `owner` row,
+or has theirs raised to owner. A team always keeps an admin besides the one
+leaving (`team_member_keep_admin`), so there is always someone to hand to.
+Each removal from a team takes a per-team advisory lock first
+(`team_leave:<team>`, `lockTeamLeave`), so two removals at once run one
+after the other and the second reads what the first committed: a member
+leaving while the admin who would receive their project also leaves still
+ends with the remaining admin as its direct owner. History: `member.added`
+or `member.role` with `handedFrom`, then `member.removed` with `leftTeam`
+and the team's name, on each project. Tests: `teams/leave-projects.db.test.ts`.
+
 **Privacy contact** (168_team_privacy_contact, POPIA s18(1)(b)): the team,
 as the client organisation, is the responsible party for its projects'
 information, so it names whom people ask: `privacy_contact_name` and
