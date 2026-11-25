@@ -412,6 +412,41 @@ run in parallel after WP-4.1.
     export and verify still work), automatic runs and alerts stop after a
     14-day grace, and published farm views stay up. **Data is never deleted
     because a trial or plan ended.** Deletion follows WP-4.8 retention.
+  - **The farmer is told why their page stopped updating.** A paused
+    catchment's farm view keeps its last publication, so without a word a
+    farmer sees figures that just stop changing. The workspace's paused note
+    (billing.md § Pausing after a downgrade) is for members and links to
+    the plan. The farmer gets their own:
+    - *Where.* At the top of the farm view, above the dates line, an
+      information note (not an error, not amber). It replaces the generic
+      stale wording (`FARM_VIEW_STALE_DAYS`, ui.md § Data age and stale
+      wording), so the farmer reads the reason, not only "7 days old". The
+      farm view's API answer carries `updatesPausedAt` (from
+      `app_project_plan_paused`, read under the farmer's own rights) and the
+      date of the last publication. Nothing else about the plan.
+    - *What it says.* Plain words, no billing terms, no prices, and not who
+      did or didn't pay: "**Updates are paused.** {WUA} has paused the
+      automatic updates for this catchment since {date}. The figures below
+      are from {last update}, the last update. Nothing about your farm is
+      lost. Ask {WUA} when updates will start again." {WUA} is the
+      catchment's team or org name, with the WUA's contact if it set one.
+      When the pause ends the note goes and the next publication shows as
+      usual.
+    - *Alerts.* A farmer with farm alerts gets one email when the pause
+      lands ("Your water alerts are paused", the same words), built as the
+      recipient under RLS like every alert mail, since alerts stop with the
+      pause. Nothing is sent during the 14-day grace.
+    - *Language.* The note's strings are farmer-facing, so they go through
+      the i18n process: written in English at the call with `t()` under an
+      `// i18n-section:` marker, the email's through `mailT()` and
+      `backend/src/mail/i18n/en.ts`, translated by the `i18n-translator`
+      and `i18n-checker` agents and `pnpm gen:i18n:apply <lang>`, and the
+      sheet refreshed with `pnpm gen:i18n:sheet` (ui.md § Language).
+    - *Tests.* DB: a farmer reads `updatesPausedAt` on their own farm and
+      no plan or subscription row (positive control: an owner reads the
+      plan). e2e: a paused catchment's farm view shows the note in English
+      and Afrikaans, and not the stale wording. Mailpit: one pause email
+      per farmer, none during the grace.
   - *frontend:* a plan and usage page, and upgrade prompts at the limit.
 - **Data model.** #641 Phase 1's tables, carried over:
   - `plan(code PK, name, price_monthly_minor, price_annual_minor, currency
@@ -595,6 +630,38 @@ run in parallel after WP-4.1.
     the escape hatch: enforcement is ignored while the connection is disabled,
     so a broken IdP can't lock the admin out ([feohledger
     docs/authentication.md § SSO-only mode]).
+  - **Farmer guests are exempt from `require_sso`.** A WUA or agency that
+    requires SSO for its staff still shares farm views with farmers, who are
+    not in its Entra tenant and never will be. The rule binds the org's own
+    people (`admin`, `member`, `billing`), not its `guest`s.
+    - *How.* `app_org_access(o)` skips the `require_sso` test when the
+      user's membership of `o` is `guest`. That is every farmer (Step 2's
+      `farmer` role on a project, with its `farm_link`s) and any other
+      outside guest. `require_mfa` is a separate test and does still apply
+      to a guest when the org sets it.
+    - *What signs them in instead.* What signs them in today: their own
+      email and password (Argon2id), with their own second step if they
+      turned one on (TOTP or the emailed code), and the same `wm_session`.
+      `/auth/discover` answers `password` for them, because their address
+      isn't in a verified domain of the org.
+    - *What stays protected.* The exemption changes how a guest signs in,
+      not what a guest reads. A farmer still sees only their linked farms'
+      publication (`app_farm_access`, the aggregate rule), never the org's
+      models, members or other projects. **An address in a domain the org
+      has verified can't be a guest**: the invite, `app_accept_invites()`
+      and the `organisation_member` trigger refuse `guest` for it, so
+      staff can't dodge SSO by being re-added as guests, and turning a
+      `member` into a `guest` is refused for a verified-domain address
+      too. Raising a guest to `member` or `admin` makes the rule apply at
+      their next request (the session has no `sso_org`). Actions that need
+      step-up (publishing to farmers, licence decisions, evidence packs) are
+      never a farmer's.
+    - *Tests.* DB/RLS: in a `require_sso` org, a farmer's password session
+      reads its own farm view (positive control) and nothing else in the
+      org. A `member`'s password session is still refused. Inviting a
+      verified-domain address as a guest fails. e2e: a farmer signs in with
+      a password to a farm in an SSO-enforced org while `sso.spec.ts`'s
+      staff user is sent to Keycloak.
   - **Account linking without takeover.** Match `(issuer, sub)` first. Else
     match the email to an existing `app_user` **only if** the email's domain
     is DNS-verified by this org. Else create the user. An IdP can never claim
@@ -641,7 +708,8 @@ run in parallel after WP-4.1.
   guide `docs/guides/entra-sso.md`.
 - **Acceptance.** An Entra user from tenant X can't sign in to an org pinned
   to tenant Y. An admin can't lock themselves out by enforcing SSO without a
-  successful test sign-in.
+  successful test sign-in. A farmer keeps signing in with their password to
+  an org that enforces SSO.
 - **Size.** L (≈ 3 weeks).
 - **Depends on.** WP-4.1, WP-4.2, D4.
 
@@ -881,13 +949,47 @@ run in parallel after WP-4.1.
   - `replayDrought(series, fromWaterYear, toWaterYear, atWaterYear)`
     splices a historical drought sequence into another period.
   - `stochasticRain(series, { seed, members, years, method })`. The first
-    method is **k-nearest-neighbour block bootstrap of whole water years**.
-    It keeps the daily structure and needs no new physics. A parametric
-    Markov-chain + gamma generator comes later, if the hydrologist wants it.
-    The PRNG is seeded (xoshiro128**) inside the engine, never `Math.random`.
-  - `ensembleStats(outputs[])`: reliability (% of member-years with demand
-    met per farm), probability the EWR is met per month, storage exceedance
-    curves, and p5/p50/p95 bands for chosen keys.
+    method is a **conditional k-nearest-neighbour bootstrap of whole water
+    years** (Lall & Sharma 1996). It keeps the daily structure and needs no
+    new physics.
+  - **Multi-year droughts survive.** Drawing each water year independently
+    would break up the dry spells that matter most here: a dam that carries
+    over one dry year fails in the second or third, and independent draws
+    make a three-year drought far rarer than the record shows. So each
+    simulated year is **conditioned on the last**. Its feature is the
+    previous simulated year's catchment rain total (the water year from
+    `waterYearOf` in `calendar.ts`). Find the k historical years nearest to
+    it (k ≈ √n, weights 1/rank), pick one by the seeded PRNG, and take **the
+    year that followed it in the record** as the next simulated year. A wet
+    year tends to follow a wet year and a dry one a dry one, as they did. A
+    `persistence: 2` option adds the year before that to the feature,
+    for catchments whose record shows two-year memory. The first year of a
+    member is drawn from the whole record. The record's last year, which has
+    no successor, is a neighbour but never the next draw. `replayDrought` stays
+    for the "what if the worst drought on record came again" question.
+  - A parametric Markov-chain + gamma generator comes later, if the
+    hydrologist wants it. The PRNG is seeded (xoshiro128**) inside the engine,
+    never `Math.random`.
+  - `ensembleStats(outputs[])`: reliability per farm, probability the EWR is
+    met per month, storage exceedance curves, p5/p50/p95 bands for chosen
+    keys, and the distribution of **consecutive failed water years** per farm
+    (the multi-year drought measure). It reuses the single run's
+    **Assurance of supply** in `packages/engine/src/network/reliability.ts`
+    instead of a second set of definitions, so a member's figures mean
+    exactly what a historical run's do (model.md §2.11a). Each member's
+    `RunSummary.supplyAssurance` comes from `supplyAssurance()` as for any
+    run. Per farm, `nodeReliability()` supplies the time, volumetric and annual
+    reliability (whole water years only, against `DEFAULT_ANNUAL_THRESHOLD` or
+    the project's `assuranceAnnualThreshold`) and the resilience and
+    vulnerability figures. `demandMet()` is the one test of a met demand day.
+    `stressClassOf()` with `STRESS_THRESHOLDS` classes each month. Each water
+    year's rain comes from `waterAccount()`'s rows (`rainM3`), which is also
+    where the bootstrap's feature is checked against the run. The ensemble
+    adds only the across-member step (pooling member-years, percentiles,
+    runs of failed water years), in `scenario/ensembleStats.ts`. To count consecutive failed water years
+    exactly, `reliability.ts` exposes the per-water-year met flags that
+    `nodeReliability()` already tallies (a new optional field, no change to
+    existing figures).
 - **Backend.** `POST /projects/:id/ensembles { baseRunId?, transforms,
   members ≤ plan limit, seed }` puts a job on Step 2's queue. The worker runs
   members in chunks of 50. The engine takes tens of milliseconds per multi-decade run
@@ -910,12 +1012,18 @@ run in parallel after WP-4.1.
   Every member closes its mass balance. Same seed gives the same result.
   Reliability is non-decreasing as the rainfall scale grows (property test).
   A `FUZZ_CASES=20000` soak. *Unit:* bootstrap keeps water-year boundaries
-  (skewed `TZ`). *DB/RLS:* ensembles per project (positive control).
+  (skewed `TZ`). On a synthetic record with a built-in three-year drought,
+  the conditional bootstrap's members reproduce the record's lag-1
+  autocorrelation of annual rain and its longest dry run (within a stated
+  tolerance over 1,000 members), and the independent-draw control does
+  not. One member's reliability equals `supplyAssurance()` on the same
+  run, field for field. *DB/RLS:* ensembles per project (positive control).
   *e2e:* create → job completes → charts render. *axe.*
 - **Docs.** model.md (new section), api.md, ui.md, run-comparison.md (compare
   a scenario to the baseline).
-- **Acceptance.** The hydrologist accepts the bootstrap method and the
-  reliability definitions. A 500-member ensemble finishes in < 5 min end to
+- **Acceptance.** The hydrologist accepts the bootstrap method, its
+  conditioning (k and the persistence feature), and the reliability
+  definitions. A 500-member ensemble finishes in < 5 min end to
   end.
 - **Size.** L (≈ 4 weeks).
 - **Depends on.** WP-4.9, Step 2 queue (WP-2.8), Step 3 scenarios within a project.
