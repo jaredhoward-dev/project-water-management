@@ -4,7 +4,8 @@
 // that many onto the station queue and the rest go back to the job table, their attempt given back; another
 // project's one feed is still sent in the same tick. Positive controls: once the first answers are applied, the same
 // project's waiting fetches go out, so a project alone still drains its own queue; and an answer lost for a day no
-// longer holds a place (app_feed_fetch_out).
+// longer holds a place (app_feed_fetch_out). A project's non-station feed is not counted against the cap: it still
+// goes out through beginFeedFetch, to the shared queue, while that project's station share is full.
 //
 // DB test files run one at a time; afterEach removes every feed and feed job.
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -18,6 +19,7 @@ vi.mock('../transport.js', async (orig) => ({
 	}
 }));
 import { asOwner, signUp } from '../../__tests__/helpers.js';
+import { cellCentre } from '../../feeds/cellCache.js';
 import { STATION_FIXTURE_KEY } from '../../feeds/stationFixtures.js';
 import { runTick } from '../runner.js';
 import { STATION_FETCHES_PER_PROJECT, STATION_TURN_WAIT_SECONDS } from './feed-fetch.js';
@@ -133,5 +135,35 @@ describe('a project has at most STATION_FETCHES_PER_PROJECT station fetches out'
 		await tick();
 		expect(sent).toHaveLength(1);
 		expect(fids).toContain(sent[0]!.feedId);
+	});
+
+	it('a non-station feed of a project whose station share is full still goes out, through beginFeedFetch, to the shared queue', async () => {
+		sqsWorker();
+		const owner = await signUp('FairMixed');
+		const { pid, fids } = await stationProject(owner, 'Mixed feeds', STATION_FETCHES_PER_PROJECT + 2);
+		const r = await owner.call('POST', `/projects/${pid}/feeds`, {
+			source: 'chirps',
+			config: { cells: [{ ...cellCentre({ row: 1600, col: 4100 }), weight: 1 }], startDate: '2024-01-01' }
+		});
+		expect(r.status, JSON.stringify(r.body)).toBe(201);
+		const chirps = r.body.feed.id as string;
+		expect((await owner.call('POST', `/projects/${pid}/feeds/${chirps}/run-now`)).status).toBe(202);
+
+		const result = await tick();
+		// The station share is full (positive control: the cap did bite this project in this tick)…
+		expect(sentOf(fids)).toHaveLength(STATION_FETCHES_PER_PROJECT);
+		expect(result.released).toBe(2);
+		// …and the CHIRPS feed went out anyway, on the shared queue's group, its fetch recorded.
+		expect(sentOf([chirps])).toEqual([{ feedId: chirps, group: 'chc' }]);
+		const [rec] = (await asOwner(`SELECT fetch_job_id IS NOT NULL AS out FROM data_feed WHERE id = $1`, [chirps])) as { out: boolean }[];
+		expect(rec!.out).toBe(true);
+		// Its fetch, still out, takes no place in the station share: once the sent station fetches are answered, both
+		// waiting ones go out.
+		await answer(sentOf(fids).map((x) => x.feedId));
+		await waitOver();
+		sent.length = 0;
+		await tick();
+		expect(sentOf(fids)).toHaveLength(2);
+		expect((await asOwner(`SELECT fetch_job_id IS NOT NULL AS out FROM data_feed WHERE id = $1`, [chirps]))[0]!.out).toBe(true);
 	});
 });
