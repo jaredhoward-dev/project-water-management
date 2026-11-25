@@ -59,6 +59,19 @@ describe('freshness', () => {
 		expect(dataEnd({ startDate: '2025-01-01', length: 5 })).toBe('2025-01-05');
 	});
 
+	it('counts the catchment rain only, as the project list does: a land unit’s own rain reaching later never moves it (issue #832)', () => {
+		// The catchment gauge ends 31 Mar; a unit's own rain series (209_unit_rain_series) runs to 10 Apr.
+		const unitRain = { ...meta('u', 'rain_catchment_mm', 'Farm gauge', '2025-01-01', 100), siteNodeId: 'unit-1' };
+		const f = freshness([...list, unitRain], '2025-04-12')!;
+		expect(f).toMatchObject({ latest: '2025-03-31', age: 12, stale: true });
+		// The unit's series is still in the table and still counts as behind when it lags.
+		expect(f.perSeries.map((s) => s.id)).toContain('u');
+		// Positive control: the same series with no site is the catchment's rain, and moves it.
+		expect(freshness([...list, { ...unitRain, siteNodeId: null }], '2025-04-12')!.latest).toBe('2025-04-10');
+		// A unit's rain alone is no catchment rain: the header reads "no rain", as the list does.
+		expect(freshness([unitRain], '2025-04-12')).toMatchObject({ latest: null, stale: true });
+	});
+
 	it('is stale with no date when there is no recorded rain at all', () => {
 		expect(freshness([meta('fc', 'rain_forecast_mm', '', '2025-04-01', 30)], '2025-04-12')).toMatchObject({ latest: null, age: null, stale: true });
 	});

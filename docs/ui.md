@@ -1530,11 +1530,22 @@ same way on every screen:
 
 ## Header: data freshness and "Add data"
 
-- **Rain up to 14 Jun 2026 (12 days ago)**: the latest end of the
-  **recorded rain** (catchment or CHIRPS, `isRecordedRain`), which is what a
-  run is driven by. A forecast runs into the future and observed flow only
-  scores a run, so neither counts: either would read "up to date" while the
-  rain lags. With no recorded rain it reads "No recorded rain yet". Click it
+- **Rain up to 14 Jun 2026 (12 days ago)**: the **latest rain day**, the
+  last day with a value in the catchment's **recorded rain**: gauge rain
+  (`rain_catchment_mm`) or CHIRPS (`rain_chirps_mm`) with no site. That is
+  what a run is driven by. A forecast runs into the future and observed flow
+  only scores a run, so neither counts: either would read "up to date" while
+  the rain lags. A land unit's own rain series (a series given to a farm
+  unit, 209_unit_rain_series) doesn't count either: it covers one unit, not
+  the catchment. Trailing blank days ("no reading") are no data, and a series
+  with no value at all adds nothing. One rule decides it everywhere: the
+  engine's `latestRainDay` (`packages/engine/src/recordedRain.ts`), which the
+  header, the Data tab and the Overview call, and whose SQL form
+  (`backend/src/series/lastDay.ts` `recordedRainUntilSql`, the same kinds
+  and the same no-site test) gives the project list's and the portfolio's
+  `dataUntil`, so the header and the list never name different days (issue
+  #832, a DB test in `series/unitRain.db.test.ts` checks both agree). With no
+  recorded rain it reads "No recorded rain yet". Click it
   for every series' end date. It turns amber when the recorded rain is more
   than 7 days old (`STALE_DAYS`, [Data age and stale wording](#data-age-and-stale-wording)). Ages count
   calendar days up to **the project's** date (its time zone,
