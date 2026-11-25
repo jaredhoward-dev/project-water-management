@@ -369,6 +369,24 @@ describe('buildPackBundle + checkPackBundle', () => {
 			expect(failing(r)).toEqual(['manifest']);
 		});
 
+		// The short code is what a reader matches against the code printed on the pack (and what the result's first line
+		// names), so a bundle.json naming another pack's code beside this manifest's hash is refused, not printed.
+		it("bundle.json's short code isn't its manifest hash's: manifest fails", async () => {
+			const bytes = (await buildPackBundle(input, hash)).bytes;
+			const r = await checkPackBundle(
+				await rezip(bytes, (f) => {
+					const index = JSON.parse(f.get('bundle.json')!) as PackBundleIndex;
+					index.pack.shortCode = 'aaaa-bbbb-cccc';
+					f.set('bundle.json', canonicalJson(index));
+				}),
+				{ hash, rerun: false }
+			);
+			expect(failing(r)).toEqual(['manifest']);
+			expect(r.checks.find((c) => c.id === 'manifest')!.detail).toContain("bundle.json's short code aaaa-bbbb-cccc isn't");
+			// Positive control: the same rezip with the code left alone checks clean.
+			expect((await checkPackBundle(await rezip(bytes, () => {}), { hash, rerun: false })).ok).toBe(true);
+		});
+
 		it('an input value changed, bundle.json fixed: the series fails its SHA-256, and nothing is re-run', async () => {
 			const bytes = (await buildPackBundle(input, hash)).bytes;
 			const file = `series/${input.baseline.inputs.series.rain_catchment_mm!.valuesSha256}.csv`;
@@ -512,6 +530,7 @@ describe('buildPackBundle + checkPackBundle', () => {
 					f.set('manifest.json', text);
 					const index = JSON.parse(f.get('bundle.json')!) as PackBundleIndex;
 					index.pack.manifestSha256 = hash(text);
+					index.pack.shortCode = packShortCode(index.pack.manifestSha256);
 					f.set('bundle.json', JSON.stringify(index));
 				});
 				expect(failing(r)).toEqual(['structure']);
