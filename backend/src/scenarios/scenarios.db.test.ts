@@ -637,6 +637,33 @@ describe('status', () => {
 		expect((await patch({ status: 'draft' })).status).toBe(200);
 		expect((await patch({ ops: [] })).body.scenario.ops).toEqual([]);
 	});
+
+	// PATCH { status: 'submitted' } is the team editor's submit (ScenarioEditor): it holds the line POST …/submit does,
+	// so a submitted scenario (which the evidence report's § 4 counts) never freezes ops it can't run.
+	it("refuses to submit by PATCH a scenario whose ops don't all apply, as …/submit does; once they apply, it submits", async () => {
+		const u = await signUp('PatchSubmitter');
+		const c = await catchment(u, 'Patch submit');
+		const base = await run(u, c.projectId, 'Baseline');
+		const missing = crypto.randomUUID();
+		const sid = await create(u, c.projectId, { name: 'Half applies', baseRunId: base, ops: [damRaise(c.farm.id, 120_000), damRaise(missing, 60_000)] });
+		const url = `/projects/${c.projectId}/scenarios/${sid}`;
+		const problems = [`op 2 (node.set): hydrological unit ${missing} not found`];
+
+		const viaSubmit = await u.call('POST', `${url}/submit`);
+		expect(viaSubmit.status).toBe(422);
+		expect(viaSubmit.body.details.problems).toEqual(problems);
+		const viaPatch = await u.call('PATCH', url, { status: 'submitted' });
+		expect(viaPatch.status, JSON.stringify(viaPatch.body)).toBe(422);
+		expect(viaPatch.body.details.problems).toEqual(problems);
+		// Nothing moved, and a name sent with it isn't kept either (one change, refused whole).
+		expect((await u.call('PATCH', url, { name: 'Renamed', status: 'submitted' })).status).toBe(422);
+		const [row] = await asOwner('SELECT status, name FROM scenario WHERE id = $1', [sid]);
+		expect(row).toEqual({ status: 'draft', name: 'Half applies' });
+		// Ops sent with the move are the ones checked: a list that applies submits in the same PATCH (positive control).
+		const ok = await u.call('PATCH', url, { ops: [damRaise(c.farm.id, 120_000)], status: 'submitted' });
+		expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+		expect(ok.body.scenario.status).toBe('submitted');
+	});
 });
 
 describe('a scenario saved before issue #385 with a name over two lines', () => {
