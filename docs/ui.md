@@ -559,16 +559,23 @@ address (`LANDING_ROUTES`, `addressFor` in `lib/auth/session.svelte.ts`).
   "Farmers and viewers are always free" and "Assessors verify evidence
   packs free" come first; "No VAT is charged", Free's non-commercial rule,
   and that data is never held back by a plan close it. Never "quota",
-  "abuse" or "402". It says nothing about the reverse trial on purpose: the
-  trial is off (`REVERSE_TRIAL`), and a page offering what isn't on would
-  mislead ([followups.md](./followups.md)).
+  "abuse" or "402".
+- **The reverse trial.** Pro says "14 days of Pro free when you sign up, no
+  card needed. Then Free, unless you choose a plan." (`data-testid="pro-trial"`),
+  its number from `PLAN_FIGURES`' `trialDays` (`plan.trial_days`), but only
+  in a build with `PUBLIC_REVERSE_TRIAL=true`: the page is prerendered and
+  can't ask the API whether `REVERSE_TRIAL` is on, so the build flag mirrors
+  it, and a page offering a trial that isn't on would mislead. Empty (off)
+  by default, so today it shows nothing
+  ([billing.md § The pricing page and the trial](./billing.md#the-pricing-page-and-the-trial)).
 - **Figures from one place.** Every price and limit comes from
   `@water-management/engine/plans` (`PLAN_FIGURES`), since a static page
   can't read the `plan` table; `backend/src/billing/planFigures.db.test.ts`
   fails when a migration moves a figure and that file doesn't follow.
 - **Links.** The landing page's closing panel ("See plans and prices") and
-  its footer, in the page's language. The Plan page's *Compare plans*
-  (assistant panel, live-catchment note) still goes to `/account/plan`.
+  its footer, in the page's language, and the Plan page's *See all plans*
+  (in English, the workspace's language). The *Compare plans* links
+  (assistant panel, live-catchment note) still go to `/account/plan`.
 - **Not yet.** Checkout's disclosures and consent tick (#641 Phase 4) are on
   the Plan page's checkout, not here.
 
@@ -1407,7 +1414,13 @@ role, freshness, Add data) and each tab's own header:
   live catchments (341) a note that its feeds, alerts and automatic runs are
   paused because the plan it is billed to ended, that nothing is lost, with
   a link to the plan (`billing/planPause.ts`; billing.md § Pausing after a
-  downgrade). Every message and action of the
+  downgrade); and in the last 3 days of the person's reverse trial (342,
+  the trial-ending email's window) *Your Pro trial ends on 7 Dec 2026…*,
+  that the account then moves to Free with nothing charged or deleted and
+  nothing paused for 14 days, with an **Upgrade** link to the Plan page
+  (`planPause.ts` `trialNotice`, `billing/trialEnding.ts`; from the
+  project's `planTrialEnd`, which only the billing account's own person
+  gets, 349; billing.md § The reverse trial). Every message and action of the
   old banners is kept. The model save bar stays the dock at the bottom
   (Save changes, Discard, the reason), and the grid modal and sheets keep
   their own `ModelSaveRow`.
@@ -2855,6 +2868,17 @@ moves ⋯ (not the one that brought an off-screen ⋯ into view: its event
 arrives a frame after the menu opened) or a resize. One menu is open at a
 time.
 
+**Copy…** opens the copy dialog (`lib/components/projects/CopyProjectDialog.svelte`,
+`POST /projects/:id/copy`): the copy's name, prefilled "*name* (copy)", and
+where it goes (it stays in the team, or is personal when you only view
+it). A copy closes the dialog and reloads the list. When Free's live limit
+made the copy with automatic runs off (the answer's `autoRunsOff:
+"live_catchments"`; billing.md § Live catchments (Free)), the dialog stays
+open on a done state instead: "Copied to *name*", then one information line
+saying the new project starts with automatic runs off because another
+catchment on the plan is live, with **Compare plans** to the plan that bills
+the copy (`billing/AutoRunsOffNotice.svelte`), and *Close* or *Open project*.
+
 **Delete** asks for confirmation, then deletes. A project that has nominated
 an evidence run is kept for good (issue #43, [data-model.md](./data-model.md)
 § Evidence nomination), so the server answers `409`; instead of the raw error
@@ -2896,8 +2920,10 @@ turns a project document into a new project through `POST /projects/import`:
    list still takes the project.
 4. **Done:** "Imported *name*", plus "Its first run is ready on the Runs tab"
    after a run, or a warning with the reason when the run failed (the project
-   is still imported). *Open project* goes to it; the list behind has already
-   reloaded.
+   is still imported). When Free's live limit made it with automatic runs
+   off (`autoRunsOff: "live_catchments"`), the copy dialog's line follows:
+   why, with **Compare plans** (`billing/AutoRunsOffNotice.svelte`). *Open
+   project* goes to it; the list behind has already reloaded.
 5. **Failed:** the server's message (zod or model problems are listed) and
    "Nothing was created." When the server couldn't be reached, it says the
    import may or may not have gone through and to check the list first. *Back
@@ -3174,7 +3200,17 @@ The page is two cards, side by side where they fit and stacked on a phone:
   up): with no subscription, *Upgrade to Pro, monthly (R 899.00 a month)* and
   *…, yearly (R 8 990.00 a year)* (*Team* on a team's page), priced from
   `GET /billing/plans` (unpriced until it answers, or if it fails); with one,
-  *Manage billing*. Team's Upgrade has an *Editor seats* number field above
+  *Manage billing*, except during a live reverse trial
+  (`subscription.reverseTrial`, 342), where the Upgrade buttons stay, since
+  checkout replaces the trial (344; `plan.ts` `billingActions`,
+  `onReverseTrial`). In the trial's last 3 days a note above them says when
+  it ends, that the account then moves to Free with nothing charged or
+  deleted and nothing paused for 14 days, and to upgrade to keep Pro
+  (`billing/trialEnding.ts`; billing.md § The reverse trial). Coming back
+  from checkout during a trial, the page waits for a subscription other
+  than the trial (`hasPaidSubscription`). Under the buttons, **See all
+  plans** links the public pricing page (`/welcome/pricing`, through
+  `resolve()`), which sets the three plans side by side. Team's Upgrade has an *Editor seats* number field above
   the buttons (a `NumberInput` spinbutton with `whole`, labelled, from the 3
   included to 50, a hint under it with each extra seat's monthly and yearly
   price, named by `aria-describedby`; ArrowUp and ArrowDown step it by one),
@@ -5192,7 +5228,10 @@ map" card) stays the schematic; this is the geography.
   list), and a value read over a redrawn outline, the rest of the
   catchment's area, a dam in another unit's boundary and a moved gauge, each
   with a link to where it is set again (MAP from the grid, Rain for each
-  unit, Crops, Evaporation from the map, Network). The grid's "Where each
+  unit, Crops, Evaporation from the map, Network). A WR2012 reference whose
+  quaternary was looked up at the boundary or a gauge redrawn, moved or
+  deleted since is flagged too, linking to **WR2012 check: Propose from the
+  map** (followups F8/F14). The grid's "Where each
   hydrological unit’s area came from" says "’s earlier outline" beside such
   a unit. Until 2026-10-02 a line in the column with
   **Show the checks** opening a side sheet, **Map checks** (`checks=1`); that
@@ -9934,7 +9973,10 @@ calibration's line points at *How the shown run fits* for NSE and PBIAS.
   a gauge on the map, or typed coordinates) in the loaded quaternary dataset
   and lists its values (code, area, MAP, MAR, period, monthly means, source)
   beside what the form holds, each with **Use** (or *Same* / *Used*, or *Not
-  in the data*). A used value goes into the form only; Save keeps it. A
+  in the data*). A used value goes into the form only; Save keeps it, with
+  where it was looked up (`reference.lookup`: the point, the code, and the
+  boundary or gauge as it stood; nothing for typed coordinates), which the
+  Map's Checks re-check after a boundary edit. A
   proposal from the committed synthetic dataset carries a warning that its
   values are invented; with no dataset loaded, or no quaternary at the point,
   it says so (with no dataset, in plain words: enter the values from the
@@ -13944,6 +13986,20 @@ with read-only tools over the project's data. It never changes anything.
   streams) inside its border; under it one quiet line with the share of the
   project's monthly budget left, when it starts again, and **New
   conversation** once there is one; then the disclaimer the server sends.
+  For a person on a capped account (Free, or a reverse trial) with billing
+  enforced, a line of its own above the budget says how many questions are
+  left today (`data-testid="assistant-day-meter"`, `chat.svelte.ts`
+  `dayMeterText`, from the status's `day`, api.md § Assistant): what's left
+  of the SAST day (and of the trial's whole allowance, when that's less) ÷
+  the account's median question, "About 6 questions left today, at what your
+  questions usually cost (an estimate)." ("… today on your trial" on a
+  trial). Free never shows more than its messages left, which is a count, so
+  it says "Up to 3 questions left today."; with no median yet Free says its
+  messages left and a trial the share of its day left; "No questions left
+  today." once either is spent. The status is read again after each turn,
+  so the line counts down (a failed read keeps the line). Paid plans and
+  billing off have no line. `AssistantPanel.test.ts`,
+  `chat.svelte.test.ts`, `assistant.spec.ts`.
   Its first paragraph ("The assistant's answers are advice, not model
   output, and they can be wrong.") is the line of a `common/Fold.svelte`,
   always in view; the reports' `DISCLAIMER` paragraphs fold under it
@@ -14029,15 +14085,19 @@ with read-only tools over the project's data. It never changes anything.
   monthly caps, docs/api.md § Assistant) and when it starts again, and the
   box takes nothing. The share left under the box is of the cap nearest its
   end. With billing enforced, a dollar cap (`assistant_daily_cap`,
+  `assistant_trial_cap`, `assistant_trial_daily_cap`,
   `assistant_monthly_cap`, `assistant_member_cap`,
   `assistant_free_pool_spent`; billing.md § Assistant dollar caps) shows the
   server's words and "Back … your time." from `params.resetsAt`, and the box
   takes nothing until then (`data-testid="assistant-cap"`). On Free's day and
   month (`params.plan` is `free`, which the API sends on those two) the note
-  ends with a **Compare plans** link to the Plan page (`/account/plan`,
+  ends with a **Compare plans** link to the Plan page of the account that
+  bills the catchment (the team's, `/teams/:id/plan`, for a team catchment,
+  else `/account/plan`; `billing/planLink.ts`;
   `data-testid="assistant-compare-plans"`), the month's after "Pro includes
   about 15 times as much." (Free $1, Pro $15 a month, 323's plan limits).
-  The Free pool never upsells (it isn't the person's doing), nor does a paid
+  The Free pool never upsells (it isn't the person's doing), nor does a
+  reverse trial's cap (the trial is Pro already), a paid
   account's month or a Team member's share, whose words say a team admin
   can raise it; an editor who can't read the owner's account gets no plan,
   so no link (`chat.svelte.ts` `capOffersPlans`). The issue's *OK* button is

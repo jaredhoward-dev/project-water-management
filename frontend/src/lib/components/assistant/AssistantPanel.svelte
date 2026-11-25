@@ -25,6 +25,7 @@
 	import Fold from '#lib/components/common/Fold.svelte';
 	import AnswerText from './AnswerText.svelte';
 	import EmailGateNotice from '#lib/components/billing/EmailGateNotice.svelte';
+	import { planHref, useBillingTeam } from '#lib/components/billing/planLink.js';
 	import { tick } from 'svelte';
 	import type { AssistantProposal } from '#lib/api/types.js';
 	import { fmtDay, fmtPct, fmtWhen } from '#lib/format/number.js';
@@ -32,7 +33,6 @@
 	import { focusAfterRemove } from '#lib/a11y/focusAfterRemove.js';
 	import { basePath } from '#lib/nav/base.js';
 	import { withSite } from '@water-management/engine';
-	import { resolve } from '$app/paths';
 	import { applicable, capOffersPlans, waitText, type AssistantChat, type AssistantTurn, type ProposalEntry } from './chat.svelte';
 
 	let {
@@ -51,6 +51,9 @@
 		runId?: string | null;
 		onapply?: (proposal: AssistantProposal) => void | Promise<void>;
 	} = $props();
+
+	/** Compare plans opens the plan that bills this catchment: its team's, else your own (planLink.ts). */
+	const billingTeam = useBillingTeam();
 
 	/** This site's address, for the disclaimer's `{site}` (the Terms link), as liability/Disclaimer.svelte. */
 	const site = typeof location === 'undefined' ? basePath() : `${location.origin}${basePath()}`;
@@ -317,12 +320,13 @@
 				</p>
 			{:else if chat.refusal?.kind === 'cap'}
 				<!-- A dollar cap (billing enforced): the server's words, then when it's back in the viewer's time. Free's day and
-				     month offer Compare plans (the month adds what Pro includes); the Free pool and a paid account's caps never upsell. -->
+				     month offer Compare plans (the month adds what Pro includes); the Free pool, a reverse trial's caps and a
+				     paid account's caps never upsell. -->
 				<p class="note warn" role="alert" data-testid="assistant-cap" data-code={chat.refusal.code}>
 					{chat.refusal.message}
 					Back {fmtWhen(chat.refusal.resetsAt)} your time.
 					{#if capOffersPlans(chat.refusal) && chat.refusal.code === 'assistant_monthly_cap'}Pro includes about 15 times as much.{/if}
-					{#if capOffersPlans(chat.refusal)}<a class="cap-plans" href={resolve('account/plan')} data-testid="assistant-compare-plans">Compare plans</a>{/if}
+					{#if capOffersPlans(chat.refusal)}<a class="cap-plans" href={planHref(billingTeam(), basePath())} data-testid="assistant-compare-plans">Compare plans</a>{/if}
 				</p>
 			{:else if chat.spent && st}
 				<p class="note warn" role="alert" data-testid="assistant-budget-spent">
@@ -368,6 +372,10 @@
 
 			{#if st || chat.turns.length}
 				<div class="meta">
+					{#if chat.dayMeter}
+						<!-- A capped account's day (Free, a reverse trial; billing enforced): an estimate from its median question. -->
+						<span class="day-meter" data-testid="assistant-day-meter">{chat.dayMeter}</span>
+					{/if}
 					{#if st}
 						<span class="budget" data-testid="assistant-budget">
 							{fmtPct(left, 0)} of this month’s budget left · starts again {fmtDay(st.budget.resetsAt)}
@@ -786,6 +794,10 @@
 	}
 	.meta button {
 		margin-left: auto;
+	}
+	/* Its own line above the month's budget: the day is what binds a capped account first. */
+	.day-meter {
+		flex-basis: 100%;
 	}
 	/* The disclaimer's line: what the answers are, in view; the report's paragraphs fold under it and scroll
 	   in their own box, so opening them never pushes the question box off a phone's screen. */

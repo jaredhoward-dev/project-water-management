@@ -206,8 +206,28 @@ and only on a per-seat plan; on Free or Pro it is kept for when the team
 moves to Team. Like the other caps, nothing refuses past it unless billing is
 enforced.
 
-**Not built yet** ([followups.md](./followups.md#billing-issue-641)): the
-"questions left today" meter, and Haiku on Free.
+**The questions-left meter** (`350_assistant_day_meter.sql`, `usage.ts`
+`dayMeter`). With billing enforced, the assistant's status (`GET
+/projects/:id/assistant`, [api.md § Assistant](./api.md#assistant)) carries
+`day` for a person on a capped account, Free or a reverse trial: the SAST
+day's dollars and what's left of them (the day row's cost plus every
+reservation begun today, as the begin counts them), Free's messages left, the
+trial's whole $2 left, and the account's median question: the median, over
+its day rows of the last 30 SAST days that recorded a priced turn, of the
+row's cost ÷ its messages, rounded up. The panel turns that into "About 6
+questions left today, at what your questions usually cost (an estimate)"
+([ui.md § Assistant](./ui.md#assistant)). Per-turn costs aren't kept (the
+month and day rows hold sums), so the median is of daily averages, and a
+turn still running when the status is read makes its day look cheaper (its
+message is counted at begin, its cost at the charge): an estimate, and worded
+as one. The Free pool isn't in it (not the person's allowance; its refusal
+says so). Off, a paid plan, or no billing account: `day` is null. It reads
+the person's own sums, not `assistant_dollars_spent` (which scans every pool
+account's month), since the status is read each time the panel loads and
+again after each turn.
+
+**Not built yet** ([followups.md](./followups.md#billing-issue-641)): Haiku
+on Free.
 
 ## Metrics and the abuse report
 
@@ -223,8 +243,9 @@ pnpm dev:billing:report --show-emails       # operator only: prints the addresse
 ```
 
 It reads two owner-only functions (`325_billing_metrics.sql`; never granted
-to `water_app`, [data-model.md](./data-model.md)) and the owner-only
-`email_gate_refusal` table (348) on this checkout's
+to `water_app`, [data-model.md](./data-model.md)), 338's owner-only
+`app_live_catchments_in_use`, `billing_grant_log` and `subscription` (the
+reverse trials) and the owner-only `email_gate_refusal` table (348) on this checkout's
 database (`MIGRATION_DATABASE_URL`); in production the operator runs the
 same code through the migrate Lambda's `billing-report` owner action
 (`.github/workflows/billing-admin.yml`, approved in the `production`
@@ -242,7 +263,8 @@ output never goes into an issue, a PR, a chat or an agent's transcript.
 | Metric | How it is worked out | Threshold (the issue's) |
 | --- | --- | --- |
 | Activation | Verified sign-ups of the month (SAST) with a model run within 7 days of signing up. Sign-ups under 7 days old are left out and counted as pending | < 30% → fix onboarding first |
-| Active Free accounts near / at each limit | Active = a run, a server report or assistant use this month on the account's projects. Near ≥ 80% of the limit, at ≥ 100%, for reports (5), the assistant's dollars ($1) and catchments (Free has no limit, so none) | > 15% at reports → 10 a month; < 3% at the monthly assistant cap → room to raise |
+| Active Free accounts near / at each limit | Active = a run, a server report or assistant use this month on the account's projects. Near ≥ 80% of the limit, at ≥ 100%, for reports (5), the assistant's dollars ($1), catchments (Free has no limit, so none) and live catchments (1: the share at the live-catchment limit). Catchments and live catchments are counted **today**; live is 338's count (`app_live_catchments_in_use`: an enabled feed or alert rule, automatic runs on, or a publication; [§ Live catchments](#live-catchments-free)), so an account past its limit from before enforcement counts as at it, and an idle account with a live catchment isn't in the share | > 15% at reports → 10 a month; < 3% at the monthly assistant cap → room to raise |
+| Reverse trial → paid within 30 days | The reverse trials (342) that **began in the report's SAST month**: `billing_grant_log` `grant` rows by `reverse trial`, one per account (one trial per canonical email). Paid = the account's first paid plan at or after the trial's start: a subscription from a payment provider (`stripe`, or `mock` locally) whose first payment was taken: `active`, `past_due` or `canceled` (so a plan bought and later cancelled counts; not `trialing`, and not `expired`, Stripe's `incomplete_expired`, a first payment never made), or a paid B2B invoice's grant (`billing_grant_log` `grant` by `invoice`, 335); a staff grant is not paid. Converted when it came at most 30 days after the start. A trial under 30 days old is left out and counted as pending (with how many of those already pay). A deleted account's trial goes with it (`billing_grant_log` cascades) | |
 | Assistant spend per account | p50 and p90 (nearest rank) per plan over the accounts that spent this month, with the total and any unpriced turns (then a floor) | Paid: > 20% at $15 → top-up packs sooner |
 | Free spend by accounts under 7 days old | Its share of the month's Free assistant spend. `assistant_usage` is monthly, so an account counts as new when its latest spend of the month came under 7 days after it started: **an upper bound** | > 50% → escalation (b) |
 | Heaviest Free accounts | The five with the most assistant spend, by account id | |
@@ -258,10 +280,9 @@ spend keeps `assistant_usage`'s UTC month, as `app_account_plan` does.
 **Not yet measurable**, printed as such so a gap is never read as a zero
 (the app doesn't record what each needs): upgrade at the limit (no checkout,
 trial or limit-message events), churn after the limit (no record of hitting
-one), reverse trial to paid (built in 342, off, and the report doesn't read it yet), the share at the assistant's daily
+one), the share at the assistant's daily
 cap and the Free pool's burn by day (`assistant_day_usage` keeps each day
-since 336, but the report doesn't read it yet), the share at the live-catchment limit (338 defines live,
-but the report doesn't read it yet), paid seats reaching $15 (spend isn't kept per paid seat), sign-up throttle hits per address
+since 336, but the report doesn't read it yet), paid seats reaching $15 (spend isn't kept per paid seat), sign-up throttle hits per address
 (`signup_throttle` keeps only an hour's hashed buckets) and suspensions (no
 suspend action yet).
 
@@ -870,6 +891,49 @@ subscription) and nothing is deleted. The Plan page already reads
 `subscription.trialEnd` and shows "Trial ends 7 Dec 2026" for a trialing
 subscription (`components/billing/plan.ts` `subscriptionLine`).
 
+**The pricing page and the trial** (decided 2026-11-24). The public
+pricing page ([ui.md § Pricing page](./ui.md#pricing-page)) says "14 days
+of Pro free when you sign up, no card needed. Then Free, unless you choose
+a plan." on Pro, the number from `PLAN_FIGURES`' `trialDays`
+(`packages/engine/src/plans.ts`, pinned to `plan.trial_days` by
+`planFigures.db.test.ts`). The page is prerendered, so it can't ask the API
+whether the trial is on: a build-time flag, `PUBLIC_REVERSE_TRIAL`
+(`frontend/src/env.ts`, read by `reverseTrialDays` in
+`components/pricing/pricing.ts`), shows the line only when it is exactly
+`true`, as `REVERSE_TRIAL` reads. Empty in both committed env files, so the
+page offers nothing today. The operator sets the repository variable
+`PUBLIC_REVERSE_TRIAL=true` and releases the web in the same change that
+turns on `REVERSE_TRIAL` and `BILLING_ENFORCED`, and unsets it (and
+releases again) when turning them off ([deployment.md](./deployment.md)).
+Rejected: reading `/billing/plans` from the page at load (the page would
+show the line only after a request, flash on every visit and need the API
+up for a static page), and leaving it off the page (the first thing a
+visitor learns about the trial would be its end notice). The cost of the
+flag: the two settings can disagree, so turning one on without the other
+either offers a trial nobody gets or grants one the page doesn't mention;
+the variable's row in deployment.md says to move them together.
+
+**What the pages show** (349, round 2026-11-24). The plan JSON marks a
+reverse trial: `subscription.reverseTrial` is true for a `manual` +
+`trialing` subscription (`billing/entitlements.ts` `accountPlan` asks
+`app_billing_live_subscription_ref` for the provider of a trialing one;
+false for a staff grant or a Stripe trial). During one the Plan page offers
+**Upgrade** rather than Manage billing (`plan.ts` `billingActions`), since
+checkout replaces the trial (below). In the trial's last 3 days (the
+trial-ending email's window, [§ Plan emails](#plan-emails)) a note on the
+Plan page, and one in the workspace header beside the paused notice, says
+when it ends, that the account then moves to Free with nothing charged or
+deleted and nothing paused for 14 days, and offers Upgrade
+(`components/billing/trialEnding.ts`). The workspace reads the project's
+`planTrialEnd` (`349_project_trial_end.sql`, `app_project_trial_end`): the
+trial end of the account the catchment is billed to, only for that
+account's person or a team admin (`app_billing_account_readable`), so a
+member never sees someone else's trial. All of it is inert while
+`REVERSE_TRIAL` is off: no trial row exists. Tests:
+`billing/trialBanner.db.test.ts`, `entitlements.test.ts`, the frontend's
+`plan.test.ts`, `trialEnding.test.ts` and `planPause.test.ts`, and e2e
+cases in `billing-checkout.spec.ts` and `billing-keep-live.spec.ts`.
+
 **The trial's assistant.** Pro's month applies, and on top, during a reverse
 trial, `app_assistant_begin` refuses (enforced only):
 
@@ -904,10 +968,13 @@ since every subscription write fires 341's sync, which takes it.
 
 **3 days before the end** the person gets an email ([§ Plan emails](#plan-emails)).
 
-**Not built yet** ([followups.md § Billing](./followups.md#billing-issue-641)):
-the banner 3 days before the end (on the Plan page and in the workspace), the
-Plan page's Upgrade button during a trial (it offers Manage billing while any subscription is live,
-`billingActions`), and the assistant panel's own words for the two new codes.
+**On the pages** (round 2026-11-24): the Plan page's Upgrade during a trial
+and the 3-day note on the Plan page and in the workspace are above (§ What the
+pages show). Still open ([followups.md § Billing](./followups.md#billing-issue-641)):
+whether to key `reverse_trial_claim` with an HMAC (operator decision). The assistant panel shows the two trial codes as caps,
+with the server's words and when they're back, never an upsell (the trial is
+Pro already), and its day meter counts the trial's day and its whole $2
+([§ Assistant dollar caps](#assistant-dollar-caps)).
 
 **Tests.** `billing/reverseTrial.db.test.ts` (off grants and claims nothing;
 on, a first verification starts 14 days of Pro, logged and on the plan page;
@@ -1118,6 +1185,9 @@ a second one when `BILLING_ENFORCED` is on.
   trigger on `project` that fires after `project_billing_account_set`, under
   the same account lock), its other automatic-run fields kept, and the
   answer says so (`autoRunsOff: "live_catchments"`, [api.md](./api.md)).
+  The copy dialog and the import dialog show it in their done state: one
+  information line saying why, with *Compare plans*
+  (`AutoRunsOffNotice.svelte`; [ui.md § Project list](./ui.md#project-list)).
   Automatic runs are the only way a new project is live: a copy leaves feeds
   with the original and copies no alert rules or publications, and an import
   has none. Below the limit, or with enforcement off, the copy keeps them on.
@@ -1138,8 +1208,14 @@ a second one when `BILLING_ENFORCED` is on.
   on) and the alert rules editor show it as an information note, not an
   error (`LiveLimitNotice.svelte`, `liveLimit.ts` in
   `frontend/src/lib/components/billing/`), in #641's tone (no "quota" or
-  "402"), with *Compare plans* linking to Plan and usage. So do the
-  settings save bar (automatic runs; `SaveBar.svelte`, from the settings
+  "402"), with *Compare plans* linking to the Plan page of the account that
+  bills the catchment: a team catchment's team (`/teams/:id/plan`), any
+  other the person's own (`/account/plan`; [§ Who the plan belongs
+  to](#who-the-plan-belongs-to)). Every Compare plans link (this note, the
+  copy and import dialogs' line, the assistant's cap) builds it with
+  `planHref` (`planLink.ts`), the team from `project.team`, which the
+  workspace provides to the components below it. The note also shows in
+  the settings save bar (automatic runs; `SaveBar.svelte`, from the settings
   draft's `liveLimit`, the edit kept unsaved) and the Publish this run
   dialog (`PublicationPanel.svelte`, the dialog kept open), each in place of
   the error line (340's round, issue #641 round 9).
@@ -1600,8 +1676,11 @@ none of this is built except where a bullet says so:
   `/welcome/pricing/af`, prerendered (docs/ui.md § Pricing page). A static
   page can't read `plan`, so its figures are
   `packages/engine/src/plans.ts` (`PLAN_FIGURES`), which
-  `backend/src/billing/planFigures.db.test.ts` pins to the table: a
-  migration that moves a price or limit updates that file in the same
-  change. Still open in Phase 4: the checkout disclosures and consent tick,
+  `backend/src/billing/planFigures.db.test.ts` pins to the table (prices,
+  limits and `trial_days`): a migration that moves a price, limit or
+  trial length updates that file in the same change. Pro's reverse-trial
+  line shows only in a build with `PUBLIC_REVERSE_TRIAL=true`
+  ([§ The pricing page and the trial](#the-pricing-page-and-the-trial)). Still open in Phase 4: the checkout disclosures and consent tick,
   Terms §8, the privacy notice (Stripe), the `LEGAL_VERSION` bump and
-  Gate D.
+  Gate D. The legal text is drafted for counsel, not live:
+  [legal/billing-terms-draft.md](./legal/billing-terms-draft.md).

@@ -946,10 +946,25 @@ someone takes it again. These checks say so:
   `GAUGE_MOVED_M` (50 m) since, the check says how far and points at the
   Network, where what drains into it is set. A gauge linked before 273 has
   no point recorded and is never flagged.
+- **A WR2012 quaternary looked up at a feature edited since** (F8, F14):
+  Calibration → WR2012 check's **Propose from the map** saves where the
+  quaternary was looked up with the reference
+  (`settings.wr2012.reference.lookup`, engine `Wr2012Lookup`: the point,
+  the code found there, and the boundary or gauge the point came from with
+  its `updatedAt` and area then; [§ Quaternary lookup](#quaternary-lookup)).
+  The check flags the reference when that boundary is gone or is another
+  outline (`stale.ts outlineChanged`, as above), or was edited since and the
+  point now lies outside it (a reshape that kept the area), and when that
+  gauge is gone or moved more than `GAUGE_MOVED_M` (50 m); it links to
+  **WR2012 check: Propose from the map** to look it up again. A reference
+  typed by hand, saved before lookups were recorded, looked up at typed
+  coordinates, or whose code was typed over since (the lookup's code isn't
+  the reference's) records nothing to compare, so it is never flagged: the
+  check doesn't guess which quaternary the boundary lies in now.
 
 Not built here: re-proposing every unit's area at once without an
-elevation model (Divide's area half), and a flag for a WR2012 quaternary
-the moved boundary no longer sits in ([followups.md](./followups.md), issue
+elevation model (Divide's area half), and weighting WR2012 over every
+quaternary the boundary covers ([followups.md](./followups.md), issue
 #646 F9 and F14).
 
 Geometry is in metres on a local equirectangular projection around the
@@ -1320,7 +1335,11 @@ catchment that contains a point (the boundary's centre, a gauge, or typed
 coordinates; `GET /projects/:id/map/quaternary`) and lists its reference
 values (code, area, MAP, naturalised MAR, reference period, monthly means,
 source) beside what the form holds, each with **Use**. A used value goes into
-the form only; **Save** keeps it. The source shown is the dataset's own,
+the form only; **Save** keeps it, with where it was looked up
+(`reference.lookup`: the point, the code found there, and the boundary or
+gauge the point came from as it stood, or none for typed coordinates), so
+the Map's [Checks](#checks) can flag the reference once that feature is
+redrawn or moved. The source shown is the dataset's own,
 with the quaternary and the point appended. Nothing fills itself, and a
 proposal from the synthetic dataset is marked "Synthetic test data … never
 use them for a real catchment".

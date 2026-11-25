@@ -5,7 +5,7 @@ import { ApiError } from '../http/errors.js';
 import { trySendMail } from '../mail/transport.js';
 import { issueEmailToken, markVerified, verificationMail } from './email-routes.js';
 import { answerAlike } from './accountMail.js';
-import { accountDeletedMail, accountExistsMail, siteLink } from '../mail/templates.js';
+import { accountDeletedMail, accountExistsMail, emailChangeTakenMail, siteLink } from '../mail/templates.js';
 import { lockOwnRoles, recordDeparture, soleHoldings, type Departure, type SoleHoldings } from './deleteAccount.js';
 import { logEvent } from '../logging/logEvent.js';
 import type { Mail } from '../mail/transport.js';
@@ -215,25 +215,36 @@ async function inviteNames(inviteHash: Buffer, address: string): Promise<boolean
 }
 
 /**
- * The email for a sign-up (or an email change, email-change-routes.ts) to an
- * address that already has an account: a fresh confirmation link if the
- * account was never confirmed, else "you already have an account" with a
- * password-reset link. Null when the address's cooldown or daily cap holds it
- * back (the answer is the same either way). Run in a withoutUser transaction:
- * from here on it acts as the address's holder.
+ * The email to the holder of an address that already has an account, when
+ * someone signs up with it (`sign-up`) or asks to change another account's
+ * address to it (`email-change`, email-change-routes.ts). Sign-up: a fresh
+ * confirmation link if the account was never confirmed, else "you already
+ * have an account" with a password-reset link. Email change: its own email
+ * (emailChangeTakenMail, "someone asked to change an account's address to
+ * this one; nothing changed") with the same link, a confirmation for an
+ * unconfirmed account, else a password reset. Each link is issued under the
+ * address's cooldown and daily cap; null when they hold it back (the
+ * requester's answer is the same either way). Run in a withoutUser
+ * transaction: from here on it acts as the address's holder.
  */
-export async function takenAddressMail(db: Db, address: string): Promise<Mail | null> {
+export async function takenAddressMail(db: Db, address: string, reason: 'sign-up' | 'email-change'): Promise<Mail | null> {
 	const { rows } = await db.query<{ id: string; email: string; locale: Locale | null }>('SELECT id, email, locale FROM app_auth_account($1)', [address]);
 	const owner = rows[0];
 	if (!owner) return null;
 	await actAsUser(db, owner.id);
 	const { rows: me } = await db.query<{ verified: boolean }>('SELECT email_verified_at IS NOT NULL AS verified FROM app_user WHERE id = $1', [owner.id]);
-	if (!me[0]?.verified) {
+	const verified = !!me[0]?.verified;
+	if (reason === 'sign-up' && !verified) {
 		const sent = await verificationMail(db, owner.id, owner.email);
 		return 'mail' in sent ? sent.mail : null;
 	}
-	const issued = await issueEmailToken(db, owner.id, 'reset');
-	return 'token' in issued ? accountExistsMail(owner.email, siteLink('/reset-password', issued.token), owner.locale) : null;
+	const purpose = verified ? 'reset' : 'verify';
+	const issued = await issueEmailToken(db, owner.id, purpose);
+	if (!('token' in issued)) return null;
+	const url = siteLink(verified ? '/reset-password' : '/verify-email', issued.token);
+	return reason === 'sign-up'
+		? accountExistsMail(owner.email, url, owner.locale)
+		: emailChangeTakenMail(owner.email, { kind: verified ? 'reset' : 'confirm', url }, owner.locale);
 }
 
 export const authRoutes = new Hono<AuthEnv>()
@@ -297,7 +308,7 @@ export const authRoutes = new Hono<AuthEnv>()
 				LEGAL_VERSION
 			]);
 			const id = created[0]?.id;
-			if (!id) return { kind: 'taken', mail: await takenAddressMail(db, body.email) };
+			if (!id) return { kind: 'taken', mail: await takenAddressMail(db, body.email, 'sign-up') };
 			await actAsUser(db, id);
 			const row = (await db.query<UserRow>(`SELECT ${USER_COLS} FROM app_user WHERE id = $1`, [id])).rows[0]!;
 			// A live invite for exactly this address proves the inbox.

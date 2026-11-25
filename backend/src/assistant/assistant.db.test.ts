@@ -201,6 +201,8 @@ describe('the assistant, on (mock)', () => {
 			canApply: false,
 			budget: { tokensPerMonth: 2_000_000, tokensUsed: 0, scope: 'project', resetsAt: expect.stringMatching(/^\d{4}-\d{2}-01T00:00:00\.000Z$/) },
 			rate: { messagesPerHour: 30 },
+			// No day meter with billing off (the default): no cap refuses, so there is nothing to count down.
+			day: null,
 			disclaimer: ASSISTANT_DISCLAIMER
 		});
 		expect((await editor.call('GET', at('/assistant'))).body.canApply).toBe(true);

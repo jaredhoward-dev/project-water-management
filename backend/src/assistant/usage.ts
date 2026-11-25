@@ -19,7 +19,8 @@ import { ApiError } from '../http/errors.js';
 import { logEvent } from '../logging/logEvent.js';
 import { safeError } from '../logging/safeError.js';
 import type { AssistantConfig } from './config.js';
-import { DOLLAR_REFUSAL, isDollarOutcome, poolAlarmShare, type DollarOutcome } from './dollarCaps.js';
+import { dayResetsAt, DOLLAR_REFUSAL, isDollarOutcome, poolAlarmShare, type DollarOutcome } from './dollarCaps.js';
+import type { AssistantDayMeter } from './types.js';
 
 /** When this UTC month's budget starts again: the first instant of next month, ISO. */
 export function monthResetsAt(now = new Date()): string {
@@ -60,6 +61,46 @@ const monthUsed = (r: UsedRow | undefined): MonthUsed => ({ project: Number(r?.p
 export async function tokensUsed(db: Db, projectId: string): Promise<MonthUsed> {
 	const { rows } = await db.query<UsedRow>('SELECT project_used, user_used, total_used FROM app_assistant_used($1)', [projectId]);
 	return monthUsed(rows[0]);
+}
+
+type DayMeterRow = {
+	kind: 'free' | 'trial';
+	usd_micros_per_day: string;
+	usd_micros_left: string;
+	messages_left: number | null;
+	trial_usd_micros_left: string | null;
+	median_turn_usd_micros: string | null;
+};
+const numOrNull = (v: string | null): number | null => (v === null ? null : Number(v));
+
+/**
+ * Today's assistant for the caller on the project's billing account, for the panel's "questions left today" meter
+ * (350_assistant_day_meter, docs/billing.md § Assistant dollar caps): null unless billing is enforced and the account
+ * is capped by the day (Free, or a reverse trial). Read in the caller's transaction (withUser); the function answers
+ * nothing to anyone below a viewer.
+ */
+export async function dayMeter(
+	db: Db,
+	projectId: string,
+	cfg: Pick<AssistantConfig, 'freeUsdMicrosPerDay' | 'freeMessagesPerDay'>,
+	now = new Date()
+): Promise<AssistantDayMeter | null> {
+	const { rows } = await db.query<DayMeterRow>(
+		`SELECT kind, usd_micros_per_day, usd_micros_left, messages_left, trial_usd_micros_left, median_turn_usd_micros
+		 FROM app_assistant_day_meter($1, $2, $3)`,
+		[projectId, cfg.freeUsdMicrosPerDay, cfg.freeMessagesPerDay]
+	);
+	const r = rows[0];
+	if (!r) return null;
+	return {
+		kind: r.kind,
+		usdMicrosPerDay: Number(r.usd_micros_per_day),
+		usdMicrosLeft: Number(r.usd_micros_left),
+		messagesLeft: r.messages_left,
+		trialUsdMicrosLeft: numOrNull(r.trial_usd_micros_left),
+		medianTurnUsdMicros: numOrNull(r.median_turn_usd_micros),
+		resetsAt: dayResetsAt(now)
+	};
 }
 
 /** The refusal for a spent month, by the cap that refused. */

@@ -81,6 +81,36 @@ test('several projects for one place: create, copy, delete', async ({ page, owne
 	await expect(row(page, 'Example Valley — drought')).toHaveCount(0);
 });
 
+// Free's live limit (338; docs/billing.md § Live catchments (Free)): a copy made with automatic runs off says why in
+// the dialog's done state, with Compare plans for the plan that bills the copy (a team catchment's team plan). Billing
+// isn't enforced in e2e, so the copy's real answer is given the API's `autoRunsOff` here; the DB tests
+// (backend billing/liveCatchments*.db.test.ts) cover the real start-off.
+test('a copy Free’s live limit started with automatic runs off says why, with Compare plans for the team’s plan', async ({ page, owner }) => {
+	void owner;
+	const team = (await (await page.request.post(`${API_URL}/teams`, { data: { name: 'Copy Hydrology' } })).json()) as { team: { id: string } };
+	const made = await page.request.post(`${API_URL}/projects`, { data: { name: 'Live source', teamId: team.team.id } });
+	expect(made.status()).toBe(201);
+	await page.route(`${API_URL}/projects/*/copy`, async (route) => {
+		const res = await route.fetch();
+		await route.fulfill({ response: res, json: { ...((await res.json()) as object), autoRunsOff: 'live_catchments' } });
+	});
+	await page.goto('/');
+	await openRowMenu(page, 'Live source');
+	await row(page, 'Live source').getByRole('button', { name: 'Copy Live source' }).click();
+	await page.getByRole('dialog', { name: 'Copy project' }).getByRole('button', { name: 'Copy project' }).click();
+
+	const done = page.getByRole('dialog', { name: 'Project copied' });
+	await expect(done.getByTestId('copy-done')).toHaveText(/Copied to Live source \(copy\) in Copy Hydrology\./);
+	const note = done.getByTestId('auto-runs-off');
+	await expect(note).toContainText('The new project starts with automatic runs off: Free runs one catchment live');
+	await expect(note.getByRole('link', { name: 'Compare plans' })).toHaveAttribute('href', `/teams/${team.team.id}/plan`);
+	await expect(done.getByRole('link', { name: 'Open project' })).toBeFocused();
+	await expectNoViolations(page);
+	// The list behind already has the copy.
+	await done.getByRole('button', { name: 'Close', exact: true }).click();
+	await expect(row(page, 'Live source (copy)')).toBeVisible();
+});
+
 // Issue #286: a new user with no projects can start from the invented example
 // catchment (the frontend's exampleCatchment.generated.json, a lazy chunk),
 // imported as their own project through POST /projects/import with one run.

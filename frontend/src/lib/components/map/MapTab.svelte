@@ -442,8 +442,9 @@
 	let startInfo = $state<StartState | null>(null);
 	let startLoaded = $state(false);
 	// The consistency checks (#326 A4). Since issue #646 item 4, also what a map edit left behind (F6–F9): the
-	// acceptances' polygons (GET …/map/features `accepted`) and Start's rest of the catchment.
-	const checkInputs = $derived<MapCheckInputs>({ accepted: data?.accepted ?? null, rest: restOfCatchment(startInfo?.proposals) });
+	// acceptances' polygons (GET …/map/features `accepted`) and Start's rest of the catchment; and the WR2012
+	// reference's lookup (followups F8/F14).
+	const checkInputs = $derived<MapCheckInputs>({ accepted: data?.accepted ?? null, rest: restOfCatchment(startInfo?.proposals), wr2012: settings?.wr2012?.reference ?? null });
 	const checks = $derived(mapChecks(features, nodes, {}, checkInputs));
 	async function loadStart() {
 		if (!canEdit) return;

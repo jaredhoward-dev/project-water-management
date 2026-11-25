@@ -13,6 +13,8 @@
 // A dollar cap's refusal (issue #641, the POST answered 429 by page.route, since
 // the e2e API runs without billing enforced): the server's words, the box
 // closed, and Compare plans to the Plan page on Free's day; none on the Free pool.
+// A reverse trial (the status's `day` added by page.route, as an enforced API
+// sends it): the questions-left meter, and its day cap's own words, no upsell.
 // Invented data only.
 import type { Page } from '@playwright/test';
 import { createProject, createRun, seedRunnableProject } from '../support/api.ts';
@@ -248,4 +250,48 @@ test('a dollar cap: Free’s day shows the server’s words, closes the box and 
 	await expect(again.getByRole('textbox', { name: 'Your question' })).toBeDisabled();
 	await expect(poolCap.getByRole('link', { name: 'Compare plans' })).toHaveCount(0);
 	await expect(poolCap).not.toContainText('Pro includes');
+});
+
+/** Adds `day` to the assistant's status, as the API sends it for a capped account with billing enforced (usage.ts dayMeter). */
+async function statusWithDay(page: Page, day: Record<string, unknown>) {
+	await page.route(/\/projects\/[^/]+\/assistant$/, async (route) => {
+		if (route.request().method() !== 'GET') return route.fallback();
+		const res = await route.fetch();
+		const status = await res.json();
+		await route.fulfill({ response: res, json: { ...status, day } });
+	});
+}
+
+test('a reverse trial: the day meter estimates questions left, and its day cap has its own words with no Compare plans', async ({ page, owner }) => {
+	void owner;
+	const project = await createProject(page.request, 'Assistant trial farm');
+	await statusWithDay(page, {
+		kind: 'trial',
+		usdMicrosPerDay: 1_000_000,
+		usdMicrosLeft: 600_000,
+		messagesLeft: null,
+		trialUsdMicrosLeft: 1_500_000,
+		medianTurnUsdMicros: 100_000,
+		resetsAt: new Date(Date.now() + 3 * 3600_000).toISOString()
+	});
+	const words = 'That’s today’s assistant use on your trial. It’s back at midnight, South African time. Everything else in your catchment keeps working.';
+	await refuseWith(page, 'assistant_trial_daily_cap', words);
+	await page.goto(`/projects/${project.id}`);
+	const sheet = await openAssistant(page);
+	// The estimate, worded as one, above the month's budget.
+	// clock-free: "today" is the meter's fixed wording for the SAST day, not a date the clock moves.
+	await expect(sheet.getByTestId('assistant-day-meter')).toHaveText('About 6 questions left today on your trial, at what your questions usually cost (an estimate).');
+	await expect(sheet.getByTestId('assistant-budget')).toBeVisible();
+	const box = sheet.getByRole('textbox', { name: 'Your question' });
+	await box.fill('How full is the dam?');
+	await sheet.getByRole('button', { name: 'Send' }).click();
+	const cap = sheet.getByTestId('assistant-cap');
+	await expect(cap).toHaveAttribute('data-code', 'assistant_trial_daily_cap');
+	await expect(cap).toContainText(words);
+	await expect(cap).toContainText(/Back .+ your time\./);
+	await expect(box).toBeDisabled();
+	await expect(box).toHaveValue('How full is the dam?');
+	await expect(cap.getByRole('link', { name: 'Compare plans' })).toHaveCount(0);
+	await expect(sheet.getByText('The question wasn’t sent')).toHaveCount(0);
+	await expectNoViolations(page);
 });

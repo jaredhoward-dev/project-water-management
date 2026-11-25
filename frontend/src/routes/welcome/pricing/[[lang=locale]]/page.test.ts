@@ -17,6 +17,12 @@ import { entries, load, prerender, ssr } from './+page';
 import Page from './+page.svelte';
 
 const url = vi.hoisted(() => ({ href: 'https://example.org/welcome/pricing' }));
+const env = vi.hoisted(() => ({ PUBLIC_REVERSE_TRIAL: '' as string | undefined }));
+vi.mock('$app/env/public', () => ({
+	get PUBLIC_REVERSE_TRIAL() {
+		return env.PUBLIC_REVERSE_TRIAL;
+	}
+}));
 vi.mock('$app/paths', () => ({ resolve: (p: string) => `/${p.replace(/^\//, '')}`, asset: (f: string) => `/${f}` }));
 vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
 vi.mock('$app/state', () => ({
@@ -62,7 +68,10 @@ const text = (html: string) => {
 	return out.replace(/\u00a0|\u202f|&nbsp;/g, ' ').replace(/\s+/g, ' ');
 };
 
-afterEach(() => setLocale('en'));
+afterEach(() => {
+	setLocale('en');
+	env.PUBLIC_REVERSE_TRIAL = '';
+});
 
 describe('the pricing route', () => {
 	it('is prerendered, and for every language but English (whose page is /welcome/pricing)', () => {
@@ -117,5 +126,32 @@ describe('the pricing page as prerendered', () => {
 		expect(head).toContain('<link rel="canonical" href="https://example.org/welcome/pricing/af"');
 		expect(head).toContain('<meta property="og:locale" content="af_ZA"');
 		expect(body).toMatch(/<a href="\/welcome\/pricing\/af" hreflang="af" lang="af" aria-current="true"/);
+	});
+
+	// The reverse trial (billing.md § The reverse trial): the build's PUBLIC_REVERSE_TRIAL, off by default.
+	const TRIAL_EN = `${planFigures('pro').trialDays} days of Pro free when you sign up, no card needed. Then Free, unless you choose a plan.`;
+
+	it('offers no trial while PUBLIC_REVERSE_TRIAL is off (the default), nor for anything but the exact `true`', async () => {
+		for (const flag of [undefined, '', 'false', '1', 'TRUE']) {
+			env.PUBLIC_REVERSE_TRIAL = flag;
+			const { body } = await renderAt('https://example.org/welcome/pricing');
+			expect(body).not.toContain('data-testid="pro-trial"');
+			expect(text(body)).not.toMatch(/no card|trial/i);
+		}
+	});
+
+	it('with PUBLIC_REVERSE_TRIAL=true, Pro says its trial days from the plan figures, in English and Afrikaans', async () => {
+		env.PUBLIC_REVERSE_TRIAL = 'true';
+		const en = await renderAt('https://example.org/welcome/pricing');
+		const proCard = en.body.slice(en.body.indexOf('data-plan="pro"'), en.body.indexOf('data-plan="team"'));
+		expect(proCard).toContain('data-testid="pro-trial"');
+		expect(text(proCard)).toContain(TRIAL_EN);
+		expect(en.body.match(/data-testid="pro-trial"/g)).toHaveLength(1);
+
+		const afPage = await renderAt('https://example.org/welcome/pricing/af', 'af');
+		expect(afPage.body).toContain('data-testid="pro-trial"');
+		expect(text(afPage.body)).not.toContain(TRIAL_EN);
+		const afTrial = (af['ff7c542c'] as { other: string }).other.replace('{n}', String(planFigures('pro').trialDays));
+		expect(text(afPage.body)).toContain(afTrial);
 	});
 });

@@ -6,7 +6,8 @@
 // run comparison's input diff; places a gauge through the Place sheet
 // (`place=1`); reads Every feature (`grid=map-features`). The pick is in the
 // URL (`feature=`, `node=`) and Back undoes it. Calibration → WR2012 check looks
-// up the quaternary under the boundary. A viewer gets no edit tools. The big
+// up the quaternary under the boundary, and the Checks flag the reference once
+// the boundary is redrawn. A viewer gets no edit tools. The big
 // case (30 units) fits the window with the list scrolling in its card. No
 // assertion reads the map's pixels. Axe-scanned, light and dark, wide and phone.
 import type { Page } from '@playwright/test';
@@ -16,8 +17,9 @@ import { API_URL } from '../support/env.ts';
 import { answerConfirm } from '../support/confirm.ts';
 import { whatChanged } from '../support/compare.ts';
 import { expect, test } from '../support/fixtures.ts';
-import { boundaryGeoJson, damGeoJson, loadSyntheticQuaternaries, openMap, parcelsGeoJson, projectedGeoJson, seedBigMap, showTab, uploadThroughSheet } from '../support/map.ts';
+import { boundaryGeoJson, box, damGeoJson, loadSyntheticQuaternaries, openMap, parcelsGeoJson, projectedGeoJson, seedBigMap, showTab, uploadThroughSheet } from '../support/map.ts';
 import { expectNoSidewaysScroll, layoutSettled, resizeTo } from '../support/reflow.ts';
+import { saveSettings } from '../support/settings.ts';
 
 const header = (page: Page) => page.getByTestId('section-header');
 const list = (page: Page) => page.getByTestId('map-feature-list');
@@ -259,6 +261,48 @@ test('the quaternary under the boundary proposes the WR2012 values, one at a tim
 	await expect(page.getByLabel('Quaternary area (km²)', { exact: true })).toHaveValue('');
 	await expect(rows.getByRole('row').filter({ hasText: 'Quaternary MAP (mm)' })).toContainText('Used');
 	await expectNoViolations(page);
+});
+
+test('a WR2012 reference looked up at the boundary is flagged in the Checks once the boundary is redrawn (followups F8, F14)', async ({ page, owner }) => {
+	void owner;
+	await loadSyntheticQuaternaries();
+	const project = await seedRunnableProject(page.request, 'Catchment map quaternary recheck');
+	const at = `/projects/${project.id}`;
+	await openMap(page, project.id);
+	await uploadThroughSheet(page, null, 'boundary.geojson', boundaryGeoJson());
+
+	// Take every proposed value from the quaternary under the boundary's centre, and save.
+	await page.goto(`${at}?tab=calibration`);
+	await page.getByLabel('Compare runs with WR2012 naturalised flow').check();
+	await page.getByRole('button', { name: 'Propose from the map' }).click();
+	const proposal = page.getByTestId('quaternary-proposal');
+	await expect(proposal.getByLabel('Look up at')).toHaveValue(/.+/);
+	await proposal.getByRole('button', { name: 'Look up the quaternary' }).click();
+	await expect(proposal.getByTestId('quaternary-code')).toHaveText('Z01B');
+	const rows = proposal.getByTestId('quaternary-rows');
+	for (const name of ['quaternary catchment', 'quaternary area (km²)', 'quaternary map (mm)', 'naturalised mar (mm³/a)', 'reference period (water years)', 'monthly means, oct … sep (mm³)', 'source']) {
+		await rows.getByRole('button', { name: `Use the proposed ${name}` }).click();
+	}
+	await saveSettings(page);
+	const saved = await (await page.request.get(`${API_URL}/projects/${project.id}`)).json();
+	const map = await (await page.request.get(`${API_URL}/projects/${project.id}/map/features`)).json();
+	const b = map.features.find((f: { kind: string }) => f.kind === 'catchment_boundary');
+	expect(saved.project.settings.wr2012.reference.lookup).toMatchObject({ code: 'Z01B', feature: { id: b.id, kind: 'catchment_boundary', updatedAt: b.updatedAt } });
+
+	// Unchanged: no warning. Redrawn larger: the Checks flag the reference and link back to the lookup.
+	await openMap(page, project.id, '&checks=1');
+	const check = page.getByTestId('map-checks').locator(`[data-check="wr2012-lookup:${b.id}"]`);
+	await expect(check).toHaveCount(0);
+	const patched = await page.request.patch(`${API_URL}/projects/${project.id}/map/features/${b.id}`, {
+		data: { geometry: { type: 'Polygon', coordinates: [box(21.3, -33.7, 0.15)] } }
+	});
+	expect(patched.status(), await patched.text()).toBe(200);
+	await openMap(page, project.id, '&checks=1');
+	await expect(check).toContainText("The WR2012 reference's quaternary Z01B was looked up on the map, and the catchment boundary has been redrawn since");
+	await expectNoViolations(page);
+	await check.getByTestId('map-check-link').click();
+	await expect(page).toHaveURL(/tab=calibration#set-wr2012$/);
+	await expect(page.getByRole('button', { name: 'Propose from the map' })).toBeVisible();
 });
 
 test('an editor marks a dam outline off-channel in its card, kept across a reload; a viewer reads it; a point dam isn’t asked (194)', async ({ page, owner, signIn }) => {

@@ -170,6 +170,32 @@ export function accountExistsMail(to: string, url: string, locale?: string | nul
 	);
 }
 
+/**
+ * To the holder of an address another account asked to change to
+ * (auth/email-change-routes.ts /change-email, 347): the requester is answered
+ * the same as for a free address, so the holder learns it here. Nothing
+ * names the requester or their account. The link is the holder's own way in:
+ * a password reset for a confirmed account (`reset`), or a confirmation link
+ * for one never confirmed (`confirm`), which can't sign in until it is.
+ */
+export function emailChangeTakenMail(to: string, link: { kind: 'reset' | 'confirm'; url: string }, locale?: string | null): Mail {
+	const tr = mailT(locale);
+	const v = { email: to, product: PRODUCT };
+	const confirm = link.kind === 'confirm';
+	return render(
+		'email_change_taken',
+		to,
+		tr.t('mail.changeTaken.subject', v),
+		{
+			heading: tr.t('mail.changeTaken.heading'),
+			paragraphs: [tr.t('mail.changeTaken.body', v), tr.t(confirm ? 'mail.changeTaken.confirm' : 'mail.changeTaken.signIn')],
+			action: { label: tr.t(confirm ? 'mail.changeTaken.confirmAction' : 'mail.changeTaken.resetAction'), url: link.url },
+			footer: [tr.t(confirm ? 'mail.verify.expires' : 'mail.reset.expires'), tr.t('mail.changeTaken.ignore')]
+		},
+		tr
+	);
+}
+
 export function resetPasswordMail(to: string, url: string, locale?: string | null): Mail {
 	const tr = mailT(locale);
 	const v = { email: to, product: PRODUCT };

@@ -20,3 +20,12 @@ export const monthsFreeYearly = (p: PlanFigures): number =>
 
 /** A plan's assistant allowance as a multiple of Free's (Pro: 15). */
 export const assistantTimesFree = (p: PlanFigures): number => Math.round(p.assistantUsdPerMonth / planFigures('free').assistantUsdPerMonth);
+
+/**
+ * Whether the page offers the reverse trial (billing.md § The reverse trial): the build's
+ * PUBLIC_REVERSE_TRIAL, read like the backend's REVERSE_TRIAL (only the exact string `true`), and a Pro
+ * `trial_days` above 0. The prerendered page can't ask the API, so the operator sets the build flag when
+ * REVERSE_TRIAL and BILLING_ENFORCED go on (deployment.md); off (the default), the page offers nothing.
+ */
+export const reverseTrialDays = (flag: string | undefined, pro: PlanFigures = planFigures('pro')): number | null =>
+	flag === 'true' && pro.trialDays > 0 ? pro.trialDays : null;

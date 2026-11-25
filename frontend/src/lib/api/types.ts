@@ -289,6 +289,11 @@ export interface Project extends ProjectSummary {
 	 * catchments (341, docs/billing.md § Pausing after a downgrade), ISO; null when not paused. Absent from an older API.
 	 */
 	planPausedAt?: string | null;
+	/**
+	 * When the reverse trial (342: 14 days of Pro, no card) of the account this catchment is billed to ends, ISO; only
+	 * to that account's person (349), else null. The header's trial-ending notice reads it. Absent from an older API.
+	 */
+	planTrialEnd?: string | null;
 }
 
 /** What a series merge or replace answers: the series, and when the automatic re-run it queued is due (null: none queued). */
@@ -331,9 +336,17 @@ export interface ProjectFileSeries {
 /** POST /projects/import. `runId` / `runError` only when a run was asked for. */
 export interface ImportResult {
 	project: Project;
+	/** Free's live limit made it with automatic runs off (338; docs/billing.md § Live catchments (Free)). */
+	autoRunsOff?: 'live_catchments';
 	runId?: string;
 	/** Why the requested run failed; the project was still imported. */
 	runError?: string;
+}
+
+/** POST /projects/:id/copy's 201: the copy, and `autoRunsOff` as for an import. */
+export interface CopyResult {
+	project: Project;
+	autoRunsOff?: 'live_catchments';
 }
 
 /**
@@ -4646,9 +4659,31 @@ export type AssistantStatus =
 			 */
 			budget: { tokensPerMonth: number; tokensUsed: number; resetsAt: string; scope: AssistantBudgetScope };
 			rate: { messagesPerHour: number };
+			/**
+			 * Today's assistant for a capped account (Free, or a reverse trial) while billing is enforced, for the
+			 * "questions left today" meter; null otherwise (an older server leaves it out).
+			 */
+			day?: AssistantDayMeter | null;
 			/** The report disclaimer, shown under the panel. */
 			disclaimer: string;
 	  };
+
+/**
+ * What the caller has left of today's assistant (the SAST day), in micro-USD (docs/billing.md § Assistant dollar
+ * caps). `medianTurnUsdMicros`: the account's median cost of a question over its last 30 days, null with none yet.
+ */
+export interface AssistantDayMeter {
+	kind: 'free' | 'trial';
+	usdMicrosPerDay: number;
+	usdMicrosLeft: number;
+	/** Free's messages a day left; null on a trial. */
+	messagesLeft: number | null;
+	/** The reverse trial's whole allowance left; null on Free. */
+	trialUsdMicrosLeft: number | null;
+	medianTurnUsdMicros: number | null;
+	/** The next 00:00 SAST (ISO). */
+	resetsAt: string;
+}
 
 /** POST /projects/:id/assistant/messages body. The last message is the user's new one. */
 export interface AssistantRequest {
@@ -4708,6 +4743,12 @@ export interface Subscription {
 	cancelAtPeriodEnd: boolean;
 	/** How often it bills (332): null when not recorded (a staff grant, a subscription from before 332, an interval that isn't a plain month or year). */
 	interval: BillingInterval | null;
+	/**
+	 * The reverse trial (342: provider `manual`, status `trialing`, docs/billing.md § The reverse trial): the Plan page
+	 * offers Upgrade in its place and warns before `trialEnd`. False for a staff grant or a Stripe trial; absent from an
+	 * older API.
+	 */
+	reverseTrial?: boolean;
 }
 
 /** One counted thing this month; `limit: null` is unlimited. */

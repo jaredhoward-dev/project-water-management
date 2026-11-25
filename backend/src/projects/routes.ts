@@ -70,6 +70,8 @@ type ProjectRow = {
 	mfa_required?: boolean;
 	/** When its operations were paused past Free's live catchments (341 app_project_plan_paused), or null; getProject only. */
 	plan_paused_at?: Date | null;
+	/** When the reverse trial of the account it's billed to ends, for that account's owner only (349 app_project_trial_end), or null; getProject only. */
+	plan_trial_end?: Date | null;
 };
 
 const summary = (r: ProjectRow) => ({
@@ -110,7 +112,10 @@ const full = (r: ProjectRow) => ({
 	mfaRequired: r.mfa_required ?? r.require_mfa,
 	// The workspace's paused banner (341, docs/billing.md § Pausing after a downgrade): when its feeds, alerts and
 	// automatic runs were paused because the billing account's plan ended, or null.
-	planPausedAt: r.plan_paused_at ? r.plan_paused_at.toISOString() : null
+	planPausedAt: r.plan_paused_at ? r.plan_paused_at.toISOString() : null,
+	// The workspace's trial-ending banner (349, docs/billing.md § The reverse trial): when the reverse trial of the
+	// account the catchment is billed to ends, only to that account's person (or a team admin), else null.
+	planTrialEnd: r.plan_trial_end ? r.plan_trial_end.toISOString() : null
 });
 
 // RLS already limits rows to projects the user can see (directly or via a
@@ -235,7 +240,7 @@ function publicRecordKept() {
 
 async function getProject(db: import('../db/tx.js').Db, id: string) {
 	// The team's two-step setting through a definer: someone shared a team project directly can't read the team row.
-	const { rows } = await db.query<ProjectRow>(`SELECT q.*, app_project_requires_mfa(q.id) AS mfa_required, app_project_plan_paused(q.id) AS plan_paused_at FROM (${SELECT_PROJECT} WHERE p.id = $1) q`, [id]);
+	const { rows } = await db.query<ProjectRow>(`SELECT q.*, app_project_requires_mfa(q.id) AS mfa_required, app_project_plan_paused(q.id) AS plan_paused_at, app_project_trial_end(q.id) AS plan_trial_end FROM (${SELECT_PROJECT} WHERE p.id = $1) q`, [id]);
 	if (!rows[0]) throw new ApiError(404, 'not found');
 	return rows[0];
 }

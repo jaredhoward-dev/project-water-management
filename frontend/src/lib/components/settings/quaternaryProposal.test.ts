@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import type { MapFeature, QuaternaryProposal } from '#lib/api/types.js';
 import { blankReference } from './wr2012';
-import { lookupPoints, proposalRows, proposedSource, useValue } from './quaternaryProposal';
+import { lookupPoints, proposalRows, proposedSource, recordLookup, useValue } from './quaternaryProposal';
 
 const p: QuaternaryProposal = {
 	code: 'Z01B',
@@ -62,15 +62,34 @@ describe('useValue', () => {
 
 describe('lookupPoints', () => {
 	it('starts from the boundary’s centre, then each gauge', () => {
-		const base = { nodeId: null, nodeName: null, damPosition: null, properties: {}, areaM2: null, sourceId: null, nonContributingM2: null, createdBy: null, createdAt: '', updatedAt: '' };
+		const base = { nodeId: null, nodeName: null, damPosition: null, properties: {}, areaM2: null, sourceId: null, nonContributingM2: null, createdBy: null, createdAt: '', updatedAt: '2026-11-01T00:00:00.000Z' };
 		const fs: MapFeature[] = [
 			{ ...base, id: 'g', kind: 'gauge', name: 'Weir', geometry: { type: 'Point', coordinates: [21.3, -33.6] }, center: [21.3, -33.6] },
 			{ ...base, id: 'b', kind: 'catchment_boundary', name: 'Upper', geometry: { type: 'Polygon', coordinates: [] }, center: [21.35, -33.65], areaM2: 1 },
 			{ ...base, id: 'd', kind: 'dam', name: 'Dam', geometry: { type: 'Point', coordinates: [21, -33] }, center: [21, -33] }
 		];
 		expect(lookupPoints(fs)).toEqual([
-			{ id: 'b', label: 'The catchment boundary’s centre (Upper)', at: [21.35, -33.65] },
-			{ id: 'g', label: 'Gauge Weir', at: [21.3, -33.6] }
+			{ id: 'b', label: 'The catchment boundary’s centre (Upper)', at: [21.35, -33.65], feature: { id: 'b', kind: 'catchment_boundary', updatedAt: '2026-11-01T00:00:00.000Z', areaM2: 1 } },
+			{ id: 'g', label: 'Gauge Weir', at: [21.3, -33.6], feature: { id: 'g', kind: 'gauge', updatedAt: '2026-11-01T00:00:00.000Z', areaM2: null } }
 		]);
+	});
+});
+
+describe('recordLookup', () => {
+	const from = { id: 'b', kind: 'catchment_boundary' as const, updatedAt: '2026-11-01T00:00:00.000Z', areaM2: 1.5e8 };
+
+	it('records the point, the code found there and the feature it came from, as copies', () => {
+		const ref = blankReference();
+		recordLookup(ref, p, at, from);
+		expect(ref.lookup).toEqual({ point: [21.35, -33.65], code: 'Z01B', feature: from });
+		expect(ref.lookup!.point).not.toBe(at);
+		expect(ref.lookup!.feature).not.toBe(from);
+	});
+
+	it('records typed coordinates with no feature, and a later lookup replaces an earlier one', () => {
+		const ref = blankReference();
+		recordLookup(ref, p, at, from);
+		recordLookup(ref, { ...p, code: 'Z01C' }, [21.4, -33.7], null);
+		expect(ref.lookup).toEqual({ point: [21.4, -33.7], code: 'Z01C', feature: null });
 	});
 });

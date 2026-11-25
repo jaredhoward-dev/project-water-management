@@ -49,6 +49,22 @@ export const af: Partial<Record<MailKey, string>> = {
 	'mail.changed.body': 'Die e-posadres van jou {product}-rekening is nou {newEmail}. Jy teken daarmee in, en ons stuur voortaan alles oor die rekening daarheen.',
 	// If you didn't make this change, someone may know your password. Contact the person who manages your catchment straight away.
 	'mail.changed.notYou': 'As jy nie hierdie verandering gemaak het nie, ken iemand dalk jou wagwoord. Kontak dadelik die persoon wat jou opvanggebied bestuur.',
+	// This address already has an account — {product}
+	'mail.changeTaken.subject': 'Hierdie adres het reeds ’n rekening — {product}',
+	// This address already has an account
+	'mail.changeTaken.heading': 'Hierdie adres het reeds ’n rekening',
+	// Someone asked to change the email address of an {product} account to {email}. This address already has an account of its own, so nothing was changed, on either account.
+	'mail.changeTaken.body': 'Iemand het gevra om die e-posadres van ’n {product}-rekening na {email} te verander. Hierdie adres het reeds ’n eie rekening, so niks is op enige van die twee rekeninge verander nie.',
+	// If it was you, the account you want is already here: sign in to it with this address. If you’ve forgotten its password, choose a new one:
+	'mail.changeTaken.signIn': 'As dit jy was, is die rekening wat jy wil hê reeds hier: teken daarby in met hierdie adres. As jy sy wagwoord vergeet het, kies ’n nuwe een:',
+	// Choose a new password
+	'mail.changeTaken.resetAction': 'Kies ’n nuwe wagwoord',
+	// If it was you, the account you want is already here, but its address isn’t confirmed yet. Confirm it, then sign in with this address:
+	'mail.changeTaken.confirm': 'As dit jy was, is die rekening wat jy wil hê reeds hier, maar sy adres is nog nie bevestig nie. Bevestig dit, en teken dan met hierdie adres in:',
+	// Confirm email address
+	'mail.changeTaken.confirmAction': 'Bevestig e-posadres',
+	// If it wasn't you, you can ignore this email. Nothing has changed on your account, and no other account can take this address.
+	'mail.changeTaken.ignore': 'As dit nie jy was nie, kan jy hierdie e-pos ignoreer. Niks aan jou rekening het verander nie, en geen ander rekening kan hierdie adres oorneem nie.',
 	// Reset your password — {product}
 	'mail.reset.subject': 'Stel jou wagwoord terug — {product}',
 	// Reset your password

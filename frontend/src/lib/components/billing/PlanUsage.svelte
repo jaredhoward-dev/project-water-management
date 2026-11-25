@@ -19,6 +19,7 @@
 	// Past Free's live catchments after a plan ended (341), a third card lists
 	// them and lets the person choose the one that stays live (KeepLive.svelte, 345).
 	import { onMount, untrack, type Snippet } from 'svelte';
+	import { resolve } from '$app/paths';
 	import { replaceState } from '$app/navigation';
 	import { page } from '$app/state';
 	import { PUBLIC_API_URL } from '$app/env/public';
@@ -33,6 +34,7 @@
 		billingRedirect,
 		checkoutNotice,
 		editorsHint,
+		hasPaidSubscription,
 		monthName,
 		priceLine,
 		seatHint,
@@ -47,6 +49,7 @@
 		wantsKeepPicker,
 		type ConfirmState
 	} from './plan';
+	import { trialEndingText } from './trialEnding';
 
 	let {
 		plan,
@@ -139,7 +142,7 @@
 		let live = true;
 		void (async () => {
 			shown = firstReturned;
-			if (firstReturned === 'done' && !plan.subscription && reload) {
+			if (firstReturned === 'done' && !hasPaidSubscription(plan) && reload) {
 				confirm = 'waiting';
 				for (const ms of CONFIRM_DELAYS_MS) {
 					await new Promise((r) => setTimeout(r, ms));
@@ -150,9 +153,9 @@
 						// A failed re-read is the same as one that hasn't caught up: try again, then say to reload.
 					}
 					if (!live) return;
-					if (plan.subscription) break;
+					if (hasPaidSubscription(plan)) break;
 				}
-				confirm = plan.subscription ? 'confirmed' : 'unconfirmed';
+				confirm = hasPaidSubscription(plan) ? 'confirmed' : 'unconfirmed';
 			}
 			if (!live || !page.url.searchParams.has('checkout')) return;
 			const url = new URL(page.url.href);
@@ -186,6 +189,8 @@
 	}
 
 	const sub = $derived(subscriptionLine(plan.subscription));
+	// The reverse trial's last 3 days (349, trialEnding.ts): when it ends, what Free means, and Upgrade (offered below).
+	const trialEnding = $derived(plan.subscription?.reverseTrial ? trialEndingText(plan.subscription.trialEnd) : null);
 	const seatsLine = $derived(subscriptionSeatsLine(plan));
 	const totalLine = $derived(subscriptionTotalLine(plan));
 	const editors = $derived(editorsHint(plan.team?.editorCount));
@@ -219,6 +224,9 @@
 				</p>
 			{/if}
 		</div>
+		{#if trialEnding}
+			<p class="note trial-ending" role="note" data-trial-ending>{trialEnding}</p>
+		{/if}
 		{#if showUpgrade && actions.upgrade && checkout}
 			{#if seats}
 				<div class="seats" data-seats>
@@ -257,6 +265,8 @@
 			</div>
 		{/if}
 		{#if actionError}<p class="err" role="alert" data-billing-error>{actionError}</p>{/if}
+		<!-- The public pricing page sets the three plans side by side (ui.md § Pricing page). -->
+		<p class="all-plans"><a href={resolve('/welcome/pricing/[[lang=locale]]', {})} data-all-plans>See all plans</a></p>
 	</section>
 
 	<section class="panel usage-card" aria-labelledby="usage-h">
@@ -365,6 +375,10 @@
 	}
 	.seats-hint {
 		margin: 0;
+		font-size: var(--font-sm);
+	}
+	.all-plans {
+		margin: 0.85rem 0 0;
 		font-size: var(--font-sm);
 	}
 	.err {

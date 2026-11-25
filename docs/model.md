@@ -9389,7 +9389,11 @@ run with it (`RunSummary.wr2012`). It never changes model results.
   - `periodStart` / `periodEnd`: the hydrological years the reference
     covers, each labelled by the year it starts in (1920 = Oct 1920 – Sep 1921);
   - `mapMm`: the quaternary's mean annual precipitation, optional;
-  - `source`: where the numbers come from.
+  - `source`: where the numbers come from;
+  - `lookup` (optional, `Wr2012Lookup`): where the quaternary was looked up
+    on the map (point, code, the boundary or gauge as it stood). Provenance
+    for the Map's Checks only ([maps.md § Checks](./maps.md#checks)): the
+    comparison never reads it, so it changes no result and no ENGINE_VERSION.
 - **Plausibility** (`wr2012ReferenceIssues`; the backend's zod schema and the
   Settings form apply the same function):
   - with a MAP, the MAR can't exceed the rain on the quaternary,

@@ -7,6 +7,8 @@
 // workspace is; a farmer page never shows it.
 import type { Project } from '#lib/api/types.js';
 import { fmtDate } from '#lib/format/number.js';
+import { planHref } from './planLink';
+import { trialEndingText } from './trialEnding';
 
 export interface PausedNotice {
 	text: string;
@@ -15,17 +17,6 @@ export interface PausedNotice {
 	/** The link to the plan: planHref(teamId, base). */
 	href: string;
 	linkText: string;
-}
-
-/**
- * The plan a catchment is billed to: `<base>/teams/<encoded team id>/plan` for a
- * team catchment, else `<base>/account/plan`. The head is always a literal
- * app path and the id is encoded, so an id from the API can't leave the app's
- * origin (urlAttributes.security.test.ts calls it with hostile ids). `base` is
- * the app's base path (basePath(), '' at the site root).
- */
-export function planHref(teamId: string | null, base = ''): string {
-	return teamId ? `${base}/teams/${encodeURIComponent(teamId)}/plan` : `${base}/account/plan`;
 }
 
 /** The notice for a paused catchment, or null when it isn't paused (or an older API doesn't say). */
@@ -38,4 +29,23 @@ export function pausedNotice(p: Pick<Project, 'planPausedAt' | 'team'> | null | 
 		href: planHref(teamId, base),
 		linkText: p.team ? 'The team’s plan' : 'Plan and usage'
 	};
+}
+
+/** The header's trial-ending notice (349; trialEnding.ts): its words and the plan page to upgrade on. */
+export interface TrialNotice {
+	text: string;
+	href: string;
+	linkText: string;
+}
+
+/**
+ * The notice in the 3 days before the reverse trial of the account this
+ * catchment is billed to ends, or null. Only the account's person gets
+ * `planTrialEnd` (349), so a member never sees someone else's trial. Links to
+ * the Plan page, where Upgrade is offered during the trial.
+ */
+export function trialNotice(p: Pick<Project, 'planTrialEnd' | 'team'> | null | undefined, base = '', now: number = Date.now()): TrialNotice | null {
+	const text = trialEndingText(p?.planTrialEnd, now);
+	if (!text) return null;
+	return { text, href: planHref(p?.team?.id ?? null, base), linkText: 'Upgrade' };
 }

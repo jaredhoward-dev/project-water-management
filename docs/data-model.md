@@ -3767,6 +3767,14 @@ page holds the conversation and sends it with each turn.
   `total_used`; the deployment's is a sum naming no one), reservations
   counted as spent. Spend and reservations are summed in one statement
   (`assistant_month_spent`), so a charge committing alongside is seen once.
+  `app_assistant_day_meter(project, free_usd_micros_per_day,
+  free_messages_per_day)` (350, SECURITY DEFINER, STABLE) answers the
+  status's day meter: one row (`kind` `free` or `trial`, the day's dollars
+  and what's left of them, Free's messages left, the trial's whole allowance
+  left, the account's median question over 30 SAST days) only with billing
+  enforced, on a Free or reverse-trial account, to a viewer and above; no
+  row otherwise ([billing.md § Assistant dollar
+  caps](./billing.md#assistant-dollar-caps)).
 - Each turn's cost (324, issue #641 Phase 1, shadow mode: recorded, no cap
   reads it). The backend prices the turn (`assistant/pricing.ts`: a
   per-model table of USD per million tokens, Bedrock's global-profile prices
@@ -3802,7 +3810,7 @@ page holds the conversation and sends it with each turn.
   turn still running keeps counting with its `user_id` cleared, until it is
   charged or expires.
 
-### Billing (323_billing.sql, 331_billing_rls_order.sql, 338_live_catchments.sql, 339_team_assistant_share.sql, 340_live_catchment_gaps.sql, 341_plan_pause.sql, 343_free_email_gate.sql)
+### Billing (323_billing.sql, 331_billing_rls_order.sql, 338_live_catchments.sql, 339_team_assistant_share.sql, 340_live_catchment_gaps.sql, 341_plan_pause.sql, 343_free_email_gate.sql, 344_trial_checkout.sql, 345_plan_keep_picker.sql, 346_billing_notices.sql, 347_email_change.sql, 348_email_gate_refusals.sql, 349_project_trial_end.sql, 350_assistant_day_meter.sql)
 
 Plans, who each project bills to, and monthly usage, in **shadow mode**
 (issue #641 Phase 1): everything is counted, nothing is refused, and no
@@ -3924,6 +3932,13 @@ never to a farmer, contributor or viewer.
     (Free); then the caller's own `{ email, verified }`. Definer, executable
     by `water_app`; the routes refuse an unverified or disposable address
     ([billing.md § Verified email on Free](./billing.md#verified-email-on-free)).
+  - `app_project_trial_end(project) → timestamptz` (349): the `trial_end`
+    of the live `manual` + `trialing` subscription (a reverse trial) of the
+    account the project bills to; NULL for no trial, a missing project, or a
+    caller who can't read that account (`app_billing_account_readable`: its
+    person, or a team admin). Definer, stable, read-only, executable by
+    `water_app`; the project's `planTrialEnd`
+    ([billing.md § The reverse trial](./billing.md#the-reverse-trial)).
   - `app_entitlements(project) → jsonb`: `{ plan, limits, features,
     status }` for an editor or owner; NULL for anyone else.
   - `app_usage_add(project, kind, qty = 1)`: adds to the project's

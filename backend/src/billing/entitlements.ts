@@ -110,7 +110,25 @@ export async function accountPlan(db: Db, accountId: string | null, env: NodeJS.
 	if (!accountId) return null;
 	const { rows } = await db.query<{ plan: Record<string, unknown> | null }>('SELECT app_account_plan($1) AS plan', [accountId]);
 	const plan = rows[0]?.plan;
-	return plan ? { ...plan, enforced: billingEnforced(env), provider: billingProviderName(env) } : null;
+	if (!plan) return null;
+	return { ...(await withReverseTrial(db, accountId, plan)), enforced: billingEnforced(env), provider: billingProviderName(env) };
+}
+
+/**
+ * The plan with `subscription.reverseTrial` added: true when the live subscription is the reverse trial (342: provider
+ * `manual`, status `trialing`; docs/billing.md § The reverse trial), so the Plan page offers Upgrade in its place and
+ * warns before it ends. app_account_plan doesn't say which provider holds the subscription, so a trialing one is asked
+ * of app_billing_live_subscription_ref (333; the same caller check). Exported for its test.
+ */
+export async function withReverseTrial(db: Db, accountId: string, plan: Record<string, unknown>): Promise<Record<string, unknown>> {
+	const sub = plan.subscription as { status?: unknown } | null | undefined;
+	if (!sub || typeof sub !== 'object') return plan;
+	let reverseTrial = false;
+	if (sub.status === 'trialing') {
+		const { rows } = await db.query<{ ref: { provider?: string } | null }>('SELECT app_billing_live_subscription_ref($1) AS ref', [accountId]);
+		reverseTrial = rows[0]?.ref?.provider === 'manual';
+	}
+	return { ...plan, subscription: { ...sub, reverseTrial } };
 }
 
 /** The signed-in person's own billing account (created on first ask). */

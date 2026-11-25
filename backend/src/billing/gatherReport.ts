@@ -1,17 +1,21 @@
 // The billing metrics report's rows (325_billing_metrics's owner-only
-// functions) on a schema-owner connection, built into the report by
+// functions, 338's live count, 342's reverse trials in billing_grant_log) on a schema-owner connection, built into the report by
 // metrics.ts (issue #641; docs/billing.md § Metrics and the abuse report).
 // Two callers: the local script (scripts/billing-report.ts) and the migrate
 // Lambda's billing-report action (ops/ownerActions.ts), which answers with
 // redact(report) only. No dotenv here: the migrate Lambda bundles this module.
 import type pg from 'pg';
-import { buildReport, type AccountRow, type GateRefusalRow, type PersonRow, type PlanLimits, type Report } from './metrics.js';
+import { buildReport, type AccountRow, type GateRefusalRow, type PersonRow, type PlanLimits, type Report, type ReverseTrialRow } from './metrics.js';
 
 /** The month's report (YYYY-MM, or null for the current SAST month), addresses included: redact before it leaves the caller. */
 export async function gatherReportOn(client: pg.ClientBase, month: string | null, now = new Date()): Promise<Report> {
 	const first = month
 		? `${month}-01`
 		: ((await client.query<{ m: string }>(`SELECT to_char(app_billing_month($1), 'YYYY-MM-DD') AS m`, [now])).rows[0]!.m);
+	// Each account's live catchments today (338's count; owner-only, like the rest of the report).
+	const live = new Map(
+		(await client.query<{ id: string; live: string }>('SELECT id, app_live_catchments_in_use(id) AS live FROM billing_account')).rows.map((r) => [r.id, Number(r.live)])
+	);
 	const accounts = (
 		await client.query<{
 			account_id: string; kind: 'user' | 'team'; plan_code: string; started_at: Date; catchments: string; runs: string; reports: string;
@@ -20,7 +24,8 @@ export async function gatherReportOn(client: pg.ClientBase, month: string | null
 	).rows.map(
 		(r): AccountRow => ({
 			accountId: r.account_id, kind: r.kind, planCode: r.plan_code, startedAt: r.started_at, catchments: Number(r.catchments), runs: Number(r.runs),
-			reports: Number(r.reports), assistantUsdMicros: Number(r.assistant_usd_micros), unpricedTurns: Number(r.unpriced_turns), lastSpendAt: r.last_spend_at
+			reports: Number(r.reports), assistantUsdMicros: Number(r.assistant_usd_micros), unpricedTurns: Number(r.unpriced_turns), lastSpendAt: r.last_spend_at,
+			liveCatchments: live.get(r.account_id) ?? 0
 		})
 	);
 	const people = (
@@ -40,5 +45,27 @@ export async function gatherReportOn(client: pg.ClientBase, month: string | null
 			[first]
 		)
 	).rows.map((r): GateRefusalRow => ({ code: r.code, feature: r.feature, refusals: Number(r.refusals) }));
-	return buildReport(first.slice(0, 7), now, accounts, people, limits, refusals);
+	// The reverse trials (342) that began in the SAST month, from billing_grant_log, and each account's first paid plan
+	// from the trial's start on: a payment provider's subscription whose first payment was taken (Stripe, or the local mock:
+	// active, past_due or canceled; not trialing, and not expired, which is Stripe's incomplete_expired, a first payment
+	// never made), or a paid invoice's grant (335). Staff grants are not paid. Dates only: no account id leaves this query.
+	const trials = (
+		await client.query<{ started_at: Date; first_paid_at: Date | null }>(
+			`SELECT g.created_at AS started_at,
+			        least(
+			          (SELECT min(s.created_at) FROM subscription s
+			           WHERE s.billing_account_id = g.billing_account_id AND s.provider IN ('stripe', 'mock') AND s.status IN ('active', 'past_due', 'canceled')
+			             AND s.created_at >= g.created_at),
+			          (SELECT min(l.created_at) FROM billing_grant_log l
+			           WHERE l.billing_account_id = g.billing_account_id AND l.action = 'grant' AND l.granted_by = 'invoice'
+			             AND l.created_at >= g.created_at)
+			        ) AS first_paid_at
+			 FROM billing_grant_log g
+			 WHERE g.action = 'grant' AND g.granted_by = 'reverse trial'
+			   AND g.created_at >= $1::date::timestamp AT TIME ZONE 'Africa/Johannesburg'
+			   AND g.created_at < ($1::date + interval '1 month')::timestamp AT TIME ZONE 'Africa/Johannesburg'`,
+			[first]
+		)
+	).rows.map((r): ReverseTrialRow => ({ startedAt: r.started_at, firstPaidAt: r.first_paid_at }));
+	return buildReport(first.slice(0, 7), now, accounts, people, limits, refusals, trials);
 }

@@ -882,23 +882,38 @@ plan stays on the issue. Found while building:
 Phase 1 (shadow mode) is in [billing.md](./billing.md); the later phases
 are #641's checklist. Open items from building it:
 
-- [ ] **The Plan page's "Compare plans" could link the public pricing
+- [ ] **Phase 4 legal: drafted, not live** (#821's "Phase 4 legal").
+      [legal/billing-terms-draft.md](./legal/billing-terms-draft.md)
+      proposes Terms §8, the privacy notice's billing parts and the checkout
+      disclosures and consent tick, each beside the current text with its
+      counsel question (2026-11-24, docs only). Left: counsel's answers
+      (its § 6), then the live text, the consent tick and its record (a
+      migration), the `LEGAL_VERSION` bump with its re-acceptance entry and
+      translation (its § 5), and the gap it found: deleting an account
+      neither cancels a live Stripe subscription nor deals with the Stripe
+      customer (its § 3, §7). Trigger: before the first charge
+      (`BILLING_PROVIDER=stripe`), with Gates A, C and D.
+- [x] **The Plan page's "Compare plans" could link the public pricing
       page.** `/welcome/pricing` (Phase 4) now shows the three plans side by
       side; the Plan page (`PlanUsage.svelte`) and its Compare plans links
       (assistant panel, live-catchment note) still go to `/account/plan`.
       Durable fix: a "See all plans" link on the Plan page to
       `/welcome/pricing`, once its owner settles where comparing plans
       lives. Trigger: the Plan page's next change.
+      *Done (round 2026-11-24): the Plan card ends with **See all plans**
+      to `/welcome/pricing` (ui.md § Plan and usage). The Compare plans
+      links stay on `/account/plan`, where Upgrade is.*
 - [ ] **The pricing page's Afrikaans has no native review.** Written by the
       i18n-translator and checked by the i18n-checker (2026-11-24); terms to
       put to the client's reviewer: "lewendig" for live, "gepubliseerde
       bladsye vir boere" for published farm views, "assistenttoelaag".
       Trigger: the next Afrikaans review round.
-- [ ] **The pricing page doesn't mention the reverse trial.** Deliberate
-      while `REVERSE_TRIAL` is off (ui.md § Pricing page). Durable fix: a
-      "14 days of Pro, no card" line from `plan.trial_days` added to
-      `PLAN_FIGURES`, through the i18n flow (English and Afrikaans).
-      Trigger: before `REVERSE_TRIAL` goes on.
+- [x] **The pricing page doesn't mention the reverse trial.** Done
+      2026-11-24: Pro's "14 days of Pro free … no card needed" line, its
+      number from `PLAN_FIGURES`' `trialDays` (pinned to `plan.trial_days`),
+      shown only in a build with `PUBLIC_REVERSE_TRIAL=true`, which the
+      operator sets with `REVERSE_TRIAL` (billing.md § The pricing page and
+      the trial).
 - [ ] **Drop the 4-argument `app_assistant_charge`.** Migration 324 keeps
       it as a wrapper (charged as unpriced) so a backend released before
       324 keeps charging during the rollout. Durable fix: a forward
@@ -931,7 +946,7 @@ are #641's checklist. Open items from building it:
       *Assistant share* in the team's Plan card
       (`billing/assistantShare.db.test.ts`, the e2e case in
       `billing-seats.spec.ts`).
-- [ ] **The assistant panel has no meter for the dollar caps.** The panel
+- [x] **The assistant panel has no meter for the dollar caps.** The panel
       maps the four codes (round 7: the server's words, when it's back, the
       box closed until then) and, since round 8, offers *Compare plans* on
       Free's day and month from the 429's `params.plan` (ui.md § Assistant),
@@ -939,6 +954,14 @@ are #641's checklist. Open items from building it:
       the account's median turn cost (the status would need the Free day's
       dollars left), with an e2e case in `e2e/tests/assistant.spec.ts`.
       Trigger: before `BILLING_ENFORCED` is on.
+      *Done (2026-11-24): `350_assistant_day_meter.sql`
+      (`app_assistant_day_meter`) gives the status a `day` (Free's or the
+      trial's SAST day left, Free's messages left, the trial's whole
+      allowance left, the account's median question over 30 days), and the
+      panel says "About N questions left today …" as an estimate
+      (billing.md § Assistant dollar caps, ui.md § Assistant;
+      `dollarCaps.db.test.ts`, `reverseTrial.db.test.ts`,
+      `chat.svelte.test.ts`, `AssistantPanel.test.ts`, `assistant.spec.ts`).*
 - [x] **Terraform doesn't set the dollar-cap settings.** The assistant
       Lambda ran on the code's defaults ($0.30, 20 messages, a $30 pool),
       and the production check didn't require `ASSISTANT_FREE_*`.
@@ -961,21 +984,23 @@ are #641's checklist. Open items from building it:
       a trial** (round 10, 344): checkout accepts an account whose live row
       is a reverse trial, and `app_billing_apply` ends the trial (`expired`,
       logged as an `expire` by `checkout`) in the transaction that writes the
-      paid row (billing.md § The reverse trial). Its UI half is open: the
-      Plan page offers Manage billing, not Upgrade, while the trial is live
-      (`components/billing/plan.ts` `billingActions`), and the plan JSON
-      doesn't yet say a subscription is a reverse trial; trigger: before
-      `REVERSE_TRIAL` goes on. Still to do: (2) the banner 3 days before the end (the email 3 days before is
-      done: 346, billing.md § Plan emails; the banner belongs on the Plan
-      page and the workspace);
+      paid row (billing.md § The reverse trial), and its UI half (round
+      2026-11-24, 349): the plan JSON's `subscription.reverseTrial`, and
+      the Plan page offers Upgrade, not Manage billing, while the trial is
+      live (`plan.ts` `billingActions`); ~~(2) the banner 3 days before the
+      end~~ (round 2026-11-24, 349: on the Plan page and in the workspace
+      header, `billing/trialEnding.ts`, from the project's `planTrialEnd`;
+      the email is 346's). Still to do:
       ~~(3) the live-catchment picker at the end and pausing the others~~
       (345's picker and 341's pause after the 14-day grace, which a trial's
-      end starts like any lapse); (4) the assistant panel's
-      words for `assistant_trial_cap` and `assistant_trial_daily_cap`
-      (`frontend/.../assistant/chat.svelte.ts` `DOLLAR_CAP_CODES` doesn't
-      list them, so they show as a plain error); (5) the abuse report's
+      end starts like any lapse); ~~(4) the assistant panel's
+      words for `assistant_trial_cap` and `assistant_trial_daily_cap`~~
+      (done 2026-11-24: `DOLLAR_CAP_CODES` lists them, so the panel shows the
+      server's words and when they're back, with no Compare plans; ui.md §
+      Assistant); ~~(5) the abuse report's
       "reverse trial → paid within 30 days" from `billing_grant_log`'s
-      `reverse trial` grants; (6) whether to key `reverse_trial_claim` with an
+      `reverse trial` grants~~ (done: `reverseTrialToPaid` in
+      `billing/metrics.ts`, billing.md § Metrics and the abuse report); (6) whether to key `reverse_trial_claim` with an
       HMAC under a server secret rather than a bare SHA-256 (a bare hash can be
       tested against a known address; an HMAC needs a secret kept for good, or
       the claims stop matching); operator decision.
@@ -1088,7 +1113,7 @@ are #641's checklist. Open items from building it:
       Team seats), and the operator issues a B2B Stripe invoice with a PO
       number (`pnpm dev:billing:invoice`, the `billing-invoice` owner action,
       direct invoke only; billing.md § B2B invoices).
-- [ ] **Free's live catchment: what 338 left** (issue #641 round 8,
+- [x] **Free's live catchment: what 338 left** (issue #641 round 8,
       2026-11-24). `338_live_catchments` refuses a second live catchment on
       Free when `BILLING_ENFORCED=true` (billing.md § Live catchments
       (Free)). Done in round 9 (340_live_catchment_gaps): ~~(1) the Plan
@@ -1102,15 +1127,15 @@ are #641's checklist. Open items from building it:
       …/plan/keep`, the *Live catchments* card), ~~a workspace banner on
       a paused catchment~~ (`project.planPausedAt`, the header's notice) and
       ~~the owners' email when the grace starts and when the pause lands~~
-      (346, billing.md § Plan emails). Still to do:
-      (4) the abuse report's "share at the live-catchment limit" can now be
-      measured from 338's count; (6) *Compare plans* always opens the
-      person's own Plan page, not a team's for a team catchment billed to a
-      Free team; (8) the copy and import dialogs don't yet show the API's
-      `autoRunsOff` (the new project opens with automatic runs off and its
-      Model settings say so, but nothing says why); durable fix: a line in
-      the copy dialog's and ImportProjectDialog's done state with *Compare
-      plans*. Trigger: before `BILLING_ENFORCED` goes on in production.
+      (346, billing.md § Plan emails). Done in the 2026-11-24 round:
+      ~~(4) the abuse report's "share at the live-catchment limit"~~
+      (`live_catchments` in the report's Free limit shares, from 338's
+      count); ~~(6) *Compare plans* always opens the person's own Plan
+      page~~ (every link goes through `billing/planLink.ts` `planHref`: a
+      team catchment's team plan, else the person's own); ~~(8) the copy and
+      import dialogs don't show the API's `autoRunsOff`~~
+      (`AutoRunsOffNotice` in both done states, with *Compare plans*;
+      billing.md § Live catchments (Free)). Nothing left.
 - [ ] **Free's verified-email gate: what 343 left** (issue #641 round 9,
       2026-11-24). `343_free_email_gate` refuses the assistant and switching
       a feed on, on Free, to an unverified or disposable-domain address when
@@ -1129,6 +1154,16 @@ are #641's checklist. Open items from building it:
       live operations (alert rules, automatic runs, publishing) aren't gated:
       #641 names the assistant and live feeds only, so (5) stays open by
       design.
+- [x] **The email change's taken address reused sign-up's email** (#821,
+      round 10). Changing an account's address to one that already has an
+      account mailed its holder sign-up's "Someone tried to create an
+      account" text. Done (2026-11-24 round): its own email,
+      `emailChangeTakenMail` (`email_change_taken`, `mail.changeTaken.*`,
+      Afrikaans through the translator and checker agents): what was asked,
+      that nothing changed on either account, sign in or reset the password
+      (or confirm, for an account never confirmed) if it was them, ignore it
+      if not, never naming the account that asked; same answer, limits and
+      timing for the requester (security.md § Changing the email address).
 - [ ] **`billing-invoice` can't reach Stripe from the migrate Lambda.** The
       migrate Lambda has no `BILLING_PROVIDER=stripe`, no key and no route to
       Stripe, so the action answers `billing_unavailable`
@@ -8351,7 +8386,7 @@ editor's and a large boundary's notes in step 4
       drains-into unticked. Trigger: a client dividing without a DEM, or
       more than a handful of units redrawn at once (start-from-map.md § Not
       built).
-- [ ] **The WR2012 quaternary isn't re-checked after a boundary edit** (F8,
+- [x] **The WR2012 quaternary isn't re-checked after a boundary edit** (F8,
       F14). The reference stores the quaternary's values, not the point or
       feature it was looked up at (it may have been a gauge, or typed), so
       nothing can tell that the moved boundary now lies in another
@@ -8360,6 +8395,15 @@ editor's and a large boundary's notes in step 4
       and flag it in the Checks when that feature's outline changed or its
       point's quaternary differs. Trigger: the next WR2012 change, or a
       client catchment redrawn across a quaternary line.
+      Done (2026-11-24, no migration: settings are JSON): Propose from the
+      map saves `reference.lookup` (engine `Wr2012Lookup`: the point, the
+      code, the boundary or gauge with its `updatedAt` and area), and the
+      Map's Checks flag the reference when that boundary is another outline
+      or no longer holds the point, or that gauge moved over 50 m or is
+      gone, linking back to the lookup ([maps.md §
+      Checks](./maps.md#checks)). A reference without a lookup (typed, or
+      saved before) is never flagged. The Checks say the feature changed,
+      not which quaternary it lies in now: the re-run lookup says that.
 - [ ] **WR2012 uses one quaternary** (F14). A catchment across two
       quaternaries gets the first one's MAR × the area ratio. Durable fix:
       area-weight every quaternary the boundary covers (the quaternary

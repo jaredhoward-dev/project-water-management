@@ -11,12 +11,17 @@ vi.mock('./i18n/af.js', async () => {
 });
 
 const { af } = await import('./i18n/af.js');
-const { farmerInviteMail, resetPasswordMail, verifyEmailMail } = await import('./templates.js');
+const { emailChangeTakenMail, farmerInviteMail, resetPasswordMail, verifyEmailMail } = await import('./templates.js');
 const url = 'http://localhost:7777/verify-email?token=abc';
 
 describe('farmer emails in Afrikaans', () => {
 	it('verify and reset come out in the account’s language, marked lang="af", link and product intact', () => {
-		for (const mail of [verifyEmailMail('ann@example.com', url, 'af'), resetPasswordMail('ann@example.com', url, 'af')]) {
+		for (const mail of [
+			verifyEmailMail('ann@example.com', url, 'af'),
+			resetPasswordMail('ann@example.com', url, 'af'),
+			emailChangeTakenMail('ann@example.com', { kind: 'reset', url }, 'af'),
+			emailChangeTakenMail('ann@example.com', { kind: 'confirm', url }, 'af')
+		]) {
 			expect(mail.subject).toMatch(/^\[af\] .* — IC-WBT$/);
 			// The app's name is never translated: the sign-off stays the full English name (issue #551).
 			expect(mail.text.trimEnd().endsWith('— Integrated Catchment - Water Balance Tool (IC-WBT)')).toBe(true);

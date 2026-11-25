@@ -60,7 +60,7 @@ test('a local-only backend dev default passes (positive control)', () => {
 });
 
 test('a non-local host in a dev default fails, and the value is not echoed', () => {
-	const f = checkEnvFile('backend/.env.development', 'DATABASE_URL=postgresql://u:hunter2@db.prod.internal:5432/water\n');
+	const f = checkEnvFile('backend/.env.development', 'DATABASE_URL=postgresql://u:hunter2@db.prod.internal:5432/water\n'); // trufflehog:ignore (synthetic host and password)
 	assert.equal(f.length, 1);
 	assert.equal(f[0].line, 1);
 	assert.doesNotMatch(f[0].rule, /hunter2|prod\.internal/);

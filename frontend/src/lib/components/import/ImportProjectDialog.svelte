@@ -26,6 +26,8 @@
 	import FormatHelp from '#lib/components/common/FormatHelp.svelte';
 	import type { WorkbookImportProgress } from '#lib/spreadsheet/import/messages.js';
 	import type { WorkbookImportSession } from '#lib/spreadsheet/import/runner.js';
+	import AutoRunsOffNotice from '#lib/components/billing/AutoRunsOffNotice.svelte';
+	import { startedAutoRunsOff } from '#lib/components/billing/liveLimit.js';
 	import ImportPreview from './ImportPreview.svelte';
 	import { buildImportReport, importerVersion, projectFileNotes } from './importReport';
 	import { IMPORT_ACCEPT, importBody, importTooLarge, readImportFile, type ParsedImport } from './projectFile';
@@ -367,6 +369,8 @@
 				Imported <strong>{result.project.name}</strong>{result.project.team?.name ? ` into ${result.project.team.name}` : ''}.
 				{#if result.runId}Its first run is ready on the Runs tab.{/if}
 			</div>
+			<!-- Free's live limit made it with automatic runs off (338): say why, with Compare plans for the plan that bills it. -->
+			{#if startedAutoRunsOff(result)}<AutoRunsOffNotice teamId={result.project.team?.id} />{/if}
 			{#if result.runError}
 				<div class="alert alert-warning" role="alert">
 					The project was imported, but the model didn't run: {result.runError}. Fix the input, then run it from the Runs tab.

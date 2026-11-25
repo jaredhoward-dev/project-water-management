@@ -18,6 +18,8 @@ export interface AccountRow {
 	assistantUsdMicros: number;
 	unpricedTurns: number;
 	lastSpendAt: Date | null;
+	/** Its live catchments today (338's app_live_catchments_in_use: a feed, an alert, automatic runs or a publication on). */
+	liveCatchments: number;
 }
 
 export interface PersonRow {
@@ -100,7 +102,7 @@ export function activation(people: PersonRow[], now: Date): Activation {
 }
 
 export interface LimitShare {
-	limit: 'reports_per_month' | 'assistant_usd_micros_per_month' | 'catchments';
+	limit: 'reports_per_month' | 'assistant_usd_micros_per_month' | 'catchments' | 'live_catchments';
 	/** The Free plan's limit; null: Free has none, so nothing is near it. */
 	value: number | null;
 	near: number;
@@ -110,12 +112,18 @@ export interface LimitShare {
 }
 
 const used = (a: AccountRow, limit: LimitShare['limit']): number =>
-	limit === 'reports_per_month' ? a.reports : limit === 'catchments' ? a.catchments : a.assistantUsdMicros;
+	limit === 'reports_per_month'
+		? a.reports
+		: limit === 'catchments'
+			? a.catchments
+			: limit === 'live_catchments'
+				? a.liveCatchments
+				: a.assistantUsdMicros;
 
 /** Of the month's active Free accounts, how many are near (≥ 80%, below 100%) or at (≥ 100%) each Free limit. */
 export function freeLimitShares(accounts: AccountRow[], freeLimits: PlanLimits): { active: number; limits: LimitShare[] } {
 	const active = accounts.filter((a) => a.planCode === 'free' && isActive(a));
-	const limits = (['reports_per_month', 'assistant_usd_micros_per_month', 'catchments'] as const).map((limit): LimitShare => {
+	const limits = (['reports_per_month', 'assistant_usd_micros_per_month', 'catchments', 'live_catchments'] as const).map((limit): LimitShare => {
 		const value = freeLimits[limit] ?? null;
 		if (value === null || value <= 0) return { limit, value: null, near: 0, at: 0, nearShare: null, atShare: null };
 		const at = active.filter((a) => used(a, limit) >= value).length;
@@ -275,13 +283,54 @@ export function gateRefusals(rows: GateRefusalRow[]): GateRefusals {
 	return { disposable: of('email_disposable'), unverified: of('email_unverified') };
 }
 
+/** One reverse trial (342) started in the month: its billing_grant_log 'grant' by 'reverse trial', and the account's first paid plan from then on. */
+export interface ReverseTrialRow {
+	startedAt: Date;
+	/**
+	 * The account's first paid plan at or after the trial's start, or null: a
+	 * subscription from a payment provider (Stripe, or the local mock) that
+	 * isn't itself a trial, or a paid B2B invoice's grant (billing_grant_log
+	 * 'grant' by 'invoice', 335). Staff grants are not paid and don't count.
+	 */
+	firstPaidAt: Date | null;
+}
+
+/** Days after a reverse trial's start within which a paid plan counts as converted. */
+export const TRIAL_CONVERSION_DAYS = 30;
+
+export interface ReverseTrialConversion {
+	/** Trials started in the month whose 30 days have passed. */
+	cohort: number;
+	/** Of the cohort, accounts that started paying within 30 days of the trial's start. */
+	paid: number;
+	share: number | null;
+	/** Trials started in the month whose 30 days are still open: left out of the share. */
+	pending: number;
+	/** Of the pending, those already paying. */
+	pendingPaid: number;
+}
+
+/**
+ * "Reverse trial → paid within 30 days" (#641): the reverse trials that began
+ * in the report's SAST month, each an account (one trial per canonical email,
+ * 342), and how many had a paid plan within 30 days of the trial's start
+ * (start ≤ paid ≤ start + 30 days). A trial whose 30 days haven't passed is
+ * pending, like activation's 7.
+ */
+export function reverseTrialToPaid(trials: ReverseTrialRow[], now: Date): ReverseTrialConversion {
+	const window = TRIAL_CONVERSION_DAYS * DAY_MS;
+	const paidIn = (t: ReverseTrialRow) => t.firstPaidAt !== null && t.firstPaidAt.getTime() - t.startedAt.getTime() <= window;
+	const done = trials.filter((t) => now.getTime() - t.startedAt.getTime() >= window);
+	const open = trials.filter((t) => now.getTime() - t.startedAt.getTime() < window);
+	const paid = done.filter(paidIn).length;
+	return { cohort: done.length, paid, share: share(paid, done.length), pending: open.length, pendingPaid: open.filter(paidIn).length };
+}
+
 /** The issue's metrics this data can't answer yet, and what each would need. Printed so nobody reads a gap as a zero. */
 export const NOT_YET_MEASURABLE: { metric: string; needs: string }[] = [
 	{ metric: 'Upgrade at the limit (checkout or trial within 7 days of a limit message)', needs: 'no checkout, trial or limit-message events are recorded (Phase 3)' },
 	{ metric: 'Churn after the limit (inactive 30 days after hitting one)', needs: 'no record of when an account hit a limit' },
-	{ metric: 'Reverse trial → paid within 30 days', needs: 'no trials exist yet' },
 	{ metric: 'Share of active Free accounts at the assistant daily cap', needs: 'assistant_usage is monthly; there is no daily cap or daily record yet' },
-	{ metric: 'Share of active Free accounts at the live-catchment limit', needs: 'no catchment is marked live yet' },
 	{ metric: 'Free pool burn by day of month', needs: 'assistant_usage is monthly; there is no pool or daily record yet' },
 	{ metric: 'Paid AI: share of seats reaching $15', needs: 'spend is per project and person, not per paid seat; no one is on a paid plan in Phase 1' },
 	{ metric: 'Sign-up throttle hits per address', needs: 'signup_throttle keeps only a hashed bucket for its hour (079)' },
@@ -299,6 +348,7 @@ export interface Report {
 	heaviestFree: ReturnType<typeof heaviestFree>;
 	abuse: AbuseReport;
 	gateRefusals: GateRefusals;
+	reverseTrial: ReverseTrialConversion;
 	notYetMeasurable: typeof NOT_YET_MEASURABLE;
 }
 
@@ -308,7 +358,8 @@ export function buildReport(
 	accounts: AccountRow[],
 	people: PersonRow[],
 	freeLimits: PlanLimits,
-	refusals: GateRefusalRow[] = []
+	refusals: GateRefusalRow[] = [],
+	trials: ReverseTrialRow[] = []
 ): Report {
 	return {
 		month,
@@ -321,6 +372,7 @@ export function buildReport(
 		heaviestFree: heaviestFree(accounts),
 		abuse: abuseReport(people),
 		gateRefusals: gateRefusals(refusals),
+		reverseTrial: reverseTrialToPaid(trials, now),
 		notYetMeasurable: NOT_YET_MEASURABLE
 	};
 }
@@ -349,7 +401,12 @@ export function formatReport(r: Report, showEmails: boolean): string {
 		const value = l.value === null ? 'no limit on Free' : l.limit === 'assistant_usd_micros_per_month' ? usd(l.value) : String(l.value);
 		out.push(`  ${l.limit.padEnd(32)} ${value.padEnd(18)} near ${l.near} (${pct(l.nearShare)})  at ${l.at} (${pct(l.atShare)})`);
 	}
-	out.push('  thresholds: > 15% at reports → 10 a month; < 3% at the monthly assistant cap → room to raise', '');
+	out.push('  thresholds: > 15% at reports → 10 a month; < 3% at the monthly assistant cap → room to raise');
+	out.push('  catchments and live catchments are counted today; live: a feed, an alert, automatic runs or a publication on (338)', '');
+	const rt = r.reverseTrial;
+	out.push(`Reverse trial → paid within ${TRIAL_CONVERSION_DAYS} days (trials that began this month; paid: a card plan or a paid invoice)`);
+	out.push(`  ${rt.paid} of ${rt.cohort} = ${pct(rt.share)}`);
+	out.push(`  ${rt.pending} trials under ${TRIAL_CONVERSION_DAYS} days old left out (${rt.pendingPaid} of them paying already)`, '');
 	out.push('Assistant spend per account (accounts that spent; UTC month)');
 	for (const s of r.assistantSpend)
 		out.push(`  ${s.plan.padEnd(6)} ${String(s.spenders).padStart(5)} accounts  p50 ${usd(s.p50UsdMicros)}  p90 ${usd(s.p90UsdMicros)}  total ${usd(s.totalUsdMicros)}${s.unpricedTurns ? `  (${s.unpricedTurns} unpriced turns: a floor)` : ''}`);

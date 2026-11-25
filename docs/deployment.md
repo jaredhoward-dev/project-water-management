@@ -642,6 +642,7 @@ environment's job is the required reviewer (§ 1), not storage.
 | `WAF_CAPTCHA_SCRIPT_URL` | `waf_captcha_script_url` (the sign-in CAPTCHA's jsapi.js; empty until `waf_captcha_integration_url` is set) |
 | secret `WAF_CAPTCHA_API_KEY` | `waf_captcha_api_key` (the CAPTCHA API key for the site's domain; it ships in the public bundle, but the provider marks it sensitive) |
 | `PUBLIC_TILES_URL`, `PUBLIC_TILES_GLYPHS_URL`, `PUBLIC_TERRAIN_URL`, `PUBLIC_CHANNELS_URL` | not outputs: set by hand once the files are in the tiles bucket (§ Map tiles); unset, the map draws the plain background |
+| `PUBLIC_REVERSE_TRIAL` | not an output: set to `true` by hand in the same change that turns on the API's `REVERSE_TRIAL` and `BILLING_ENFORCED`, then release the web; unset (off), the pricing page offers no trial ([billing.md § The pricing page and the trial](./billing.md#the-pricing-page-and-the-trial)) |
 
 `PUBLIC_API_URL` is not a GitHub variable: the build reads `/api` from the
 committed `frontend/.env.production`.

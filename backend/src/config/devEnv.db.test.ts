@@ -46,6 +46,6 @@ describe('ensureDevDb', () => {
 		const u = new URL(url());
 		u.pathname = '/water';
 		expect(await ensureDevDb(u.toString())).toBe(false);
-		expect(await ensureDevDb('postgresql://water:water@db.example.org:5432/water_w3')).toBe(false);
+		expect(await ensureDevDb('postgresql://water:water@db.example.org:5432/water_w3')).toBe(false); // trufflehog:ignore (synthetic: reserved host)
 	});
 });

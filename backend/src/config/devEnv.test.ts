@@ -44,7 +44,7 @@ describe('withDevDb', () => {
 			'postgresql://water_app:water_app@127.0.0.1:5434/water_e2e',
 			'postgresql://water_app:water_app@127.0.0.1:5434/water_test_w3',
 			'postgresql://water_app:water_app@127.0.0.1:5434/mine',
-			'postgresql://water_app:pw@db.example.org:5432/water',
+			'postgresql://water_app:pw@db.example.org:5432/water', // trufflehog:ignore (synthetic: reserved host)
 			'not a url'
 		]) {
 			expect(withDevDb(url, 'water_w7')).toBe(url);

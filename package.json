@@ -132,7 +132,7 @@
 		"test:backend:perf:db": "pnpm -C backend test:perf:db",
 		"test:backend:v8-osr": "pnpm -C backend test:v8-osr",
 		"test:scripts": "node scripts/check_root_scripts.mjs",
-		"test:guards": "node --test scripts/guards/*.test.mjs scripts/git-hooks/*.test.mjs scripts/release/*.test.mjs scripts/ingest/*.test.mjs scripts/coverage-report/*.test.mjs infra/scripts/*.test.mjs",
+		"test:guards": "node --test scripts/guards/*.test.mjs scripts/git-hooks/*.test.mjs scripts/release/*.test.mjs scripts/ingest/*.test.mjs scripts/coverage-report/*.test.mjs scripts/ci/*.test.mjs infra/scripts/*.test.mjs",
 		"test:verify": "python3 -u verify/test_verify.py",
 		"test:ingest": "ingest/dev.sh test",
 		"//-- e2e --": "Playwright (Chromium), fully local. Needs dev:db:up; rebuilds its own database and starts its own backend + a production build of the frontend (frontend/build-e2e; dev servers and frontend/build untouched): water_e2e, :3101 and :7801 in the main checkout, a per-worktree slot (from a registry in the shared .git) and database elsewhere (E2E_SLOT overrides; e2e/support/env.ts, docs/testing.md), so two checkouts can run it at once. First time: test:e2e:install. See e2e/README.md.",

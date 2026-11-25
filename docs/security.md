@@ -573,9 +573,13 @@ nothing about the account changes. Limits: the verification email's one-a-minute
 cooldown and the account's daily cap of reset, verification and change emails
 (078's `account_mail_quota`). **No enumeration:** the answer is the same `202`
 whether or not the new address has an account (a taken address gets no
-link: its holder gets sign-up's "you already have an account" email, or a
-fresh confirmation link, under that address's own cooldown and cap, sent
-inside the same `answerAlike`), after the same time (`answerAlike`) and under the same limits (the link
+link: its holder gets an email of its own, `emailChangeTakenMail`: someone
+asked to change an account's address to this one and nothing changed on
+either account; if it was them, sign in with this address (with a
+password-reset link) or, for an account never confirmed, confirm it (a
+confirmation link); if not, ignore it. It never names the account that
+asked. It goes under that address's own cooldown and cap), sent inside the
+same `answerAlike`, so after the same time and under the same limits (the link
 is issued, and counted, before the address is looked up), so this reveals no
 more than sign-up. If an account takes the address after the link went out,
 the switch is refused (`409 email_change_taken`) by `app_user`'s unique email;
@@ -4511,7 +4515,17 @@ readable by anyone. The rules:
   the `CI gate`) and, weekly, the whole history (`secret-scan-sweep.yml`,
   which opens a `secret-scan` issue when it fails); a verified or unknown
   finding fails it, and a reviewed unverified false positive gets a
-  `trufflehog:ignore` comment on its line. For the gitleaks hook, reviewed false positives are
+  `trufflehog:ignore` comment on its line. A synthetic value whose host
+  doesn't resolve (a fixture's `db.example.org`) comes back unknown, since
+  TruffleHog's check tried to connect: tag its line in the change that adds
+  it. A tag can't reach a commit already pushed, so a finding the weekly
+  sweep keeps reporting from history is listed, after reading the line, by
+  its exact commit, file, line and detector in
+  `.github/secret-scan-reviewed.txt` and reported as `reviewed` (a notice);
+  a verified finding fails even when listed, an entry whose commit isn't in
+  the history fails, and no path or detector is excluded from the scan
+  (issue #818; the step is `scripts/ci/secret_scan_report.py`, tested by
+  `pnpm test:guards`). For the gitleaks hook, reviewed false positives are
   allowlisted by their exact value in `.gitleaks.toml` (m³/day field names,
   fake test tokens, the mocked-provider Terraform tests' synthetic secrets),
   never by path; add one only after checking the match isn't real.

@@ -6,7 +6,9 @@
 // edit left behind: a unit's area from an earlier outline (with Use), values
 // read over an outline redrawn since (stale.ts), the rest of the catchment's
 // area from the boundary as it was, a dam inside another unit's boundary
-// than its own, and a gauge moved since it became its node.
+// than its own, and a gauge moved since it became its node. And the WR2012
+// reference whose quaternary was looked up at a boundary or gauge redrawn
+// or moved since (followups F8/F14).
 // Warnings only: nothing here blocks a save or a run. Pure (no DOM, no
 // MapLibre) and dependency-free, so vitest covers every check
 // (mapChecks.test.ts) and it ships in the tab's chunk.
@@ -19,7 +21,8 @@ import type { MapAcceptances, MapFeature, MapGeometry, MapNodeArea, MapPosition 
 import { fmtNum } from '#lib/format/number.js';
 import { alreadyAccepted, isPolygon, KIND_LABEL } from './mapData';
 import { takenAreaM2 } from './areaBasis';
-import { STALE_LINK, staleValues, unitPolygonOf, type RestOfCatchment } from './stale';
+import type { Wr2012Reference } from '@water-management/engine';
+import { outlineChanged, STALE_LINK, staleValues, unitPolygonOf, type RestOfCatchment } from './stale';
 
 /** One warning: what it says, and the features and nodes it is about. */
 export interface MapCheck {
@@ -40,7 +43,12 @@ export interface MapCheckInputs {
 	accepted?: MapAcceptances | null;
 	/** The rest of the catchment Start made beside units' boundaries (stale.ts restOfCatchment). */
 	rest?: RestOfCatchment | null;
+	/** The saved WR2012 reference (settings.wr2012.reference): its `lookup` says where its quaternary was looked up. */
+	wr2012?: Wr2012Reference | null;
 }
+
+/** Where the WR2012 lookup is run again (Calibration → WR2012 check → Propose from the map), and the link's words. */
+export const WR2012_LOOKUP_LINK = { href: '?tab=calibration#set-wr2012', text: 'WR2012 check: Propose from the map' } as const;
 
 /** The units' total area may differ from the boundary's by this fraction before it's flagged. */
 export const UNITS_VS_BOUNDARY_TOLERANCE = 0.1;
@@ -466,6 +474,41 @@ export function mapChecks(features: readonly MapFeature[], nodes: readonly MapNo
 			nodeIds: [g.nodeId],
 			link: { href: '?tab=network', text: 'Network' }
 		});
+	}
+
+	// 12. The WR2012 quaternary looked up at a boundary or gauge redrawn or moved since (F8, F14). Only a lookup the
+	// reference recorded, for the quaternary it still names: a typed code, or one saved before lookups were recorded,
+	// is left alone (nothing to compare with, and no guessing).
+	const lk = inputs.wr2012?.lookup;
+	if (lk?.feature && lk.code === inputs.wr2012!.quaternary.trim()) {
+		const was = lk.feature;
+		const f = features.find((x) => x.id === was.id && x.kind === was.kind);
+		const at = `${fmtNum(lk.point[1], 4)}, ${fmtNum(lk.point[0], 4)}`;
+		let why: string | null = null;
+		if (was.kind === 'catchment_boundary') {
+			if (!f || !isPolygon(f.geometry)) why = 'the catchment boundary it was looked up at is gone';
+			else if (
+				outlineChanged({ featureId: was.id, updatedAt: was.updatedAt, areaM2: was.areaM2 ?? 0 }, f) ||
+				// A reshape that keeps the area (F7) still counts once the point it was looked up at is outside.
+				(f.updatedAt !== was.updatedAt && !polysOf(f).some((poly) => inPoly(proj.to(lk.point), poly)))
+			) {
+				why = `the catchment boundary has been redrawn since it was looked up at its centre (${at})`;
+			}
+		} else if (!f || f.geometry.type !== 'Point') {
+			why = 'the gauge it was looked up at is gone';
+		} else {
+			const moved = haversineM(lk.point, f.geometry.coordinates);
+			if (moved > movedM + EPS) why = `gauge ${nameOf(f)} has moved ${distanceText(moved)} since it was looked up there`;
+		}
+		if (why) {
+			checks.push({
+				id: `wr2012-lookup:${was.id}`,
+				text: `The WR2012 reference's quaternary ${lk.code} was looked up on the map, and ${why}: look the quaternary up again, in case it now lies in another.`,
+				featureIds: f ? [f.id] : [],
+				nodeIds: [],
+				link: WR2012_LOOKUP_LINK
+			});
+		}
 	}
 
 	return checks;
