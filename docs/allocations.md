@@ -769,7 +769,12 @@ and volumes; the farmer's own figures are theirs (and already in their
 data-subject export). The history records registration numbers and
 counts, never names; a viewer reads the allocation events without the
 registration number and volume until an owner switches **What viewers see**
-on (`app_audit_subject`, 190), as they read the rows themselves.
+on (`app_audit_subject`, 190), as they read the rows themselves. The same
+viewer reads the decision log's record of a publication of a cap or
+full-allocation run (published before 213) without its per-farm figures,
+which rest on each farm's volume, as the farm previews and outlook of such
+a run are withheld; the History says how many farms it covered (365,
+issue #523 finding I; security.md § Allocations).
 
 The catchment's series follow the same two limits for share links and
 applicants (232_small_catchments, issue #523 G8, provisional, #92): the

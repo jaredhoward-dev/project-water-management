@@ -1145,7 +1145,9 @@ the result change?", and put back any earlier version.
   `allocation.demo_loaded/demo_removed`, 315, counts only;
   a viewer reads `allocation.created/changed/deleted` without the
   registration number and volume until an owner lets viewers read each
-  volume: the History reads every subject through `app_audit_subject`, 190),
+  volume: the History reads every subject through `app_audit_subject`, 190;
+  of a `publication.published` event of a cap or full-allocation run, that
+  reader gets no `perFarm`, 365),
   `api_key.created/revoked` (039: key id, name, prefix, scopes, allowed
   series, lifetime; never the key or its hash), `alert_rules.changed` (051:
   an editor switched alert kinds on or off or changed a threshold),
