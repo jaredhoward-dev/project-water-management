@@ -16,8 +16,13 @@
 //     WAF block, a timeout), queues the request again with backoff
 //     (requestRenderAgain).
 //
+// In production a request is sent only with a render slot (reports/
+// renderSlots.ts, 353): never more in flight than the renderer runs at once,
+// so none waits in SQS past its token's life; without one the job goes back
+// to the job table (its attempt given back) and asks again shortly.
+//
 // The render token is issued in its own committed transaction as the acting
-// user, because the headless browser presents it on another connection
+// user, once the request can go, because the headless browser presents it on another connection
 // (POST /auth/render-session) while this job's transaction is still open.
 // A retry issues a fresh one; an unused token dies after 5 minutes.
 //
@@ -30,6 +35,7 @@ import { renderOptionsFromEnv, RenderError, renderReportPdf } from '../../report
 import { putPdf, reportKey } from '../../reports/storage.js';
 import { failReport, finishReport, loadReport, REPORT_MAX_ATTEMPTS } from '../../reports/store.js';
 import { issueRenderToken } from '../../reports/tokens.js';
+import { expiredUnrendered, MAX_EXPIRED_REQUESTS, reportSlot, sendWithSlot } from '../../reports/renderSlots.js';
 import { JobError } from '../errors.js';
 import { enqueueJob } from '../queue.js';
 import { defineHandler } from '../registry.js';
@@ -43,16 +49,30 @@ import { logEvent } from '../../logging/logEvent.js';
  * long done by then, so the queue's own retry can't reach it: queue another
  * request job instead, delayed like the queue's backoff (2^n minutes), until
  * REPORT_MAX_ATTEMPTS requests have been made in all. Each request issues a
- * fresh token. The report stays `rendering` meanwhile (the 1-hour answer
- * window, store.ts, covers 2 + 4 minutes of backoff and three renders).
+ * fresh token when it gets a render slot (reports/renderSlots.ts). The report
+ * stays `rendering` meanwhile (the 1-hour answer window, store.ts, counts
+ * from each send).
+ *
+ * `expired`: the renderer refused the request only because it waited past its
+ * token's life, and rendered nothing (renderSlots.ts expiredUnrendered: an
+ * SQS redelivery after a visibility timeout, a stalled renderer). That asks
+ * again at once and never counts toward REPORT_MAX_ATTEMPTS, up to
+ * MAX_EXPIRED_REQUESTS times; past them it counts like any other.
  * Returns false when the attempts are used up.
  */
-export async function requestRenderAgain(db: Db, projectId: string, reportId: string): Promise<boolean> {
-	const { rows } = await db.query<{ n: number }>(
-		`SELECT count(*)::int AS n FROM job WHERE project_id = $1 AND kind = 'report_render' AND payload->>'reportId' = $2 AND NOT (payload ? 'result')`,
-		[projectId, reportId]
+export async function requestRenderAgain(db: Db, projectId: string, reportId: string, { expired = false }: { expired?: boolean } = {}): Promise<boolean> {
+	const requeue = `report_requeue:${reportId}:`;
+	const { rows } = await db.query<{ made: number; requeued: number }>(
+		`SELECT count(*) FILTER (WHERE NOT starts_with(coalesce(dedupe_key, ''), $3))::int AS made,
+			count(*) FILTER (WHERE starts_with(coalesce(dedupe_key, ''), $3))::int AS requeued
+		 FROM job WHERE project_id = $1 AND kind = 'report_render' AND payload->>'reportId' = $2 AND NOT (payload ? 'result')`,
+		[projectId, reportId, requeue]
 	);
-	const made = rows[0]?.n ?? 0;
+	const { made = 0, requeued = 0 } = rows[0] ?? {};
+	if (expired && requeued < MAX_EXPIRED_REQUESTS) {
+		await enqueueJob(db, { projectId, kind: 'report_render', payload: { reportId }, dedupeKey: `${requeue}${requeued}`, maxAttempts: REPORT_MAX_ATTEMPTS });
+		return true;
+	}
 	if (made >= REPORT_MAX_ATTEMPTS) return false;
 	await enqueueJob(db, {
 		projectId,
@@ -86,7 +106,7 @@ export const reportRenderHandler = defineHandler({
 		if (payload.result) {
 			if (!payload.result.ok) {
 				// A failure another attempt could fix (a WAF block, a timeout): ask again, later.
-				if (payload.result.retry && (await requestRenderAgain(db, job.projectId, report.id))) return;
+				if (payload.result.retry && (await requestRenderAgain(db, job.projectId, report.id, { expired: expiredUnrendered(payload.result) }))) return;
 				return failReport(db, report, `the renderer failed: ${payload.result.error}`);
 			}
 			return finishReport(db, report, payload.result);
@@ -105,14 +125,20 @@ export const reportRenderHandler = defineHandler({
 		}
 		// Committed now, on its own connection: the renderer uses it before this job commits.
 		// At the visibility the report was queued at (218, #523 G1): without volumes, the session prints none.
-		const token = await withUser(job.actingUserId, (tx) => issueRenderToken(tx, job.projectId, runId, against?.runId, { redact: !report.withVolumes }));
+		const issue = () => withUser(job.actingUserId, (tx) => issueRenderToken(tx, job.projectId, runId, against?.runId, { redact: !report.withVolumes }));
 
 		if (reportRenderer() === 'sqs') {
-			const message: RenderRequestMessage = { v: 1, type: 'render', reportId: report.id, projectId: job.projectId, runId, ...(against ? { against } : {}), token };
-			await sendToQueue(process.env.RENDER_REQUESTS_QUEUE_URL, 'RENDER_REQUESTS_QUEUE_URL', message);
-			await db.query(`UPDATE report SET status = 'rendering' WHERE id = $1`, [report.id]);
+			// Only with a render slot (reports/renderSlots.ts): else back to the job table to wait, and no token issued.
+			await sendWithSlot(reportSlot(report.id), async () => {
+				const token = await issue();
+				const message: RenderRequestMessage = { v: 1, type: 'render', reportId: report.id, projectId: job.projectId, runId, ...(against ? { against } : {}), token };
+				await sendToQueue(process.env.RENDER_REQUESTS_QUEUE_URL, 'RENDER_REQUESTS_QUEUE_URL', message);
+			});
+			// The answer window counts from the send (353): a wait for a slot isn't the renderer's.
+			await db.query(`UPDATE report SET status = 'rendering', sent_at = now() WHERE id = $1`, [report.id]);
 			return;
 		}
+		const token = await issue();
 
 		let rendered;
 		try {

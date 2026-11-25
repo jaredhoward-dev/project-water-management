@@ -23,6 +23,9 @@ vi.mock('./feeds/schedule.js', () => ({ acceptIngestResult: (m: unknown) => acce
 const acceptRenderResult = vi.fn(async (_m: unknown) => 'queued' as string);
 const acceptPackRenderResult = vi.fn(async (_m: unknown) => 'queued' as string);
 vi.mock('./reports/schedule.js', () => ({ acceptRenderResult: (m: unknown) => acceptRenderResult(m), acceptPackRenderResult: (m: unknown) => acceptPackRenderResult(m) }));
+// The renderer's answer frees its render slot (353; the slot itself: reports/renderSlots.db.test.ts).
+const freeRenderSlot = vi.fn(async (_t: string) => true);
+vi.mock('./reports/renderSlots.js', async (orig) => ({ ...(await orig<typeof import('./reports/renderSlots.js')>()), freeRenderSlot: (t: string) => freeRenderSlot(t) }));
 const acceptMailEvent = vi.fn(async (_b: string): Promise<unknown> => ({ reason: 'bounce', suppressed: 1 }));
 vi.mock('./mail/suppression.js', () => ({ acceptMailEvent: (b: string) => acceptMailEvent(b) }));
 
@@ -139,6 +142,9 @@ describe('handler', () => {
 		expect(acceptRenderResult).toHaveBeenCalledWith(msg);
 		expect(runTick).toHaveBeenCalledTimes(1);
 		expect(warn).toHaveBeenCalledWith(JSON.stringify({ event: 'render_result_dropped', messageId: 'm2', reason: 'unknown_report' }));
+		// Each answer frees the report's render slot, whatever became of it.
+		expect(freeRenderSlot.mock.calls).toEqual([[`report:${msg.reportId}`], [`report:${msg.reportId}`]]);
+		freeRenderSlot.mockClear();
 		acceptRenderResult.mockClear();
 	});
 
@@ -159,6 +165,12 @@ describe('handler', () => {
 		expect(acceptRenderResult).not.toHaveBeenCalled();
 		expect(runTick).toHaveBeenCalledTimes(1);
 		expect(warn).toHaveBeenCalledWith(JSON.stringify({ event: 'pack_render_result_dropped', messageId: 'm2', reason: 'unknown_pack' }));
+		// The pack's slot, and an applicant's copy's own.
+		expect(freeRenderSlot.mock.calls).toEqual([[`pack:${msg.packId}`], [`pack:${msg.packId}`]]);
+		freeRenderSlot.mockClear();
+		await handler({ Records: [{ messageId: 'm3', body: JSON.stringify({ ...msg, copy: 'applicant' }) }] } as never);
+		expect(freeRenderSlot.mock.calls).toEqual([[`applicant_pack:${msg.packId}`]]);
+		freeRenderSlot.mockClear();
 		acceptPackRenderResult.mockClear();
 	});
 

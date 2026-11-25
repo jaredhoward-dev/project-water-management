@@ -49,6 +49,8 @@ beforeEach(() => {
 	vi.stubEnv('FEED_FETCHER', 'sqs');
 	vi.stubEnv('FETCH_REQUESTS_QUEUE_URL', 'memory://fetch-requests');
 	vi.stubEnv('REPORT_RENDERER', 'sqs');
+	// No answer ever comes here to free a render slot (353): room for every request this file sends.
+	vi.stubEnv('RENDER_CONCURRENCY', '100');
 	vi.stubEnv('RENDER_REQUESTS_QUEUE_URL', 'memory://render-requests');
 });
 afterEach(async () => {
