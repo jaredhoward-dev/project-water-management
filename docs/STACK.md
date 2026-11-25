@@ -133,7 +133,11 @@ sides share.
   polite HTTP client (stdlib `urllib`: a descriptive User-Agent with
   `INGEST_CONTACT`, conditional GETs, 1 request a second, `Retry-After`, and a
   403 that stops the run). Dependencies hash-pinned in
-  `ingest/requirements.txt`. `FEED_SOURCE=fixtures` reads a committed
+  `ingest/requirements.txt`. The one-off SWOT lake height trial
+  (`ingest/swot_trial.py`, `ingest/dev.sh swot`, issue #625; the operator
+  runs it) adds pyshp in a hash-pinned `ingest/requirements-trial.txt`,
+  which `ingest/dev.sh` and CI's ingest job install beside it and the Lambda
+  image never does. `FEED_SOURCE=fixtures` reads a committed
   synthetic NetCDF (`ingest/fixtures/`) and needs no network. Optional
   locally (`pnpm dev:ingest:run`); pnpm dev, the other CI jobs and e2e never
   need Python ([ingest/README.md](../ingest/README.md)).
