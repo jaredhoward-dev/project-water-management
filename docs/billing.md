@@ -1666,7 +1666,12 @@ pnpm dev:billing:invoice <email|team-id> <plan> --interval month|year --po "<PO 
   making anything the customer's invoices are searched for its
   `wm_invoice_key`: a draft is completed, an open one not yet sent is sent,
   a sent one is answered as it is (`reused`). A voided one is ignored, so a
-  wrong invoice is voided in Stripe and issued again.
+  wrong invoice is voided in Stripe and issued again. The lookup pages
+  through `GET /v1/invoices?customer=…` 100 at a time (`starting_after`,
+  until found or `has_more` is false), not Stripe's invoice search, which
+  is eventually consistent and Stripe says not to use for read-after-write.
+  Past 20 pages (2,000 invoices) it logs `stripe_invoice_lookup_too_many`
+  and refuses (`invoice_pages`) rather than risk a second invoice.
 - **The period** runs from `--from` (a SAST day; default today) for one
   month or year, through the day before the same date (31 January + 1 month
   clamps to 28 February, so through 27 February). The answer's `until` is

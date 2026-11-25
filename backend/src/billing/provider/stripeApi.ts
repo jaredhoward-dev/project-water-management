@@ -18,7 +18,7 @@
 //
 // and, for a B2B invoice from the staff tool (docs/billing.md § B2B invoices):
 //
-//   GET    /v1/invoices?customer=…                the customer's invoices, to find one this key already made
+//   GET    /v1/invoices?customer=…                the customer's invoices, to find one this key already made (paged with starting_after)
 //   POST   /v1/invoices                           a draft: send_invoice, days_until_due 30, the PO number as a custom field
 //   POST   /v1/invoiceitems                       its lines (invoice=<id>), each an amount, a description and a period
 //   POST   /v1/invoices/:id/finalize              open it (auto_advance=false: nothing advances without us)
@@ -46,6 +46,8 @@
 // The answer is read for its id or url only. A failure throws StripeApiError
 // carrying Stripe's HTTP status and error type/code, never the key and never
 // the request; the route answers it as the app's own coded 503.
+
+import { logEvent } from '../../logging/logEvent.js';
 
 /** The API version every request pins (Stripe-Version), the one stripe@23.1.0 pins (its apiVersion.js). Bump on purpose, with the normaliser's tests. */
 export const STRIPE_API_VERSION = '2026-10-28.endive';
@@ -543,12 +545,35 @@ export interface StripeInvoiceResult {
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 const meta = (o: Record<string, unknown>): Record<string, unknown> => (typeof o.metadata === 'object' && o.metadata !== null ? (o.metadata as Record<string, unknown>) : {});
 
-/** The customer's invoice this key made, if any (void ones left out: voided means the operator cancelled it). */
+/**
+ * How many pages of 100 findInvoice reads before it gives up: 2,000 invoices, far past any B2B customer
+ * (one invoice a month or a year). Past it the invoice is refused, never made, since an unread page
+ * could hold the one this key already made.
+ */
+export const FIND_INVOICE_MAX_PAGES = 20;
+
+/**
+ * The customer's invoice this key made, if any (void ones left out: voided means the operator cancelled it).
+ * Pages through the list (newest first) with starting_after until it is found or has_more is false. Not
+ * invoice search: search is eventually consistent (Stripe: "don't use search for read-after-write flows"),
+ * so an invoice made by a run seconds earlier could be missed, which is the one case this lookup exists for.
+ */
 async function findInvoice(o: StripeClientOptions, customer: string, key: string): Promise<Record<string, unknown> | null> {
-	const list = await send(o, 'GET', '/v1/invoices', { customer, limit: 100 });
-	const data = Array.isArray(list.data) ? (list.data as Record<string, unknown>[]) : null;
-	if (!data) throw new StripeApiError(502, 'unexpected_response', 'data');
-	return data.find((inv) => meta(inv).wm_invoice_key === key && inv.status !== 'void') ?? null;
+	let startingAfter: string | undefined;
+	for (let page = 0; page < FIND_INVOICE_MAX_PAGES; page++) {
+		const list = await send(o, 'GET', '/v1/invoices', { customer, limit: 100, starting_after: startingAfter });
+		const data = Array.isArray(list.data) ? (list.data as Record<string, unknown>[]) : null;
+		if (!data) throw new StripeApiError(502, 'unexpected_response', 'data');
+		const found = data.find((inv) => meta(inv).wm_invoice_key === key && inv.status !== 'void');
+		if (found) return found;
+		if (list.has_more !== true) return null;
+		const last = data.at(-1);
+		// has_more with no usable cursor would page from the top again: refuse rather than loop.
+		if (!last || typeof last.id !== 'string' || !INVOICE_ID.test(last.id)) throw new StripeApiError(502, 'unexpected_response', 'data');
+		startingAfter = last.id;
+	}
+	logEvent('error', { event: 'stripe_invoice_lookup_too_many', pages: FIND_INVOICE_MAX_PAGES });
+	throw new StripeApiError(502, 'unexpected_response', 'invoice_pages');
 }
 
 /**
