@@ -7,13 +7,13 @@
 // The audit log is the record: append-only for water_app (030_history.sql),
 // staff-only (viewers and above; farmers and applicants read none of it),
 // kept for the life of the project, and pseudonymised on account deletion
-// (048). A farmer reads their own farm's line through GET
-// /projects/:id/farm/:nodeId/history, never this. docs/data-model.md
-// § Change history lists the fields.
+// (048). A farmer reads none of it: their farm page shows the current
+// publication's projection. docs/data-model.md § Change history lists the
+// fields.
 import type { FarmProjection, ModelBand, NoticeText, RestrictionLevel } from '@water-management/engine';
 import type { Publication } from './publish.js';
 
-/** One farm's figures in a publication: the farm history's (FarmHistoryEntry) own-farm fields, plus its id and name. Never the even share. */
+/** One farm's figures in a publication: its own-farm fields from the stored projection, plus its id and name. Never the even share. */
 export interface DecisionFarm {
 	nodeId: string;
 	name: string;

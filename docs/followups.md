@@ -7293,7 +7293,7 @@ assume, the questions for counsel); these are the actions, with triggers.
 
 ## Housekeeping
 
-- [ ] **Three routes with no client call (round 4 reports; operator
+- [x] **Three routes with no client call (round 4 reports; operator
       decision 2026-10-11, issue #90).** `POST /projects/:id/jobs`, and the
       farm `series` and `history` routes looked to have no caller in `frontend/src` (round 4 reports).
       **Durable fix:** for each, find a caller (a script, e2e, a planned
@@ -7301,6 +7301,17 @@ assume, the questions for counsel); these are the actions, with triggers.
       tests, its line in docs/api.md and its row in the route-auth inventory
       (`src/routes.test.ts`). **Trigger:** the next backend round; don't
       leave them undecided past it.
+      - [x] Done (2026-11-25): farm `series` removed. No caller in
+            `frontend/src`, `e2e/`, `scripts/` or `backend/scripts`; the
+            only external surface is `/ingest/v1` (planned-work.md § Public
+            API docs); the farm page charts its 12 months from the projection.
+      - [x] Done (2026-11-25): farm `history` removed. No caller anywhere,
+            and design/farmer-view.md §12 chose "compared with last season"
+            from `lastSeason`, not `/history`.
+      - [x] Done (2026-11-25): `POST /projects/:id/jobs` removed. No caller
+            outside backend DB tests, which now queue through `enqueueJob`;
+            not an integrator route. The `rerun` handler still runs a
+            `manual` job queued before the removal.
 - [ ] **A client navigation to a glossary topic once never committed
       (2026-10-30, seen once).** help.spec.ts › "a guide shows its diagrams
       and links into the glossary" failed once at load average ~70 (other

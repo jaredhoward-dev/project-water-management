@@ -110,7 +110,6 @@ export const SAMPLE: Record<string, (c: LadderCtx) => Sample> = {
 			statementSha256: '0'.repeat(64)
 		}
 	}),
-	'POST /projects/:id/jobs': () => ({ body: { kind: 'rerun', label: 'Ladder' } }),
 	'POST /projects/:id/yield': (c) => ({ body: { nodeId: c.farmId, runId: c.runId, kind: 'firm' } }),
 	'GET /projects/:id/yield': (c) => ({ query: { runId: c.runId } }),
 	'GET /projects/:id/yield/jobs': (c) => ({ query: { nodeId: c.farmId } }),

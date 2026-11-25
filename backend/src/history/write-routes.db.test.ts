@@ -986,7 +986,6 @@ const WRITE_ROUTES: Entry[] = [
 		exempt:
 			'asks the assistant and changes nothing the history covers: it reads the project and keeps only token and message counts (262_assistant_usage); a proposed settings change is applied by the settings PATCH, which records a revision'
 	},
-	{ route: `POST ${P}/jobs`, exempt: 'queues a model run; the run records run.created when it runs (runs/execute.ts storeRun)' },
 	{
 		route: `POST ${P}/auto-calibrations`,
 		exempt: 'queues a run of the calibration rules; nothing in the settings changes until its fit is applied, which records a revision'
