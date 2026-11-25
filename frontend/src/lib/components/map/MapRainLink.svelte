@@ -2,7 +2,8 @@
 	Whether a rain feed reads the Map's catchment boundary (issue #326 B-rain;
 	docs/ui.md § Map): for editors, while the map has a boundary, it reads the
 	feed list and says (`reads`) whether a CHIRPS feed reads the boundary
-	(`current`), read it before it was redrawn (`changed`), none does (`none`)
+	(`current`), read it before it was redrawn (`changed`; with the outline's
+	hash in the feed's mark, a rename or a relink isn't a redraw), none does (`none`)
 	or the list couldn't be read (`error`). The Map's Getting started pill
 	(MapSetupPill) shows the step and its link to Data → Data feeds; until
 	2026-10-02 this drew its own line above the map.
@@ -12,12 +13,12 @@
 	import { boundaryFeedState } from '../feeds/boundaryState';
 	import type { RainReads } from './mapSetup';
 
-	let { projectId, boundary, reads = $bindable(null) }: { projectId: string; boundary: Pick<MapFeature, 'id' | 'updatedAt'>; reads?: RainReads } = $props();
+	let { projectId, boundary, reads = $bindable(null) }: { projectId: string; boundary: Pick<MapFeature, 'id' | 'updatedAt' | 'geomHash'>; reads?: RainReads } = $props();
 
-	type Feeds = { feeds: { source: string; config: { boundary?: { featureId: string; updatedAt: string } } }[] };
+	type Feeds = { feeds: { source: string; config: { boundary?: { featureId: string; updatedAt: string; geomHash?: string } } }[] };
 
 	$effect(() => {
-		const b = { id: boundary.id, updatedAt: boundary.updatedAt };
+		const b = { id: boundary.id, updatedAt: boundary.updatedAt, geomHash: boundary.geomHash };
 		let live = true;
 		reads = null;
 		api

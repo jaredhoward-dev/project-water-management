@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { AlertEvent, AlertRule } from '#lib/api/types.js';
 import { eventKindName, eventText, feedbackKindName, feedbackRows, feedbackShare, feedRuleLabel, groupRules, outOfDateText, ruleChanges, seriesRuleLabel, thresholdFromInput, thresholdLabel, thresholdProblem, thresholdToInput } from './alerts';
 import { ApiError } from '#lib/api/client.js';
-import { choiceLabel, farmAlertText, feedbackThanks, fragmentAnswer, fragmentToken, modeLabel, resumeProblem, suppressedText, thresholdLine, unsubscribedText } from './words';
+import { capNotice, choiceLabel, farmAlertText, feedbackThanks, fragmentAnswer, fragmentToken, modeLabel, resumeProblem, suppressedText, thresholdLine, unsubscribedText } from './words';
 
 // A token's shape (43 base64url characters); low entropy, so no secret scanner mistakes it for a key.
 const TOKEN = 'a'.repeat(20) + '_-' + 'b'.repeat(21);
@@ -104,6 +104,15 @@ describe('the preferences page’s words', () => {
 				(k) => `You won’t get ${k} emails for R any more.`
 			)
 		);
+	});
+
+	// The cap is the server's (GET /me/alerts dailyCap, ALERTS_DAILY_CAP), not a copy of its default.
+	it('says the daily cap the server serves, in the right number, and that every mail waits when it is 0', () => {
+		const wait = 'Any more wait for the next morning’s summary (06:00).';
+		expect(capNotice(5)).toBe(`At most 5 alert emails a day come right away. ${wait}`);
+		expect(capNotice(12)).toBe(`At most 12 alert emails a day come right away. ${wait}`);
+		expect(capNotice(1)).toBe(`At most 1 alert email a day comes right away. ${wait}`);
+		expect(capNotice(0)).toBe('Every alert email waits for the next morning’s summary (06:00).');
 	});
 
 	it('says what the unsubscribe turned off', () => {

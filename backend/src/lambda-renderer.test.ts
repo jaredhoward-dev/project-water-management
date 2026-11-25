@@ -21,6 +21,7 @@ vi.mock('./reports/storage.js', async (orig) => ({
 
 const { handler } = await import('./lambda-renderer.js');
 const { RenderError } = await import('./reports/render.js');
+const { renderRequestId } = await import('./jobs/transport.js');
 
 afterEach(() => {
 	sent.length = 0;
@@ -34,10 +35,21 @@ afterEach(() => {
 
 const ids = { reportId: '00000000-0000-4000-8000-000000000001', projectId: '00000000-0000-4000-8000-000000000002', runId: '00000000-0000-4000-8000-000000000003' };
 const TOKEN = 'a'.repeat(43);
+// The request's id, echoed in every answer so the worker frees only that request's render slot (353).
+const RID = renderRequestId(TOKEN);
 const request = { v: 1, type: 'render', ...ids, token: TOKEN };
 const record = (messageId: string, body: unknown) => ({ messageId, body: typeof body === 'string' ? body : JSON.stringify(body) });
 
 describe('renderer Lambda', () => {
+	it('names each answer with a one-way digest of its request’s token, never the token or the token store’s hash', () => {
+		expect(RID).toMatch(/^[0-9a-f]{32}$/);
+		expect(RID).not.toContain(TOKEN);
+		expect(createHash('sha256').update(TOKEN).digest('hex')).not.toContain(RID);
+		// One request, one id; another token, another.
+		expect(renderRequestId(TOKEN)).toBe(RID);
+		expect(renderRequestId('b'.repeat(43))).not.toBe(RID);
+	});
+
 	it('renders, stores under the derived key, and answers with the outcome only (never the token)', async () => {
 		vi.stubEnv('RENDER_RESULTS_QUEUE_URL', 'https://sqs.example/render-results');
 		const log = vi.spyOn(console, 'info').mockImplementation(() => {});
@@ -47,7 +59,7 @@ describe('renderer Lambda', () => {
 		expect(renderReportPdf).toHaveBeenCalledWith({ projectId: ids.projectId, runId: ids.runId, token: TOKEN }, expect.objectContaining({ timeoutMs: 90_000 }));
 		expect(putPdf).toHaveBeenCalledWith(`reports/${ids.projectId}/${ids.reportId}.pdf`, expect.any(Buffer));
 		expect(sent).toEqual([
-			{ url: 'https://sqs.example/render-results', message: { v: 1, type: 'rendered', reportId: ids.reportId, result: { ok: true, pages: 9, bytes: 10, ms: 4200 } } }
+			{ url: 'https://sqs.example/render-results', message: { v: 1, type: 'rendered', reportId: ids.reportId, requestId: RID, result: { ok: true, pages: 9, bytes: 10, ms: 4200 } } }
 		]);
 		expect(JSON.stringify(log.mock.calls)).not.toContain(TOKEN);
 	});
@@ -58,7 +70,7 @@ describe('renderer Lambda', () => {
 		const res = await handler({ Records: [record('m1', request)] } as never);
 		expect(res).toEqual({ batchItemFailures: [] });
 		expect(putPdf).not.toHaveBeenCalled();
-		expect(sent[0]!.message).toEqual({ v: 1, type: 'rendered', reportId: ids.reportId, result: { ok: false, error: 'the render took longer than 90 s', retry: true } });
+		expect(sent[0]!.message).toEqual({ v: 1, type: 'rendered', reportId: ids.reportId, requestId: RID, result: { ok: false, error: 'the render took longer than 90 s', retry: true } });
 	});
 
 	it('says only "could not be stored" when storage fails', async () => {
@@ -121,6 +133,7 @@ describe('renderer Lambda', () => {
 			v: 1,
 			type: 'rendered',
 			reportId: ids.reportId,
+			requestId: RID,
 			result: { ok: false, error: 'the request waited too long in the queue: its render token expired', retry: true }
 		});
 		expect(warn).toHaveBeenCalledWith(JSON.stringify({ event: 'report_render_failed', reportId: ids.reportId, projectId: ids.projectId, reason: 'expired', retry: true }));
@@ -167,7 +180,7 @@ describe('renderer Lambda, an evidence pack', () => {
 		expect(sent).toEqual([
 			{
 				url: 'https://sqs.example/render-results',
-				message: { v: 1, type: 'rendered_pack', packId: pack.packId, result: { ok: true, pages: 12, bytes: bytes.length, ms: 3100, sha256: SHA } }
+				message: { v: 1, type: 'rendered_pack', packId: pack.packId, requestId: RID, result: { ok: true, pages: 12, bytes: bytes.length, ms: 3100, sha256: SHA } }
 			}
 		]);
 		expect(JSON.stringify(log.mock.calls)).not.toContain(TOKEN);
@@ -183,6 +196,7 @@ describe('renderer Lambda, an evidence pack', () => {
 			v: 1,
 			type: 'rendered_pack',
 			packId: pack.packId,
+			requestId: RID,
 			result: { ok: false, error: 'the render token was refused (used, expired, or the requester lost access)', retry: false }
 		});
 		expect(warn.mock.calls).toEqual([[JSON.stringify({ event: 'report_render_failed', packId: pack.packId, projectId: pack.projectId, reason: 'render', retry: false })]]);
@@ -213,6 +227,7 @@ describe('renderer Lambda, an evidence pack', () => {
 			v: 1,
 			type: 'rendered_pack',
 			packId: pack.packId,
+			requestId: RID,
 			result: { ok: false, error: 'the request waited too long in the queue: its render token expired', retry: true }
 		});
 	});
@@ -248,7 +263,7 @@ describe("renderer Lambda, an applicant's copy of a pack", () => {
 		expect(sent).toEqual([
 			{
 				url: 'https://sqs.example/render-results',
-				message: { v: 1, type: 'rendered_pack', packId: pack.packId, copy: 'applicant', result: { ok: true, pages: 3, bytes: bytes.length, ms: 900, sha256: SHA } }
+				message: { v: 1, type: 'rendered_pack', packId: pack.packId, copy: 'applicant', requestId: RID, result: { ok: true, pages: 3, bytes: bytes.length, ms: 900, sha256: SHA } }
 			}
 		]);
 	});

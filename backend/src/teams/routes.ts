@@ -12,6 +12,7 @@ import { requireOwnSecondFactor, requireTeamStepUp } from '../auth/stepUp.js';
 import { readJson } from '../http/body.js';
 import { teamName } from '../http/visibleName.js';
 import { recordTeamAudit } from '../history/record.js';
+import { leaveTeamProjects, lockTeamLeave } from './leaveProjects.js';
 import { cancelPlanAtProvider, teamBilling, TeamPlanNotCancelledError, uncancelled } from '../billing/cancelOnDelete.js';
 import { billingProvider } from '../billing/provider.js';
 import { applySettingsPatch, appliedThresholds, teamThresholds, TeamSettingsPatch } from './settings.js';
@@ -267,18 +268,27 @@ export const teamRoutes = new Hono<AuthEnv>()
 		});
 	})
 	.delete('/:id/members/:userId', async (c) => {
-		const { id, userId } = c.req.param();
+		const id = c.req.param('id');
+		// A uuid's case doesn't change whom it names: your own id in capitals is still you (leaving, not removing).
+		const userId = c.req.param('userId').toLowerCase();
+		const me = c.get('userId').toLowerCase();
+		const self = userId === me;
 		return withUser(c.get('userId'), async (db) => {
 			const role = await requireTeamRole(db, id, 'viewer');
-			if (userId !== c.get('userId') && role !== 'admin') throw new ApiError(403, 'requires team admin');
+			if (!self && role !== 'admin') throw new ApiError(403, 'requires team admin');
 			// Removing someone else is a team admin's action: two-step sign-in where the team requires it (auth/stepUp.ts). Leaving isn't.
-			if (userId !== c.get('userId')) await requireTeamStepUp(db, id);
+			if (!self) await requireTeamStepUp(db, id);
 			if (!UUID.test(userId)) throw new ApiError(404, 'not found');
+			// One removal from this team at a time, before anything is read (leaveProjects.ts).
+			await lockTeamLeave(db, id);
 			await assertNotLastAdmin(db, id, userId);
 			// Recorded before the row goes, while the leaver can still write events on the team's projects.
 			const subject = await memberSubject(db, id, userId);
 			if (!subject) throw new ApiError(404, 'not found');
-			await recordTeamAudit(db, id, 'team_member.removed', { ...subject, self: userId === c.get('userId') });
+			await recordTeamAudit(db, id, 'team_member.removed', { ...subject, self });
+			// Their direct roles on the team's projects go too, the ones they created included; a
+			// project they alone owned directly passes to a team admin (leaveProjects.ts, 2026-11-24).
+			await leaveTeamProjects(db, id, String(subject.team), userId, me);
 			const { rowCount } = await db.query('DELETE FROM team_member WHERE team_id = $1 AND user_id = $2', [id, userId]);
 			if (!rowCount) throw new ApiError(404, 'not found');
 			return c.body(null, 204);

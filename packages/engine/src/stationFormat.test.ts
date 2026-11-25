@@ -246,6 +246,41 @@ describe('running totals', () => {
 			expect(d.values).toEqual([2, null, null]);
 		}
 	});
+	it('makes a silent day a gap, and the day the rise from before it lands on too (engine ≥ 1.119.0)', () => {
+		// Readings 10, 10, 12 on the 1st, nothing at all on the 2nd, then 20 and 21 on the 3rd.
+		const text = obs([
+			['2024-02-29T23:30:00Z', 10],
+			['2024-03-01T00:30:00Z', 10],
+			['2024-03-01T12:00:00Z', 12],
+			['2024-03-03T12:00:00Z', 20],
+			['2024-03-03T18:00:00Z', 21]
+		]);
+		// The 12 → 20 rise holds the 2nd's rain, which no reading split: never [2, 0, 9] ('zero') nor [2, null, 9] ('gap').
+		for (const g of [f, { ...f, noReadingsMeans: 'zero' as const }]) {
+			const d = stationDays(readStationAnswer(text, g), g, '2024-03-01', '2024-03-03', LATER);
+			expect(d.values).toEqual([2, null, null]);
+			expect(d.gaps).toBe(2);
+		}
+		// Positive control: the same readings on consecutive days keep every day's rain.
+		const next = obs([
+			['2024-02-29T23:30:00Z', 10],
+			['2024-03-01T00:30:00Z', 10],
+			['2024-03-01T12:00:00Z', 12],
+			['2024-03-02T12:00:00Z', 20],
+			['2024-03-02T18:00:00Z', 21]
+		]);
+		for (const g of [f, { ...f, noReadingsMeans: 'zero' as const }]) expect(stationDays(readStationAnswer(next, g), g, '2024-03-01', '2024-03-02', LATER).values).toEqual([2, 9]);
+		// A total unchanged across the silence says no rain fell: the silent day is 0 for a logger whose silence means 0.
+		const dry = obs([
+			['2024-02-29T23:30:00Z', 10],
+			['2024-03-01T12:00:00Z', 12],
+			['2024-03-03T12:00:00Z', 12],
+			['2024-03-03T18:00:00Z', 13]
+		]);
+		const z = { ...f, noReadingsMeans: 'zero' as const };
+		expect(stationDays(readStationAnswer(dry, z), z, '2024-03-01', '2024-03-03', LATER).values).toEqual([2, 0, 1]);
+		expect(stationDays(readStationAnswer(dry, f), f, '2024-03-01', '2024-03-03', LATER).values).toEqual([2, null, 1]);
+	});
 	it('keeps a rise across a missing reading inside the day it ends in, and gaps the missing readings left at the end', () => {
 		const text = JSON.stringify({ obs: [['2024-02-29T23:30:00Z', 10], ['2024-03-01T06:00:00Z', null], ['2024-03-01T12:00:00Z', 12], ['2024-03-02T12:00:00Z', 13]].map(([t, total]) => ({ t: at(t as string) / 1000, total })) });
 		const d = stationDays(readStationAnswer(text, f), f, '2024-03-01', '2024-03-02', LATER);

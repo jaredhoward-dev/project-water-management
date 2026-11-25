@@ -1,6 +1,6 @@
 // Alert routes (roadmap WP-2.13, docs/api.md § Alerts):
 //
-//   GET  /me/alerts                       your alert choices, per project and kind
+//   GET  /me/alerts                       your alert choices, per project and kind, and the daily cap
 //   PUT  /me/alerts/:projectId            change them (immediate / daily / off)
 //   POST /me/alerts/resume                turn alert mail back on after SES suppressed the address
 //   GET  /projects/:id/alert-rules        the project's rules (editor)
@@ -29,7 +29,7 @@ import { rank, requireRole, UUID, type Role } from '../projects/access.js';
 import { feedLabel, keyFedSeriesSql, newestForecast, seriesLabel, type ForecastOutOfDate } from './evaluate.js';
 import { DEFAULT_TIME_ZONE } from '../projects/timeZone.js';
 import { queueAlertEval } from './queue.js';
-import { ALERT_KINDS, ALERT_MODES, DEFAULT_THRESHOLDS, defaultMode, SERIES_STALE_ALERT_DAYS, THRESHOLD, type AlertKind, type AlertMode } from './rules.js';
+import { ALERT_KINDS, ALERT_MODES, dailyCap, DEFAULT_THRESHOLDS, defaultMode, SERIES_STALE_ALERT_DAYS, THRESHOLD, type AlertKind, type AlertMode } from './rules.js';
 import { newNonce } from './tokens.js';
 import { logEvent } from '../logging/logEvent.js';
 
@@ -189,7 +189,7 @@ export const meAlertRoutes = new Hono<AuthEnv>()
 		withUser(c.get('userId'), async (db) => {
 			const projects = [];
 			for (const p of await myProjects(db)) projects.push(await projectAlerts(db, p));
-			return c.json({ projects });
+			return c.json({ projects, dailyCap: dailyCap() });
 		})
 	)
 	.put('/alerts/:projectId', async (c) => {

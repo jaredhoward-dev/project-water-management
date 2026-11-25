@@ -430,7 +430,34 @@ R1](./design/planning-outputs.md#31-r1-a-demandscale-scenario-op-foundation-s)).
   and January of 2021 only), and dated ops stack with each other and with
   undated ones. Without dates the op sets `demandFactor` exactly as before,
   and a run without a dated op is the one before 1.82.0, to the bit. A
-  window that lies outside the run scales nothing. The input diff reports it
+  window that would change no day is refused (engine ≥ 1.119.0), as a
+  `series.scale` whose dates miss its series is: one whose `months` never
+  fall between its `from` and `to` (December–February from 1 March to 30
+  November), whatever the run, and one none of whose days (or none of
+  whose months' days) a run of the input can cover. Engine 1.82.0–1.118.0
+  applied such an op, so the scenario said demand changed while its run
+  equalled its base. What a run can cover is an outer bound of its window,
+  taken from the input as the ops before the op leave it: the simulation
+  start and end when set, else the span of the rain that drives the run
+  (the catchment rain or its station's record, CHIRPS, the forecast, the
+  gap-filling products' ends and rain-source periods: `rainDriverSpan`, the
+  span `prepareRun` starts the window from), never a longer flow or A-pan
+  record; and only from `settings.demandFactorFrom` when that is later, as
+  in a seasonal outlook member, whose demand factors start at the decision
+  date, so an outlook level whose dated op falls outside the season is
+  reported as a problem and not run. The ops apply in
+  order, so a `settings.set` of `simulationStart`/`simulationEnd` that
+  brings the window into the run must come before the op; one after it
+  doesn't rescue it, and one after it that moves the run away from an
+  accepted window isn't refused (its window then scales nothing, as
+  before). An input with no series and no dates set checks only the months
+  against the dates. Since the check reads the base's simulation dates and
+  series span, not just the op, a saved scenario's verdict can change with
+  its base's data: a window accepted today is refused (reported as the
+  scenario's problem, and its run refused) once the base's dates are moved
+  or its series are cut back so that no day of the window is left, and one
+  refused today is accepted once the data reaches it, with no edit to the
+  scenario. The input diff reports it
   (`dated demand factors none → 2021-10-01 – 2022-09-30 × 1.3`), the
   self-check replays it, a warm start counts a window starting before the
   snapshot day as history, and the drought restriction rule built from the
@@ -458,7 +485,12 @@ R1](./design/planning-outputs.md#31-r1-a-demandscale-scenario-op-foundation-s)).
 - **Problems** (the op is skipped): a factor outside 0–2; an empty or
   repeating `nodeIds` or `months` (leave the field out for all of them); a
   month outside 1–12; a category other than the two; a `from` or `to` that
-  isn't an ISO date, or `from` after `to`; a node id the input
+  isn't an ISO date, or `from` after `to`; dates that would change no day
+  (above: `its months (Jun, Jul) never fall between 1 Oct 2021 and 31 Dec
+  2021, so it would change no day`, `no day the run can cover (1 Oct 2020 –
+  12 Feb 2022) falls in 1 Jan 2030 – its end, so it would change no day`,
+  `none of its months (Jun) falls on a day the run can cover between …`;
+  engine ≥ 1.119.0); a node id the input
   doesn't have (`node … not found`); a node of another kind (`"Town" is an
   other water user, not a farm`); no node of the category at all when
   `nodeIds` is left out (`the model has no other water user to scale`). The
@@ -899,7 +931,10 @@ window's eight known fields.
   intersecting, a whole-run window equal to the undated op to the bit, the
   dry-year stress's per-year ops stacking on an undated one, a user's and a
   part's (an object's floor too), the validator's date errors and the input
-  diff; and
+  diff, and (engine ≥ 1.119.0) a window that would change no day refused:
+  months never between its dates, dates outside the run either side, months
+  only past the run's end, one day inside enough, no series to bound it, and
+  the simulation period as the ops before it leave it; and
   `ewrRule.set`'s (engine ≥ 1.6.0): the outlet's table replaced however it
   is keyed, a gauge's added then replaced, the run assessing the scenario's
   table, the problems, always baseline (masked too), the input diff, and the
@@ -1983,6 +2018,18 @@ scenario is `'team'`, and behaves exactly as above).
     land cover, boreholes and demand objects as the base projection shows
     them, where an item an op added under a hidden item's id (the run holds
     it under a fresh one) shows under the id the applicant gave it.
+
+  The run reads **current** (`run.current`) only while the application's
+  ops (their hash), its base run and its own units (as the applicant reads
+  them now, in any order) are the ones the run recorded
+  (`inputs.scenario`): a farm unlinked since moves the ops on it from the
+  proposal to another's, so a run classed under the old units is no longer
+  the application as it stands, though its ops and base didn't change.
+  Relinking it makes the run current again. A run recorded before the run
+  stored its own units (`inputs.scenario` without `ownedNodeIds`) is read
+  as having none (`scenarios/results.ts`, `?? []`), so for an application
+  with own units it reads **not current** until it is run again, though
+  nothing changed; one with no own units still reads current.
 
   **The application's side only when every op was a proposal**
   (`app_run_all_proposals`, the share link's rule). A baseline assumption

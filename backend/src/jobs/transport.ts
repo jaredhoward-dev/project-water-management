@@ -6,6 +6,7 @@
 // have no database, import this module (lambda-fetcher.test.ts guards it).
 //
 // The AWS SDK is imported lazily, so local dev and tests never load it.
+import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { FetchRequestSchema } from '../feeds/fetch.js';
 
@@ -87,11 +88,26 @@ export const RenderResult = z.discriminatedUnion('ok', [
 ]);
 export type RenderResult = z.output<typeof RenderResult>;
 
+/**
+ * Which request an answer is for (353_render_slot; reports/renderSlots.ts):
+ * a digest of the request's render token, so the request itself needs no new
+ * field (a renderer older than it would refuse one). The worker names its
+ * render slot with it before sending, the renderer echoes it in its answer,
+ * and only the answer that carries it frees the slot. One-way and
+ * domain-separated: it can't be turned back into the token, nor matched
+ * against the token store's own hash.
+ */
+export const renderRequestId = (token: string): string => createHash('sha256').update(`render-slot\0${token}`).digest('hex').slice(0, 32);
+
+/** The echoed request id. Optional: an answer from a renderer older than 353 has none (renderSlots.ts freeRenderSlot). */
+const RequestId = z.string().regex(/^[0-9a-f]{32}$/);
+
 export const RenderResultMessage = z
 	.object({
 		v: z.literal(1),
 		type: z.literal('rendered'),
 		reportId: Uuid,
+		requestId: RequestId.optional(),
 		result: RenderResult
 	})
 	.strict();
@@ -140,6 +156,7 @@ export const PackRenderResultMessage = z
 		packId: Uuid,
 		/** The answer is about an applicant's copy (165), not the pack's own PDF. */
 		copy: z.literal('applicant').optional(),
+		requestId: RequestId.optional(),
 		result: PackRenderResult
 	})
 	.strict();

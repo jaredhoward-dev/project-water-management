@@ -464,6 +464,11 @@ export function stationDays(r: StationReadings, f: StationFormat, from: string, 
 		}
 	} else if (f.valueKind === 'cumulative') {
 		let prev: number | null = null;
+		// The rain day of the last reading read (null before the first, and after a no-data code). A logger that sends
+		// nothing for a whole rain day (engine ≥ 1.119.0) leaves the same unsplit boundary as one that sends null readings:
+		// a rise from a reading two or more rain days back holds the silent days' rain, so they and the rise's own day
+		// are gaps. An unchanged total is the exception: no rain fell across the silence, so the days stand (0 rain).
+		let prevDay: number | null = null;
 		// The rain day of the first missing reading since the last one read (null when none is missing). A rise across
 		// missing readings is still the rain between the two it spans, so it stands when they fall in the day it ends
 		// in; when one falls in an earlier day, the rise holds rain of a day boundary no reading split, and every day
@@ -483,14 +488,18 @@ export function stationDays(r: StationReadings, f: StationFormat, from: string, 
 			}
 			if (x.value < 0) {
 				prev = null;
+				prevDay = null;
 				breakDays(missingFrom ?? day, day);
 				missingFrom = null;
 				continue;
 			}
-			const lost = missingFrom !== null && missingFrom < day;
-			if (lost) breakDays(missingFrom!, day);
+			const silent = prev !== null && prevDay !== null && day - prevDay >= 2 && x.value !== prev;
+			const lostFrom = Math.min(missingFrom !== null && missingFrom < day ? missingFrom : Infinity, silent ? prevDay! + 1 : Infinity);
+			const lost = lostFrom !== Infinity;
+			if (lost) breakDays(lostFrom, day);
 			const rise = prev === null || lost ? null : x.value >= prev ? x.value - prev : x.value;
 			prev = x.value;
+			prevDay = day;
 			missingFrom = null;
 			const i = day - a;
 			if (i < 0 || i >= n) continue;

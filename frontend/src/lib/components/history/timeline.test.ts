@@ -103,6 +103,17 @@ describe('what an item says', () => {
 		);
 		expect(eventLine(ev('member.role', { displayName: 'Ben', from: 'viewer', to: 'editor' }))).toBe('Changed Ben’s role from viewer to editor');
 		expect(eventLine(ev('member.role', { displayName: 'Ben', from: 'viewer', to: 'contributor' }))).toBe('Changed Ben’s role from viewer to applicant');
+		// Leaving a team takes the direct role on its projects too; a project they alone owned passes to a team admin (2026-11-24).
+		expect(eventLine(ev('member.removed', { displayName: 'Ben', role: 'owner', self: true, team: 'Upper WUA', leftTeam: true }))).toBe(
+			'Ben left the project (owner) on leaving the team “Upper WUA”'
+		);
+		expect(eventLine(ev('member.removed', { displayName: 'Ben', role: 'editor', self: false, team: 'Upper WUA', leftTeam: true }))).toBe(
+			'Removed Ben (editor) with their removal from the team “Upper WUA”'
+		);
+		expect(eventLine(ev('member.added', { displayName: 'Ann', role: 'owner', handedFrom: 'Ben' }))).toBe('Made Ann an owner, in place of Ben, who left the team');
+		expect(eventLine(ev('member.role', { displayName: 'Ann', from: 'editor', to: 'owner', handedFrom: 'Ben' }))).toBe(
+			'Changed Ann’s role from editor to owner, in place of Ben, who left the team'
+		);
 		expect(eventLine(ev('invite.sent', { email: 'j•••@example.com', role: 'admin' }))).toBe('Invited j•••@example.com as owner');
 		expect(eventLine(ev('member.party', { displayName: 'Ben', from: null, to: 'Rooikloof Trust' }))).toBe('Put Ben in the applying party Rooikloof Trust');
 		expect(eventLine(ev('member.party', { displayName: 'Ben', from: 'Rooikloof Trust', to: null }))).toBe('Took Ben out of the applying party Rooikloof Trust');
@@ -278,6 +289,10 @@ describe('what an item says', () => {
 		const units = ['Upper', 'Middle', 'Lower', 'Spring'].map((name, i) => ({ nodeId: `n${i}`, name, feedId: `f${i}`, action: i ? 'created' : 'updated', cells: 2 }));
 		expect(eventLine(ev('feed.configured', { action: 'units', source: 'chirps', targetKind: 'rain_chirps_mm', product: 'rnl', startDate: '1981-01-01', created: 3, updated: 1, units }))).toBe(
 			'Set up rain for each unit: CHIRPS rnl feeds for 4 units (Upper, Middle, Lower and 1 more), 3 created, 1 updated, from 1 Jan 1981'
+		);
+		// A feed whose mark alone was rewritten (followups F7b).
+		expect(eventLine(ev('feed.configured', { action: 'units', source: 'chirps', targetKind: 'rain_chirps_mm', product: 'rnl', startDate: '1981-01-01', created: 0, updated: 0, marked: 1, units: units.slice(0, 1) }))).toBe(
+			'Set up rain for each unit: CHIRPS rnl feeds for 1 unit (Upper), 1 outline record updated, from 1 Jan 1981'
 		);
 		expect(eventLine(ev('feed.configured', { action: 'units', source: 'chirps', targetKind: 'rain_chirps_mm', product: 'sat', startDate: '1998-01-01', created: 1, updated: 0, units: units.slice(0, 1) }))).toBe(
 			'Set up rain for each unit: CHIRPS sat feeds for 1 unit (Upper), 1 created, from 1 Jan 1998'

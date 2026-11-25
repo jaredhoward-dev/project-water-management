@@ -10,7 +10,7 @@ import { anon, app, asOwner, lastMailTo, monthly, node, retirePendingJobs, signU
 import { newToken } from '../auth/tokens.js';
 import { withUser } from '../db/tx.js';
 import { reportRenderHandler } from '../jobs/handlers/report-render.js';
-import { acceptRenderResult, SCHEDULE_NO_ACCESS, SCHEDULE_NO_RUNS, scheduleDueReports } from './schedule.js';
+import { acceptRenderResult, SCHEDULE_FAILED, SCHEDULE_NO_ACCESS, SCHEDULE_NO_RUNS, scheduleDueReports } from './schedule.js';
 import { createReport, finishReport, loadReport, REPORTS_PER_HOUR } from './store.js';
 import { cannedPolicy } from './cloudfrontSign.js';
 import { issueRenderToken } from './tokens.js';
@@ -806,6 +806,54 @@ describe('report schedules', () => {
 		expect(rows.every((x) => x.claimed)).toBe(true);
 		expect(await asOwner('SELECT id FROM report WHERE project_id = ANY($1)', [[empty, projectId]])).toEqual([]);
 		await asOwner('DELETE FROM report_schedule WHERE id = ANY($1)', [[s1.id, s2.id]]);
+	});
+
+	it('one schedule whose report can’t be queued doesn’t stop the others: it says why, and its next time works', async () => {
+		const owner = await signUp('IsoOwner');
+		const made = [];
+		for (const name of ['Iso A', 'Iso B', 'Iso C']) {
+			const { projectId } = await withRun(owner, name);
+			const s = (await owner.call('POST', `/projects/${projectId}/report-schedules`, weekly([owner.id]))).body.schedule;
+			made.push({ projectId, id: s.id as string });
+		}
+		const ids = made.map((m) => m.id);
+		await asOwner(`UPDATE report_schedule SET anchor_at = now() - interval '21 days' WHERE id = ANY($1)`, [ids]);
+		// The tick reads schedules by id: the first one fails, so the others come after it.
+		const bad = [...made].sort((a, b) => (a.id < b.id ? -1 : 1))[0]!;
+		const good = made.filter((m) => m !== bad);
+		// The seam: the database refuses that project's report row, as any unexpected error in createReport would.
+		await asOwner(`CREATE FUNCTION test_refuse_report() RETURNS trigger LANGUAGE plpgsql SET search_path = public AS $$
+			BEGIN
+				IF NEW.project_id = '${bad.projectId}' THEN RAISE EXCEPTION 'secret detail: relation xyz' USING ERRCODE = 'XX000'; END IF;
+				RETURN NEW;
+			END $$`);
+		await asOwner('CREATE TRIGGER test_refuse_report BEFORE INSERT ON report FOR EACH ROW EXECUTE FUNCTION test_refuse_report()');
+		let r;
+		try {
+			r = await scheduleDueReports();
+		} finally {
+			await asOwner('DROP TRIGGER test_refuse_report ON report');
+			await asOwner('DROP FUNCTION test_refuse_report()');
+		}
+		expect(r.failed).toBeGreaterThanOrEqual(1);
+		expect(r.queued).toBeGreaterThanOrEqual(2);
+		const reports = await asOwner('SELECT project_id, schedule_id FROM report WHERE project_id = ANY($1)', [made.map((m) => m.projectId)]);
+		expect(reports.map((x) => x.schedule_id).sort()).toEqual(good.map((m) => m.id).sort());
+		// Nothing half-made for the failing one: no job left without its report.
+		expect(await asOwner('SELECT id FROM job WHERE project_id = $1', [bad.projectId])).toEqual([]);
+		// The members see a fixed reason, never the database's text.
+		const listed = (await owner.call('GET', `/projects/${bad.projectId}/report-schedules`)).body.schedules[0];
+		expect(listed.lastError).toBe(SCHEDULE_FAILED);
+		expect(JSON.stringify(listed)).not.toContain('secret detail');
+		for (const g of good) expect((await owner.call('GET', `/projects/${g.projectId}/report-schedules`)).body.schedules[0].lastError).toBeNull();
+
+		// The next scheduled time (as if the failure was last week) queues normally and clears the reason.
+		await asOwner(`UPDATE report_schedule SET last_fired_for = last_fired_for - interval '7 days' WHERE id = $1`, [bad.id]);
+		await scheduleDueReports();
+		expect(await asOwner('SELECT schedule_id FROM report WHERE project_id = $1', [bad.projectId])).toEqual([{ schedule_id: bad.id }]);
+		expect((await owner.call('GET', `/projects/${bad.projectId}/report-schedules`)).body.schedules[0].lastError).toBeNull();
+		await asOwner('DELETE FROM job WHERE project_id = ANY($1)', [made.map((m) => m.projectId)]);
+		await asOwner('DELETE FROM report_schedule WHERE id = ANY($1)', [ids]);
 	});
 });
 

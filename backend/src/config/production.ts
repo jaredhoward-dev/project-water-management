@@ -436,6 +436,7 @@ export const SETTINGS: Record<string, Setting> = {
 	// --- Alerts ----------------------------------------------------------------------------
 	ALERTS_TOKEN_SECRET: { why: 'Signs unsubscribe and “Was this useful?” links; only the worker signs (the API checks a link by its hash). From the worker’s runtime secret.', checks: { worker: secret(32) } },
 	ALERTS_ENABLED: { why: 'The alert-email kill switch: the worker must be told explicitly (Terraform var.alerts_enabled).', checks: { worker: decision } },
+	RENDER_CONCURRENCY: { why: 'How many render requests the worker keeps in flight (render slots, reports/renderSlots.ts); Terraform sets it from local.renderer_concurrency, the renderer trigger’s own maximum, and the code default (2) is that same number, so unset is safe.' },
 	ALERTS_DAILY_CAP: { why: 'Per-person immediate mails a day; the code default (5) is safe.' },
 	API_PUBLIC_URL: {
 		why: 'Where a mail client posts the one-click unsubscribe; defaults to SITE_URL/api.',

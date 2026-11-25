@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const { calls } = vi.hoisted(() => ({
-	calls: { sent: [] as unknown[], tokens: [] as { projectId: string; packId: string }[], enqueued: [] as Record<string, unknown>[], puts: [] as { key: string; sha256: string }[] }
+	calls: { sent: [] as unknown[], slots: [] as string[], tokens: [] as { projectId: string; packId: string }[], enqueued: [] as Record<string, unknown>[], puts: [] as { key: string; sha256: string }[] }
 }));
 const renderReportPdf = vi.fn();
 vi.mock('../../reports/render.js', async (orig) => ({ ...(await orig<typeof import('../../reports/render.js')>()), renderReportPdf: (...a: unknown[]) => renderReportPdf(...a) }));
@@ -24,10 +24,16 @@ vi.mock('../transport.js', async (orig) => ({
 	...(await orig<typeof import('../transport.js')>()),
 	sendToQueue: async (_url: string | undefined, _name: string, message: unknown) => void calls.sent.push(message)
 }));
+vi.mock('../../reports/renderSlots.js', async (orig) => ({
+	...(await orig<typeof import('../../reports/renderSlots.js')>()),
+	// The slot itself is a database's (reports/renderSlots.db.test.ts): here it is always free, and named.
+	sendWithSlot: async (target: string, _jobId: string, issue: () => Promise<string>, send: (token: string) => Promise<void>) => (calls.slots.push(target), send(await issue()))
+}));
 vi.mock('../queue.js', () => ({ enqueueJob: async (_db: unknown, j: Record<string, unknown>) => (calls.enqueued.push(j), { job: { id: 'j2' }, created: true }) }));
 
 const { applicantPackRenderHandler } = await import('./applicant-pack-render.js');
 const { JobError } = await import('../errors.js');
+const { STALE_REQUEST_ERROR } = await import('../../reports/render.js');
 
 const P = '00000000-0000-4000-8000-000000000002';
 const K = '00000000-0000-4000-8000-000000000006';
@@ -46,7 +52,7 @@ function db(o: { party?: boolean; recordedAlready?: boolean } = {}) {
 			if (sql.includes('app_applicant_pack_meta')) return { rows: [{ m: o.party === false ? null : { scenarioId: S } }] };
 			if (sql.includes('FROM evidence_pack_applicant_copy')) return { rows: o.recordedAlready ? [{}] : [] };
 			if (sql.includes('app_record_applicant_pack_pdf')) return { rows: [{ recorded: true }] };
-			if (sql.includes('count(*)')) return { rows: [{ n: 1 }] };
+			if (sql.includes('count(*)')) return { rows: [{ made: 1, requeued: 0 }] };
 			throw new Error(`unexpected query: ${sql}`);
 		}
 	};
@@ -57,6 +63,7 @@ const recorded = (d: ReturnType<typeof db>) => d.queries.filter((q) => q.sql.inc
 
 afterEach(() => {
 	calls.sent.length = 0;
+	calls.slots.length = 0;
 	calls.tokens.length = 0;
 	calls.enqueued.length = 0;
 	calls.puts.length = 0;
@@ -90,6 +97,7 @@ describe('applicant_pack_render', () => {
 		vi.stubEnv('RENDER_REQUESTS_QUEUE_URL', 'https://sqs.example/render-requests');
 		await run(db());
 		expect(calls.sent).toEqual([{ v: 1, type: 'render_pack', packId: K, projectId: P, scenarioId: S, token: 'T'.repeat(43) }]);
+		expect(calls.slots).toEqual([`applicant_pack:${K}`]);
 		vi.spyOn(console, 'info').mockImplementation(() => {});
 		const d = db();
 		await run(d, { packId: K, result: { ok: true, pages: 3, bytes: bytes.length, ms: 500, sha256: SHA } });
@@ -104,5 +112,8 @@ describe('applicant_pack_render', () => {
 		// A retryable failure asks again, delayed.
 		await run(db(), { packId: K, result: { ok: false, error: 'timed out', retry: true } });
 		expect(calls.enqueued).toEqual([expect.objectContaining({ kind: 'applicant_pack_render', payload: { packId: K }, dedupeKey: `applicant_copy_retry:${K}:u1:1` })]);
+		// One that only waited past its token's life (nothing rendered) asks again at once, keyed apart: not counted.
+		await run(db(), { packId: K, result: { ok: false, error: STALE_REQUEST_ERROR, retry: true } });
+		expect(calls.enqueued[1]).toEqual({ projectId: P, kind: 'applicant_pack_render', payload: { packId: K }, dedupeKey: `applicant_copy_requeue:${K}:u1:0`, maxAttempts: 3 });
 	});
 });

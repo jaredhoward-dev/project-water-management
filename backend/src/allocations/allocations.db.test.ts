@@ -15,7 +15,7 @@
 import { allocationStatus, compareAllocations, type AllocationComparison, type AllocationStatus } from '@water-management/engine';
 import { readFileSync } from 'node:fs';
 import pg from 'pg';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, onTestFinished, vi } from 'vitest';
 
 // The report job's render request (REPORT_RENDERER=sqs in the render-claim test): captured, never sent.
 const { sent } = vi.hoisted(() => ({ sent: [] as Record<string, unknown>[] }));
@@ -137,6 +137,25 @@ describe('importing a WARMS extract', () => {
 		const res = await editor.call('POST', `/projects/${projectId}/allocations/import`, importBody({ fileName: 'renamed.csv' }));
 		expect(res.status).toBe(409);
 		expect(res.body.error).toMatch(/already imported \(as “warms-synthetic\.csv” on 26 Sep 2026\)/);
+	});
+
+	it('marks a row already in the project the way it matches one: case, ends and repeated spaces aside', async () => {
+		const created = await editor.call('POST', `/projects/${projectId}/allocations`, {
+			nodeId: farmB.id,
+			registrationNo: 'SPC 001',
+			authorisation: 'licence',
+			waterSource: 'surface',
+			volumeM3PerYear: 10
+		});
+		expect(created.status, JSON.stringify(created.body)).toBe(201);
+		onTestFinished(async () => void (await editor.call('DELETE', `/projects/${projectId}/allocations/${created.body.allocation.id}`)));
+		const text = 'registration_no,farm,authorisation,water_source,volume_m3_year\nspc   001,,licence,surface,5\nSPC 002,,licence,surface,5\n';
+		const res = await editor.call('POST', `/projects/${projectId}/allocations/import`, importBody({ kind: 'csv', fileName: 'spaces.csv', text }));
+		expect(res.status, JSON.stringify(res.body)).toBe(200);
+		expect(res.body.rows.map((r: { registrationNo: string; nodeId: string | null; alreadyInProject: boolean }) => [r.registrationNo, r.nodeId, r.alreadyInProject])).toEqual([
+			['spc   001', farmB.id, true],
+			['SPC 002', null, false] // control: a number not in the project
+		]);
 	});
 
 	it('undoes an import with its rows, and allows it again after', async () => {
@@ -1501,6 +1520,8 @@ describe('no viewer GET carries a registered volume while the owners keep them f
 
 		beforeAll(() => {
 			vi.stubEnv('REPORT_RENDERER', 'sqs');
+			// No answer ever comes here to free a render slot (353): room for every request this file sends.
+			vi.stubEnv('RENDER_CONCURRENCY', '100');
 			vi.stubEnv('RENDER_REQUESTS_QUEUE_URL', 'http://queue.test/render-requests');
 		});
 		afterAll(async () => {

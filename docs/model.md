@@ -334,7 +334,19 @@ Sheets `[Crop demand]` → `[Farm demand]` → `[Irrigation Demand]`.
    A demand object's factor and an other water user's take them the same
    way, through the same basic-needs floor. A node with no window runs as
    before, to the bit. This is what limits the dry-year stress's extra
-   demand to the named drought years (scenarios.md § Combined what-ifs).
+   demand to the named drought years (scenarios.md § Combined what-ifs). A
+   `demand.scale` whose window would change no day (its months never
+   between its dates, or no day of it the run applies demand factors on) is
+   refused as a problem from engine 1.119.0 (scenarios.md § Demand
+   scaling). The run's days are bounded by the simulation start and end
+   when set, else by the span of the rain that drives the run (the same
+   span the run window starts from, `rainDriverSpan` in `driverSpan.ts`: the
+   catchment rain or its station's record, CHIRPS, the forecast, the
+   gap-filling products' ends, rain-source periods), never by a longer flow
+   or A-pan record; and from `settings.demandFactorFrom` when that is later
+   (a seasonal outlook member's decision date, §2.15). The run
+   itself is unchanged: a window stored on a node outside the run still
+   scales nothing.
 
 5. **Abstraction demand (engine ≥ 0.16.0, [audit N1](./engine-audit.md))**:
    the farm abstracts enough to cover its application losses,

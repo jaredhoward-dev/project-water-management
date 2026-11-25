@@ -8,6 +8,9 @@
 //                        schedule's acting user, under RLS, emailed to its
 //                        recipients. The claim makes it once per time, and the
 //                        job's dedupe key (schedule + time) backs that up.
+//                        Each schedule is handled on its own: one that throws
+//                        is logged, gets a fixed reason (SCHEDULE_FAILED), and
+//                        the rest of the tick goes on.
 //   acceptRenderResult   the production worker, for each `render-results`
 //                        message: queue the follow-up report_render job that
 //                        records the answer, as the report's requester.
@@ -22,6 +25,8 @@
 import { withoutUser, withUser } from '../db/tx.js';
 import { applicantCopyResultDedupeKey } from '../evidence/applicantCopy.js';
 import { enqueueJob } from '../jobs/queue.js';
+import { logEvent } from '../logging/logEvent.js';
+import { safeError } from '../logging/safeError.js';
 import type { PackRenderResultMessage, RenderResultMessage } from '../jobs/transport.js';
 import { dueFireAt } from './due.js';
 import { deletePdf, REPORT_RETENTION_DAYS, reportKey, storageKind } from './storage.js';
@@ -31,6 +36,8 @@ export interface ReportScheduleResult {
 	queued: number;
 	/** Due times that queued nothing (no runs, the acting user lost access): recorded on the schedule. */
 	skipped: number;
+	/** Schedules whose turn threw (queuing the report, or the claim): logged, a fixed reason recorded, the rest of the tick goes on. */
+	failed: number;
 }
 
 interface ScheduleRow {
@@ -49,6 +56,7 @@ interface ScheduleRow {
 /** Fixed reasons a due time queued nothing (shown to the project's members). */
 export const SCHEDULE_NO_RUNS = 'the project had no runs to report on';
 export const SCHEDULE_NO_ACCESS = 'the editor who saved this schedule can no longer edit the project: an editor must save it again';
+export const SCHEDULE_FAILED = 'the report could not be queued because of an error on our side; the next scheduled time will try again';
 
 export async function scheduleDueReports(now = new Date()): Promise<ReportScheduleResult> {
 	const { rows } = await withoutUser((db) =>
@@ -58,7 +66,8 @@ export async function scheduleDueReports(now = new Date()): Promise<ReportSchedu
 			 FROM app_report_schedules_to_check()`
 		)
 	);
-	const out: ReportScheduleResult = { queued: 0, skipped: 0 };
+	const out: ReportScheduleResult = { queued: 0, skipped: 0, failed: 0 };
+	// Each schedule on its own: one that throws is logged and marked, and the rest of the tick goes on.
 	for (const s of rows) {
 		let fire: Date | null;
 		try {
@@ -67,35 +76,56 @@ export async function scheduleDueReports(now = new Date()): Promise<ReportSchedu
 			continue; // A zone this runtime doesn't know (the API validates it on save).
 		}
 		if (!fire) continue;
-		const claimed = await withoutUser(async (db) => {
-			const { rows: c } = await db.query<{ ok: boolean }>('SELECT app_claim_report_schedule($1, $2) AS ok', [s.id, fire]);
-			return c[0]?.ok === true;
-		});
-		if (!claimed) continue;
-		const outcome = await withUser(s.actingUserId, async (db) => {
-			const { rows: role } = await db.query<{ ok: boolean }>(`SELECT app_has_role($1, 'editor') AS ok`, [s.projectId]);
-			if (!role[0]?.ok) return SCHEDULE_NO_ACCESS;
-			const { rows: run } = await db.query<{ id: string }>(
-				'SELECT id FROM model_run WHERE project_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1',
-				[s.projectId]
+		try {
+			const r = await fireSchedule(s, fire);
+			if (r !== 'none') out[r]++;
+		} catch (err) {
+			out.failed++;
+			logEvent('error', { event: 'report_schedule_failed', scheduleId: s.id, ...safeError(err) });
+			// The claim (if it was made) stands: this time is lost, the reason says so, and the next time tries again.
+			await withoutUser((db) => db.query('SELECT app_report_schedule_failed($1, $2)', [s.id, SCHEDULE_FAILED])).catch((e: unknown) =>
+				logEvent('error', { event: 'report_schedule_failed_unrecorded', scheduleId: s.id, ...safeError(e) })
 			);
-			if (!run[0]) return SCHEDULE_NO_RUNS;
-			const { rows: to } = await db.query<{ userId: string }>('SELECT user_id AS "userId" FROM report_schedule_recipient WHERE schedule_id = $1', [s.id]);
-			await createReport(db, {
-				projectId: s.projectId,
-				runId: run[0].id,
-				emailTo: to.map((r) => r.userId),
-				scheduleId: s.id,
-				dedupeKey: `report_schedule:${s.id}:${fire!.toISOString()}`
-			});
-			return null;
-		});
-		if (outcome) {
-			await withoutUser((db) => db.query('SELECT app_report_schedule_failed($1, $2)', [s.id, outcome]));
-			out.skipped++;
-		} else out.queued++;
+		}
 	}
 	return out;
+}
+
+/**
+ * One schedule's due time: claim it (committed on its own, so two workers
+ * can't both queue it), then queue the report in its own transaction as the
+ * acting user. A throw there rolls back that transaction only (no job without
+ * its report row) and reaches the caller.
+ */
+async function fireSchedule(s: ScheduleRow, fire: Date): Promise<'queued' | 'skipped' | 'none'> {
+	const claimed = await withoutUser(async (db) => {
+		const { rows: c } = await db.query<{ ok: boolean }>('SELECT app_claim_report_schedule($1, $2) AS ok', [s.id, fire]);
+		return c[0]?.ok === true;
+	});
+	if (!claimed) return 'none';
+	const outcome = await withUser(s.actingUserId, async (db) => {
+		const { rows: role } = await db.query<{ ok: boolean }>(`SELECT app_has_role($1, 'editor') AS ok`, [s.projectId]);
+		if (!role[0]?.ok) return SCHEDULE_NO_ACCESS;
+		const { rows: run } = await db.query<{ id: string }>(
+			'SELECT id FROM model_run WHERE project_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1',
+			[s.projectId]
+		);
+		if (!run[0]) return SCHEDULE_NO_RUNS;
+		const { rows: to } = await db.query<{ userId: string }>('SELECT user_id AS "userId" FROM report_schedule_recipient WHERE schedule_id = $1', [s.id]);
+		await createReport(db, {
+			projectId: s.projectId,
+			runId: run[0].id,
+			emailTo: to.map((r) => r.userId),
+			scheduleId: s.id,
+			dedupeKey: `report_schedule:${s.id}:${fire.toISOString()}`
+		});
+		return null;
+	});
+	if (outcome) {
+		await withoutUser((db) => db.query('SELECT app_report_schedule_failed($1, $2)', [s.id, outcome]));
+		return 'skipped';
+	}
+	return 'queued';
 }
 
 /** What became of a render-results message. */

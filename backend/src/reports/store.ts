@@ -88,11 +88,13 @@ export interface ReportRow {
 	finishedAt: string | null;
 	/** Printed with each farm's registered volume (218, report_enqueue sets it). */
 	withVolumes: boolean;
+	/** When its latest request went to the renderer Lambda (353; production only): the answer window counts from it. */
+	sentAt: string | null;
 }
 
 const REPORT_COLS = `r.id, r.project_id AS "projectId", r.run_id AS "runId", r.impact, r.against_run_id AS "againstRunId", r.job_id AS "jobId", r.schedule_id AS "scheduleId",
 	r.requested_by AS "requestedBy", r.email_to AS "emailTo", r.status, r.pages, r.bytes, r.error,
-	r.created_at AS "createdAt", r.finished_at AS "finishedAt", r.with_volumes AS "withVolumes"`;
+	r.created_at AS "createdAt", r.finished_at AS "finishedAt", r.with_volumes AS "withVolumes", r.sent_at AS "sentAt"`;
 
 /** A report of the project, by id (RLS: viewer). */
 export async function loadReport(db: Db, projectId: string, reportId: string): Promise<ReportRow | null> {
@@ -103,15 +105,20 @@ export async function loadReport(db: Db, projectId: string, reportId: string): P
 /**
  * A report handed to the renderer Lambda that hasn't answered in this long
  * is shown as failed (its message was lost or dead-lettered, which alarms).
+ * It counts from the send (report.sent_at, 353), not from the ask: a report
+ * that waited in our queue for a render slot (reports/renderSlots.ts) wasn't
+ * with the renderer meanwhile. A report asked again that waits for a slot
+ * moves it to each ask (jobs/handlers/report-render.ts), so a live wait never
+ * reads as failed, and a wait whose job stops asking still does an hour on.
  */
 export const RENDER_ANSWER_WITHIN_MS = 60 * 60 * 1000;
 
 /** The status the API shows: the report's own, or its job's while the render hasn't finished. */
-export function reportState(reportStatus: ReportRow['status'], jobStatus: JobStatus | null, createdAt: Date, now = new Date()): ReportState {
+export function reportState(reportStatus: ReportRow['status'], jobStatus: JobStatus | null, sentAt: Date, now = new Date()): ReportState {
 	if (reportStatus === 'done' || reportStatus === 'failed') return reportStatus;
 	if (jobStatus === 'dead' || jobStatus === null) return 'failed';
 	if (jobStatus === 'failed') return 'retrying';
-	if (reportStatus === 'rendering' && now.getTime() - createdAt.getTime() > RENDER_ANSWER_WITHIN_MS) return 'failed';
+	if (reportStatus === 'rendering' && now.getTime() - sentAt.getTime() > RENDER_ANSWER_WITHIN_MS) return 'failed';
 	if (jobStatus === 'running' || reportStatus === 'rendering') return 'rendering';
 	return 'queued';
 }
@@ -126,7 +133,7 @@ export async function reportByJob(db: Db, projectId: string, jobId: string): Pro
 	);
 	const r = rows[0];
 	if (!r) return null;
-	const status = reportState(r.status, r.jobStatus, new Date(r.createdAt));
+	const status = reportState(r.status, r.jobStatus, new Date(r.sentAt ?? r.createdAt));
 	return {
 		jobId,
 		status,

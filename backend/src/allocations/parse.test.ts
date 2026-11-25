@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
 	ImportRefused,
+	matchKey,
 	matchRow,
 	parseAllocationTable,
 	parseAuthorisation,
@@ -444,6 +445,15 @@ describe('matchRow', () => {
 		expect(matchRow({ registrationNo: 'r-9', propertyRef: '', farm: 'Farm A' }, nodes, known)).toEqual({ nodeId: 'b', matchedBy: 'registration' });
 		expect(matchRow({ registrationNo: 'R-1', propertyRef: 'portion 3', farm: '' }, nodes, known)).toEqual({ nodeId: 'a', matchedBy: 'property' });
 		expect(matchRow({ registrationNo: '', propertyRef: '', farm: ' farm a ' }, nodes, known)).toEqual({ nodeId: 'a', matchedBy: 'name' });
+	});
+
+	it('compares registration numbers by matchKey: case, ends and repeated spaces aside', () => {
+		expect(matchKey('  SYN \t 001 ')).toBe('syn 001');
+		expect(matchKey('SYN-001')).not.toBe(matchKey('SYN 001')); // control: a hyphen is not a space
+		expect(matchRow({ registrationNo: 'syn   001', propertyRef: '', farm: '' }, nodes, [{ registrationNo: 'SYN 001', propertyRef: '', nodeId: 'a' }])).toEqual({
+			nodeId: 'a',
+			matchedBy: 'registration'
+		});
 	});
 
 	it('leaves an ambiguous or unknown name unmatched', () => {

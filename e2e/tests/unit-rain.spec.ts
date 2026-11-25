@@ -7,7 +7,9 @@
 //   anything is sent, and the owner's Create makes one feed into the unit's
 //   own rain series, whose card says it reads the unit's parcel; then nothing
 //   is left to change. An editor opens it from the head's Rain from the map
-//   and sees the proposal with no button. The panel passes axe.
+//   and sees the proposal with no button. The panel passes axe. A parcel
+//   redrawn over the same cells offers to update the outline record alone
+//   (followups F7b).
 // - A unit's form takes its MAP and asks for its source before Save.
 // - Settings → Flow generation is Per unit with no switch (issue #658), its Units without a station reads the
 //   gauge's MAP from the catchment rain station (issue #553; set in Series details,
@@ -96,6 +98,32 @@ test('the owner sets up a CHIRPS feed for each unit with a parcel, and the feed 
 	await panel.getByRole('button', { name: 'Close' }).click();
 	await expect(panel).toHaveCount(0);
 	await expect(feeds.getByRole('button', { name: 'Attach a feed' })).toBeFocused();
+});
+
+test('a parcel redrawn over the same cells offers to update the outline record alone (followups F7b)', async ({ page, owner }) => {
+	void owner;
+	const id = await seed(page.request, 'Unit rain outline');
+	const made = await page.request.post(`${API_URL}/projects/${id}/feeds/chirps/from-units`, { data: {} });
+	expect(made.status(), await made.text()).toBe(200);
+	// A vertex added half way along an edge: another outline (another hash) over the same cells and weights.
+	const features = (await (await page.request.get(`${API_URL}/projects/${id}/map/features`)).json()).features as { id: string; name: string }[];
+	const parcel = features.find((f) => f.name === 'Upper parcel')!;
+	const [x, y, d] = [21.31, -33.69, 0.03];
+	const reshaped = { type: 'Polygon', coordinates: [[[x, y], [x + d / 2, y], [x + d, y], [x + d, y + d], [x, y + d], [x, y]]] };
+	const moved = await page.request.patch(`${API_URL}/projects/${id}/map/features/${parcel.id}`, { data: { geometry: reshaped } });
+	expect(moved.status(), await moved.text()).toBe(200);
+
+	await openUnitRain(page, id);
+	const panel = unitRain(page);
+	await expect(panel.getByTestId('unit-rain-words')).toHaveText(
+		'A unit’s parcel was redrawn over the same cells, so its feed reads the right rain already; this updates the record of the outline it was read over, so the Map’s Checks stop flagging it. The series keeps its days; the next fetch reads the record again over the same cells.'
+	);
+	await expect(panel.getByTestId('unit-rain-apply')).toHaveText('Update the outline record');
+	await panel.getByTestId('unit-rain-apply').click();
+	// The seed's Lower farm has no parcel, so the answer also says it was left out, as Create's does above.
+	await expect(panel.getByTestId('unit-rain-done')).toHaveText('Updated the outline record of 1 feed; the cells and the series are as they were. 1 unit left out: see below.');
+	await expect(panel.getByTestId('unit-rain-apply')).toHaveCount(0);
+	await expect(panel.getByTestId('unit-rain-words')).toHaveText('Every unit’s feed already reads its parcel with this product: nothing to change.');
 });
 
 test('an editor sees the proposal but an owner creates the feeds', async ({ page, owner, signIn }) => {

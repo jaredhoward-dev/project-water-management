@@ -39,6 +39,7 @@ const NOT_A_GATE: Record<string, string> = {
 	'feeds/fromUnits.ts': 'the canApply flag the unit-rain proposal shows; applying it goes through requireRole(…, owner) (#482)',
 	'evidence/notices.ts': 'who is emailed about a pack, not an action',
 	'errata/notices.ts': 'who is emailed about a known engine bug (still an owner when it is sent), not an action',
+	'teams/leaveProjects.ts': 'which direct owner row to hand to a team admin when someone leaves a team, not a gate; the removal route calls requireTeamStepUp for an admin removing someone (2026-11-24)',
 	'licence/record.ts': 'who is emailed that a licence record needs a decision (still an owner when it is sent), not an action'
 };
 

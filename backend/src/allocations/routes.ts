@@ -35,6 +35,7 @@ import {
 	CONDITIONS_SEPARATOR,
 	IMPORT_MAX_CHARS,
 	ImportRefused,
+	matchKey,
 	matchRow,
 	parseAllocationTable,
 	PURPOSES,
@@ -372,10 +373,11 @@ async function prepareImport(db: Db, projectId: string, body: Omit<z.infer<typeo
 		`SELECT registration_no AS "registrationNo", property_ref AS "propertyRef", node_id AS "nodeId" FROM allocation WHERE project_id = $1 AND node_id IS NOT NULL AND ${NOT_DEMO}`,
 		[projectId]
 	);
-	const { rows: regs } = await db.query<{ r: string }>(`SELECT DISTINCT lower(registration_no) AS r FROM allocation WHERE project_id = $1 AND registration_no <> '' AND ${NOT_DEMO}`, [
+	const { rows: regs } = await db.query<{ r: string }>(`SELECT DISTINCT registration_no AS r FROM allocation WHERE project_id = $1 AND registration_no <> '' AND ${NOT_DEMO}`, [
 		projectId
 	]);
-	const existing = new Set(regs.map((x) => x.r));
+	// The same key matchRow compares by (parse.ts matchKey), so a row matched by its number is also marked already there.
+	const existing = new Set(regs.map((x) => matchKey(x.r)));
 	const nodeIds = new Set(nodes.map((n) => n.id));
 	const rows: PreviewRow[] = table.rows.map((r) => {
 		const line = String(r.line);
@@ -388,7 +390,7 @@ async function prepareImport(db: Db, projectId: string, body: Omit<z.infer<typeo
 			nodeId = m;
 			matchedBy = m === null ? null : 'manual';
 		}
-		return { ...r, nodeId, matchedBy, alreadyInProject: !!r.registrationNo && existing.has(r.registrationNo.toLowerCase()) };
+		return { ...r, nodeId, matchedBy, alreadyInProject: !!r.registrationNo && existing.has(matchKey(r.registrationNo)) };
 	});
 	const valid = rows.filter((r) => r.errors.length === 0);
 	return {

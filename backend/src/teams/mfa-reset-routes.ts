@@ -41,18 +41,19 @@ export const teamMfaResetRoutes = new Hono<AuthEnv>().post('/:id/members/:userId
 		}
 		const subject = await memberSubject(db, id, userId);
 		if (!subject) throw new ApiError(404, 'not found');
-		const { rows } = await db.query<{ status: 'not_found' | 'self' | 'co_admin' | 'not_enrolled' | 'done'; email: string | null; locale: string | null }>(
+		const { rows } = await db.query<{ status: 'not_found' | 'self' | 'co_admin' | 'team_admin' | 'not_enrolled' | 'done'; email: string | null; locale: string | null }>(
 			'SELECT status, email, locale FROM app_mfa_team_reset($1, $2, $3)',
 			[id, userId, watermark]
 		);
 		const r = rows[0]!;
 		if (r.status === 'not_found') throw new ApiError(404, 'not found');
 		if (r.status === 'self') throw new ApiError(409, 'you can’t remove your own two-step sign-in here');
-		if (r.status === 'co_admin') {
+		// One answer for an admin of this team and of any other: the caller learns that this person administers some team, never which.
+		if (r.status === 'co_admin' || r.status === 'team_admin') {
 			throw ApiError.coded(
 				403,
 				'mfa_reset_admin',
-				'a team admin can’t remove another admin’s two-step sign-in: they use “Lost your phone and your recovery codes?” when they sign in'
+				'a team admin can’t remove the two-step sign-in of an admin of this or any other team: they use “Lost your phone and your recovery codes?” when they sign in, or ask the operator, who checks who they are first'
 			);
 		}
 		if (r.status === 'not_enrolled') throw new ApiError(409, 'this member hasn’t set up two-step sign-in');

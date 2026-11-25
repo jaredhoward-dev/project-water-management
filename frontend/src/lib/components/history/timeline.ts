@@ -187,12 +187,21 @@ export function eventLine(e: Pick<HistoryEvent, 'kind' | 'subject'>): string {
 			return text[0]!.toUpperCase() + text.slice(1);
 		}
 		case 'member.added':
+			// handedFrom: a team admin given direct ownership when its only direct owner left the team (teams/leaveProjects.ts).
+			if (s.handedFrom) return `Made ${who} an owner, in place of ${str(s.handedFrom)}, who left the team`;
 			return s.via === 'invite' ? `${who} joined as ${role(s.role)} (accepted an invite)` : `Added ${who} as ${role(s.role)}`;
 		case 'member.removed':
 			// accountDeleted: they deleted their account (issue #112), which took them out of every project; the name reads "Deleted user".
 			if (s.accountDeleted) return `${who} deleted their account and left the project (${role(s.role)})`;
+			// leftTeam: leaving the project's team, or being removed from it, takes their direct role here too (2026-11-24).
+			if (s.leftTeam) {
+				return s.self
+					? `${who} left the project (${role(s.role)}) on leaving the team “${str(s.team)}”`
+					: `Removed ${who} (${role(s.role)}) with their removal from the team “${str(s.team)}”`;
+			}
 			return s.self ? `${who} left the project` : `Removed ${who} (${role(s.role)})`;
 		case 'member.role':
+			if (s.handedFrom) return `Changed ${who}’s role from ${role(s.from)} to ${role(s.to)}, in place of ${str(s.handedFrom)}, who left the team`;
 			return `Changed ${who}’s role from ${role(s.from)} to ${role(s.to)}`;
 		case 'member.party':
 			return s.to ? `Put ${who} in the applying party ${str(s.to)}` : `Took ${who} out of the applying party ${str(s.from)}`;
@@ -336,7 +345,10 @@ export function eventLine(e: Pick<HistoryEvent, 'kind' | 'subject'>): string {
 			if (s.action === 'units') {
 				const units = Array.isArray(s.units) ? (s.units as { name?: unknown }[]).map((u) => str(u.name)).filter(Boolean) : [];
 				const named = units.length > 3 ? `${units.slice(0, 3).join(', ')} and ${units.length - 3} more` : units.join(', ');
-				const made = [typeof s.created === 'number' && s.created ? `${s.created} created` : null, typeof s.updated === 'number' && s.updated ? `${s.updated} updated` : null].filter(Boolean).join(', ');
+				const made = [typeof s.created === 'number' && s.created ? `${s.created} created` : null, typeof s.updated === 'number' && s.updated ? `${s.updated} updated` : null,
+					// Followups F7b: a feed whose mark alone was rewritten (its parcel redrawn over the same cells).
+					typeof s.marked === 'number' && s.marked ? `${s.marked} outline ${s.marked === 1 ? 'record' : 'records'} updated` : null
+				].filter(Boolean).join(', ');
 				const product = str(s.product) ? ` ${str(s.product)}` : '';
 				return `Set up rain for each unit: CHIRPS${product} feeds for ${plural(units.length, 'unit')}${named ? ` (${named})` : ''}${made ? `, ${made}` : ''}${str(s.startDate) ? `, from ${fmtDay(str(s.startDate))}` : ''}`;
 			}

@@ -3115,7 +3115,12 @@ settings. **Members** is the side column (below on a narrow page): each
 member is a row of two lines (issue #520), the name with the email under it
 beside the role, then the row's **Reset two-step** and **Remove** on a line of
 their own under both, so the narrow column never clips them (a third column
-cut them to "Reset two-" and "Rem" at 1440). Each row is a grid with the table
+cut them to "Reset two-" and "Rem" at 1440). **Remove** asks first
+(*Remove this member?*): "They lose their access to its projects, including
+the ones they created. The team's owners keep them." (`lib/teams/removeConfirm.ts`;
+2026-11-24: their direct roles on the team's projects go with the team, and
+a project they alone owned passes to a team owner, security.md §
+Authorization). Each row is a grid with the table
 roles kept explicitly; your own row has no actions line. The email wraps at
 its `@` first, then only after a `.` (`EmailText` with `breakAfter="."`,
 `format/email.ts` `emailGroups`): "demo" / "@example.com", never
@@ -3135,7 +3140,10 @@ personal copy (the Copy dialog says so).
 for a member who can't get a code and lost their recovery codes. Never on
 an admin's row (operator decision, 2026-10-08: another admin uses the
 sign-in page's reset or the operator; the API refuses it too, `403
-mfa_reset_admin`). A confirm dialog says to do it only when sure it's them
+mfa_reset_admin`). A member who is an admin of another team shows the button
+(the page can't see other teams), and the API refuses them the same way
+(359, 2026-11-24): the error line says they use the sign-in page's reset or
+ask the operator. A confirm dialog says to do it only when sure it's them
 asking (in person, on a call), and what it does: the member's
 authenticator app, codes by email and recovery codes stop working, they're signed out everywhere, anyone with their password can
 sign in as them until they set it up again, and they get an email; it is
@@ -3155,7 +3163,9 @@ in the team's projects, POPIA s18(1)(b), 168: admins edit *Name or office*,
 the farm menu and invitations name it), **Two-step sign-in** (204: the
 same **Require two-step sign-in** switch as the Project page's, for admins,
 saying that members who manage the team need an authenticator app; members
-read *On* / *Off* and "Only owners can change it."), and **Leave or delete** (*Leave team* for everyone, the only admin
+read *On* / *Off* and "Only owners can change it."), and **Leave or delete** (*Leave team* for everyone, which asks first:
+"You lose your access to its projects, including the ones you created. The
+team's owners keep them."; the only admin
 told "You are the only owner…" and to hand over first; *Delete team* for admins, which closes the sheet
 and asks in a confirmation dialog). The URL opens it (the project list's
 team note, "Change them on the team page", links there), and closing it drops the
@@ -4447,7 +4457,9 @@ map" card) stays the schematic; this is the geography.
   **Rain from the boundary** (issue #326 B-rain: "No rain feed reads this
   catchment boundary yet." with **Set up the rain feed from the boundary**,
   or "The boundary changed since the rain feed took its cells." with
-  **Propose its cells again**; both open Data → Data feeds with the
+  **Propose its cells again**, only for another outline: a rename or a
+  relink isn't one when the feed's mark has the outline's hash (maps.md §
+  Rain from the boundary); both open Data → Data feeds with the
   proposal showing). `MapRainLink.svelte` reads the feed list (its hidden
   marker's `data-state`, `loading`, `current`, `changed`, `none`, `error`,
   says when it is in). The pill goes once both are done, and doesn't show
@@ -7543,7 +7555,13 @@ editors run one now and read the map's proposals, viewers read.
   **Re-read the record** / **Set up 3 feeds** when a unit's parcel was
   redrawn after its feed fetched (its `replace` action, 296: the sentence
   says the record is read again over the new cells, runs use the old one
-  until it is complete, and days entered by hand stay) (from each unit's
+  until it is complete, and days entered by hand stay), **Update the outline
+  record** / **Update 2 outline records** when a parcel was redrawn over the
+  same cells and its feed's mark still names the old outline (its `mark`
+  action, followups F7b: the sentence says the feed reads the right rain
+  already, the record of the outline is updated so the Map's Checks stop
+  flagging it, and the series keeps its days; beside other work the button
+  keeps that work's label and the sentence adds this) (from each unit's
   `action`; `unitRain.ts unitRainAction`), in the panel's action row with Close. When
   the new feeds would pass the project's feed cap (the proposal's `maxFeeds`, 60; the catchment's
   included) a warning says so plainly, with the room left, before the button
@@ -7558,7 +7576,7 @@ editors run one now and read the map's proposals, viewers read.
   by its site, never by its series name (`CHIRPS v3 (<product>) <unit>`).
   History reads "Set up rain for each unit: CHIRPS rnl feeds for 4 units
   (Upper, Middle, Lower and 1 more), 3 created, 1 updated, from 1981-01-01"
-  (`history/timeline.ts`). A unit's feed card reads "3 cells of a
+  (and "1 outline record updated" for a `mark`; `history/timeline.ts`). A unit's feed card reads "3 cells of a
   unit's parcel (12.35 km²), area weighted" (`describePlace`). The card
   opens on it at once on `?rain=units` (Settings' Rain for each unit link),
   its heading focused; **Close** closes the card. Tested by `e2e/tests/unit-rain.spec.ts`, and
@@ -16083,7 +16101,10 @@ the catalogue, [§ Language](#language)); both unit-tested.
   (`workspace/SectionHeader`, issue #17) is the page's one title, **Alert
   emails**, with what the page is for as its context line, **Back to your
   account** on the right, and under it one slim line with the daily cap (5
-  right away, the rest in the next morning's summary) ending in **What are
+  right away by default, the rest in the next morning's summary; the number
+  is the server's `ALERTS_DAILY_CAP`, which `GET /me/alerts` serves as
+  `dailyCap`, and `capNotice` in `alerts/words.ts` words it, "1 alert email
+  … comes" for one and "every alert email waits" for 0) ending in **What are
   alert emails?**, an inline link to the `farm-alerts` entry on
   `/farm/words` (inline so the line stays one row; no `?from=`, so its back
   link is **Your hydrological units**), and, when mail is

@@ -1122,7 +1122,9 @@ flowchart LR
    turning those past the daily cap (5 since the last 06:00 in the project's
    time zone, 059_local_day) into
    digest lines; after 06:00 there `app_alert_claim_digest` claims each person's
-   digest lines, one email per catchment. Each mail is built in a
+   digest lines, one email per catchment, each person by one worker only
+   (a per-person advisory try lock, 357, so two workers at once never split
+   one person's lines over two digests). Each mail is built in a
    transaction **as its recipient** (`withUser`): `app_alert_my_mode`
    re-checks their access and choice, and RLS limits what the mail can say
    (a farmer's names only their farm). The unsubscribe token is derived
@@ -1190,8 +1192,14 @@ row names a source, where to read it and the series it merges into:
     total's day whose first reading has nothing before it to rise from is a
     gap, so a re-read never writes a short total over a stored day; so is
     every day from a missing reading to the next reading read when they fall
-    in different days (the rise holds rain no reading split), and a day of
-    missing readings is never 0 mm, whatever `noReadingsMeans` says. `{end}`
+    in different days (the rise holds rain no reading split), and so (engine
+    ≥ 1.119.0) is every day from the one after the last reading read through
+    the next reading's when the logger sent nothing at all for a whole rain
+    day between them (readings 12 on the 1st and 20 on the 3rd: the 2nd and
+    the 3rd are gaps, never 0 and 9 mm), unless the total didn't change
+    across the silence (no rain fell, so the silent days follow
+    `noReadingsMeans`). A day of missing readings is never 0 mm, whatever
+    `noReadingsMeans` says. `{end}`
     written as a time runs an hour past the window's last rain day (an API
     that reads its end as exclusive would otherwise drop the reading stamped
     there); readings past the window are ignored.
@@ -1704,8 +1712,10 @@ row names a source, where to read it and the series it merges into:
   - **New cells re-read the record** (296_feed_area_replace, the durable fix
     for #326 B-rain's "new cells only into an empty series"). A gridded feed's
     days (`chirps`, `agera5_et0`) are the weighted mean of its cells, so new
-    cells (another box or list, the catchment boundary's, a unit's redrawn
-    parcel; `config.ts sameArea`: the same grid cells with the same shares of
+    cells (another box or list, the catchment boundary's (its feed's
+    `config.boundary` mark records the outline's hash, so only a reshape, not
+    a rename or a relink, proposes them again: [maps.md § Rain from the
+    boundary](./maps.md#rain-from-the-boundary)), a unit's redrawn parcel; `config.ts sameArea`: the same grid cells with the same shares of
     the weight and the same sea-cell rule is the same area) never merge onto
     days it wrote over its old ones. A save giving such a feed new cells while
     its series holds days it wrote (`feed_days`) answers **409**
@@ -1822,7 +1832,9 @@ row names a source, where to read it and the series it merges into:
   `disabled`, and `copy-behind` (a CHIRPS feed read from our copy whose copy
   is late, [§ Our copy of the rain data](#our-copy-of-the-rain-data)). A feed
   not fetched two days after it was attached or changed is
-  stale ("the background worker may not be running"). A project with the
+  stale ("the background worker may not be running"); which of the two it
+  says goes by the instants (`updated_at` against `created_at`), so a feed
+  attached and changed on one day says "changed". A project with the
   `data_stale` or `feed_failing` alert on emails its owners and editors
   ([§ Alert emails](#alert-emails)); `data_stale` also watches each series
   an API key sends (a logger pushing to `/ingest`, which has no feed):
@@ -3079,7 +3091,54 @@ sequenceDiagram
   renders, two at a time: the token would be refused as final;
   `RENDER_REQUEST_MAX_AGE_MS`). Its answer carries that `retry` flag back, and the worker
   asks again with a fresh token after 2, then 4 minutes, up to 3 renders
-  (`jobs/handlers/report-render.ts` `requestRenderAgain`).
+  (`jobs/handlers/report-render.ts` `requestRenderAgain`). An answer that
+  only says the request outwaited its token (`STALE_REQUEST_ERROR`: nothing
+  was rendered; with render slots, below, only an SQS redelivery after a
+  visibility timeout or a stalled renderer does it) is asked again at once
+  and never counts toward the 3, up to 5 times (`MAX_EXPIRED_REQUESTS`).
+- **Render slots** (`reports/renderSlots.ts`, `353_render_slot`; production,
+  `REPORT_RENDERER=sqs`, only). The worker never has more render requests in
+  flight than the renderer runs at once: `RENDER_CONCURRENCY` (2), the number
+  `infra/reports.tf` gives the renderer's SQS trigger as
+  `maximum_concurrency` (`local.renderer_concurrency`, both from one
+  local). A `report_render`, `pack_render` or `applicant_pack_render`
+  request job takes a slot (`app_render_slot_take`, under an advisory lock)
+  *before* it issues its render token and sends; without one it goes back
+  to the job table (`JobRelease`, its attempt given back) and asks again in
+  15 s, keeping its place in a first-asked, first-sent line, so a burst
+  (many Monday 07:00 schedules) waits in our queue, not in `render-requests`
+  with its tokens dying. Each request sent on a slot is named first
+  (`app_render_slot_sent`) by its request id, a one-way digest of its render
+  token (`jobs/transport.ts renderRequestId`), which the renderer echoes in
+  its answer (`requestId`, optional in the result schema). A slot frees
+  when the answer *to that request* arrives (`lambda-worker.ts`, any
+  outcome, before it is queued as a job), when the send fails, or on its own
+  10 minutes after it was taken (a token's 5, a render's 2, a margin: the
+  answer was lost or dead-lettered). A late or redelivered answer of an
+  earlier request (an SQS redelivery, the first answer after an expired
+  request was asked again, the answer of a slot that timed out and was taken
+  again) frees nothing, so no more than `RENDER_CONCURRENCY` ever run. An
+  answer with no `requestId` (a renderer older than 353) frees only a slot
+  not yet named, which in practice is none: that slot frees on its 10
+  minutes. Whenever a slot frees (an answer, a failed send, an expired slot
+  reclaimed by a take) the oldest waiter whose job is still queued is made
+  due at once and the worker woken (`app_render_slot_wake`: NOTIFY
+  `job_queued` for the local worker; in production the answer's own worker
+  invocation runs the tick that claims it), so a free slot never idles until
+  the 5-minute tick. A waiter that stops asking (its report deleted) leaves
+  the line as long after its last ask. One target (a report, a pack, an
+  applicant's copy) is never in flight twice. A report's 1-hour answer
+  window counts from its send (`report.sent_at`), not from when it was
+  asked for; a report asked again (`requestRenderAgain`) that waits for a
+  slot moves `sent_at` to each ask, so a live wait never reads as an
+  unanswered send, and a wait whose job stops asking still fails it an hour
+  on. **Rollout:** the request message is unchanged (an older renderer
+  would refuse a new field), and the worker accepts answers with or without
+  `requestId`, so the release order (worker first, then the renderer's
+  image; deployment.md § Releasing) is safe; between the two, the old
+  renderer's answers free nothing and its slots free on their 10 minutes.
+  Locally (`REPORT_RENDERER=inline`) the job renders itself and takes no
+  slot.
 - **Storage** (`reports/storage.ts`, `STORAGE`): one S3 client.
   `local` (the default) is MinIO from docker-compose on :9002, bucket created
   on first use; `s3` is the private production bucket (SSE, 7-day
@@ -3112,8 +3171,14 @@ sequenceDiagram
   the project's **latest run** as the schedule's acting user (the editor who
   last saved it) with the dedupe key `report_schedule:<id>:<time>`. A time
   that finds no runs, or an acting user who is no longer an editor, queues
-  nothing and says why on the schedule. A missed week is sent once, late;
-  older misses aren't replayed.
+  nothing and says why on the schedule. Each schedule is handled on its own:
+  if queuing its report throws, that schedule's transaction rolls back (no
+  job without its report row), the error is logged
+  (`report_schedule_failed`, name and code only), the schedule shows a fixed
+  reason (`SCHEDULE_FAILED`, never the database's text), and the tick goes on
+  to the other schedules and the rest of its work. The claimed time stays
+  claimed, so that one time is lost and the next scheduled time tries again.
+  A missed week is sent once, late; older misses aren't replayed.
 - **Retention:** PDFs 7 days (the bucket's lifecycle in production); the
   tick deletes report rows after 8 days (`app_purge_reports`), and locally
   their MinIO objects too.

@@ -3,6 +3,7 @@
 // ops that set a volume on a unit that isn't an application's own, and its
 // check renumbered to the ops left.
 import { withheldAllocationOps, withoutPositions } from '../allocations/viewerUnits.js';
+import type { ScenarioOp } from '@water-management/engine';
 import type { LicenceTerms, ScenarioRow } from './execute.js';
 
 /** "op 3" / "ops 3–5" / "ops 2, 4" as a problem line starts (engine opNumbers): 1-based. */
@@ -16,34 +17,57 @@ const labelOf = (n: number[]) => {
  * A scenario's check as a viewer kept from each farm's volume reads it
  * (#523 G1): the ops at `drop` left out (viewerScenario), the rest
  * renumbered, a problem line about only those ops left out and the others'
- * op numbers moved down.
+ * op numbers moved down. The assessors' wording (`assessorProblems`, line
+ * for line `problems`) loses and renumbers the same lines, so the two lists
+ * still match line for line; `reIds` loses the fresh ids of the allocations
+ * only the left-out ops set (`ops`: the scenario's ops, as the check saw
+ * them). `renamed` names nodes and crops, which no left-out op touches.
  */
-export function checkWithout<C extends { applied: { index: number }[]; problems: string[]; classified: unknown[]; maskedRules?: { problem: number; ops: number[] }[] }>(c: C, drop: ReadonlySet<number>): C {
+export function checkWithout<
+	C extends {
+		applied: { index: number }[];
+		problems: string[];
+		classified: unknown[];
+		maskedRules?: { problem: number; ops: number[] }[];
+		assessorProblems?: string[];
+		reIds?: { kind: string; id: string }[];
+	}
+>(c: C, drop: ReadonlySet<number>, ops: readonly ScenarioOp[] = []): C {
 	if (!drop.size) return c;
 	const to = (i: number) => (drop.has(i) ? null : i - [...drop].filter((d) => d < i).length);
-	const problemTo = new Map<number, number>();
-	const problems: string[] = [];
-	c.problems.forEach((line, i) => {
+	// A problem line as the viewer reads it: its op numbers moved down, or null when it names only left-out ops.
+	const relabel = (line: string): string | null => {
 		const m = OP_LABEL.exec(line);
-		if (!m) {
-			problemTo.set(i, problems.length);
-			problems.push(line);
-			return;
-		}
+		if (!m) return line;
 		const nums = m[2]!.split(', ').flatMap((part) => {
 			const r = /^(\d+)–(\d+)$/.exec(part);
 			return r ? Array.from({ length: Number(r[2]) - Number(r[1]) + 1 }, (_, k) => Number(r[1]) + k) : [Number(part)];
 		});
 		const kept = nums.map((n) => to(n - 1)).filter((x): x is number => x !== null);
-		if (!kept.length) return;
+		return kept.length ? `${labelOf(kept.map((x) => x + 1))}${line.slice(m[0].length - 2)}` : null;
+	};
+	const problemTo = new Map<number, number>();
+	const problems: string[] = [];
+	const assessorProblems: string[] = [];
+	c.problems.forEach((line, i) => {
+		const out = relabel(line);
+		if (out === null) return;
 		problemTo.set(i, problems.length);
-		problems.push(`${labelOf(kept.map((x) => x + 1))}${line.slice(m[0].length - 2)}`);
+		problems.push(out);
+		// Same line, same ops: its label is the problem line's (engine unmaskText rewrites names only).
+		const real = c.assessorProblems?.[i];
+		if (real !== undefined) assessorProblems.push(relabel(real) ?? real);
 	});
+	const allocationId = (op: ScenarioOp | undefined) => (op?.op === 'allocation.set' ? op.allocation.id : null);
+	const keptIds = new Set(ops.filter((_, i) => !drop.has(i)).map(allocationId));
+	const goneIds = new Set([...drop].map((i) => allocationId(ops[i])).filter((id): id is string => id !== null && !keptIds.has(id)));
 	return {
 		...c,
 		applied: c.applied.filter((a) => !drop.has(a.index)).map((a) => ({ ...a, index: to(a.index)! })),
 		problems,
 		classified: withoutPositions(c.classified, drop),
+		...(c.assessorProblems ? { assessorProblems } : {}),
+		...(c.reIds && goneIds.size ? { reIds: c.reIds.filter((r) => !(r.kind === 'allocation' && goneIds.has(r.id))) } : {}),
 		...(c.maskedRules
 			? {
 					maskedRules: c.maskedRules

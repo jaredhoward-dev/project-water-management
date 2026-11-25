@@ -60,7 +60,7 @@ describe('errorText', () => {
 		mfa_required: 'This needs two-step sign-in. Set it up on your Account page first.',
 		mfa_step_up: 'This needs two-step sign-in. Sign out, then sign in again with a code.',
 		mfa_reset_limit: 'You asked for this a few times today already. Check your inbox and spam folder, or try again tomorrow.',
-		mfa_reset_admin: 'A team admin can’t remove another admin’s two-step sign-in. They can remove it themselves when they sign in, after a 3-day wait.',
+		mfa_reset_admin: 'A team admin can’t remove the two-step sign-in of someone who is an admin of this or any other team. They can remove it themselves when they sign in, after a 3-day wait, or ask the operator.',
 		mfa_email_wait: 'We just emailed you a code. You can ask for another in 1 minute.',
 		mfa_email_failed: 'We couldn’t send the email. Try again in a minute.',
 		comment_throttled: 'You have posted 10 comments in the last hour. Wait a while, then try again.',

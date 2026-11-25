@@ -55,7 +55,8 @@
 	import LoadState from '#lib/components/common/LoadState.svelte';
 	import { foldList } from '#lib/components/common/fold.js';
 	import { fillHeader } from '#lib/components/workspace/headerSlot.svelte.js';
-	import { fmtDate, fmtNum, localIsoDate } from '#lib/format/number.js';
+	import { fmtDate, fmtNum } from '#lib/format/number.js';
+	import { projectToday } from '#lib/components/projects/freshness.js';
 	import { withoutParam, withParam } from '#lib/workspace/overlays.js';
 	import AllocationForm from './AllocationForm.svelte';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
@@ -98,6 +99,7 @@
 		canEdit,
 		isOwner = false,
 		settings = null,
+		timeZone,
 		onProjectChange
 	}: {
 		projectId: string;
@@ -106,6 +108,8 @@
 		isOwner?: boolean;
 		/** The saved settings, for the comparison band (none: the band card waits). */
 		settings?: Pick<ProjectSettings, 'allocationTolerance'> | null;
+		/** The project's IANA zone (058): "in force today" is the project's day, as the API's totals and comparison count it. */
+		timeZone?: string;
 		/** The saved project after the band's save, so the page (and its settings draft) takes it in. */
 		onProjectChange?: (p: Project) => void;
 	} = $props();
@@ -335,7 +339,7 @@
 
 	// --- what is registered per unit, in force today: the map's run-free shading (the Registered users table's subtotals) ---
 	const registeredByUnit = $derived(
-		data && !data.unitsHidden ? { units: data.nodes, subtotals: unitSubtotals(registeredUsers(data.allocations, data.nodes, localIsoDate(), data.canSeeHolders)) } : null
+		data && !data.unitsHidden ? { units: data.nodes, subtotals: unitSubtotals(registeredUsers(data.allocations, data.nodes, projectToday(timeZone), data.canSeeHolders)) } : null
 	);
 
 	// --- the sheets: add or change a volume (`volume=new|<id>`), import (`import=1`); editors only ---
@@ -642,7 +646,7 @@
 
 	<!-- A viewer who reads only totals per water source (162) reads no row, so no table: AllocationTotals says what they see. -->
 	{#if data && !data.unitsHidden}
-		<AllocationRegisteredUsers {projectId} {data} {canEdit} focusUnit={usersFocus} onstart={startAction} onchanged={changed} onfailed={failed} />
+		<AllocationRegisteredUsers {projectId} {data} {canEdit} {timeZone} focusUnit={usersFocus} onstart={startAction} onchanged={changed} onfailed={failed} />
 	{/if}
 	{#if registeredByUnit && (data?.allocations.length || (comparison && units.length))}
 		<AllocationUseMap

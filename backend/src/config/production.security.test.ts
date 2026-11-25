@@ -142,6 +142,7 @@ const PROD: Record<Role, Record<string, string>> = {
 		MIRROR_URL: 's3://water-management-mirror-000000000000',
 		REPORT_RENDERER: 'sqs',
 		RENDER_REQUESTS_QUEUE_URL: SQS('render-requests'),
+		RENDER_CONCURRENCY: '2',
 		STORAGE: 's3',
 		REPORTS_BUCKET: 'water-management-reports-000000000000',
 		PACKS_BUCKET: 'water-management-packs-000000000000',

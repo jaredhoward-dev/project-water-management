@@ -45,7 +45,8 @@ import {
 import { apanDailyInfo, type ApanDailyInfo } from './evaporation/apanDaily';
 import { resolveApanUnits, type ApanUnitsRun } from './evaporation/apanUnits';
 import { et0DailyInfo, type Et0DailyInfo } from './evaporation/et0Daily';
-import { applyGapRain, fitGapProducts, gapRainKeys, type GapRainFits, type GapRainRun } from './gapRain';
+import { rainDriverSpan } from './driverSpan';
+import { applyGapRain, fitGapProducts, type GapRainFits, type GapRainRun } from './gapRain';
 import { doubleMass as doubleMassOf, doubleMassRunWarning, type DoubleMass } from './doublemass';
 import { dayText, fromEpochDay, monthOfEpochDay, toEpochDay, type Monthly } from './calendar';
 import { DEFAULT_ANNUAL_THRESHOLD } from './network/reliability';
@@ -260,33 +261,9 @@ export function prepareRun(input: ModelInput, options: PrepareOptions = {}): Pre
 	// CHIRPS, forecast, a rain-source period's series inside its period), as
 	// before engine 0.45.0; an explicit simulationStart / End replaces its end.
 	// The catchment's station drives it in the catchment gauge's place (engine ≥ 1.91.0).
-	const drivers: (DailySeries | undefined)[] = [plan ? plan.record : series.rain_catchment_mm, series.rain_chirps_mm, series.rain_forecast_mm];
-	let first = Infinity;
-	let last = -Infinity;
-	for (const s of drivers) {
-		if (!s || s.values.length === 0) continue;
-		const d0 = toEpochDay(s.startDate);
-		first = Math.min(first, d0);
-		last = Math.max(last, d0 + s.values.length - 1);
-	}
-	// The gap-filling products extend its end, never its start (engine ≥ 1.101.0, settings.gapRain): IMERG Late's recent
-	// days reach past CHIRPS', while a product record longer than the rain's (ERA5-Land from 1950) doesn't pull the start back.
-	if (settings.gapRain && !plan && Number.isFinite(first))
-		for (const k of gapRainKeys(settings.gapRain, series)) {
-			const s = (series as Record<string, DailySeries | undefined>)[k.key];
-			if (s && s.values.length) last = Math.max(last, toEpochDay(s.startDate) + s.values.length - 1);
-		}
-	// A rain-source period's series drives the run too, inside its period (engine ≥ 0.30.0).
-	for (const p of work.settings.rainSource) {
-		const s = series[p.series];
-		if (!s || s.values.length === 0) continue;
-		const d0 = toEpochDay(s.startDate);
-		const a = Math.max(d0, toEpochDay(p.start));
-		const b = Math.min(d0 + s.values.length - 1, toEpochDay(p.end));
-		if (a > b) continue;
-		first = Math.min(first, a);
-		last = Math.max(last, b);
-	}
+	// The gap-filling products extend its end (engine ≥ 1.101.0, settings.gapRain), not under a catchment station.
+	// One function (./driverSpan.ts) with the scenario checks' bound on a dated demand window, so the two can't drift.
+	const [first, last] = rainDriverSpan({ catchment: plan ? plan.record : series.rain_catchment_mm, series, gapRain: plan ? null : settings.gapRain, rainSource: work.settings.rainSource });
 	let start = settings.simulationStart ? toEpochDay(settings.simulationStart) : first;
 	let end = settings.simulationEnd ? toEpochDay(settings.simulationEnd) : last;
 	if (!Number.isFinite(start) || !Number.isFinite(end)) {

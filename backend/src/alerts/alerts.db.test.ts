@@ -6,6 +6,7 @@
 //
 // The tests queue alert checks and run ticks; each leaves no job queued, so
 // another file's tick never picks one up (jobs and feeds tests count them).
+import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { anon, app, asOwner, monthly, node, settlePendingNotices, signUp, disableFeedsAfterFile } from '../__tests__/helpers.js';
 import { hashToken } from '../auth/tokens.js';
@@ -14,6 +15,7 @@ import { runTick } from '../jobs/runner.js';
 import { outbox, type Mail } from '../mail/transport.js';
 import { DEFAULT_TIME_ZONE, localDate } from '../projects/timeZone.js';
 import { evaluateAlerts } from './evaluate.js';
+import { DEFAULT_DAILY_CAP } from './rules.js';
 import { DIGEST_CLAIM_LINES, DIGEST_MAX_LINES, RULE_OFF, sendAlerts } from './send.js';
 
 // The feeds this file makes are switched off when it ends (db-setup.ts).
@@ -459,6 +461,93 @@ describe('the daily cap and the digest', () => {
 		const t = tokenIn(digest);
 		expect((await anon('POST', '/alerts/unsubscribe', { token: t })).body.kind).toBe('all');
 		expect((await rowsAs<{ mode: string | null }>(lone, 'SELECT app_alert_my_mode($1, $2, NULL) AS mode', [projectId, 'data_stale']))[0]!.mode).toBeNull();
+		await reset();
+	});
+});
+
+describe('the daily cap the alert emails page says', () => {
+	// The page's sentence follows the server's ALERTS_DAILY_CAP, not a copy of its default in the frontend.
+	it('GET /me/alerts serves the cap the worker applies (ALERTS_DAILY_CAP), its default when unset', async () => {
+		expect((await farmer.call('GET', '/me/alerts')).body.dailyCap).toBe(DEFAULT_DAILY_CAP);
+		vi.stubEnv('ALERTS_DAILY_CAP', '2');
+		try {
+			expect((await farmer.call('GET', '/me/alerts')).body.dailyCap).toBe(2);
+			vi.stubEnv('ALERTS_DAILY_CAP', '0');
+			expect((await viewer.call('GET', '/me/alerts')).body.dailyCap).toBe(0);
+		} finally {
+			vi.unstubAllEnvs();
+		}
+		expect((await farmer.call('GET', '/me/alerts')).body.dailyCap).toBe(DEFAULT_DAILY_CAP);
+	});
+});
+
+describe('two workers claiming digests at once (357)', () => {
+	/** A new editor with `n` due digest lines (queued an hour apart, a day before `tomorrow()`), as the schema owner. */
+	async function queueDigest(n: number) {
+		const u = await signUp('Aclaim');
+		expect((await owner.call('POST', `/projects/${projectId}/members`, { email: u.email, role: 'editor' })).status).toBe(201);
+		// One rule for the farm (unique per kind and node), shared by every person queued after a reset().
+		await asOwner(`INSERT INTO alert_rule (project_id, kind, node_id, threshold) VALUES ($1, 'dam_below', $2, 0.5) ON CONFLICT DO NOTHING`, [projectId, one.id]);
+		const [rule] = await asOwner(`SELECT id FROM alert_rule WHERE project_id = $1 AND kind = 'dam_below' AND node_id = $2`, [projectId, one.id]);
+		await asOwner(
+			`WITH e AS (
+				INSERT INTO alert_event (rule_id, project_id, state, value, detail)
+				SELECT $1, $2, 'cleared', 0.2, jsonb_build_object('source', 'latest', 'pct', 0.2, 'date', '2023-02-01', 'i', i) FROM generate_series(1, $4::int) i
+				RETURNING id, (detail->>'i')::int AS i
+			)
+			INSERT INTO alert_delivery (event_id, user_id, project_id, mode, status, created_at)
+			SELECT e.id, $3, $2, 'daily_digest', 'digest', now() - make_interval(hours => $4::int - e.i + 1) FROM e`,
+			[rule.id, projectId, u.id, n]
+		);
+		return u;
+	}
+	const tomorrow = () => new Date(Date.now() + 24 * 3600_000);
+	/** One worker's digest claim, as alerts/send.ts makes it. */
+	const claim = () =>
+		withoutUser(
+			async (db) =>
+				(await db.query<{ user_id: string; event_id: string }>(`SELECT user_id, event_id FROM app_alert_claim_digest($1, 500, $2, interval '5 minutes')`, [tomorrow(), DIGEST_CLAIM_LINES]))
+					.rows
+		);
+	const of = (rows: { user_id: string }[], u: { id: string }) => rows.filter((r) => r.user_id === u.id).length;
+	const drop = (...us: { id: string }[]) => asOwner('DELETE FROM alert_delivery WHERE user_id = ANY ($1)', [us.map((u) => u.id)]);
+
+	it('leaves a person another worker is part-way through to that worker, so their lines never split over two digests', async () => {
+		await reset();
+		const u = await queueDigest(3);
+		const v = await queueDigest(2);
+		// Another worker, part-way through u's lines: it holds u's person lock (357) and has locked one line so far.
+		const other = new pg.Client({ connectionString: process.env.TEST_MIGRATION_DATABASE_URL });
+		await other.connect();
+		try {
+			await other.query('BEGIN');
+			await other.query(`SELECT pg_advisory_xact_lock(hashtextextended('alert_digest:' || $1::text, 0))`, [u.id]);
+			await other.query(`SELECT 1 FROM alert_delivery WHERE user_id = $1 ORDER BY created_at LIMIT 1 FOR UPDATE`, [u.id]);
+			const got = await claim();
+			// Before 357 this claimed u's two other lines: a second, partial digest.
+			expect(of(got, u)).toBe(0);
+			// Positive control: v, whom no other worker holds, is claimed whole, without waiting.
+			expect(of(got, v)).toBe(2);
+		} finally {
+			await other.query('ROLLBACK');
+			await other.end();
+		}
+		// Once the other worker is gone, u's lines are claimed together, in one digest.
+		expect(of(await claim(), u)).toBe(3);
+		await drop(u, v);
+		await reset();
+	});
+
+	it('two claims at the same moment give each person one digest with every line', async () => {
+		await reset();
+		const u = await queueDigest(40);
+		const v = await queueDigest(40);
+		const [a, b] = await Promise.all([claim(), claim()]);
+		for (const p of [u, v]) {
+			// All of a person's lines in one claim (one digest), none in the other.
+			expect([of(a, p), of(b, p)].sort((x, y) => x - y)).toEqual([0, 40]);
+		}
+		await drop(u, v);
 		await reset();
 	});
 });

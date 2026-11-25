@@ -711,6 +711,50 @@ resource "aws_cloudwatch_metric_alarm" "run_stamp_drift" {
   depends_on = [aws_cloudwatch_log_metric_filter.run_stamp_drift]
 }
 
+# --- Billing: an orphan that couldn't be cancelled or refunded ---------------
+# The billing webhook (backend/src/billing/webhook.ts, 352_billing_orphan;
+# docs/billing.md § Webhooks and providers) cancels and refunds a
+# subscription whose account is gone. When the provider call fails it answers
+# 503, so Stripe redelivers, and logs one line in the API's log group:
+#   {"event":"billing_webhook","provider":"stripe","type":"…","eventId":"evt_…","result":"orphan_failed"}
+# (no account, no person). Stripe stops redelivering about 3 days after the
+# first send; if every attempt fails the row stays orphan_pending and the
+# customer keeps paying a plan for an account that no longer exists. Any one
+# line pages, so the operator can act while the retries still run. Only with
+# billing_provider = "stripe": manual takes no webhooks, so no orphan reaches
+# it. The second signal, not on logs: the billing report's first line lists
+# the rows still pending past the retries (docs/deployment.md § Billing
+# alarms).
+resource "aws_cloudwatch_log_metric_filter" "billing_orphan_failed" {
+  count          = local.alarms_essential && var.billing_provider == "stripe" ? 1 : 0
+  name           = "${local.project}-billing-orphan-failed"
+  log_group_name = aws_cloudwatch_log_group.lambda.name
+  pattern        = "{ $.message.event = \"billing_webhook\" && $.message.result = \"orphan_failed\" }"
+
+  metric_transformation {
+    name          = "BillingOrphanFailed"
+    namespace     = "${local.project}/Application"
+    value         = "1"
+    default_value = "0"
+    unit          = "Count"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "billing_orphan_failed" {
+  count               = local.alarms_essential && var.billing_provider == "stripe" ? 1 : 0
+  alarm_name          = "${local.project}-billing-orphan-failed"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = aws_cloudwatch_log_metric_filter.billing_orphan_failed[0].metric_transformation[0].name
+  namespace           = aws_cloudwatch_log_metric_filter.billing_orphan_failed[0].metric_transformation[0].namespace
+  period              = 3600
+  statistic           = "Sum"
+  threshold           = 0
+  alarm_description   = "The billing webhook couldn't cancel or refund a subscription whose account was deleted (an orphan, 352): Stripe redelivers the event for about 3 days, and if every attempt fails the customer keeps paying. Search the API's log group for event = billing_webhook and result = orphan_failed (eventId is Stripe's event id). Find the event in Stripe's dashboard (Developers, Events), cancel its subscription now and refund its payments there; the billing report (billing-admin workflow, billing-report) lists any still pending after the retries. docs/deployment.md § Billing alarms."
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+  treat_missing_data  = "notBreaching"
+}
+
 # --- Email that failed to send ----------------------------------------------
 # trySendMail (backend/src/mail/transport.ts) never fails the request over a
 # mail error (a sign-up or forgot-password answer must not depend on it), so

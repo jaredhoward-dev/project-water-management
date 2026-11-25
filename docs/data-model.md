@@ -3474,6 +3474,25 @@ only read. `project_insert` and `project_update` enforce this (008);
 edit a project whose team they only view. A viewer copying a team project gets
 a personal copy.
 
+**Leaving a team takes its projects with it** (operator decision,
+2026-11-24; `backend/src/teams/leaveProjects.ts`). When someone leaves a
+team or a team admin removes them, their direct `project_member` rows on the
+team's projects go in the same transaction, the projects they created
+included (a `farmer` row stays: it reaches only their own farm). Where they
+were a project's only direct owner, the keep-owner trigger would refuse
+that, so direct ownership is handed to a team admin first: the admin
+removing them, or, when they leave themselves, the team's longest-standing
+other admin (`team_member.added_at`). That admin gets a direct `owner` row,
+or has theirs raised to owner. A team always keeps an admin besides the one
+leaving (`team_member_keep_admin`), so there is always someone to hand to.
+Each removal from a team takes a per-team advisory lock first
+(`team_leave:<team>`, `lockTeamLeave`), so two removals at once run one
+after the other and the second reads what the first committed: a member
+leaving while the admin who would receive their project also leaves still
+ends with the remaining admin as its direct owner. History: `member.added`
+or `member.role` with `handedFrom`, then `member.removed` with `leftTeam`
+and the team's name, on each project. Tests: `teams/leave-projects.db.test.ts`.
+
 **Privacy contact** (168_team_privacy_contact, POPIA s18(1)(b)): the team,
 as the client organisation, is the responsible party for its projects'
 information, so it names whom people ask: `privacy_contact_name` and
@@ -5067,7 +5086,7 @@ columns (`BEFORE UPDATE OF …`), so a cleared `job_id` never reaches it;
 table with an UPDATE trigger names the DB test that ages its job past 30
 days and runs the purge.
 
-### Data feeds (018_feeds.sql, 027_feed_schedule.sql, 029_feed_fetch.sql, 032_series_provenance.sql, 111_feed_daily_only.sql, 321_feed_source_station_api.sql)
+### Data feeds (018_feeds.sql, 027_feed_schedule.sql, 029_feed_fetch.sql, 032_series_provenance.sql, 111_feed_daily_only.sql, 321_feed_source_station_api.sql, 358_feed_mark_keeps_progress.sql)
 
 One scheduled feed per row ([architecture.md § Data feeds](./architecture.md#data-feeds)).
 
@@ -5081,7 +5100,7 @@ One scheduled feed per row ([architecture.md § Data feeds](./architecture.md#da
 | `created_by`, `created_at`, `updated_at` | `updated_at` is the feed's version: a fetch result for an older version is dropped |
 | `last_scheduled_at` | When the scheduler last claimed it (the schedule's clock) |
 | `last_attempt_at`, `last_success_at`, `consecutive_failures`, `last_error` (≤ 500, sanitised), `last_data_date`, `last_value`, `last_meta` (≤ 4 KB) | Health, written only by the functions below. `last_meta.through` is the last day the latest successful fetch asked for, the fetch window's progress through days with no data (#29); `last_meta.merged` the days it wrote and `last_meta.kept` the days it left holding a value it didn't write (#30); `last_meta.finalThrough` (CHIRPS) the last day through which the series holds final values, checked by the ingest and not re-read by the next window (#69); `last_meta.filesChecked` / `recheckDaysRead` / `revisionXmin` (CHIRPS) the re-check of cached finals, § Re-checking cached finals (210); `last_meta.gapEra5l` / `gapImergLate` (the CHIRPS feed whose cells the runs read, while `settings.gapRain` asks for the product) what that fetch's fill made of it, `ok`, `not_ready` or `failed:<format\|unavailable\|refused>`, merged in after the ingest by `app_record_gap_fill` (254_feed_gap_fill_outcome; only the running feed_fetch job of that feed, queued as the caller; never an error's text) |
-| `replace_series_from` | An owner's confirmation that the feed may replace its target series, which holds another product or version (032): what it held then, `CHIRPS/2.0`, or `''` for an unrecorded one. The ingest stages the new record (`feed_stage`, below) and swaps it in whole only while the series still holds exactly that, then clears it (`app_feed_replace_done`). The swapped-in record is all the feed's days (`feed_id` / `feed_days` cover it), so its later re-reads still revise them. Setting it restarts the feed's history like a re-target; re-targeting without a new one clears it; any change to it, the target or the config discards the stage. Since 296 (`296_feed_area_replace.sql`) it may also be `area:<product/version>` (`area:` for a source with no version, `agera5_et0`): the owner confirmed re-reading the feed's whole record over its new cells, staged the same way; the swap replaces only the feed's own days (`feed_days`) and keeps a person's, with the product days (292) rebuilt from the stage ([architecture.md § Data feeds](./architecture.md#data-feeds)) |
+| `replace_series_from` | An owner's confirmation that the feed may replace its target series, which holds another product or version (032): what it held then, `CHIRPS/2.0`, or `''` for an unrecorded one. The ingest stages the new record (`feed_stage`, below) and swaps it in whole only while the series still holds exactly that, then clears it (`app_feed_replace_done`). The swapped-in record is all the feed's days (`feed_id` / `feed_days` cover it), so its later re-reads still revise them. Setting it restarts the feed's history like a re-target; re-targeting without a new one clears it; any change to it, the target or the config (its `unit` and `boundary` marks aside, 358) discards the stage. Since 296 (`296_feed_area_replace.sql`) it may also be `area:<product/version>` (`area:` for a source with no version, `agera5_et0`): the owner confirmed re-reading the feed's whole record over its new cells, staged the same way; the swap replaces only the feed's own days (`feed_days`) and keeps a person's, with the product days (292) rebuilt from the stage ([architecture.md § Data feeds](./architecture.md#data-feeds)) |
 | `replace_config_from` | With an area confirmation only (`CHECK`; 296): the config the series' record was read over, which withdrawing the replacement (`replaceSeries: false`) puts back. `data_feed_stamp` clears it with any confirmation that isn't an area one, and `app_feed_replace_done` once the swap is in |
 | `fetch_job_id`, `fetch_start`, `fetch_end` | The newest fetch sent to the fetcher Lambda whose answer isn't applied yet, and the days it asked for (029, #31). All three or none; no foreign key (finished jobs are purged). Written only by `app_begin_feed_fetch` / `app_take_feed_fetch` |
 
@@ -5090,8 +5109,12 @@ One scheduled feed per row ([architecture.md § Data feeds](./architecture.md#da
   on `water_app`'s writes only: it stamps the acting user, keeps the id,
   project and creator, and never lets a direct write set health (an owner
   can't forge "last success"), nor the fetch columns. Changing the source,
-  config or target clears the health and the fetch columns; switching a feed
-  back on makes it due at once.
+  config or target clears the health and the fetch columns (and discards any
+  `feed_stage`); switching a feed back on makes it due at once. A config
+  change confined to its marks, `unit` (Rain for each unit) or `boundary`
+  (the catchment boundary's feeds), the place its cells came from rather
+  than what it reads, keeps all of them (358_feed_mark_keeps_progress,
+  followups F7b): the trigger compares the config without those two keys.
 - **`SECURITY DEFINER` helpers** (`water_app` only, revoked from `PUBLIC`):
   - `app_due_feeds(limit, all, projects)` (027; `projects` since 322): the
     scheduler, no user context. Lists enabled feeds with an acting user that
@@ -5913,8 +5936,9 @@ refuses one.
 | --- | --- |
 | `render_token` | The headless renderer's way in: `purpose` (`report`, or `pack` since 119), `token_hash` (SHA-256, unique; never the token), `user_id` (the requester), `project_id`, `run_id` (a run of that project; NULL for a pack's token), `against_run_id` (082: an impact report's baseline, any run the issuer can read; `ON DELETE CASCADE`), `pack_id` (119: an issued evidence pack of that project the issuer reads; `ON DELETE CASCADE`; the purpose follows it, and `render_token_target` keeps exactly one target per purpose), `expires_at` (5 minutes after issue, whatever the caller sent: the `render_token_issue` trigger), `created_at`, `redact_allocations` (218, issue #523 G1: the report job sets it to `NOT report.with_volumes`; the render session it opens reads every project as a viewer kept from each registered volume, so the print is at the visibility fixed when the report was queued) |
 | `report` | One requested PDF: `project_id`, `run_id` (`ON DELETE SET NULL`: a trimmed run fails a queued report), `job_id` (its `report_render` job, unique, `SET NULL` once purged; the API addresses a report by it), `schedule_id` (null on demand), `requested_by`, `email_to` (user ids, ≤ 50, resolved to current members' addresses at send time), `impact` + `against_run_id` (082: an impact report of the run against a baseline, which may be another project's run the requester can read; `ON DELETE SET NULL` with `impact` kept, so a report whose baseline went fails rather than printing the plain report; fixed at insert), `status` (`queued` → `rendering` → `done`, or `failed` when the production renderer answers with a failure), `pages`, `bytes`, `error` (our own text, ≤ 500), `created_at`, `finished_at` (set exactly when done or failed), `with_volumes` (218, issue #523 G1: printed with each farm's registered volume, set by `report_enqueue`: the requester reads each one, an editor or owner or a viewer with `allocations_viewer_units` on, and a run of the project or the baseline carries one; existing rows true; never for an impact report against another project's baseline, which prints without any volumes. A viewer kept from the volumes is refused its PDF unless they asked for it, and isn't emailed its link). The PDF is at `reports/<project_id>/<id>.pdf` in the bucket: derived, never stored |
-| `report_schedule` | `frequency` (`weekly` with `weekday` 1–7, or `monthly` with `month_day` 1–28), `hour` 0–23 in `timezone` (IANA), `enabled`, `acting_user_id` (the editor who last saved it; `SET NULL` when that account goes, then skipped), `created_by`, `created_at`, `updated_at`, `anchor_at` (fires only for times after this; reset when the timing or `enabled` changes), `last_fired_for` (the scheduled time last queued), `last_error` (fixed text: why a due time queued nothing) |
+| `report_schedule` | `frequency` (`weekly` with `weekday` 1–7, or `monthly` with `month_day` 1–28), `hour` 0–23 in `timezone` (IANA), `enabled`, `acting_user_id` (the editor who last saved it; `SET NULL` when that account goes, then skipped), `created_by`, `created_at`, `updated_at`, `anchor_at` (fires only for times after this; reset when the timing or `enabled` changes), `last_fired_for` (the scheduled time last queued), `last_error` (fixed text: why a due time queued nothing: no runs, the acting user lost the editor role, or an error queuing the report; cleared by the next claim) |
 | `report_schedule_recipient` | `(schedule_id, user_id)`: who a schedule's PDF goes to |
+| `render_slot` | 353: render requests in flight to the renderer Lambda and those waiting for a slot (architecture.md § Server-side reports, render slots): `target` (`report:<id>`, `pack:<id>` or `applicant_pack:<pack id>`, the key), `seq` (the waiting line's order), `state` (`waiting` or `sent`), `asked_at`, `sent_at`, `expires_at` (10 minutes after the send, or after a waiter's last ask). Owner-only: no grants and no policy; only `app_render_slot_take` / `app_render_slot_free`, from the worker's context (no user). `report.sent_at` (353, `UPDATE` granted with `status`) is when the report's latest request was sent; its answer window counts from it |
 
 - **RLS**:
   - `render_token`: INSERT as yourself for a project you can view (and a
@@ -6046,6 +6070,12 @@ Email alerts (roadmap WP-2.13; [api.md § Alerts](./api.md#alerts),
     lines past that are marked `skipped` ("over the digest limit"), so
     nothing piles up for the next digest. 051 took the boundary itself
     (06:00 SAST for every project); 059 moved it to each project's zone.
+    357 claims each person under a transaction-scoped advisory *try* lock
+    (`'alert_digest:' || user_id`), taken before any of their lines is read:
+    a person another worker is claiming right now is left to it, so two
+    workers claiming at once can't each take part of one person's lines
+    (`FOR UPDATE SKIP LOCKED` alone let their scans interleave and split
+    them into two digests), and never wait for each other.
   - `alert_digest_start(at, zone)` (059, internal: no grant to water_app):
     the latest 06:00 in `zone` at or before `at`.
   - `app_alert_finish(event, user, status, reason)`: `sent`, `skipped`,

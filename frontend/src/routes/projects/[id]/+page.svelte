@@ -1391,7 +1391,7 @@
 					{/key}
 				{:else if tab === 'allocations'}
 					<Lazy load={LOAD.allocations}>
-						{#snippet children(AllocationsTab)}<AllocationsTab {projectId} {runs} {canEdit} {isOwner} settings={project?.settings ?? null} {onProjectChange} />{/snippet}
+						{#snippet children(AllocationsTab)}<AllocationsTab {projectId} {runs} {canEdit} {isOwner} settings={project?.settings ?? null} timeZone={project?.timeZone} {onProjectChange} />{/snippet}
 					</Lazy>
 				{:else if tab === 'project'}
 					<Lazy load={LOAD.project}>

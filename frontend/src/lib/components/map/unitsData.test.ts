@@ -49,6 +49,12 @@ describe('unitDataRows', () => {
 		expect(unitDataRows(order, map, r)[1]!.rain).toMatchObject({ kind: 'offer', action: 'replace', owner: true });
 	});
 
+	it('offers a feed whose parcel was redrawn over the same cells its mark alone (mark, followups F7b)', () => {
+		const r = rain(true);
+		r.units[1] = { ...r.units[1]!, action: 'mark' };
+		expect(unitDataRows(order, map, r)[1]!.rain).toMatchObject({ kind: 'offer', action: 'mark', owner: true });
+	});
+
 	it('a proposal that failed to load says so on every unit', () => {
 		const rows = unitDataRows(order, null, rain(true), { map: 'the MAP proposal couldn’t be read', rain: '' });
 		expect(rows[0]!.map).toEqual({ kind: 'none', reason: 'the MAP proposal couldn’t be read' });

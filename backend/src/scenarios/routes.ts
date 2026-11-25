@@ -87,7 +87,7 @@ async function withCheck(db: Db, projectId: string, s: ScenarioRow, role: Role) 
 	const alternatives = await loadAlternatives(db, projectId, s.id);
 	try {
 		const base = await loadBaseInput(db, projectId, s.baseRunId, role);
-		const check = checkWithout(checkView(checkScenario(base, s, await hiddenHolders(db, s)), role), drop);
+		const check = checkWithout(checkView(checkScenario(base, s, await hiddenHolders(db, s)), role), drop, s.ops);
 		// The WULA reference's warnings (294, engine wulaWarnings): over the ops as the caller reads them, so their op numbers match the list's. Never a block.
 		const wulaLines = wulaWarnings(scenario.ops, check.classified, scenario.wula, { application: isApplication(s) });
 		return { scenario, check: { ...check, wulaWarnings: wulaLines }, checkError: null, unverifiedRunIds, alternatives };

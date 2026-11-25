@@ -58,4 +58,29 @@ describe('checkWithout', () => {
 		// Nothing left out: the check as it was.
 		expect(checkWithout(check, new Set())).toBe(check);
 	});
+
+	it('drops and renumbers the assessors’ wording line for line with the problems, and the fresh ids of the left-out allocations', () => {
+		const check = {
+			applied: [{ index: 0 }],
+			classified: ['proposal', 'baseline', 'proposal'],
+			problems: ['op 2 (allocation.set): a rule', 'op 3 (node.set, "Farm 1"): a rule in the model keeps water', 'a line with no op'],
+			assessorProblems: ['op 2 (allocation.set): a rule', 'op 3 (node.set, "Bergvliet"): its share rule', 'a line with no op'],
+			reIds: [
+				{ kind: 'allocation', id: 'a-n2', as: 'fresh-1' },
+				{ kind: 'allocation', id: 'a-n1', as: 'fresh-2' },
+				{ kind: 'crop', id: 'c1', as: 'fresh-3' }
+			]
+		};
+		const ops = [node('n1'), set('n2'), set('n1')] as never[];
+		const out = checkWithout(check, new Set([1]), ops);
+		expect(out.problems).toEqual(['op 2 (node.set, "Farm 1"): a rule in the model keeps water', 'a line with no op']);
+		expect(out.assessorProblems).toEqual(['op 2 (node.set, "Bergvliet"): its share rule', 'a line with no op']);
+		expect(out.reIds).toEqual([
+			{ kind: 'allocation', id: 'a-n1', as: 'fresh-2' },
+			{ kind: 'crop', id: 'c1', as: 'fresh-3' }
+		]);
+		// A check without the assessors' wording (below editor, a team scenario) gets none.
+		const { assessorProblems: _a, reIds: _r, ...plain } = check;
+		expect('assessorProblems' in checkWithout(plain, new Set([1]), ops)).toBe(false);
+	});
 });

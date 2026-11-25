@@ -23,6 +23,12 @@ vi.mock('./feeds/schedule.js', () => ({ acceptIngestResult: (m: unknown) => acce
 const acceptRenderResult = vi.fn(async (_m: unknown) => 'queued' as string);
 const acceptPackRenderResult = vi.fn(async (_m: unknown) => 'queued' as string);
 vi.mock('./reports/schedule.js', () => ({ acceptRenderResult: (m: unknown) => acceptRenderResult(m), acceptPackRenderResult: (m: unknown) => acceptPackRenderResult(m) }));
+// The renderer's answer frees its render slot (353; the slot itself: reports/renderSlots.db.test.ts).
+const freeRenderSlot = vi.fn(async (_t: string, _r?: string | null) => true);
+vi.mock('./reports/renderSlots.js', async (orig) => ({
+	...(await orig<typeof import('./reports/renderSlots.js')>()),
+	freeRenderSlot: (t: string, r?: string | null) => freeRenderSlot(t, r)
+}));
 const acceptMailEvent = vi.fn(async (_b: string): Promise<unknown> => ({ reason: 'bounce', suppressed: 1 }));
 vi.mock('./mail/suppression.js', () => ({ acceptMailEvent: (b: string) => acceptMailEvent(b) }));
 
@@ -132,13 +138,25 @@ describe('handler', () => {
 	it('queues each render-results message as a report_render job before the tick, and logs one it drops', async () => {
 		vi.spyOn(console, 'info').mockImplementation(() => {});
 		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-		const msg = { v: 1, type: 'rendered', reportId: '00000000-0000-4000-8000-000000000004', result: { ok: true, pages: 9, bytes: 1000, ms: 4000 } };
+		const msg = { v: 1, type: 'rendered', reportId: '00000000-0000-4000-8000-000000000004', requestId: 'a1'.repeat(16), result: { ok: true, pages: 9, bytes: 1000, ms: 4000 } };
 		acceptRenderResult.mockResolvedValueOnce('queued').mockResolvedValueOnce('unknown_report');
 		await handler({ Records: [{ messageId: 'm1', body: JSON.stringify(msg) }, { messageId: 'm2', body: JSON.stringify(msg) }] } as never);
 		expect(acceptRenderResult).toHaveBeenCalledTimes(2);
 		expect(acceptRenderResult).toHaveBeenCalledWith(msg);
 		expect(runTick).toHaveBeenCalledTimes(1);
 		expect(warn).toHaveBeenCalledWith(JSON.stringify({ event: 'render_result_dropped', messageId: 'm2', reason: 'unknown_report' }));
+		// Each answer frees the report's render slot, whatever became of it, if it is the request in flight's (its echoed id).
+		expect(freeRenderSlot.mock.calls).toEqual([
+			[`report:${msg.reportId}`, msg.requestId],
+			[`report:${msg.reportId}`, msg.requestId]
+		]);
+		freeRenderSlot.mockClear();
+		// An answer from a renderer older than 353 carries no id: still accepted, and the slot is asked with none.
+		const { requestId: _, ...legacy } = msg;
+		await handler({ Records: [{ messageId: 'm3', body: JSON.stringify(legacy) }] } as never);
+		expect(acceptRenderResult).toHaveBeenLastCalledWith(legacy);
+		expect(freeRenderSlot.mock.calls).toEqual([[`report:${msg.reportId}`, undefined]]);
+		freeRenderSlot.mockClear();
 		acceptRenderResult.mockClear();
 	});
 
@@ -149,6 +167,7 @@ describe('handler', () => {
 			v: 1,
 			type: 'rendered_pack',
 			packId: '00000000-0000-4000-8000-000000000006',
+			requestId: 'b2'.repeat(16),
 			result: { ok: true, pages: 12, bytes: 5000, ms: 3000, sha256: 'ab'.repeat(32) }
 		};
 		acceptPackRenderResult.mockResolvedValueOnce('queued').mockResolvedValueOnce('unknown_pack');
@@ -159,6 +178,15 @@ describe('handler', () => {
 		expect(acceptRenderResult).not.toHaveBeenCalled();
 		expect(runTick).toHaveBeenCalledTimes(1);
 		expect(warn).toHaveBeenCalledWith(JSON.stringify({ event: 'pack_render_result_dropped', messageId: 'm2', reason: 'unknown_pack' }));
+		// The pack's slot, and an applicant's copy's own.
+		expect(freeRenderSlot.mock.calls).toEqual([
+			[`pack:${msg.packId}`, msg.requestId],
+			[`pack:${msg.packId}`, msg.requestId]
+		]);
+		freeRenderSlot.mockClear();
+		await handler({ Records: [{ messageId: 'm3', body: JSON.stringify({ ...msg, copy: 'applicant' }) }] } as never);
+		expect(freeRenderSlot.mock.calls).toEqual([[`applicant_pack:${msg.packId}`, msg.requestId]]);
+		freeRenderSlot.mockClear();
 		acceptPackRenderResult.mockClear();
 	});
 

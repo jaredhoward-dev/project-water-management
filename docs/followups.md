@@ -920,6 +920,17 @@ are #641's checklist. Open items from building it:
       production's; the event row records `orphan_pending` then
       `orphan_refunded` or `orphan_skipped_old` (352; billing.md § The
       route, "An orphan", and § Deleting an account).*
+- [x] **An orphan that can't be cancelled or refunded was only a log line.**
+      If every redelivery of an orphan's event fails for Stripe's 3 days,
+      the row stays `orphan_pending` and the customer keeps paying.
+      *Done (round 2026-11-24 r5): the `billing-orphan-failed` alarm pages on
+      the webhook's first `orphan_failed` line (essential tier, with
+      `billing_provider = "stripe"`), and the billing report opens with every
+      row still pending past the 3 days, read as the schema owner, so not on
+      logs (deployment.md § Billing alarms). Not the job tick: `billing_event`
+      is owner-only and the tick runs as `water_app`, so that would need a
+      migration (a SECURITY DEFINER listing and an operator email from the
+      tick), left for when a proactive non-log signal is wanted.*
 - [x] **The Plan page's "Compare plans" could link the public pricing
       page.** `/welcome/pricing` (Phase 4) now shows the three plans side by
       side; the Plan page (`PlanUsage.svelte`) and its Compare plans links
@@ -5165,6 +5176,26 @@ role and not before it.
       `backend/renderer-deps/package-lock.json` now resolves it (through
       `aws-lambda-ric` → `node-gyp` → `make-fetch-happen`, build-time only).
       The `osv-scanner.toml` entry is gone.
+- [x] **A burst of renders outlived its render tokens on the renderer's
+      queue** (round 4 review). The worker issued each 5-minute token just
+      before sending, and the renderer runs 2 at a time, so a burst (many
+      Monday 07:00 schedules) left requests waiting past their token's life;
+      the renderer answered them "expired, retry" and the worker's 3 requests
+      could all be spent that way. Done: render slots (`353_render_slot`,
+      `reports/renderSlots.ts`): never more requests in flight than
+      `RENDER_CONCURRENCY` (Terraform's `local.renderer_concurrency`, also the
+      trigger's `maximum_concurrency`); the token is issued only on send; the
+      rest wait in the job table, in order, their attempts given back; a slot
+      frees on the answer to the request in flight (its echoed `requestId`, a
+      digest of its token; a stale or redelivered answer frees nothing, one
+      without an id only an unnamed slot), a failed send, or 10 minutes, and
+      each free makes the next waiter due at once and wakes the worker. A
+      re-asked report waiting for a slot moves `sent_at` to each ask. An expired,
+      never-rendered answer (an SQS redelivery) asks again uncounted, up to 5
+      times. Reports, packs and applicants' copies alike; a report's answer
+      window counts from its send (`report.sent_at`). Tests:
+      `reports/renderSlots.db.test.ts`, the handler unit tests,
+      `lambda-worker.test.ts`.
 - [ ] **The renderer image has never run on Lambda.** CI and
       the gates cover the render path with the local Chromium (the worker's
       inline renderer, MinIO, Mailpit, e2e) and the renderer Lambda's
@@ -6372,6 +6403,16 @@ the Map tab, Settings → WR2012 check → Propose from the map;
       only when the importer flags a unit. Parity: `fixture.test.ts` against
       the committed `synthetic_b023.run-of-river.*` output, and the local
       `sourceWorkbooks.test.ts` on the client workbooks.
+- [x] **A dated `demand.scale` that changes no day applied anyway** (round 4
+      finding, 2026-11-24). Its months never between its dates, or its window
+      outside the run, left a scenario that said demand changed while its run
+      equalled its base; `series.scale` already refused the same. Done (engine
+      1.119.0): refused as a problem (`overrides.ts`
+      `datedDemandWindowProblem`, against an outer bound of the run window as
+      the earlier ops leave the simulation period; scenarios.md § Demand
+      scaling). A saved scenario holding such an op now shows it as "Doesn't
+      apply", and running, submitting or freezing licence terms with it is
+      refused (422) until the op is deleted; nothing stored is migrated.
 
 ## Rain forcing, fitting at import and river off-takes (issue #54)
 
@@ -8475,6 +8516,23 @@ editor's and a large boundary's notes in step 4
       canonically, holes and parts sorted), the server serves it on every
       polygon feature, and the hashes decide when both sides have one; a
       stamp from before falls back to the area rule (maps.md § Checks).
+      The catchment boundary's rain and reference ET feeds' `boundary` mark
+      got the hash later (2026-11-24): a rename or a relink of the boundary
+      no longer reads as a redraw on the Map's Getting started pill or the
+      proposal; a mark from before still goes by the version (maps.md §
+      Rain from the boundary).
+- [x] **A unit feed's mark stayed stale over the same cells** (F7b). A
+      parcel reshaped to exactly the same cells and weights read as nothing
+      to do in Rain for each unit, so a mark with an old hash (or none) kept
+      the Map's Checks flagging the unit with no way to clear it. Done: the
+      proposal offers such a unit as `mark`, and applying it rewrites the
+      feed's mark alone (`feeds/fromUnits.ts markStale`; maps.md § Rain for
+      each unit). And the progress stays (2026-11-24): `data_feed_stamp`
+      reset a feed's progress on any config change, so the next fetch read
+      the record again from 1981 over the same cells; it now compares the
+      config without its `unit` and `boundary` marks
+      (358_feed_mark_keeps_progress), so a mark-only change keeps the
+      progress and any stage, and any other config change resets them.
 
 ## Planning outputs against the mock-ups (2026-11-03)
 

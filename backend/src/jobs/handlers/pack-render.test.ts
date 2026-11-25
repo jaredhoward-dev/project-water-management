@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 const { calls } = vi.hoisted(() => ({
 	calls: {
 		sent: [] as unknown[],
+		slots: [] as string[],
 		tokens: [] as { projectId: string; packId: string }[],
 		enqueued: [] as Record<string, unknown>[],
 		puts: [] as { key: string; bytes: number; sha256: string }[]
@@ -30,11 +31,17 @@ vi.mock('../transport.js', async (orig) => ({
 	...(await orig<typeof import('../transport.js')>()),
 	sendToQueue: async (_url: string | undefined, _name: string, message: unknown) => void calls.sent.push(message)
 }));
+vi.mock('../../reports/renderSlots.js', async (orig) => ({
+	...(await orig<typeof import('../../reports/renderSlots.js')>()),
+	// The slot itself is a database's (reports/renderSlots.db.test.ts): here it is always free, and named.
+	sendWithSlot: async (target: string, _jobId: string, issue: () => Promise<string>, send: (token: string) => Promise<void>) => (calls.slots.push(target), send(await issue()))
+}));
 vi.mock('../queue.js', () => ({ enqueueJob: async (_db: unknown, j: Record<string, unknown>) => (calls.enqueued.push(j), { job: { id: 'j2' }, created: true }) }));
 
 const { packRenderHandler } = await import('./pack-render.js');
 const { JobError } = await import('../errors.js');
-const { RenderError } = await import('../../reports/render.js');
+const { RenderError, STALE_REQUEST_ERROR } = await import('../../reports/render.js');
+const { MAX_EXPIRED_REQUESTS } = await import('../../reports/renderSlots.js');
 
 const P = '00000000-0000-4000-8000-000000000002';
 const K = '00000000-0000-4000-8000-000000000006';
@@ -43,7 +50,7 @@ const bytes = Buffer.from('%PDF-1.7 an issued pack');
 const SHA = createHash('sha256').update(bytes).digest('hex');
 
 /** A database whose pack is in `state`, recording what the handler asks of it. */
-function db(state: { issued: boolean; hasPdf: boolean } | null, o: { requestsMade?: number; recorded?: boolean } = {}) {
+function db(state: { issued: boolean; hasPdf: boolean } | null, o: { requestsMade?: number; requeued?: number; recorded?: boolean } = {}) {
 	const queries: { sql: string; params: unknown[] }[] = [];
 	return {
 		queries,
@@ -51,7 +58,7 @@ function db(state: { issued: boolean; hasPdf: boolean } | null, o: { requestsMad
 			queries.push({ sql, params });
 			if (sql.includes('FROM evidence_pack')) return { rows: state ? [state] : [] };
 			if (sql.includes('app_record_pack_pdf')) return { rows: [{ recorded: o.recorded ?? true }] };
-			if (sql.includes('count(*)')) return { rows: [{ n: o.requestsMade ?? 1 }] };
+			if (sql.includes('count(*)')) return { rows: [{ made: o.requestsMade ?? 1, requeued: o.requeued ?? 0 }] };
 			throw new Error(`unexpected query: ${sql}`);
 		}
 	};
@@ -62,6 +69,7 @@ const recorded = (d: ReturnType<typeof db>) => d.queries.filter((q) => q.sql.inc
 
 afterEach(() => {
 	calls.sent.length = 0;
+	calls.slots.length = 0;
 	calls.tokens.length = 0;
 	calls.enqueued.length = 0;
 	calls.puts.length = 0;
@@ -129,6 +137,7 @@ describe('pack_render in production (REPORT_RENDERER=sqs)', () => {
 		vi.stubEnv('RENDER_REQUESTS_QUEUE_URL', 'memory://render-requests');
 		await run(db({ issued: true, hasPdf: false }));
 		expect(calls.sent).toEqual([{ v: 1, type: 'render_pack', packId: K, projectId: P, token: 'T'.repeat(43) }]);
+		expect(calls.slots).toEqual([`pack:${K}`]);
 		expect(renderReportPdf).not.toHaveBeenCalled();
 	});
 
@@ -162,6 +171,16 @@ describe('pack_render in production (REPORT_RENDERER=sqs)', () => {
 			retry: false
 		});
 		await expect(run(db({ issued: true, hasPdf: false }, { requestsMade: 1 }), failed(false))).rejects.toMatchObject({ retry: false });
+		expect(calls.enqueued).toHaveLength(1);
+	});
+
+	it('asks again at once, uncounted, when the request only waited past its token’s life (nothing rendered), up to MAX_EXPIRED_REQUESTS', async () => {
+		const expired = { packId: K, result: { ok: false, error: STALE_REQUEST_ERROR, retry: true } };
+		// Every counted request used up: an expired answer still asks again, keyed apart, with no delay.
+		await run(db({ issued: true, hasPdf: false }, { requestsMade: 3, requeued: 0 }), expired);
+		expect(calls.enqueued).toEqual([{ projectId: P, kind: 'pack_render', payload: { packId: K }, dedupeKey: `pack_requeue:${K}:0`, maxAttempts: 3 }]);
+		// Past MAX_EXPIRED_REQUESTS it counts like any retryable failure: here, the last.
+		await expect(run(db({ issued: true, hasPdf: false }, { requestsMade: 3, requeued: MAX_EXPIRED_REQUESTS }), expired)).rejects.toMatchObject({ retry: false });
 		expect(calls.enqueued).toHaveLength(1);
 	});
 });
