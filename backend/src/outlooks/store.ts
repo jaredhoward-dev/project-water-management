@@ -612,7 +612,7 @@ function planTriggerTable(base: ModelInput, baseRun: OutlookBaseRun, reviewDate:
 }
 
 /** What the c3s method read before any member runs: the engine's inputs, or why there are none (no area to average over). */
-type ForecastInputs = { inputs: C3sInputs } | { problem: string };
+export type ForecastInputs = { inputs: C3sInputs } | { problem: string };
 
 /**
  * The forecast area (outlooks/c3s.ts forecastArea: the catchment boundary,
@@ -638,7 +638,7 @@ async function readForecastInputs(db: Db, projectId: string, raw: ModelInput, de
  * the engine's default review date. An engine error is stored as the
  * outlook's message (off), never thrown: the ESP result beside it stands.
  */
-function forecastOutlook(
+export function forecastOutlook(
 	raw: ModelInput,
 	got: ForecastInputs,
 	o: { season: OutlookSeason; baseRun: OutlookBaseRun; snapshot: ModelStateSnapshot | null; analogueYears: number[]; reviewDate: string | null }
@@ -674,7 +674,8 @@ function forecastOutlook(
 			hindcasts: inputs.hindcasts,
 			baseRun: o.baseRun,
 			...(o.snapshot ? { snapshot: o.snapshot } : {}),
-			...(o.analogueYears.length ? { analogueYears: o.analogueYears } : {}),
+			// Always the kept years, none included: an empty list left out would be the engine's default, every year of the record.
+			analogueYears: o.analogueYears,
 			...(!rule && o.reviewDate ? { reviewDates: [o.reviewDate] } : {})
 		});
 	} catch (err) {
