@@ -652,7 +652,14 @@ export interface KnownMatch {
 
 export type MatchedBy = 'registration' | 'property' | 'name' | null;
 
-const key = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ');
+/**
+ * The one way registration numbers, property references and names compare:
+ * case, the ends and repeated spaces aside. Matching a row (matchRow) and
+ * marking it already in the project (routes.ts prepareImport) both use it, so a
+ * row that matches by its registration number is also marked as already there.
+ */
+export const matchKey = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ');
+const key = matchKey;
 
 /**
  * Match a row to a node: first the node an existing allocation with the same
