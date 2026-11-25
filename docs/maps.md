@@ -1335,9 +1335,11 @@ comes from its own rain (Per unit, the only method from engine 1.109.0)
   from before the hash whose parcel was edited since; `markStale`), the
   Checks would keep flagging it, so the unit is offered as `mark`: the
   feed's mark alone is rewritten to the parcel as it is now, its cells and
-  series untouched (followups F7b). The config change restarts the feed's
-  progress as any does (data_feed_stamp), so its next fetch reads the
-  record again over the same cells, which gives the same days.
+  series untouched (followups F7b). Its progress stays too: `data_feed_stamp`
+  compares a feed's config without its `unit` and `boundary` marks
+  (358_feed_mark_keeps_progress), so a change to the mark alone isn't
+  another place and the next fetch carries on where the last one stopped,
+  while any other config change still restarts the feed's progress.
 - **Limits.** A unit reads at most 100 cells in 25 rows (one feed's limit), and
   a project has at most 20 feeds, catchment feeds included: a model with more
   units than that needs some units' rain set by hand.

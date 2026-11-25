@@ -5064,7 +5064,7 @@ columns (`BEFORE UPDATE OF …`), so a cleared `job_id` never reaches it;
 table with an UPDATE trigger names the DB test that ages its job past 30
 days and runs the purge.
 
-### Data feeds (018_feeds.sql, 027_feed_schedule.sql, 029_feed_fetch.sql, 032_series_provenance.sql, 111_feed_daily_only.sql, 321_feed_source_station_api.sql)
+### Data feeds (018_feeds.sql, 027_feed_schedule.sql, 029_feed_fetch.sql, 032_series_provenance.sql, 111_feed_daily_only.sql, 321_feed_source_station_api.sql, 358_feed_mark_keeps_progress.sql)
 
 One scheduled feed per row ([architecture.md § Data feeds](./architecture.md#data-feeds)).
 
@@ -5078,7 +5078,7 @@ One scheduled feed per row ([architecture.md § Data feeds](./architecture.md#da
 | `created_by`, `created_at`, `updated_at` | `updated_at` is the feed's version: a fetch result for an older version is dropped |
 | `last_scheduled_at` | When the scheduler last claimed it (the schedule's clock) |
 | `last_attempt_at`, `last_success_at`, `consecutive_failures`, `last_error` (≤ 500, sanitised), `last_data_date`, `last_value`, `last_meta` (≤ 4 KB) | Health, written only by the functions below. `last_meta.through` is the last day the latest successful fetch asked for, the fetch window's progress through days with no data (#29); `last_meta.merged` the days it wrote and `last_meta.kept` the days it left holding a value it didn't write (#30); `last_meta.finalThrough` (CHIRPS) the last day through which the series holds final values, checked by the ingest and not re-read by the next window (#69); `last_meta.filesChecked` / `recheckDaysRead` / `revisionXmin` (CHIRPS) the re-check of cached finals, § Re-checking cached finals (210); `last_meta.gapEra5l` / `gapImergLate` (the CHIRPS feed whose cells the runs read, while `settings.gapRain` asks for the product) what that fetch's fill made of it, `ok`, `not_ready` or `failed:<format\|unavailable\|refused>`, merged in after the ingest by `app_record_gap_fill` (254_feed_gap_fill_outcome; only the running feed_fetch job of that feed, queued as the caller; never an error's text) |
-| `replace_series_from` | An owner's confirmation that the feed may replace its target series, which holds another product or version (032): what it held then, `CHIRPS/2.0`, or `''` for an unrecorded one. The ingest stages the new record (`feed_stage`, below) and swaps it in whole only while the series still holds exactly that, then clears it (`app_feed_replace_done`). The swapped-in record is all the feed's days (`feed_id` / `feed_days` cover it), so its later re-reads still revise them. Setting it restarts the feed's history like a re-target; re-targeting without a new one clears it; any change to it, the target or the config discards the stage. Since 296 (`296_feed_area_replace.sql`) it may also be `area:<product/version>` (`area:` for a source with no version, `agera5_et0`): the owner confirmed re-reading the feed's whole record over its new cells, staged the same way; the swap replaces only the feed's own days (`feed_days`) and keeps a person's, with the product days (292) rebuilt from the stage ([architecture.md § Data feeds](./architecture.md#data-feeds)) |
+| `replace_series_from` | An owner's confirmation that the feed may replace its target series, which holds another product or version (032): what it held then, `CHIRPS/2.0`, or `''` for an unrecorded one. The ingest stages the new record (`feed_stage`, below) and swaps it in whole only while the series still holds exactly that, then clears it (`app_feed_replace_done`). The swapped-in record is all the feed's days (`feed_id` / `feed_days` cover it), so its later re-reads still revise them. Setting it restarts the feed's history like a re-target; re-targeting without a new one clears it; any change to it, the target or the config (its `unit` and `boundary` marks aside, 358) discards the stage. Since 296 (`296_feed_area_replace.sql`) it may also be `area:<product/version>` (`area:` for a source with no version, `agera5_et0`): the owner confirmed re-reading the feed's whole record over its new cells, staged the same way; the swap replaces only the feed's own days (`feed_days`) and keeps a person's, with the product days (292) rebuilt from the stage ([architecture.md § Data feeds](./architecture.md#data-feeds)) |
 | `replace_config_from` | With an area confirmation only (`CHECK`; 296): the config the series' record was read over, which withdrawing the replacement (`replaceSeries: false`) puts back. `data_feed_stamp` clears it with any confirmation that isn't an area one, and `app_feed_replace_done` once the swap is in |
 | `fetch_job_id`, `fetch_start`, `fetch_end` | The newest fetch sent to the fetcher Lambda whose answer isn't applied yet, and the days it asked for (029, #31). All three or none; no foreign key (finished jobs are purged). Written only by `app_begin_feed_fetch` / `app_take_feed_fetch` |
 
@@ -5087,8 +5087,12 @@ One scheduled feed per row ([architecture.md § Data feeds](./architecture.md#da
   on `water_app`'s writes only: it stamps the acting user, keeps the id,
   project and creator, and never lets a direct write set health (an owner
   can't forge "last success"), nor the fetch columns. Changing the source,
-  config or target clears the health and the fetch columns; switching a feed
-  back on makes it due at once.
+  config or target clears the health and the fetch columns (and discards any
+  `feed_stage`); switching a feed back on makes it due at once. A config
+  change confined to its marks, `unit` (Rain for each unit) or `boundary`
+  (the catchment boundary's feeds), the place its cells came from rather
+  than what it reads, keeps all of them (358_feed_mark_keeps_progress,
+  followups F7b): the trigger compares the config without those two keys.
 - **`SECURITY DEFINER` helpers** (`water_app` only, revoked from `PUBLIC`):
   - `app_due_feeds(limit, all, projects)` (027; `projects` since 322): the
     scheduler, no user context. Lists enabled feeds with an acting user that

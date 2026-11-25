@@ -8490,11 +8490,12 @@ editor's and a large boundary's notes in step 4
       the Map's Checks flagging the unit with no way to clear it. Done: the
       proposal offers such a unit as `mark`, and applying it rewrites the
       feed's mark alone (`feeds/fromUnits.ts markStale`; maps.md § Rain for
-      each unit). Left as it is: the config change restarts the feed's
-      progress (data_feed_stamp resets it on any config change), so the next
-      fetch reads the record again over the same cells; a trigger that
-      treats a change of `unit` alone as no change would avoid that re-read
-      (a migration), worth it if re-reads from 1981 ever cost real time.
+      each unit). And the progress stays (2026-11-24): `data_feed_stamp`
+      reset a feed's progress on any config change, so the next fetch read
+      the record again from 1981 over the same cells; it now compares the
+      config without its `unit` and `boundary` marks
+      (358_feed_mark_keeps_progress), so a mark-only change keeps the
+      progress and any stage, and any other config change resets them.
 
 ## Planning outputs against the mock-ups (2026-11-03)
 
