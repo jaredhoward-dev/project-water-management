@@ -61,16 +61,31 @@ export const sortUnitRows = (rows: readonly UnitRainRow[]): UnitRainRow[] =>
 		.sort((a, b) => (NEEDS[a.r.feed?.state ?? 'none'] ?? 9) - (NEEDS[b.r.feed?.state ?? 'none'] ?? 9) || a.i - b.i)
 		.map((x) => x.r);
 
+/** The words for the feeds whose mark alone is rewritten (followups F7b): the outline changed, the cells didn't. */
+function markWords(mark: number): string {
+	return `${mark === 1 ? 'A unit’s parcel was' : `${fmtNum(mark)} units’ parcels were`} redrawn over the same cells, so ${mark === 1 ? 'its feed reads' : 'their feeds read'} the right rain already; this updates the record of the outline ${mark === 1 ? 'it was' : 'they were'} read over, so the Map’s Checks stop flagging ${mark === 1 ? 'it' : 'them'}. The series ${mark === 1 ? 'keeps its' : 'keep their'} days; the next fetch reads ${mark === 1 ? 'the record' : 'each record'} again over the same cells.`;
+}
+
 /**
  * What the button does, from each unit's action: create the missing feeds,
- * give the empty ones new cells or the product, or both. Null when nothing
- * would change (every unit's feed reads its parcel already, or no unit).
+ * give the empty ones new cells or the product, or both, and refresh the
+ * marks of feeds whose parcel was redrawn over the same cells. Null when
+ * nothing would change (every unit's feed reads its parcel already, or no unit).
  */
 export function unitRainAction(p: Pick<UnitRainProposal, 'units'>): { label: string; words: string } | null {
 	const make = p.units.filter((u) => u.action === 'create').length;
 	const update = p.units.filter((u) => u.action === 'update').length;
 	const replace = p.units.filter((u) => u.action === 'replace').length;
-	if (!make && !update && !replace) return null;
+	const mark = p.units.filter((u) => u.action === 'mark').length;
+	if (!make && !update && !replace) {
+		if (!mark) return null;
+		return { label: mark === 1 ? 'Update the outline record' : `Update ${fmtNum(mark)} outline records`, words: markWords(mark) };
+	}
+	const main = feedAction(make, update, replace);
+	return mark ? { label: main.label, words: `${main.words} ${markWords(mark)}` } : main;
+}
+
+function feedAction(make: number, update: number, replace: number): { label: string; words: string } {
 	if (replace) {
 		// A redrawn parcel under a feed that has fetched: its record is read again over the new cells, never spliced (296).
 		const others = make + update;
@@ -92,7 +107,7 @@ export function unitRainAction(p: Pick<UnitRainProposal, 'units'>): { label: str
 	};
 }
 
-/** Every proposed unit's feed already reads its parcel with this product. */
+/** Every proposed unit's feed already reads its parcel with this product, and its mark names the parcel as it is. */
 export const unitRainUpToDate = (p: Pick<UnitRainProposal, 'units'>) => p.units.length > 0 && p.units.every((u) => u.action === 'none');
 
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
@@ -110,7 +125,7 @@ export function unitRainBody(product: UnitRainProduct, startDate: string, nodeId
 }
 
 /** "Created 3 feeds and updated 1 feed. …" from the POST's answer, with how many units it left out. */
-export function appliedWords(r: Pick<UnitRainApplyResult, 'created' | 'updated' | 'replaced' | 'skipped'>): string {
+export function appliedWords(r: Pick<UnitRainApplyResult, 'created' | 'updated' | 'replaced' | 'marked' | 'skipped'>): string {
 	const updated = r.updated - (r.replaced ?? 0);
 	const parts = [
 		r.created ? `created ${plural(r.created, 'feed')}` : null,
@@ -118,9 +133,10 @@ export function appliedWords(r: Pick<UnitRainApplyResult, 'created' | 'updated' 
 		r.replaced ? `started re-reading ${plural(r.replaced, 'record')} over the new cells` : null
 	].filter(Boolean);
 	const skipped = r.skipped?.length ? ` ${plural(r.skipped.length, 'unit')} left out: see below.` : '';
-	if (!parts.length) return `Nothing to change: every unit’s feed already reads its parcel.${skipped}`;
+	const marked = r.marked ? `Updated the outline record of ${plural(r.marked, 'feed')}; the cells and the series are as they were.` : '';
+	if (!parts.length) return marked ? `${marked}${skipped}` : `Nothing to change: every unit’s feed already reads its parcel.${skipped}`;
 	const s = parts.join(' and ');
-	return `${s.charAt(0).toUpperCase()}${s.slice(1)}. They run on the next schedule, or now with “Run now” on each feed.${skipped}`;
+	return `${s.charAt(0).toUpperCase()}${s.slice(1)}. They run on the next schedule, or now with “Run now” on each feed.${marked ? ` ${marked}` : ''}${skipped}`;
 }
 
 /**

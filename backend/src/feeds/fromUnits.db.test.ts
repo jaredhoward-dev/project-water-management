@@ -210,6 +210,52 @@ describe('rain for each unit (from-units)', () => {
 		expect(input.series.rain_chirps_mm).toBeUndefined();
 	});
 
+	it('refreshes only the mark of a feed whose parcel was reshaped to the same cells, its series untouched (followups F7b)', async () => {
+		const s = await setup();
+		const f = await parcel(s.owner, s.pid, s.a.id);
+		const feedId = (await s.owner.call('POST', at(s.pid), {})).body.feeds[0].feedId as string;
+		const feedRow = async () => (await asOwner(`SELECT config FROM data_feed WHERE id = $1`, [feedId]))[0].config;
+		const cells = (await feedRow()).cells;
+		const [series] = await unitSeries(s.pid, s.a.id);
+		await asOwner(`UPDATE time_series SET start_date = '1981-01-01', "values" = '{1,0,2}', feed_id = $2, feed_days = '{[1981-01-01,1981-01-04)}' WHERE id = $1`, [series.id, feedId]);
+
+		// Reshaped, not moved: a vertex added half way along an edge is another outline (another hash) over the same
+		// cells and weights. The proposal offered nothing, and the Map's Checks kept flagging the old mark.
+		const [w, sth, e, n] = [21.21, -33.79, 21.27, -33.74];
+		const reshaped = { type: 'Polygon', coordinates: [[[w, sth], [(w + e) / 2, sth], [e, sth], [e, n], [w, n], [w, sth]]] };
+		const moved = await s.owner.call('PATCH', `/projects/${s.pid}/map/features/${f.id}`, { geometry: reshaped });
+		expect(moved.status).toBe(200);
+		expect(moved.body.feature.geomHash).not.toBe(f.geomHash);
+		const p = (await s.owner.call('GET', at(s.pid))).body;
+		expect(p.units).toEqual([expect.objectContaining({ nodeId: s.a.id, feedId, action: 'mark', seriesDays: 3 })]);
+		expect(p.units[0].cells.map(({ lat, lon, weight }: { lat: number; lon: number; weight: number }) => ({ lat, lon, weight }))).toEqual(cells);
+
+		const r = await s.owner.call('POST', at(s.pid), {});
+		expect(r.status, JSON.stringify(r.body)).toBe(200);
+		expect(r.body).toMatchObject({ created: 0, updated: 0, replaced: 0, marked: 1, feeds: [{ nodeId: s.a.id, feedId }] });
+		const after = await feedRow();
+		expect(after.unit).toMatchObject({ featureId: f.id, updatedAt: moved.body.feature.updatedAt, geomHash: moved.body.feature.geomHash });
+		expect(after.cells).toEqual(cells);
+		// The series as it was: no replacement staged, no days changed.
+		expect((await asOwner('SELECT replace_series_from AS "from" FROM data_feed WHERE id = $1', [feedId]))[0].from).toBeNull();
+		expect((await asOwner(`SELECT "values" FROM time_series WHERE id = $1`, [series.id]))[0].values).toEqual([1, 0, 2]);
+		// The Map's checks read the mark as the outline now (geo/acceptances.ts).
+		const accepted = (await s.owner.call('GET', `/projects/${s.pid}/map/features`)).body.accepted;
+		expect(accepted.unitRain).toEqual([expect.objectContaining({ nodeId: s.a.id, geomHash: moved.body.feature.geomHash })]);
+		const [ev] = await asOwner(`SELECT subject FROM audit_event WHERE project_id = $1 AND kind = 'feed.configured' ORDER BY id DESC LIMIT 1`, [s.pid]);
+		expect(ev.subject).toMatchObject({ action: 'units', created: 0, updated: 0, marked: 1, units: [{ nodeId: s.a.id, action: 'marked' }] });
+		expect((await s.owner.call('GET', at(s.pid))).body.units[0].action).toBe('none');
+
+		// A mark from before the outline hash, its parcel edited since: refreshed too, and it gains the hash.
+		await asOwner(`UPDATE data_feed SET config = jsonb_set(config, '{unit}', (config->'unit') - 'geomHash') WHERE id = $1`, [feedId]);
+		expect((await s.owner.call('GET', at(s.pid))).body.units[0].action).toBe('none');
+		const renamed = await s.owner.call('PATCH', `/projects/${s.pid}/map/features/${f.id}`, { name: 'Parcel renamed' });
+		expect(renamed.status).toBe(200);
+		expect((await s.owner.call('GET', at(s.pid))).body.units[0].action).toBe('mark');
+		expect((await s.owner.call('POST', at(s.pid), { nodeIds: [s.a.id] })).body).toMatchObject({ marked: 1 });
+		expect((await feedRow()).unit).toMatchObject({ updatedAt: renamed.body.feature.updatedAt, geomHash: moved.body.feature.geomHash });
+	});
+
 	it('writes into the unit’s own empty CHIRPS series if it has one, and refuses while one with days has no feed', async () => {
 		const s = await setup();
 		await parcel(s.owner, s.pid, s.a.id);

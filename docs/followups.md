@@ -8484,6 +8484,17 @@ editor's and a large boundary's notes in step 4
       no longer reads as a redraw on the Map's Getting started pill or the
       proposal; a mark from before still goes by the version (maps.md §
       Rain from the boundary).
+- [x] **A unit feed's mark stayed stale over the same cells** (F7b). A
+      parcel reshaped to exactly the same cells and weights read as nothing
+      to do in Rain for each unit, so a mark with an old hash (or none) kept
+      the Map's Checks flagging the unit with no way to clear it. Done: the
+      proposal offers such a unit as `mark`, and applying it rewrites the
+      feed's mark alone (`feeds/fromUnits.ts markStale`; maps.md § Rain for
+      each unit). Left as it is: the config change restarts the feed's
+      progress (data_feed_stamp resets it on any config change), so the next
+      fetch reads the record again over the same cells; a trigger that
+      treats a change of `unit` alone as no change would avoid that re-read
+      (a migration), worth it if re-reads from 1981 ever cost real time.
 
 ## Planning outputs against the mock-ups (2026-11-03)
 

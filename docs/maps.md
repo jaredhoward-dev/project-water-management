@@ -1330,7 +1330,14 @@ comes from its own rain (Per unit, the only method from engine 1.109.0)
   areas ([architecture.md § Data feeds](./architecture.md#data-feeds)). A
   start date after the feed's first own day is refused (409
   `series_backfill`). A parcel redrawn to the same cells changes nothing the
-  feed averages, so it needs nothing.
+  feed averages, so it needs no new cells; but when the feed's mark names
+  the outline as it was (another outline hash, another feature, or a mark
+  from before the hash whose parcel was edited since; `markStale`), the
+  Checks would keep flagging it, so the unit is offered as `mark`: the
+  feed's mark alone is rewritten to the parcel as it is now, its cells and
+  series untouched (followups F7b). The config change restarts the feed's
+  progress as any does (data_feed_stamp), so its next fetch reads the
+  record again over the same cells, which gives the same days.
 - **Limits.** A unit reads at most 100 cells in 25 rows (one feed's limit), and
   a project has at most 20 feeds, catchment feeds included: a model with more
   units than that needs some units' rain set by hand.

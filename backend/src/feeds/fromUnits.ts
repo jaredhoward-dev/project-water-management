@@ -27,6 +27,11 @@
 // polygon changed after its feed has fetched gets the new cells, the feed
 // backfills its record over them into its stage, and the ingest swaps it in
 // once complete, so a run reads the old record whole until then.
+//
+// A parcel reshaped (or swapped) to exactly the same cells and weights needs
+// no new cells, but the feed's mark (`unit`) still names the outline as it
+// was, so the Map's Checks would flag it with nothing to clear it: such a unit
+// is proposed as `mark`, which rewrites the mark alone (followups F7b).
 import { compareSeriesNames } from '@water-management/engine';
 import { Hono } from 'hono';
 import { z } from 'zod';
@@ -86,7 +91,7 @@ interface UnitSeries {
 }
 
 /** What POST would do for a unit. */
-type UnitAction = 'create' | 'update' | 'replace' | 'none';
+type UnitAction = 'create' | 'update' | 'replace' | 'mark' | 'none';
 
 export interface UnitProposal {
 	nodeId: string;
@@ -98,7 +103,9 @@ export interface UnitProposal {
 	seriesDays: number;
 	/**
 	 * create: no feed yet; update: its feed takes these cells or this product (its series is empty); replace: its feed
-	 * takes these cells and re-reads its whole record over them (its series holds days, 296); none: it already reads them.
+	 * takes these cells and re-reads its whole record over them (its series holds days, 296); mark: it reads these cells
+	 * already, but its mark names the parcel's outline as it was (a reshape to the same cells): the mark alone is
+	 * rewritten; none: it already reads them, and its mark is the parcel's now.
 	 */
 	action: UnitAction;
 }
@@ -168,6 +175,19 @@ async function seriesNamed(db: Db, projectId: string, name: string) {
 	return rows[0] ?? null;
 }
 
+/**
+ * Whether a unit feed's mark names another outline than the unit's parcel now (the mark `now` would be written): another
+ * feature; with both hashes, another hash; a mark without the hash (from before followups F7) when the parcel was
+ * edited since, since it can’t say whether that edit reshaped it, and the new mark records the hash. Covers every mark the
+ * Map’s Checks flag (frontend map/stale.ts unitRainChanged), so a refresh clears them.
+ */
+export function markStale(then: Partial<UnitMark> | undefined, now: UnitMark): boolean {
+	if (!then || then.featureId !== now.featureId) return true;
+	if (then.geomHash && now.geomHash) return then.geomHash !== now.geomHash;
+	if (!then.geomHash && now.geomHash) return then.updatedAt !== now.updatedAt;
+	return then.updatedAt !== now.updatedAt && then.areaKm2 !== now.areaKm2;
+}
+
 const sameCells = (a: readonly { lat: number; lon: number; weight: number }[], b: readonly { lat: number; lon: number; weight: number }[]) =>
 	a.length === b.length && a.every((c, i) => c.lat === b[i]!.lat && c.lon === b[i]!.lon && c.weight === b[i]!.weight);
 
@@ -217,7 +237,8 @@ async function plan(db: Db, projectId: string, asked?: ChirpsDailyProduct): Prom
 			const reads = chirpsProduct(feed.config) === product && sameCells(config.cells ?? [], cells);
 			// The feed's series holds a record (it has fetched): new cells or another product would splice it.
 			const filled = feed.series?.filled ?? false;
-			if (reads) action = 'none';
+			// The mark is refreshed alone when the outline changed but the cells didn't (followups F7b).
+			if (reads) action = markStale(config.unit, mark) ? 'mark' : 'none';
 			else if (filled && chirpsProduct(feed.config) !== product) {
 				refuse(
 					`its feed’s series already holds CHIRPS ${chirpsProduct(feed.config)} days, and a feed never splices two products into one record: change the product of its feed on its own (Data → Data feeds) to replace the record`
@@ -234,11 +255,11 @@ async function plan(db: Db, projectId: string, asked?: ChirpsDailyProduct): Prom
 			targetName = own.name;
 		}
 		// Never a new series ahead of the record the unit's runs read (issue #561): a run reads the unit's first by name.
-		if (action !== 'none' && own && own.days > 0 && targetName !== own.name && compareSeriesNames(targetName, own.name) < 0) {
+		if (action !== 'none' && action !== 'mark' && own && own.days > 0 && targetName !== own.name && compareSeriesNames(targetName, own.name) < 0) {
 			refuse(`a run reads the unit’s first CHIRPS series by name, so “${targetName}” would take over from “${own.name}”, which holds ${own.days} days: rename or remove one of them first`);
 			continue;
 		}
-		if (action !== 'none' && (!feed || targetName !== feed.targetName)) {
+		if (action !== 'none' && action !== 'mark' && (!feed || targetName !== feed.targetName)) {
 			const named = await seriesNamed(db, projectId, targetName);
 			if (takenNames.has(targetName) || (named && (named.days > 0 || (named.siteNodeId !== null && named.siteNodeId !== u.nodeId)))) {
 				refuse(`a series named “${targetName}” already holds another record: rename the unit, or that series, first`);
@@ -310,7 +331,7 @@ export const feedFromUnitsRoutes = new Hono<AuthEnv>()
 				});
 			}
 			const feeds: { nodeId: string; feedId: string }[] = [];
-			const changed: { nodeId: string; name: string; feedId: string; action: 'created' | 'updated' | 'replaced'; cells: number }[] = [];
+			const changed: { nodeId: string; name: string; feedId: string; action: 'created' | 'updated' | 'replaced' | 'marked'; cells: number }[] = [];
 			for (const u of chosen) {
 				const d = p.detail.get(u.nodeId)!;
 				if (u.action === 'none') {
@@ -318,7 +339,7 @@ export const feedFromUnitsRoutes = new Hono<AuthEnv>()
 					continue;
 				}
 				const config = { cells: u.cells.map(({ lat, lon, weight }) => ({ lat, lon, weight })), unit: d.mark, product, startDate };
-				if (u.action === 'update' || u.action === 'replace') {
+				if (u.action === 'update' || u.action === 'replace' || u.action === 'mark') {
 					const cur = d.feed!;
 					// As the boundary's Apply: hold the feed's row, and refuse while a fetch is out, whose answer was asked for
 					// with the old cells (fetch_job_id, 029; app_take_feed_fetch waits on this lock).
@@ -335,6 +356,16 @@ export const feedFromUnitsRoutes = new Hono<AuthEnv>()
 						throw new ApiError(409, `the feed of “${u.name}” changed meanwhile: look at the new proposal and try again`, { code: 'feed_changed' });
 					}
 					const old = cur.config as GridConfig;
+					if (u.action === 'mark') {
+						// The outline changed, the cells didn't: the feed's config as it is, with the parcel's mark now. Its
+						// series isn't touched; the config change restarts the feed's progress (data_feed_stamp), so its next
+						// fetch reads the record again over the same cells, which gives the same days.
+						const input = FeedInput.parse({ source: 'chirps', config: { ...old, unit: d.mark }, targetKind: cur.targetKind, targetName: cur.targetName, schedule: cur.schedule, enabled: cur.enabled });
+						if (!(await updateFeed(db, id, cur.id, input).catch(conflict))) throw new ApiError(404, 'not found');
+						feeds.push({ nodeId: u.nodeId, feedId: cur.id });
+						changed.push({ nodeId: u.nodeId, name: u.name, feedId: cur.id, action: 'marked', cells: u.cells.length });
+						continue;
+					}
 					if (d.targetName !== cur.targetName) await placeSeries(db, id, u.nodeId, d.targetName, startDate, d.series?.name === cur.targetName ? d.series.id : null);
 					let input = FeedInput.parse({
 						source: 'chirps',
@@ -360,14 +391,17 @@ export const feedFromUnitsRoutes = new Hono<AuthEnv>()
 				changed.push({ nodeId: u.nodeId, name: u.name, feedId: fid, action: 'created', cells: u.cells.length });
 			}
 			const created = changed.filter((x) => x.action === 'created').length;
-			// updated counts the feeds re-reading their record too; replaced, those alone (296).
-			const updated = changed.length - created;
+			// marked: the feeds whose mark alone was rewritten (followups F7b); updated counts the others changed, the
+			// feeds re-reading their record too; replaced, those alone (296).
+			const marked = changed.filter((x) => x.action === 'marked').length;
+			const updated = changed.length - created - marked;
 			const replaced = changed.filter((x) => x.action === 'replaced').length;
 			// One History entry for the whole action, naming each unit it set up.
-			if (changed.length) await recordAudit(db, id, 'feed.configured', { action: 'units', source: 'chirps', targetKind: UNIT_TARGET_KIND, product, startDate, created, updated, units: changed });
+			if (changed.length)
+				await recordAudit(db, id, 'feed.configured', { action: 'units', source: 'chirps', targetKind: UNIT_TARGET_KIND, product, startDate, created, updated, ...(marked ? { marked } : {}), units: changed });
 			// The units left out (refused, or with no polygon) say why, so the caller sees what wasn't done.
 			const skipped = body.nodeIds ? [] : [...p.refused, ...p.withoutPolygon.map((u) => ({ ...u, reason: 'the unit has no polygon on the map' }))];
-			return { created, updated, replaced, feeds, skipped };
+			return { created, updated, replaced, marked, feeds, skipped };
 		});
 		return c.json(out);
 	});

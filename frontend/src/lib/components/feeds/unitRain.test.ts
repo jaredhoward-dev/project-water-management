@@ -87,6 +87,23 @@ describe('unitRainAction', () => {
 		expect(unitRainUpToDate(proposal([unit({ feedId: 'a', action: 'replace' })]))).toBe(false);
 	});
 
+	it('offers to update the outline record alone when a parcel was redrawn over the same cells (followups F7b)', () => {
+		// Before: a feed whose cells match but whose mark names the old outline read as nothing to do, and the Map's
+		// Checks kept flagging it with no way to clear it.
+		const one = proposal([unit({ feedId: 'a', action: 'mark' }), unit({ nodeId: 'u2', feedId: 'b', action: 'none' })]);
+		expect(unitRainUpToDate(one)).toBe(false);
+		expect(unitRainAction(one)).toEqual({
+			label: 'Update the outline record',
+			words:
+				'A unit’s parcel was redrawn over the same cells, so its feed reads the right rain already; this updates the record of the outline it was read over, so the Map’s Checks stop flagging it. The series keeps its days; the next fetch reads the record again over the same cells.'
+		});
+		expect(unitRainAction(proposal([unit({ feedId: 'a', action: 'mark' }), unit({ nodeId: 'u2', feedId: 'b', action: 'mark' })]))!.label).toBe('Update 2 outline records');
+		// Beside other work, the button keeps that work's label and the words say both.
+		const mixed = unitRainAction(proposal([unit({ feedId: 'a', action: 'mark' }), unit({ nodeId: 'u2' })]))!;
+		expect(mixed.label).toBe('Create the feed');
+		expect(mixed.words).toMatch(/^Creates 1 CHIRPS feed, .* A unit’s parcel was redrawn over the same cells/);
+	});
+
 	it('offers nothing when every unit’s feed already reads its parcel, and says it is up to date', () => {
 		const p = proposal([unit({ feedId: 'a', action: 'none' }), unit({ nodeId: 'u2', feedId: 'b', action: 'none' })]);
 		expect(unitRainAction(p)).toBeNull();
@@ -151,6 +168,8 @@ describe('appliedWords', () => {
 		expect(appliedWords({ created: 0, updated: 3, replaced: 2 })).toBe(
 			'Updated 1 feed and started re-reading 2 records over the new cells. They run on the next schedule, or now with “Run now” on each feed.'
 		);
+		expect(appliedWords({ created: 0, updated: 0, marked: 2 })).toBe('Updated the outline record of 2 feeds; the cells and the series are as they were.');
+		expect(appliedWords({ created: 1, updated: 0, marked: 1 })).toMatch(/^Created 1 feed\. .* Updated the outline record of 1 feed; the cells and the series are as they were\.$/);
 		expect(appliedWords({ created: 1, updated: 0, skipped: [{ nodeId: 'x', name: 'X', reason: 'no parcel' }, { nodeId: 'y', name: 'Y', reason: 'no parcel' }] })).toMatch(/^Created 1 feed\. .* 2 units left out: see below\.$/);
 	});
 });

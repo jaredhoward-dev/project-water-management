@@ -14,9 +14,10 @@ import { unitRainRows } from '../feeds/unitRain';
 export type MapCell = { kind: 'offer'; mapMm: number; current: number | null; coverage: number } | { kind: 'same'; mapMm: number } | { kind: 'none'; reason: string };
 /**
  * A unit's rain: a feed to create or update, or one whose record is read again over its parcel's new cells (`replace`,
- * backend 296_feed_area_replace) (`owner` false: only an owner may), already reading it, or none (and why).
+ * backend 296_feed_area_replace), or whose mark alone is rewritten (`mark`: a parcel redrawn over the same cells,
+ * followups F7b) (`owner` false: only an owner may), already reading it, or none (and why).
  */
-export type RainCell = { kind: 'offer'; action: 'create' | 'update' | 'replace'; cellsText: string; owner: boolean } | { kind: 'same'; cellsText: string } | { kind: 'none'; reason: string };
+export type RainCell = { kind: 'offer'; action: 'create' | 'update' | 'replace' | 'mark'; cellsText: string; owner: boolean } | { kind: 'same'; cellsText: string } | { kind: 'none'; reason: string };
 
 export interface UnitDataRow {
 	nodeId: string;
