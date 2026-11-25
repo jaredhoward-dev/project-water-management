@@ -1328,8 +1328,8 @@ Run before building (`/persona …`) and record each **Need verdict** here.
 
 | Persona | Must conclude | Verdict |
 | --- | --- | --- |
-| `hydrologist` | The guided setup and WR2012/DWS import get a real catchment calibrated in ≤ 4 h. The ensemble method and reliability definitions are sound. The runoff module is worth offering | not yet run |
-| `wua-manager` | Several catchments under one org, free farmer viewers, invoices a board can pay | not yet run |
+| `hydrologist` | The guided setup and WR2012/DWS import get a real catchment calibrated in ≤ 4 h. The ensemble method and reliability definitions are sound. The runoff module is worth offering | **Partly met** (2026-11-25, #828, code and engine only; the ≤ 4 h setup not timed). The existing reliability measures and the seasonal outlook ensemble are sound, and calibration statistics, dam balance and units checked by hand agree. Not met: WR2012 comes in only as typed monthly means (no flow import, no Pitman); sub-daily logger flow files are summed into days, not averaged; WP-4.11 as designed resamples whole years with no persistence rule, so multi-year droughts come out too rare (condition each year on the last, Lall & Sharma 1996, and reuse `network/reliability.ts`). The `bucket-v1` module (WP-4.12) isn't worth offering; a Pitman option would be |
+| `wua-manager` | Several catchments under one org, free farmer viewers, invoices a board can pay | **Partly met** (2026-11-25, #828, code only). Farmer viewers are free (no seat). Several catchments work only through a team (no org above teams yet), and the PO invoice is built but refused in production (`billing_unavailable`) and has no VAT or tax-invoice fields. Also: restrictions can't yet be set as a % of each member's registered volume, as DWS gazettes them (model.md §2.11) |
 | `licensing-authority` | Ensembles and scenarios are reproducible (seed, engine version) and hard to game | not yet run |
 | `admin` | Org, SSO, MFA, SCIM, support grants and deletion are manageable without asking the operator | not yet run |
 | `integrator` | The v1 API, keys, rate limits and webhooks are good enough to build on | not yet run |
@@ -1337,6 +1337,8 @@ Run before building (`/persona …`) and record each **Need verdict** here.
 | `data-subject` | Export and deletion are complete; retention is honest | not yet run |
 | `international-user` | No hard-coded locale or unit | not yet run |
 | `new-user` | The trial → first catchment path works without help | not yet run |
+| `licence-applicant` | An applicant and their consultant would pay to model a proposed dam or abstraction against a baseline and issue defensible evidence | **Partly met** (2026-11-25, #828, engine only; exports not checked). Runs are reproducible and the input diff caught every flattering edit tried; the evidence pack is hashed, re-runs offline and refuses an altered baseline. Not met: a monthly table edited in 4+ months reads only "changed in N months" in the free comparison and its printout; a new on-channel dam with no pass-inflow or EWR release passes the issue checks; the comparison has no CSV or `.xlsx` export |
+| `farmer` | A farmer, mostly on a phone, uses the free farmer view to know how much water they'll get, whether they'll be curtailed and how their dam is doing | **Partly met** (2026-11-25, #828, code only). The farm view answers all three, in Afrikaans too, with only the farmer's own figures. Not met under this plan: the org wall's SSO-only rule (§ above) has no exemption for farmers joining as guests, and a lapsed plan stops farm pages and alerts updating with no reason given to the farmer |
 
 **Client questions**
 
