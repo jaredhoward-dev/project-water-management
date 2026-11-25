@@ -410,13 +410,16 @@ And under "Information collected as you use the service":
   `reverse_trial_claim`: kept on deletion), #641 "Legal and tax
   prerequisites" 2 ("invoices kept 5 years (Tax Administration Act s29;
   confirm) while separated from account deletion").
-- *A gap, not built:* deleting an account deletes `billing_account` here but
-  leaves the Stripe customer (`cus_…`) and its invoices at Stripe; nothing
-  cancels a live Stripe subscription first. Before the first charge,
-  account deletion should cancel any live subscription and either delete the
-  Stripe customer or keep it only as the tax record (a step for
-  `/audit/account-deletion-completeness`). The clause above assumes "keep as
-  the tax record".
+- *Built (2026-11-24):* deleting an account (and deleting a team) first
+  cancels the live Stripe subscription, now and with no automatic refund,
+  and refuses the deletion if Stripe can't
+  ([billing.md § Deleting an account](../billing.md#deleting-an-account)).
+  The Stripe customer (`cus_…`) and its invoices are **kept** at Stripe as
+  the tax record, unlinked from the person here (`billing_account` and its
+  `external_customer_ref` cascade away), as the clause above assumes;
+  security.md § Personal information says so. Deleting the customer instead
+  waits for counsel (§ 6 item 9). If the notice keeps this clause, add:
+  "Deleting your account cancels a paid plan at once.
 - *For counsel:* "kept for good" for the trial fingerprint against POPIA s14
   (no longer than necessary); an alternative is a fixed period (for example 3
   years) after which a second trial is accepted.
@@ -574,10 +577,18 @@ material change needing the 15-day notice even though nothing is charged?
    operator agreement's clause 6.1 (§ 3).
 9. Retention: invoices at Stripe after deletion (5 years under the Tax
    Administration Act s29, or the US period), and the trial fingerprint
-   "kept for good" against s14 (§ 3).
+   "kept for good" against s14 (§ 3). Account deletion keeps the Stripe
+   customer and its invoices as that record (built, billing.md § Deleting
+   an account): is keeping the whole customer right, or should we delete
+   it at Stripe (Stripe then keeps its own records under its own duties)?
 10. Whether moving existing users to Free with limits is itself a material
     change, and whether 15 or 30 days' notice applies to price changes
     (§ 5, 8.8).
 11. Purchase orders' own printed terms against ours (8.12).
 12. For a tax adviser: the foreign e-services threshold and VAT-inclusive
     pricing if registration comes (8.4).
+13. Deleting an account cancels a paid plan at once with no automatic
+    refund (billing.md § Deleting an account). For a person's yearly plan,
+    is that an early end under CPA s14 that owes 8.6's refund of the
+    unused months unasked, and must the deletion page say so before the
+    person confirms?

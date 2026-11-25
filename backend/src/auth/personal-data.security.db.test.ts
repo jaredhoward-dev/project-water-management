@@ -373,12 +373,14 @@ beforeAll(async () => {
 	);
 	// A yearly renewal notice sent to them (329, CPA s14), on a subscription of their own billing account (opening their
 	// plan page, which makes it): as the schema owner, the renewal pipeline isn't under test. The deletion cascades both away.
+	// A provider's subscription (the mock's), so the deletion below first cancels it at the provider (docs/billing.md §
+	// Deleting an account), as it would a Stripe one.
 	await call(subject, 'GET', '/account/plan');
 	const [billingAccount] = await asOwner('SELECT id FROM billing_account WHERE user_id = $1', [subject.id]);
 	const [renewing] = await asOwner(
 		`INSERT INTO subscription (billing_account_id, plan_code, status, provider, external_ref, period_start, period_end)
-		 VALUES ($1, 'pro', 'active', 'manual', $2, '2026-03-01T10:00:00Z', '2027-03-01T10:00:00Z') RETURNING id`,
-		[billingAccount.id, `renewal-${tag}`]
+		 VALUES ($1, 'pro', 'active', 'mock', $2, '2026-03-01T10:00:00Z', '2027-03-01T10:00:00Z') RETURNING id`,
+		[billingAccount.id, `sub_mock_renewal${tag}`]
 	);
 	await asOwner(
 		`INSERT INTO renewal_notice (subscription_id, period_end, user_id, status, sent_at, settled_at) VALUES ($1, '2027-03-01T10:00:00Z', $2, 'sent', now(), now())`,

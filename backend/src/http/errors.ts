@@ -79,6 +79,8 @@ export const ERROR_CODES = [
 	'body_refused',
 	'run_unverified',
 	'account_sole_holder',
+	// DELETE /auth/me when the person's own paid plan couldn't be cancelled at the payment provider (auth/deleteAccount.ts).
+	'account_plan_not_cancelled',
 	// Two-step sign-in (issue #282, auth/mfa-routes.ts, auth/stepUp.ts).
 	'mfa_code_wrong',
 	'mfa_locked',

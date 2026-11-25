@@ -1,22 +1,26 @@
 <script lang="ts">
 	// First-run empty state for the project list: what a project is, the
 	// three steps from nothing to a model run, and an invented example
-	// catchment to start from instead (issue #286, example.ts).
+	// catchment to start from instead (issue #286, example.ts). The example
+	// opens on its run, unless there is something to say first (its run
+	// failed, or Free's live limit started it with automatic runs off): then
+	// the card says it, with the way in (opensStraightAway).
 	import { onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { basePath } from '#lib/nav/base.js';
 	import { api } from '#lib/api/index.js';
+	import AutoRunsOffNotice from '#lib/components/billing/AutoRunsOffNotice.svelte';
 	import ChunkFailed from '#lib/components/common/ChunkFailed.svelte';
 	import { prefetch } from '#lib/components/common/lazy.js';
-	import { loadExample, startFromExample, type ExampleFailure } from './example';
+	import { loadExample, opensStraightAway, startFromExample, type ExampleFailure, type ExampleStarted } from './example';
 
 	let { oncreate, hasTeams }: { oncreate: () => void; hasTeams: boolean } = $props();
 
 	let starting = $state(false);
 	let failure = $state<ExampleFailure | null>(null);
-	/** Created, but its run failed: say so here, with the way in, rather than open a project with no run. */
-	let unrun = $state<{ path: string; runError: string } | null>(null);
+	/** Created, with something to say first (its run failed, or it started with automatic runs off): said here, with the way in. */
+	let held = $state<ExampleStarted | null>(null);
 	const prefetchExample = () => prefetch(loadExample);
 	// A user who left the list while the import ran isn't pulled into the project when it lands.
 	let gone = false;
@@ -27,11 +31,11 @@
 		if (starting) return;
 		starting = true;
 		failure = null;
-		unrun = null;
+		held = null;
 		try {
 			const r = await startFromExample((file, opts) => api.projects.importProject(file, opts));
 			if (!r.ok) failure = r;
-			else if (r.runError) unrun = { path: r.path, runError: r.runError };
+			else if (!opensStraightAway(r)) held = r;
 			else if (!gone) await goto(`${basePath()}${r.path}`);
 		} finally {
 			starting = false;
@@ -109,12 +113,17 @@
 		<div class="alert alert-error" role="alert">
 			Couldn’t create the example: {failure.error instanceof Error ? failure.error.message : String(failure.error)}
 		</div>
-	{:else if unrun}
+	{:else if held?.runError}
 		<div class="alert alert-warning" role="alert">
-			The example was created, but the model didn’t run: {unrun.runError}.
-			<a href="{basePath()}{unrun.path}">Open the example</a> and run it from Runs &amp; results.
+			The example was created, but the model didn’t run: {held.runError}.
+			<a href="{basePath()}{held.path}">Open the example</a> and run it from Runs &amp; results.
+		</div>
+	{:else if held}
+		<div class="alert alert-info" role="status" data-testid="example-ready">
+			The example is ready, with its first run. <a href="{basePath()}{held.path}">Open the example</a>
 		</div>
 	{/if}
+	{#if held?.autoRunsOff}<div class="held-note"><AutoRunsOffNotice team={held.autoRunsOff.team} /></div>{/if}
 </section>
 
 <style>
@@ -207,6 +216,9 @@
 	}
 	.alert {
 		margin: 1rem 0 0;
+	}
+	.held-note {
+		margin-top: 0.5rem;
 	}
 	@media (max-width: 760px) {
 		.start {

@@ -889,10 +889,25 @@ are #641's checklist. Open items from building it:
       counsel question (2026-11-24, docs only). Left: counsel's answers
       (its § 6), then the live text, the consent tick and its record (a
       migration), the `LEGAL_VERSION` bump with its re-acceptance entry and
-      translation (its § 5), and the gap it found: deleting an account
+      translation (its § 5). ~~The gap it found: deleting an account
       neither cancels a live Stripe subscription nor deals with the Stripe
-      customer (its § 3, §7). Trigger: before the first charge
+      customer (its § 3, §7).~~ *Done (round 2026-11-24 r2): deleting an
+      account, or a team, cancels its live provider subscriptions first
+      and refuses if it can't; the Stripe customer and invoices are kept as
+      the tax record (billing.md § Deleting an account; counsel's § 6 items
+      9 and 13 remain).* Trigger: before the first charge
       (`BILLING_PROVIDER=stripe`), with Gates A, C and D.
+- [ ] **A checkout started during an account's deletion can still charge.**
+      Deleting an account or team expires its customer's open Stripe
+      Checkout sessions and re-checks its live subscriptions inside the
+      deleting transaction (round 2026-11-24 r2), but a session started in
+      another tab after the expiry and paid after the delete commits makes
+      a subscription for an account that is gone; the webhook answers it
+      `unknown_account` and the card is charged. Durable fix: the webhook,
+      on a live subscription event for an unknown account whose metadata
+      names one of ours, cancels it at Stripe (now, no proration) and
+      refunds its first invoice, logged; a webhook test with faked Stripe
+      HTTP. Trigger: before the first charge (`BILLING_PROVIDER=stripe`).
 - [x] **The Plan page's "Compare plans" could link the public pricing
       page.** `/welcome/pricing` (Phase 4) now shows the three plans side by
       side; the Plan page (`PlanUsage.svelte`) and its Compare plans links
@@ -961,7 +976,10 @@ are #641's checklist. Open items from building it:
       panel says "About N questions left today …" as an estimate
       (billing.md § Assistant dollar caps, ui.md § Assistant;
       `dollarCaps.db.test.ts`, `reverseTrial.db.test.ts`,
-      `chat.svelte.test.ts`, `AssistantPanel.test.ts`, `assistant.spec.ts`).*
+      `chat.svelte.test.ts`, `AssistantPanel.test.ts`, `assistant.spec.ts`).
+      Since 2026-11-24 (operator decision) the median is the person's own
+      questions, not the account's (`351_assistant_day_meter_own_median.sql`),
+      so no viewer reads the account's typical spend.*
 - [x] **Terraform doesn't set the dollar-cap settings.** The assistant
       Lambda ran on the code's defaults ($0.30, 20 messages, a $30 pool),
       and the production check didn't require `ASSISTANT_FREE_*`.
@@ -1135,7 +1153,21 @@ are #641's checklist. Open items from building it:
       team catchment's team plan, else the person's own); ~~(8) the copy and
       import dialogs don't show the API's `autoRunsOff`~~
       (`AutoRunsOffNotice` in both done states, with *Compare plans*;
-      billing.md § Live catchments (Free)). Nothing left.
+      billing.md § Live catchments (Free)); ~~the empty list's *Start from
+      an example* ignores it~~ (round 2: the card holds with the same line
+      and *Open the example*, `opensStraightAway` in `projects/example.ts`;
+      ui.md § Project list). Nothing left.
+- [x] **Compare plans sent a team catchment's non-admins to a plan page
+      they can't open** (2026-11-24 round 2). Round 1 pointed every *Compare
+      plans* link at `/teams/:id/plan` for a team catchment, but only a team
+      admin reads it (`app_billing_account_readable`; 404 to a member, a
+      viewer and a direct member outside the team). Done: the full project
+      payload's `team.role` (the caller's `app_team_role`, null outside the
+      team) and `billing/planLink.ts` `planLink`: a team admin gets the
+      team's plan, anyone else in a team catchment the public price list
+      with "This catchment is on *team*'s plan: ask a team admin to change
+      it." (billing.md § Who the plan belongs to). Not their own plan: the
+      catchment bills to the team, so it wouldn't help.
 - [ ] **Free's verified-email gate: what 343 left** (issue #641 round 9,
       2026-11-24). `343_free_email_gate` refuses the assistant and switching
       a feed on, on Free, to an unverified or disposable-domain address when

@@ -12,6 +12,8 @@ import { requireOwnSecondFactor, requireTeamStepUp } from '../auth/stepUp.js';
 import { readJson } from '../http/body.js';
 import { teamName } from '../http/visibleName.js';
 import { recordTeamAudit } from '../history/record.js';
+import { cancelPlanAtProvider, teamBilling, TeamPlanNotCancelledError, uncancelled } from '../billing/cancelOnDelete.js';
+import { billingProvider } from '../billing/provider.js';
 import { applySettingsPatch, appliedThresholds, teamThresholds, TeamSettingsPatch } from './settings.js';
 import { PrivacyContactInput, toPrivacyContact } from './privacyContact.js';
 
@@ -125,6 +127,20 @@ async function patchSettings(db: Db, id: string, patch: TeamSettingsPatch) {
 	});
 }
 
+/**
+ * A team that keeps public records (161, NARSSA s13(2)(a)) is kept until the client confirms their disposal
+ * to the operator; team_public_records_guard refuses the DELETE too.
+ */
+async function refuseKeptPublicRecords(db: Db, id: string): Promise<void> {
+	const { rows: kept } = await db.query<{ kept: boolean }>('SELECT public_records AND records_disposal_confirmed_on IS NULL AS kept FROM team WHERE id = $1', [id]);
+	if (kept[0]?.kept)
+		throw new ApiError(
+			409,
+			"this team can't be deleted yet: it keeps public records (a government body's records under the National Archives Act), so it is deleted only after the organisation confirms to the operator, in writing, that it holds its records or has a disposal authority.",
+			{ publicRecords: true }
+		);
+}
+
 export const teamRoutes = new Hono<AuthEnv>()
 	.get('/', async (c) =>
 		withUser(c.get('userId'), async (db) => {
@@ -177,19 +193,25 @@ export const teamRoutes = new Hono<AuthEnv>()
 			return c.json({ team: await getTeam(db, id) });
 		});
 	})
-	.delete('/:id', async (c) =>
-		withUser(c.get('userId'), async (db) => {
-			const id = c.req.param('id');
+	// Deleting a team. The team's paid plan is cancelled at the provider first (docs/billing.md § Deleting an
+	// account), outside the deleting transaction so no row is held over the provider's round trips, and only
+	// once the caller is known to be a team admin (a viewer never triggers a cancel). The deleting transaction
+	// then checks again: a checkout that completed meanwhile left a live subscription the cancel didn't reach,
+	// and deleting would orphan it at the provider, so that refuses with the same 503.
+	.delete('/:id', async (c) => {
+		const id = c.req.param('id');
+		const userId = c.get('userId');
+		const billing = await withUser(userId, async (db) => {
 			await requireTeamRole(db, id, 'admin');
-			// A team that keeps public records (161, NARSSA s13(2)(a)) is kept until the client confirms
-			// their disposal to the operator; team_public_records_guard refuses the DELETE too.
-			const { rows: kept } = await db.query<{ kept: boolean }>('SELECT public_records AND records_disposal_confirmed_on IS NULL AS kept FROM team WHERE id = $1', [id]);
-			if (kept[0]?.kept)
-				throw new ApiError(
-					409,
-					"this team can't be deleted yet: it keeps public records (a government body's records under the National Archives Act), so it is deleted only after the organisation confirms to the operator, in writing, that it holds its records or has a disposal authority.",
-					{ publicRecords: true }
-				);
+			await refuseKeptPublicRecords(db, id);
+			return teamBilling(db, id);
+		});
+		const refuse = () => new TeamPlanNotCancelledError();
+		const cancelled = await cancelPlanAtProvider(billing, billingProvider(), refuse);
+		return withUser(userId, async (db) => {
+			await requireTeamRole(db, id, 'admin');
+			await refuseKeptPublicRecords(db, id);
+			if (uncancelled(await teamBilling(db, id), cancelled)) throw refuse();
 			// Recorded first, while the projects are still the team's: every member
 			// loses the access the team gave them on each one.
 			const { rows } = await db.query<{ name: string; members: number }>(
@@ -200,8 +222,8 @@ export const teamRoutes = new Hono<AuthEnv>()
 			// Projects stay, owned by their direct members (team_id → NULL).
 			mustChange(await db.query('DELETE FROM team WHERE id = $1', [id]));
 			return c.body(null, 204);
-		})
-	)
+		});
+	})
 	// Every add by email is an invite (issue #136), as for a project's members:
 	// one answer whether or not the address has an account.
 	.post('/:id/members', async (c) => {

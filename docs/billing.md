@@ -31,6 +31,24 @@ and `team_id` is set, each unique).
 - An account's live `subscription` gives its plan. **No live subscription
   means Free.** In Phase 1 no one has a subscription, so every account is on
   Free.
+- **Who reads a plan, and where *Compare plans* goes.** A person reads
+  their own account's plan; a team's is read by its admins only
+  (`app_billing_account_readable`, 323: `GET /teams/:id/plan` is `404` to a
+  team member, a team viewer and someone shared a team project directly
+  outside the team). So every *Compare plans* link is built by
+  `planLink` (`frontend/src/lib/components/billing/planLink.ts`) from the
+  project's `team`, whose `role` is the caller's role in it
+  (`app_team_role`; `null` outside the team; [api.md](./api.md)): a
+  personal catchment opens `/account/plan`, a team admin `/teams/:id/plan`,
+  and anyone else in a team catchment the public price list
+  (`/welcome/pricing`) with "This catchment is on *team*'s plan: ask a team
+  admin to change it." (*its team's plan* for someone outside the team, who
+  can't read its name). Not their own plan: the catchment bills to the
+  team, so upgrading their own account wouldn't change what it may do, and
+  the price list shows what the team's admin would be choosing between. A
+  team without `role` (the list's summary, an older API) counts as not an
+  admin: the price list is always there, a plan page they can't open is a
+  404.
 - Pro attaches to a person, Team to a team. In Step 4 a billing account
   becomes an organisation 1:1 ([roadmap step 4](./roadmap/step-4-platform.md)), so nothing here
   is thrown away.
@@ -206,15 +224,23 @@ and only on a per-seat plan; on Free or Pro it is kept for when the team
 moves to Team. Like the other caps, nothing refuses past it unless billing is
 enforced.
 
-**The questions-left meter** (`350_assistant_day_meter.sql`, `usage.ts`
-`dayMeter`). With billing enforced, the assistant's status (`GET
+**The questions-left meter** (`350_assistant_day_meter.sql`,
+`351_assistant_day_meter_own_median.sql`, `usage.ts` `dayMeter`). With billing enforced, the assistant's status (`GET
 /projects/:id/assistant`, [api.md § Assistant](./api.md#assistant)) carries
 `day` for a person on a capped account, Free or a reverse trial: the SAST
 day's dollars and what's left of them (the day row's cost plus every
 reservation begun today, as the begin counts them), Free's messages left, the
-trial's whole $2 left, and the account's median question: the median, over
-its day rows of the last 30 SAST days that recorded a priced turn, of the
-row's cost ÷ its messages, rounded up. The panel turns that into "About 6
+trial's whole $2 left, and the person's own median question: the median,
+over their own day rows on the account in the last 30 SAST days that
+recorded a priced turn, of the row's cost ÷ its messages, rounded up (351;
+350 took every member's rows, which let any viewer of a Free or trial
+project read the account's typical spend, so the operator moved it to the
+person's own, 2026-11-24). With no priced day of their own it is null, and
+the panel falls back: Free says its messages left, a trial the share of its
+day left. The trial's $2 left is the one account-wide figure in `day`, by
+nature: the trial's $2 is the account's (the begin counts every member's
+rows and reservations against it, 342), so a member sees what the account
+has left of it, which is what refuses their next turn. The panel turns that into "About 6
 questions left today, at what your questions usually cost (an estimate)"
 ([ui.md § Assistant](./ui.md#assistant)). Per-turn costs aren't kept (the
 month and day rows hold sums), so the median is of daily averages, and a
@@ -1188,6 +1214,10 @@ a second one when `BILLING_ENFORCED` is on.
   The copy dialog and the import dialog show it in their done state: one
   information line saying why, with *Compare plans*
   (`AutoRunsOffNotice.svelte`; [ui.md § Project list](./ui.md#project-list)).
+  The empty list's *Start from an example* shows the same line on its card
+  and waits for *Open the example* rather than opening the project (the
+  shipped example has automatic runs off, so this only guards one that
+  gains them).
   Automatic runs are the only way a new project is live: a copy leaves feeds
   with the original and copies no alert rules or publications, and an import
   has none. Below the limit, or with enforcement off, the copy keeps them on.
@@ -1212,9 +1242,11 @@ a second one when `BILLING_ENFORCED` is on.
   bills the catchment: a team catchment's team (`/teams/:id/plan`), any
   other the person's own (`/account/plan`; [§ Who the plan belongs
   to](#who-the-plan-belongs-to)). Every Compare plans link (this note, the
-  copy and import dialogs' line, the assistant's cap) builds it with
-  `planHref` (`planLink.ts`), the team from `project.team`, which the
-  workspace provides to the components below it. The note also shows in
+  copy and import dialogs' line, the assistant's cap, the paused and
+  trial notices) builds it with `planLink` (`planLink.ts`) from
+  `project.team` and the caller's `team.role`, which the workspace provides
+  to the components below it: the team's plan only for a team admin, else
+  the price list with "ask a team admin" (§ Who the plan belongs to). The note also shows in
   the settings save bar (automatic runs; `SaveBar.svelte`, from the settings
   draft's `liveLimit`, the edit kept unsaved) and the Publish this run
   dialog (`PublicationPanel.svelte`, the dialog kept open), each in place of
@@ -1652,6 +1684,108 @@ plan table's price, the stored customer, the refusals, the script and its
 `billing/invoiceGrant.db.test.ts` (335: the grant, replay, either order with
 a failed payment, a team's extra seats, each refusal with its positive
 control, a card subscription and an open-ended grant left alone, a renewal).
+
+## Deleting an account
+
+Deleting a person's account or a team cascades away its `billing_account`
+and `subscription` rows (323), but nothing in the database reaches the
+payment provider. So the route cancels the plan there first
+(`backend/src/billing/cancelOnDelete.ts`):
+
+- **Whose plan.** `DELETE /auth/me` cancels the person's **own** account's
+  (kind `user`) only. A team's plan is the team's: deleting a team admin's
+  account asks the provider nothing about it, and the team keeps paying.
+  A team never loses its last admin this way: the only admin of a team is
+  refused (`409 account_sole_holder`) until they make someone else admin,
+  so the team's plan always has an admin to manage it. `DELETE /teams/:id`
+  (an admin deleting the team) cancels the team's plan the same way.
+- **Open checkouts first.** Under Stripe, the customer's open Checkout
+  sessions (`GET /v1/checkout/sessions?customer=…&status=open`) are
+  expired first (`POST /v1/checkout/sessions/:id/expire`): one started
+  before the deletion and paid after it would otherwise start a
+  subscription for an account that is gone, charge the card, and reach a
+  webhook that ignores the unknown account. Every session we make names
+  the account's customer (`customer=`, never `customer_email`), so listing
+  by customer finds them all. A session Stripe refuses to expire because it
+  is no longer open (it completed or expired in between) is fine: a
+  completed one's subscription is in the subscription list read next, and
+  cancelled. Left open: a checkout *started* in the moment between the
+  cancel and the delete (a second tab), whose subscription would arrive
+  after the account is gone. The window is the length of the delete
+  transaction, and the durable fix is for the webhook to cancel at Stripe
+  a subscription whose account no longer exists (tracked in
+  [followups.md](./followups.md)).
+- **What is cancelled.** Every live (`trialing`, `active`, `past_due`)
+  subscription a provider holds (not a `manual` grant or the reverse trial,
+  which nothing charges for), and, under Stripe, every other open
+  subscription of the account's customer (`GET /v1/subscriptions?customer=`;
+  canceled and `incomplete_expired` are over), so one whose webhook hasn't
+  landed is caught too. Each is cancelled **now** (`DELETE
+  /v1/subscriptions/:id` with `invoice_now=false`, `prorate=false`): no
+  final invoice and **no automatic refund** for the rest of the period
+  paid (the provider interface has no refund, and billing.md decides none
+  elsewhere). A refund the Terms owe (the proposed 8.7's 7 days after a
+  first payment, 8.6's unused months of a person's yearly plan) is made by
+  hand in Stripe's dashboard, as every refund is today; whether deleting
+  the account should itself trigger 8.6's refund is a question for counsel
+  (billing-terms-draft.md § 6 item 13). A subscription Stripe no longer has (`resource_missing`) counts
+  as cancelled. The mock has nothing outside the database to cancel.
+- **When it fails.** A provider error, no provider that can cancel
+  (`manual`, none configured, no Stripe key), or a live subscription
+  another provider holds (a mock one after switching to Stripe) refuses the
+  deletion with `503 account_plan_not_cancelled` (a team: `503
+  billing_provider_error`), and nothing is deleted. Logged as
+  `account_delete_plan_not_cancelled` with the account's random id.
+- **Order.** Self-service checks what the person alone holds first (no
+  cancel for a deletion that would be refused anyway), cancels outside the
+  deleting transaction (no row locks held over Stripe's round trips), then
+  reads the live subscriptions again inside the deleting transaction: one
+  that appeared in between (a checkout that completed) refuses the deletion
+  (`503 account_plan_not_cancelled`) rather than orphan it. Deleting a team
+  does the same: the admin check, then the cancel outside the transaction
+  (a non-admin never triggers one), then the same re-check inside the
+  deleting transaction (`503 billing_provider_error`).
+- **A refused deletion may already have ended the plan.** A refusal after
+  the cancel (a checkout completed in between, or a co-owner left at the
+  same moment) leaves the plan cancelled: Stripe's
+  `customer.subscription.deleted` ends it here too, and the person (or the
+  team) is on Free. Trying again is safe: a second attempt cancels only
+  what is still live, and goes through once nothing is.
+- **No usable provider is an erasure blocker.** While the account has a
+  live provider subscription and no provider that can cancel it is
+  configured (`BILLING_PROVIDER=manual`, an unknown value, Stripe with no
+  key, or the mock while the subscription is Stripe's), self-service
+  deletion is refused every time. That blocks a POPIA s24 erasure request,
+  so it can't be left standing: the operator cancels the subscription in
+  Stripe's dashboard and deletes the account by the runbook
+  ([deployment.md § Runbooks](./deployment.md#runbooks), item 7), or
+  restores the provider's configuration so the person can retry.
+- **The customer is kept.** The Stripe customer (`cus_…`) and its invoices
+  stay at Stripe as the record of the sale, which tax law requires keeping
+  (5 years under the Tax Administration Act s29 once registered; the US
+  period otherwise). Our only link to it, `external_customer_ref`, goes
+  with the account, and the customer we create carries only the billing
+  account's random id. Deleting the customer instead (Stripe keeps its
+  own records either way) waits for counsel
+  ([legal/billing-terms-draft.md](./legal/billing-terms-draft.md) § 6
+  item 9). Stripe's `customer.subscription.deleted` for a deleted account
+  answers `unknown_account` (logged, never retried).
+- **The operator's path** (`DELETE FROM app_user` as the schema owner)
+  can't reach Stripe, so its runbook cancels the subscription in Stripe's
+  dashboard first ([deployment.md § Runbooks](./deployment.md#runbooks),
+  item 7).
+
+Tests: `billing/cancelOnDelete.test.ts` (fake providers: cancel asked,
+failure refuses, nothing asked with nothing to cancel, another provider's
+subscription refused), `provider.test.ts` and `provider/stripeApi.test.ts`
+(the checkout session list and expiry, the subscription list and cancel
+calls, in that order), `auth/delete-me.db.test.ts` (a mock plan deleted
+with the account, a failing provider refuses with nothing deleted, a
+checkout landing during the cancel refuses with nothing deleted, a team
+admin's deletion leaves the team's plan) and `teams/teams.db.test.ts` (the
+team's own deletion, the same race, and no cancel asked for by a
+non-admin); `e2e/tests/account-delete.spec.ts` (the dialog's words for
+`account_plan_not_cancelled`, still signed in).
 
 ## Later phases
 

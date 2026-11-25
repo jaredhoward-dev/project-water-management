@@ -164,6 +164,12 @@ export interface UserPreferences {
 export interface ProjectTeam {
 	id: string;
 	name: string | null;
+	/**
+	 * Your role in the team, null when you aren't in it (a direct member). On a full project
+	 * (GET /projects/:id, create, import, copy); absent from the list. Only an `admin` reads the
+	 * team's plan (billing/planLink.ts).
+	 */
+	role?: TeamRole | null;
 }
 
 export interface ProjectSummary {
@@ -4670,7 +4676,8 @@ export type AssistantStatus =
 
 /**
  * What the caller has left of today's assistant (the SAST day), in micro-USD (docs/billing.md § Assistant dollar
- * caps). `medianTurnUsdMicros`: the account's median cost of a question over its last 30 days, null with none yet.
+ * caps). `medianTurnUsdMicros`: the caller's own median cost of a question on the account over its last 30 days (never
+ * another member's), null with none of their own yet.
  */
 export interface AssistantDayMeter {
 	kind: 'free' | 'trial';

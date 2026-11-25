@@ -72,6 +72,8 @@ type ProjectRow = {
 	plan_paused_at?: Date | null;
 	/** When the reverse trial of the account it's billed to ends, for that account's owner only (349 app_project_trial_end), or null; getProject only. */
 	plan_trial_end?: Date | null;
+	/** The caller's role in the project's team (app_team_role, 026), or null for a direct member outside it; getProject only. */
+	team_role?: 'viewer' | 'member' | 'admin' | null;
 };
 
 const summary = (r: ProjectRow) => ({
@@ -92,6 +94,9 @@ const summary = (r: ProjectRow) => ({
 // rerunQueuedFor: when the pending re-run is due (the header's "Re-run queued for 14:05"), or null.
 const full = (r: ProjectRow) => ({
 	...summary(r),
+	// The caller's role in the team (null outside it): only a team admin reads the team's plan
+	// (app_billing_account_readable, 323), so Compare plans opens it only for them (docs/billing.md § Who the plan belongs to).
+	team: r.team_id ? { id: r.team_id, name: r.team_name, role: r.team_role ?? null } : null,
 	timeZone: r.time_zone,
 	wuaName: r.wua_name,
 	settings: {
@@ -240,7 +245,7 @@ function publicRecordKept() {
 
 async function getProject(db: import('../db/tx.js').Db, id: string) {
 	// The team's two-step setting through a definer: someone shared a team project directly can't read the team row.
-	const { rows } = await db.query<ProjectRow>(`SELECT q.*, app_project_requires_mfa(q.id) AS mfa_required, app_project_plan_paused(q.id) AS plan_paused_at, app_project_trial_end(q.id) AS plan_trial_end FROM (${SELECT_PROJECT} WHERE p.id = $1) q`, [id]);
+	const { rows } = await db.query<ProjectRow>(`SELECT q.*, app_project_requires_mfa(q.id) AS mfa_required, app_project_plan_paused(q.id) AS plan_paused_at, app_project_trial_end(q.id) AS plan_trial_end, app_team_role(q.team_id) AS team_role FROM (${SELECT_PROJECT} WHERE p.id = $1) q`, [id]);
 	if (!rows[0]) throw new ApiError(404, 'not found');
 	return rows[0];
 }

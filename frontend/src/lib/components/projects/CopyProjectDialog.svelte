@@ -73,7 +73,7 @@
 		<div class="alert alert-info" role="status" data-testid="copy-done">
 			Copied to <strong>{done.project.name}</strong>{done.project.team?.name ? ` in ${done.project.team.name}` : ''}.
 		</div>
-		<AutoRunsOffNotice teamId={done.project.team?.id} />
+		<AutoRunsOffNotice team={done.project.team} />
 	{:else}
 		<form id="copy-form" onsubmit={submit}>
 			{#if error}<div class="alert alert-error" role="alert">{error}</div>{/if}

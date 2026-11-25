@@ -25,7 +25,7 @@
 	import Fold from '#lib/components/common/Fold.svelte';
 	import AnswerText from './AnswerText.svelte';
 	import EmailGateNotice from '#lib/components/billing/EmailGateNotice.svelte';
-	import { planHref, useBillingTeam } from '#lib/components/billing/planLink.js';
+	import { planLink, useBillingTeam } from '#lib/components/billing/planLink.js';
 	import { tick } from 'svelte';
 	import type { AssistantProposal } from '#lib/api/types.js';
 	import { fmtDay, fmtPct, fmtWhen } from '#lib/format/number.js';
@@ -326,7 +326,7 @@
 					{chat.refusal.message}
 					Back {fmtWhen(chat.refusal.resetsAt)} your time.
 					{#if capOffersPlans(chat.refusal) && chat.refusal.code === 'assistant_monthly_cap'}Pro includes about 15 times as much.{/if}
-					{#if capOffersPlans(chat.refusal)}<a class="cap-plans" href={planHref(billingTeam(), basePath())} data-testid="assistant-compare-plans">Compare plans</a>{/if}
+					{#if capOffersPlans(chat.refusal)}<a class="cap-plans" href={planLink(billingTeam(), basePath()).href} data-testid="assistant-compare-plans">Compare plans</a>{/if}
 				</p>
 			{:else if chat.spent && st}
 				<p class="note warn" role="alert" data-testid="assistant-budget-spent">
@@ -373,7 +373,7 @@
 			{#if st || chat.turns.length}
 				<div class="meta">
 					{#if chat.dayMeter}
-						<!-- A capped account's day (Free, a reverse trial; billing enforced): an estimate from its median question. -->
+						<!-- A capped account's day (Free, a reverse trial; billing enforced): an estimate from the person's own median question. -->
 						<span class="day-meter" data-testid="assistant-day-meter">{chat.dayMeter}</span>
 					{/if}
 					{#if st}

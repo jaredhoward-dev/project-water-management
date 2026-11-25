@@ -9,6 +9,8 @@
 // its own: loaded on hover, focus or press, never with the page.
 // example.test.ts keeps every static import of it out.
 import type { ImportResult, ProjectFile } from '#lib/api/index.js';
+import { startedAutoRunsOff } from '#lib/components/billing/liveLimit.js';
+import type { BillingTeam } from '#lib/components/billing/planLink.js';
 import { loadOnce, type Loader } from '#lib/components/common/lazy.js';
 
 export const loadExample: Loader<ProjectFile> = () =>
@@ -18,6 +20,28 @@ export const loadExample: Loader<ProjectFile> = () =>
 export type ExampleFailure = { kind: 'chunk' } | { kind: 'import'; error: unknown };
 
 export type ImportProject = (file: ProjectFile, opts: { run: boolean }) => Promise<ImportResult>;
+
+/** The example, created: the path to open (after `base`) and what the card says first, if anything. */
+export interface ExampleStarted {
+	ok: true;
+	path: string;
+	/** Its run failed (the project was still created). */
+	runError?: string;
+	/**
+	 * Free's live limit made it with automatic runs off (the API's `autoRunsOff`,
+	 * docs/billing.md § Live catchments (Free)), with the team that bills it
+	 * (null: the person's own plan) for Compare plans.
+	 */
+	autoRunsOff?: { team: BillingTeam | null };
+}
+
+/**
+ * Whether the card opens the example straight away. Not when there is
+ * something to say first (the run failed, or it started with automatic runs
+ * off): the workspace has no place for an import's one-off news, so the card
+ * says it, with the way in, rather than open a project that hides it.
+ */
+export const opensStraightAway = (r: ExampleStarted): boolean => !r.runError && !r.autoRunsOff;
 
 /**
  * Import the example as a new personal project and run it. The path to open
@@ -29,7 +53,7 @@ export type ImportProject = (file: ProjectFile, opts: { run: boolean }) => Promi
 export async function startFromExample(
 	importProject: ImportProject,
 	load: Loader<ProjectFile> = loadExample
-): Promise<{ ok: true; path: string; runError?: string } | ({ ok: false } & ExampleFailure)> {
+): Promise<ExampleStarted | ({ ok: false } & ExampleFailure)> {
 	let file: ProjectFile;
 	try {
 		file = await loadOnce(load);
@@ -39,8 +63,9 @@ export async function startFromExample(
 	try {
 		const r = await importProject(file, { run: true });
 		const id = encodeURIComponent(r.project.id);
-		if (r.runId) return { ok: true, path: `/projects/${id}?tab=runs&run=${encodeURIComponent(r.runId)}` };
-		return { ok: true, path: `/projects/${id}`, runError: r.runError ?? 'the model didn’t run' };
+		const off = startedAutoRunsOff(r) ? { autoRunsOff: { team: r.project.team ?? null } } : {};
+		if (r.runId) return { ok: true, path: `/projects/${id}?tab=runs&run=${encodeURIComponent(r.runId)}`, ...off };
+		return { ok: true, path: `/projects/${id}`, runError: r.runError ?? 'the model didn’t run', ...off };
 	} catch (error) {
 		return { ok: false, kind: 'import', error };
 	}

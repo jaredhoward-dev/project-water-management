@@ -7,7 +7,10 @@
 // (048, latest 138) and the deferred checks that keep every project an owner
 // and every team an admin. This module is the request's side of it, run as
 // the person under RLS (withUser): what refuses it up front, and the audit
-// events it leaves while the person is still a member.
+// events it leaves while the person is still a member. Cancelling the
+// person's own paid plan at the payment provider, the one step the database
+// can't take, is the route's (DELETE /auth/me in auth/routes.ts, with
+// billing/cancelOnDelete.ts; docs/billing.md § Deleting an account).
 import type { Db } from '../db/tx.js';
 import { farmLinks, recordAudit, recordLinkChanges, recordTeamAudit } from '../history/record.js';
 import { memberSubject } from '../teams/routes.js';

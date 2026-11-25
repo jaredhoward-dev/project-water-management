@@ -15,10 +15,10 @@
 // (Free)): attaching or switching on a feed refused 402 plan_limit (answered
 // by page.route, since the e2e API runs without billing enforced) shows the
 // live-limit note, not an error, keeps the form as it was, and offers
-// Compare plans.
+// Compare plans: a team catchment's for its admin, the price list and "ask a team admin" for anyone else in it.
 import { readFileSync } from 'node:fs';
 import type { APIRequestContext, Page } from '@playwright/test';
-import { addMember, createProject, createRun, putSeries, seedRunnableProject } from '../support/api.ts';
+import { acceptInvites, addMember, createProject, createRun, putSeries, seedRunnableProject } from '../support/api.ts';
 import { API_URL } from '../support/env.ts';
 import { expectNoViolations } from '../support/a11y.ts';
 import { expect, test } from '../support/fixtures.ts';
@@ -588,6 +588,57 @@ test('on Free with another catchment live, attaching or switching on a feed show
 	await expect(plans).toHaveAttribute('href', /\/account\/plan$/);
 	await plans.click();
 	await expect(page).toHaveURL(/\/account\/plan$/);
+});
+
+// Compare plans in a team catchment (docs/billing.md § Who the plan belongs to): only a team admin reads the team's
+// plan (GET /teams/:id/plan is 404 to anyone else), so the admin's link opens it, and a team member, or someone shared
+// the catchment directly outside the team, gets the public price list with whose plan it is and to ask a team admin.
+// Only a project owner attaches a feed, so the member and the outsider are made the project's owners too: the link
+// follows their team role (app_team_role), not their project role.
+test('in a team catchment, Compare plans opens the team’s plan for its admin, and the price list with “ask a team admin” for a member or a direct owner', async ({ page, owner, signIn }) => {
+	void owner;
+	const team = (await (await page.request.post(`${API_URL}/teams`, { data: { name: 'Feeds Plan WUA' } })).json()) as { team: { id: string } };
+	const made = await page.request.post(`${API_URL}/projects`, { data: { name: 'Feeds team plan', teamId: team.team.id } });
+	expect(made.status()).toBe(201);
+	const projectId = ((await made.json()) as { project: { id: string } }).project.id;
+	const member = await signIn('Feeds team member');
+	expect((await page.request.post(`${API_URL}/teams/${team.team.id}/members`, { data: { email: member.user.email, role: 'member' } })).status()).toBe(201);
+	expect(await acceptInvites(member.user.email, team.team.id)).toBe(1);
+	await addMember(page.request, projectId, member.user.email, 'owner');
+	const direct = await signIn('Feeds direct owner');
+	await addMember(page.request, projectId, direct.user.email, 'owner');
+
+	const attachRefused = async (p: Page) => {
+		await refuseLive(p, 'POST', /\/projects\/[^/]+\/feeds$/);
+		await p.goto(`/projects/${projectId}?tab=series`);
+		const panel = p.getByRole('region', { name: 'Data feeds' });
+		await panel.getByRole('button', { name: 'Attach a feed' }).click();
+		await panel.getByLabel('Source').selectOption({ label: 'CHIRPS-GEFS rainfall forecast' });
+		await panel.getByLabel('Grid cells').fill('-20.12, 25.17');
+		await panel.getByRole('button', { name: 'Attach feed' }).click();
+		const note = panel.getByTestId('live-limit');
+		await expect(note).toBeVisible();
+		return note;
+	};
+
+	// The admin (who made the team): the team's plan, no "ask".
+	const adminNote = await attachRefused(page);
+	await expect(adminNote.getByRole('link', { name: 'Compare plans' })).toHaveAttribute('href', `/teams/${team.team.id}/plan`);
+	await expect(adminNote.getByTestId('plan-ask-admin')).toHaveCount(0);
+
+	// A team member: the price list, naming the team.
+	const memberNote = await attachRefused(member.page);
+	await expect(memberNote.getByTestId('plan-ask-admin')).toHaveText('This catchment is on Feeds Plan WUA’s plan: ask a team admin to change it.');
+	const plans = memberNote.getByRole('link', { name: 'Compare plans' });
+	await expect(plans).toHaveAttribute('href', '/welcome/pricing');
+	await expectNoViolations(member.page);
+	await plans.click();
+	await expect(member.page).toHaveURL(/\/welcome\/pricing$/);
+
+	// Shared directly, outside the team: the team's name is private to its members.
+	const directNote = await attachRefused(direct.page);
+	await expect(directNote.getByTestId('plan-ask-admin')).toHaveText('This catchment is on its team’s plan: ask a team admin to change it.');
+	await expect(directNote.getByRole('link', { name: 'Compare plans' })).toHaveAttribute('href', '/welcome/pricing');
 });
 
 test('while one feed saves, every card’s actions show as unavailable, and work again once it is back', async ({ page, owner, fetchRoute }) => {

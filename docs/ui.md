@@ -574,8 +574,12 @@ address (`LANDING_ROUTES`, `addressFor` in `lib/auth/session.svelte.ts`).
   fails when a migration moves a figure and that file doesn't follow.
 - **Links.** The landing page's closing panel ("See plans and prices") and
   its footer, in the page's language, and the Plan page's *See all plans*
-  (in English, the workspace's language). The *Compare plans* links
-  (assistant panel, live-catchment note) still go to `/account/plan`.
+  (in English, the workspace's language). The workspace's *Compare plans*
+  links come here for someone in a team catchment who isn't a team admin
+  (they can't open the team's plan), with "This catchment is on *team*'s
+  plan: ask a team admin to change it."; otherwise they go to the plan
+  that bills the catchment (`billing/planLink.ts`; billing.md § Who the
+  plan belongs to).
 - **Not yet.** Checkout's disclosures and consent tick (#641 Phase 4) are on
   the Plan page's checkout, not here.
 
@@ -1414,7 +1418,10 @@ role, freshness, Add data) and each tab's own header:
   live catchments (341) a note that its feeds, alerts and automatic runs are
   paused because the plan it is billed to ended, that nothing is lost, with
   a link to the plan (`billing/planPause.ts`; billing.md § Pausing after a
-  downgrade); and in the last 3 days of the person's reverse trial (342,
+  downgrade; for someone in a team catchment who isn't a team admin, who
+  can't open the team's plan, the note adds "This catchment is on *team*'s
+  plan: ask a team admin to change it." and links **Compare plans** to the
+  price list, `billing/planLink.ts`); and in the last 3 days of the person's reverse trial (342,
   the trial-ending email's window) *Your Pro trial ends on 7 Dec 2026…*,
   that the account then moves to Free with nothing charged or deleted and
   nothing paused for 14 days, with an **Upgrade** link to the Plan page
@@ -2679,8 +2686,19 @@ your own personal project through `POST /projects/import?run=1` and opened
 on its first run (*Initial run (import)*) on Runs & results. If that run
 fails the project is still created, and the card says so instead of opening
 it ("The example was created, but the model didn’t run: …", with **Open the
-example**), as the import dialog does. A user who leaves the list while it
-works isn't pulled into the project when it lands. The document is
+example**), as the import dialog does. When Free's live limit started it
+with automatic runs off (the answer's `autoRunsOff: "live_catchments"`;
+billing.md § Live catchments (Free)) the card doesn't open it either: it
+says "The example is ready, with its first run." with **Open the example**,
+then the copy and import dialogs' line, why, with **Compare plans** to the
+person's own plan (the example is personal; `billing/AutoRunsOffNotice.svelte`),
+under the run-failed warning when both happen (`opensStraightAway` in
+`projects/example.ts` decides). The card rather than the workspace, because
+the workspace has no place for an import's one-off news and its settings
+already show automatic runs off without saying why. Today's example has
+automatic runs off, so the answer can't say so yet; this keeps an example
+that gains them from opening silently at the limit. A user who leaves the
+list while it works isn't pulled into the project when it lands. The document is
 `projects/exampleCatchment.generated.json`, the same data `pnpm
 seed:examples` seeds for Kleinberg, written by `pnpm gen:example`
 (`backend/scripts/example-file.ts`; synthetic only, the repo is public). It
@@ -2877,7 +2895,10 @@ made the copy with automatic runs off (the answer's `autoRunsOff:
 open on a done state instead: "Copied to *name*", then one information line
 saying the new project starts with automatic runs off because another
 catchment on the plan is live, with **Compare plans** to the plan that bills
-the copy (`billing/AutoRunsOffNotice.svelte`), and *Close* or *Open project*.
+the copy (`billing/AutoRunsOffNotice.svelte`; for someone in the team who
+isn't its admin, the price list after "This catchment is on *team*'s plan:
+ask a team admin to change it.", `billing/planLink.ts`), and *Close* or
+*Open project*.
 
 **Delete** asks for confirmation, then deletes. A project that has nominated
 an evidence run is kept for good (issue #43, [data-model.md](./data-model.md)
@@ -13991,10 +14012,10 @@ with read-only tools over the project's data. It never changes anything.
   left today (`data-testid="assistant-day-meter"`, `chat.svelte.ts`
   `dayMeterText`, from the status's `day`, api.md § Assistant): what's left
   of the SAST day (and of the trial's whole allowance, when that's less) ÷
-  the account's median question, "About 6 questions left today, at what your
-  questions usually cost (an estimate)." ("… today on your trial" on a
-  trial). Free never shows more than its messages left, which is a count, so
-  it says "Up to 3 questions left today."; with no median yet Free says its
+  the person's own median question (never another member's), "About 6
+  questions left today, at what your questions usually cost (an
+  estimate)." ("… today on your trial" on a trial). Free never shows more than its messages left, which is a count, so
+  it says "Up to 3 questions left today."; with no median of their own yet Free says its
   messages left and a trial the share of its day left; "No questions left
   today." once either is spent. The status is read again after each turn,
   so the line counts down (a failed read keeps the line). Paid plans and
@@ -14092,8 +14113,9 @@ with read-only tools over the project's data. It never changes anything.
   takes nothing until then (`data-testid="assistant-cap"`). On Free's day and
   month (`params.plan` is `free`, which the API sends on those two) the note
   ends with a **Compare plans** link to the Plan page of the account that
-  bills the catchment (the team's, `/teams/:id/plan`, for a team catchment,
-  else `/account/plan`; `billing/planLink.ts`;
+  bills the catchment (the team's, `/teams/:id/plan`, for a team admin; the
+  price list, `/welcome/pricing`, for anyone else in a team catchment, who
+  can't open the team's plan; else `/account/plan`; `billing/planLink.ts`;
   `data-testid="assistant-compare-plans"`), the month's after "Pro includes
   about 15 times as much." (Free $1, Pro $15 a month, 323's plan limits).
   The Free pool never upsells (it isn't the person's doing), nor does a

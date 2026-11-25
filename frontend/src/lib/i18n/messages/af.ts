@@ -1887,6 +1887,8 @@ export const af: Catalogue = {
 	'04f58c9d': 'Hierdie lopie is nie deur die modellopie self gestoor nie, so dit kan nie afgeteken word nie, en geen besluit kan daaroor geneem word nie. Vee dit uit en laat dit weer loop.',
 	// You are the only owner of a project or the only admin of a team. Hand it to someone else first.
 	'72b3c72f': 'Jy is die enigste eienaar van ’n projek of die enigste administrateur van ’n span. Gee dit eers aan iemand anders oor.',
+	// Your paid plan couldn’t be cancelled with the payment provider, so your account wasn’t deleted. Try again in a few minutes.
+	'369ba5e8': 'Ons kon nie jou betaalde plan by die betalingsverskaffer kanselleer nie, daarom is jou rekening nie uitgevee nie. Probeer oor ’n paar minute weer.',
 	// That code isn’t right. Enter the newest code from your authenticator app or your email, or one of your recovery codes.
 	'03c7e607': 'Daardie kode is nie reg nie. Tik die nuutste kode van jou verifikasie-app of jou e-pos in, of een van jou herstelkodes.',
 	// Too many wrong codes. Try again in {wait}.
