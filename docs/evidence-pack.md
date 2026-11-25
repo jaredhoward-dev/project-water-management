@@ -969,7 +969,8 @@ application:
   column doesn't compare like with like), or that ran on another engine
   than the application. Neither stops issue.
 - **Errata**: the alternatives' engines reach B.1's errata, and a pack's
-  "errata found since" check reads their runs too.
+  "errata found since" check reads their runs too, on the pack's page, at
+  issue and on verify (368_verify_alternative_errata).
 
 The alternatives are the scenario's as it cites them now, which is the
 submitted list once it is submitted (frozen like the ops,
@@ -1458,9 +1459,11 @@ the pack prints:
 - `methodology` `{ version, sha256 }`;
 - `errata` `[{ id, summary }]`, as the manifest recorded them;
 - `errataFoundSince` `[{ id, summary }]`: errata that apply now to the
-  engine of either run (or, for a `fit` erratum, of the automatic fit its
-  parameters came from) and that the manifest didn't record, found since
-  the pack was drafted (132). The current list
+  engine of either run or of a mitigation alternative's run the manifest
+  cites (368; page 1 prints their figures, [§ Mitigation
+  alternatives](#mitigation-alternatives)), or, for a `fit` erratum, of the
+  automatic fit its parameters came from, and that the manifest didn't
+  record, found since the pack was drafted (132). The current list
   ([engine-errata.md](./engine-errata.md), `errataFor`) over the runs'
   engines, less the recorded ids, in the list's order. The manifest, its
   hash and `errata` never change: an erratum added to engine-errata.md
@@ -1494,8 +1497,9 @@ withdrawal shows at once.
 
 The lookup is `app_verify_pack(code)`, a `SECURITY DEFINER` function that
 builds that object, plus `runs` (132: each run's `engine_version` and its
-fit's engine, `inputs.settings.fitRecord.engineVersion`, read from
-`model_run`), which never leaves the API: the route maps the object field by
+fits' engines, read from `model_run`; 368: the cited alternatives' runs after
+the pack's two, an alternative's run that is gone by the engine the manifest
+names, as the pack's own page counts them), which never leaves the API: the route maps the object field by
 field (`toVerify`, backend/src/share/links.ts, the same mapping as a pack's
 share link) and turns `runs` into `errataFoundSince`
 (backend/src/evidence/errata.ts), and adds `shortCode`. The errata list is
