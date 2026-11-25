@@ -499,18 +499,15 @@ provenance, `ingest/verify_copy.py`):
       reads it with 75 as the local default, the API's production check
       refuses a value outside 60–3650 whole days (the variable's validation
       matches), and `tests/ingest.tftest.hcl` asserts the two agree.
-- [ ] **ECMWF quantile mapping is fitted on cells, applied to area means**
+- [x] **ECMWF quantile mapping is fitted on cells, applied to area means**
       (R4-C, [data-sources.md § ecmwf-ens](./data-sources.md#ecmwf-ens)).
-      `ingest/ecmwf_qm_fit.py` pairs the ensemble mean with observed rain
-      per 0.1° cell, but `fromMirrorEcmwf.ts` applies the fit to a
-      catchment's area-weighted mean, whose distribution has more
-      small-rain days and fewer extremes, so the mapping can over-correct
-      the tails and under-correct drizzle. **Durable fix:** fit on area
-      means for the feed's region (the forecast mean and the observed rain
-      averaged over the same cells, per feed or per catchment-sized block,
-      one fit per group), and check it against the per-cell fit on held-out
-      days. **Trigger:** when the first QM fit is run, once the archive
-      (`ecmwf/`'s archived issue means) holds a season.
+      Done (issue #835): `ingest/ecmwf_qm_fit.py --basis area|both` fits on
+      area means (per `--block` of cells, or each `--regions` box whole),
+      the feed applies an area group before a per-cell one (`qmGroupFor`),
+      and `--holdout-from` compares the two fits on held-out days (tested
+      on a synthetic copy). Left for the operator: run `--holdout-from` on
+      the real archive once it holds a season, and write the first fit with
+      the basis that wins.
 - [x] **The uncertainty bands don't vary ERA5-Land or IMERG Late**
       (R4-B, [model.md § 2.10e](./model.md#210e-uncertainty-bands-engine--0260-issue-4-phase-9)).
       The ensemble's rain-source members run CHIRPS alone with

@@ -1001,15 +1001,24 @@ the worker. Off by default (`ET_OBSERVATIONS=off`, Terraform
   and a same-day marker (`ecmwf/refused.json`) stops the day's later runs.
 - **Fallback:** CHIRPS-GEFS; then a day-old issue (a feed reads today's,
   else yesterday's).
-- **Limitation of the calibration:** the quantile-mapping fit
-  (`ingest/ecmwf_qm_fit.py`) pairs the ensemble mean with observed rain per
-  0.1° cell, but the feed applies it to a catchment's area-weighted mean
-  (`backend/src/feeds/fromMirrorEcmwf.ts`), whose distribution differs:
-  averaging over cells gives more small-rain days and fewer extremes, so a
-  per-cell mapping can push an area mean's tails too far and leave its
-  drizzle under-corrected. The durable fix is to fit on area means for the
-  feed's region, tracked in [followups.md § The rain data copy](./followups.md#the-rain-data-copy-issue-604),
-  to be done when the first fit is run, once the archive holds a season.
+- **Cells or area means in the calibration** (issue #835): the feed applies
+  the quantile mapping to a catchment's area-weighted mean
+  (`backend/src/feeds/fromMirrorEcmwf.ts`), whose distribution is not a
+  cell's: averaging gives more small-rain days and fewer extremes, so a
+  fit made per 0.1° cell pushes an area mean's tails too far and leaves its
+  drizzle under-corrected. `ingest/ecmwf_qm_fit.py --basis area` fits on
+  area means instead: the forecast mean and the observed rain averaged over
+  the same cells, per catchment-sized block (`--block 5`, 0.5°, the default)
+  or per feed region whole (`--block 0` with the feeds' boxes in
+  `--regions`), one fit per region and season, its groups marked `"basis":
+  "area"`. The feed applies the area group for its place and month when the
+  file has one, else the per-cell group (`--basis both` writes both), so a
+  file without area groups behaves as before. `--holdout-from <day>` fits
+  both on the days before it and prints each one's error on the area means
+  of the days after; on the synthetic copy in `ingest/test_ecmwf_qm_fit.py`
+  (cells noisier than their area mean) the area fit's error is well under
+  the per-cell fit's. Run that comparison on the real archive before
+  writing the first fit.
 - **Owner:** the operator; code `ingest/ecmwf_forecast.py`, `ingest/ecmwf_qm_fit.py`,
   `backend/src/ingest/ecmwf.ts`, `backend/src/feeds/fromMirrorEcmwf.ts`.
 

@@ -636,7 +636,11 @@ fixtures mode (`ecmwf_fixturehttp.py`).
 mapping of the archived ensemble means against the copy's `sat` rain (else
 `prelim`) for the same 0.1° cell and day, per region and season, written to
 `ecmwf/qm.json`; the feed applies it (`backend/src/feeds/fromMirrorEcmwf.ts`)
-and labels the forecast "not yet calibrated" without it. Runbook:
+and labels the forecast "not yet calibrated" without it. `--basis area`
+fits on area means instead (the forecast and the rain averaged over the
+same blocks of cells, what a feed maps; issue #835), `--basis both` writes
+both kinds and the feed prefers the area group, and `--holdout-from <day>`
+compares the two fits on the days after it. Runbook:
 docs/deployment.md § ECMWF.
 
 **eccodes** comes as binary wheels (`eccodes` plus `eccodeslib`, which
@@ -844,7 +848,7 @@ They cover:
 - **NASA POWER** (`test_nasapower.py`): the tiles, one parameter a request in AG/JSON/LST, the JSON parser (fill and days not yet published NaN, units checked, other shapes refused), nearest-point placement and cells beyond the points NaN, a non-lattice refused, a run end to end (72 requests, ET₀ at a known cell equal to `fao56` of its point), a day POWER lacks skipped, the revision rule (25 cells changed for one point), the 120-day window, an implausible ET₀ and a deadline writing nothing, a 403/401 silencing the day, the metric on every exit, and the handler's routing.
 - **The round trip** (`test_roundtrip.py`): Python writes the copy from the synthetic NetCDF, and Node's `backend/src/mirror/` reads it through `tests/roundtrip.ts`, bit for bit, with the same hash and manifest; `agera5_et0` and `power_et0` are read back whole the same way (the `blocks` mode). It needs the pnpm install (`backend/node_modules/.bin/tsx`) and skips without it, except in CI, where `INGEST_REQUIRE_NODE=1` makes it fail.
 - **The ECMWF job** (`test_ecmwf_forecast.py`): the index filter (only the members' `tp`, sorted, the ranges being the messages), refusals (another run or step, a member twice, the wrong field), the corner mean at 0.1° on a structured field (and one wet point shared by its four cells), longitudes that wrap, de-accumulation to daily mm (round-off, a drop, over 2000 mm, a gap), the statistics, a fixtures run end to end (the array, its metadata, the manifest, the index, the request count), the time budget and the resumed run, keeping 7 and archiving the rest as their mean, a 403 that stops with no retry, writes the marker and silences the day, the lease, the metric on every exit, a partial issue never listed, the sweep, the S3 path, the handler's routing, the image's COPY lines and the committed fixture against its generator.
-- **The fit** (`test_ecmwf_qm_fit.py`, synthetic data only): a doubled forecast mapped back, identity, the rule beyond the pairs (the same vectors as the Node side's `applyQm`), seasons, and a fit from a small synthetic copy with its provenance.
+- **The fit** (`test_ecmwf_qm_fit.py`, synthetic data only): a doubled forecast mapped back, identity, the rule beyond the pairs (the same vectors as the Node side's `applyQm`), seasons, and a fit from a small synthetic copy with its provenance; area means (the block means, both bases in one file, the group the feed picks) and the held-out comparison, where the area fit beats the per-cell fit on a copy whose cells are noisier than their area mean (issue #835).
 - **Module names** (`test_module_names.py`): no module of ours (ingest/, the fixture helpers) shares a name with an installed requirement's top-level package or with the stdlib, and laid out flat as the image lays them out, `import ecmwf` is not ours and `from ecmwf.datastores import Client` resolves (with a control: an `ecmwf.py` beside them breaks it). The ECMWF job was once `ecmwf.py` and shadowed ecmwf-datastores-client's `ecmwf` package in the image, so every CDS-backed run failed in production while fixtures-mode tests, which never build the real client, passed.
 - **The reader:** a value outside 0–2000 mm fails the read and writes nothing.
 - **The fixture:** it still matches its generator.
