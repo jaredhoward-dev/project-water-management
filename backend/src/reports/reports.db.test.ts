@@ -331,6 +331,31 @@ describe('POST / GET /projects/:id/reports', () => {
 		await asOwner('DELETE FROM job WHERE project_id = $1', [projectId]);
 	});
 
+	it('without a runId, prints the latest run of the model, never a newer scenario run (positive control: a newer run of the model is)', async () => {
+		const owner = await signUp('RepLatest');
+		const { projectId, runId, farmId } = await withRun(owner);
+		const scenario = await owner.call('POST', `/projects/${projectId}/scenarios`, {
+			name: 'Bigger dam',
+			baseRunId: runId,
+			ops: [{ op: 'node.set', nodeId: farmId, field: 'damCapacityM3', value: 500_000 }],
+			ownedNodeIds: [farmId]
+		});
+		expect(scenario.status, JSON.stringify(scenario.body)).toBe(201);
+		const ran = await owner.call('POST', `/projects/${projectId}/scenarios/${scenario.body.scenario.id}/runs`, {});
+		expect(ran.status, JSON.stringify(ran.body)).toBe(201);
+		const runOf = async () => {
+			const res = await owner.call('POST', `/projects/${projectId}/reports`, {});
+			expect(res.status).toBe(202);
+			return (await owner.call('GET', `/projects/${projectId}/reports/${res.body.jobId}`)).body.report.runId as string;
+		};
+		// The scenario's run is the newest, but a what-if is never "the latest run" of the catchment.
+		expect(await runOf()).toBe(runId);
+		const again = await owner.call('POST', `/projects/${projectId}/runs`, {});
+		expect(again.status).toBe(201);
+		expect(await runOf()).toBe(again.body.run.id);
+		await asOwner('DELETE FROM job WHERE project_id = $1', [projectId]);
+	});
+
 	it('emails others only for editors, and only members; picks the asked-for run, never another project’s', async () => {
 		const owner = await signUp('MailOwner');
 		const viewer = await signUp('MailViewer');
@@ -784,6 +809,25 @@ describe('report schedules', () => {
 		expect(await asOwner('SELECT id FROM report WHERE project_id = $1', [projectId])).toHaveLength(1);
 		const listed = (await viewer.call('GET', `/projects/${projectId}/report-schedules`)).body.schedules[0];
 		expect(listed.lastSentFor).not.toBeNull();
+		await asOwner('DELETE FROM job WHERE project_id = $1', [projectId]);
+		await asOwner('DELETE FROM report_schedule WHERE project_id = $1', [projectId]);
+	});
+
+	it('the tick prints the latest run of the model, never a newer scenario run', async () => {
+		const owner = await signUp('TickLatest');
+		const { projectId, runId, farmId } = await withRun(owner);
+		const scenario = await owner.call('POST', `/projects/${projectId}/scenarios`, {
+			name: 'Bigger dam',
+			baseRunId: runId,
+			ops: [{ op: 'node.set', nodeId: farmId, field: 'damCapacityM3', value: 500_000 }],
+			ownedNodeIds: [farmId]
+		});
+		expect(scenario.status, JSON.stringify(scenario.body)).toBe(201);
+		expect((await owner.call('POST', `/projects/${projectId}/scenarios/${scenario.body.scenario.id}/runs`, {})).status).toBe(201);
+		const s = (await owner.call('POST', `/projects/${projectId}/report-schedules`, weekly([owner.id]))).body.schedule;
+		await asOwner(`UPDATE report_schedule SET anchor_at = now() - interval '21 days' WHERE id = $1`, [s.id]);
+		await scheduleDueReports();
+		expect(await asOwner('SELECT run_id FROM report WHERE project_id = $1', [projectId])).toEqual([{ run_id: runId }]);
 		await asOwner('DELETE FROM job WHERE project_id = $1', [projectId]);
 		await asOwner('DELETE FROM report_schedule WHERE project_id = $1', [projectId]);
 	});

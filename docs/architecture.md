@@ -3178,7 +3178,8 @@ sequenceDiagram
   enabled schedules through `app_report_schedules_to_check`, works out the
   latest due time, claims it atomically (`app_claim_report_schedule`: later
   than the last one, after the schedule was saved), and queues a render of
-  the project's **latest run** as the schedule's acting user (the editor who
+  the project's **latest run** (`runs/read.ts latestRunId`: the newest run of
+  the model, never a newer scenario or forecast run while there is one) as the schedule's acting user (the editor who
   last saved it) with the dedupe key `report_schedule:<id>:<time>`. A time
   that finds no runs, or an acting user who is no longer an editor, queues
   nothing and says why on the schedule. Each schedule is handled on its own:
