@@ -336,7 +336,10 @@ export function eventLine(e: Pick<HistoryEvent, 'kind' | 'subject'>): string {
 			if (s.action === 'units') {
 				const units = Array.isArray(s.units) ? (s.units as { name?: unknown }[]).map((u) => str(u.name)).filter(Boolean) : [];
 				const named = units.length > 3 ? `${units.slice(0, 3).join(', ')} and ${units.length - 3} more` : units.join(', ');
-				const made = [typeof s.created === 'number' && s.created ? `${s.created} created` : null, typeof s.updated === 'number' && s.updated ? `${s.updated} updated` : null].filter(Boolean).join(', ');
+				const made = [typeof s.created === 'number' && s.created ? `${s.created} created` : null, typeof s.updated === 'number' && s.updated ? `${s.updated} updated` : null,
+					// Followups F7b: a feed whose mark alone was rewritten (its parcel redrawn over the same cells).
+					typeof s.marked === 'number' && s.marked ? `${s.marked} outline ${s.marked === 1 ? 'record' : 'records'} updated` : null
+				].filter(Boolean).join(', ');
 				const product = str(s.product) ? ` ${str(s.product)}` : '';
 				return `Set up rain for each unit: CHIRPS${product} feeds for ${plural(units.length, 'unit')}${named ? ` (${named})` : ''}${made ? `, ${made}` : ''}${str(s.startDate) ? `, from ${fmtDay(str(s.startDate))}` : ''}`;
 			}

@@ -7543,7 +7543,13 @@ editors run one now and read the map's proposals, viewers read.
   **Re-read the record** / **Set up 3 feeds** when a unit's parcel was
   redrawn after its feed fetched (its `replace` action, 296: the sentence
   says the record is read again over the new cells, runs use the old one
-  until it is complete, and days entered by hand stay) (from each unit's
+  until it is complete, and days entered by hand stay), **Update the outline
+  record** / **Update 2 outline records** when a parcel was redrawn over the
+  same cells and its feed's mark still names the old outline (its `mark`
+  action, followups F7b: the sentence says the feed reads the right rain
+  already, the record of the outline is updated so the Map's Checks stop
+  flagging it, and the series keeps its days; beside other work the button
+  keeps that work's label and the sentence adds this) (from each unit's
   `action`; `unitRain.ts unitRainAction`), in the panel's action row with Close. When
   the new feeds would pass the project's feed cap (the proposal's `maxFeeds`, 60; the catchment's
   included) a warning says so plainly, with the room left, before the button
@@ -7558,7 +7564,7 @@ editors run one now and read the map's proposals, viewers read.
   by its site, never by its series name (`CHIRPS v3 (<product>) <unit>`).
   History reads "Set up rain for each unit: CHIRPS rnl feeds for 4 units
   (Upper, Middle, Lower and 1 more), 3 created, 1 updated, from 1981-01-01"
-  (`history/timeline.ts`). A unit's feed card reads "3 cells of a
+  (and "1 outline record updated" for a `mark`; `history/timeline.ts`). A unit's feed card reads "3 cells of a
   unit's parcel (12.35 km²), area weighted" (`describePlace`). The card
   opens on it at once on `?rain=units` (Settings' Rain for each unit link),
   its heading focused; **Close** closes the card. Tested by `e2e/tests/unit-rain.spec.ts`, and

@@ -279,6 +279,10 @@ describe('what an item says', () => {
 		expect(eventLine(ev('feed.configured', { action: 'units', source: 'chirps', targetKind: 'rain_chirps_mm', product: 'rnl', startDate: '1981-01-01', created: 3, updated: 1, units }))).toBe(
 			'Set up rain for each unit: CHIRPS rnl feeds for 4 units (Upper, Middle, Lower and 1 more), 3 created, 1 updated, from 1 Jan 1981'
 		);
+		// A feed whose mark alone was rewritten (followups F7b).
+		expect(eventLine(ev('feed.configured', { action: 'units', source: 'chirps', targetKind: 'rain_chirps_mm', product: 'rnl', startDate: '1981-01-01', created: 0, updated: 0, marked: 1, units: units.slice(0, 1) }))).toBe(
+			'Set up rain for each unit: CHIRPS rnl feeds for 1 unit (Upper), 1 outline record updated, from 1 Jan 1981'
+		);
 		expect(eventLine(ev('feed.configured', { action: 'units', source: 'chirps', targetKind: 'rain_chirps_mm', product: 'sat', startDate: '1998-01-01', created: 1, updated: 0, units: units.slice(0, 1) }))).toBe(
 			'Set up rain for each unit: CHIRPS sat feeds for 1 unit (Upper), 1 created, from 1 Jan 1998'
 		);

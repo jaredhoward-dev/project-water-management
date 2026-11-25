@@ -4572,10 +4572,11 @@ export interface UnitRainProposalUnit {
 	seriesDays: number;
 	/**
 	 * What POST does for it: make its feed, give its (still empty) feed these cells or this product, give its feed these
-	 * cells and re-read its whole record over them (`replace`: the series holds days; backend 296_feed_area_replace), or
-	 * nothing (it reads them already).
+	 * cells and re-read its whole record over them (`replace`: the series holds days; backend 296_feed_area_replace),
+	 * rewrite its mark alone (`mark`: it reads these cells already, but its parcel's outline changed since its mark, so
+	 * the Map's Checks flag it; followups F7b), or nothing (it reads them already).
 	 */
-	action: 'create' | 'update' | 'replace' | 'none';
+	action: 'create' | 'update' | 'replace' | 'mark' | 'none';
 }
 
 /** GET …/feeds/chirps/from-units: every land unit's proposal, and the units it can't propose for. */
@@ -4607,6 +4608,8 @@ export interface UnitRainApplyResult {
 	updated: number;
 	/** Of those, the feeds re-reading their whole record over the new cells (296). */
 	replaced?: number;
+	/** The feeds whose mark alone was rewritten (the outline changed, the cells didn't; followups F7b); not in `updated`. */
+	marked?: number;
 	feeds: { nodeId: string; feedId: string }[];
 	/** The units left out (refused, or with no parcel), and why. */
 	skipped?: { nodeId: string; name: string; reason: string }[];
