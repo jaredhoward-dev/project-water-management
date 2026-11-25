@@ -201,6 +201,42 @@ describe('data_feed RLS and the routes', () => {
 		await expect(withUser(other.id, (db) => db.query(`SELECT app_record_feed_result($1, true, '2030-01-01', 1, null, '{}')`, [id]))).rejects.toMatchObject({ code: '42501' });
 	});
 
+	it('a change to the config’s mark alone (unit, boundary) keeps the feed’s progress and stage; any other config change resets them (358)', async () => {
+		const owner = await signUp('MarkOnly');
+		const pid = await project(owner);
+		const mark = (updatedAt: string) => ({ featureId: '00000000-0000-4000-8000-000000000001', name: 'Outline', updatedAt, areaKm2: 1, geomHash: updatedAt.slice(0, 10).replaceAll('-', '').padEnd(64, '0') });
+		const config = (over: Record<string, unknown>) => JSON.stringify({ cells: [cell()], startDate: '2020-01-01', ...over });
+		const { rows } = await withUser(owner.id, (db) =>
+			db.query(`INSERT INTO data_feed (project_id, source, config, target_kind) VALUES ($1, 'chirps', $2, 'rain_chirps_mm') RETURNING id`, [pid, config({ unit: mark('2026-01-01T00:00:00.000Z') })])
+		);
+		const id = rows[0].id as string;
+		const progress = { last_data_date: '2026-10-01', consecutive_failures: 2, last_meta: { through: '2026-10-01' } };
+		// Progress and a stage as a fetch and a confirmed replacement leave them (the owner role, which the trigger lets through).
+		const seed = async () => {
+			await asOwner(`UPDATE data_feed SET last_success_at = now(), last_data_date = '2026-10-01', consecutive_failures = 2, last_meta = '{"through":"2026-10-01"}', last_scheduled_at = now() WHERE id = $1`, [id]);
+			await asOwner(`INSERT INTO feed_stage (feed_id, project_id, start_date, "values", product, product_version, replace_from) VALUES ($1, $2, '2020-01-01', '{1}', 'CHIRPS sat', '3.0', '') ON CONFLICT (feed_id) DO NOTHING`, [id, pid]);
+		};
+		const stage = async () => (await asOwner(`SELECT count(*)::int AS n FROM feed_stage WHERE feed_id = $1`, [id]))[0].n;
+		const save = (c: string) => withUser(owner.id, (db) => db.query(`UPDATE data_feed SET config = $2 WHERE id = $1`, [id, c]));
+		await seed();
+
+		// A unit's mark refreshed (Rain for each unit's mark action), then swapped for a boundary's, then dropped: the cells read the same.
+		for (const c of [config({ unit: mark('2026-02-01T00:00:00.000Z') }), config({ boundary: mark('2026-03-01T00:00:00.000Z') }), config({})]) {
+			await save(c);
+			expect(await feedRow(id)).toMatchObject({ ...progress, last_success_at: expect.any(Date), last_scheduled_at: expect.any(Date) });
+			expect(await stage()).toBe(1);
+		}
+		expect((await asOwner(`SELECT config FROM data_feed WHERE id = $1`, [id]))[0].config).toEqual(JSON.parse(config({})));
+
+		// Positive controls: new cells, or another first day, with or without a mark, are another record: progress and stage go.
+		for (const c of [config({ cells: [{ ...cell(), weight: 0.5 }], boundary: mark('2026-03-01T00:00:00.000Z') }), config({ startDate: '2021-01-01' })]) {
+			await seed();
+			await save(c);
+			expect(await feedRow(id)).toMatchObject({ last_data_date: null, consecutive_failures: 0, last_meta: null, last_success_at: null, last_scheduled_at: null });
+			expect(await stage()).toBe(0);
+		}
+	});
+
 	it('validates input, refuses a second feed for one series (409), PATCHes a subset, and deletes', async () => {
 		const owner = await signUp('Patcher');
 		const pid = await project(owner);

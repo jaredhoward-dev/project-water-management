@@ -218,6 +218,9 @@ describe('rain for each unit (from-units)', () => {
 		const cells = (await feedRow()).cells;
 		const [series] = await unitSeries(s.pid, s.a.id);
 		await asOwner(`UPDATE time_series SET start_date = '1981-01-01', "values" = '{1,0,2}', feed_id = $2, feed_days = '{[1981-01-01,1981-01-04)}' WHERE id = $1`, [series.id, feedId]);
+		// How far its fetches have read (the owner role, which data_feed_stamp lets through).
+		await asOwner(`UPDATE data_feed SET last_data_date = '1981-01-03', last_success_at = now(), last_meta = '{"through":"1981-01-03"}' WHERE id = $1`, [feedId]);
+		const progress = async () => (await asOwner(`SELECT to_char(last_data_date, 'YYYY-MM-DD') AS d, last_meta AS meta, last_success_at IS NOT NULL AS ok FROM data_feed WHERE id = $1`, [feedId]))[0];
 
 		// Reshaped, not moved: a vertex added half way along an edge is another outline (another hash) over the same
 		// cells and weights. The proposal offered nothing, and the Map's Checks kept flagging the old mark.
@@ -239,6 +242,9 @@ describe('rain for each unit (from-units)', () => {
 		// The series as it was: no replacement staged, no days changed.
 		expect((await asOwner('SELECT replace_series_from AS "from" FROM data_feed WHERE id = $1', [feedId]))[0].from).toBeNull();
 		expect((await asOwner(`SELECT "values" FROM time_series WHERE id = $1`, [series.id]))[0].values).toEqual([1, 0, 2]);
+		// And the feed's progress as it was: a change to the mark alone isn't another place (358), so the next fetch
+		// carries on from 1981-01-03 rather than reading the record from 1981 again.
+		expect(await progress()).toEqual({ d: '1981-01-03', meta: { through: '1981-01-03' }, ok: true });
 		// The Map's checks read the mark as the outline now (geo/acceptances.ts).
 		const accepted = (await s.owner.call('GET', `/projects/${s.pid}/map/features`)).body.accepted;
 		expect(accepted.unitRain).toEqual([expect.objectContaining({ nodeId: s.a.id, geomHash: moved.body.feature.geomHash })]);

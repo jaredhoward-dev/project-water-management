@@ -358,8 +358,8 @@ export const feedFromUnitsRoutes = new Hono<AuthEnv>()
 					const old = cur.config as GridConfig;
 					if (u.action === 'mark') {
 						// The outline changed, the cells didn't: the feed's config as it is, with the parcel's mark now. Its
-						// series isn't touched; the config change restarts the feed's progress (data_feed_stamp), so its next
-						// fetch reads the record again over the same cells, which gives the same days.
+						// series isn't touched, and neither is its progress: data_feed_stamp leaves it when only the config's
+						// mark changes (358), so its next fetch carries on where the last one stopped.
 						const input = FeedInput.parse({ source: 'chirps', config: { ...old, unit: d.mark }, targetKind: cur.targetKind, targetName: cur.targetName, schedule: cur.schedule, enabled: cur.enabled });
 						if (!(await updateFeed(db, id, cur.id, input).catch(conflict))) throw new ApiError(404, 'not found');
 						feeds.push({ nodeId: u.nodeId, feedId: cur.id });
