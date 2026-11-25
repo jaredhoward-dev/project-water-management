@@ -293,6 +293,10 @@ export const af: Catalogue = {
 	'fb655347': 'datavoere wat misluk',
 	// hydrological units short of water
 	'e5f272dd': 'hidrologiese eenhede met ’n watertekort',
+	// At most {n} alert email a day comes right away. Any more wait for the next morning’s summary (06:00). / At most {n} alert emails a day come right away. Any more wait for the next morning’s summary (06:00).
+	'09ba33ef': { one: 'Hoogstens {n} waarskuwings-e-pos per dag kom dadelik. Die res wag vir die volgende oggend se opsomming (06:00).', other: 'Hoogstens {n} waarskuwings-e-posse per dag kom dadelik. Die res wag vir die volgende oggend se opsomming (06:00).' },
+	// Every alert email waits for the next morning’s summary (06:00).
+	'd778d998': 'Elke waarskuwings-e-pos wag vir die volgende oggend se opsomming (06:00).',
 	// Dam running low: {farm}
 	'21b1fd3a': 'Dam raak laag: {farm}',
 	// Warns when the model puts your dam below {pct}. Your WUA sets this level.
@@ -653,6 +657,8 @@ export const af: Catalogue = {
 	'c7fda361': '{n} hidrologiese eenhede',
 	// {up} upstream of you and {down} downstream, of {count} in the catchment. The same rules apply to every hydrological unit.
 	'10e2d49e': 'Stroomop van jou: {up}. Stroomaf: {down}. Altesaam {count} in die opvanggebied. Dieselfde reëls geld vir elke hidrologiese eenheid.',
+	// the catchment outlet
+	'bb27ae88': 'die opvanggebied se uitloop',
 	// River at {name}: kept its reserve on every one of the {days} to {date}.
 	'1cdbc4c7': 'Rivier by {name}: het op elkeen van die {days} tot {date} sy reserwe behou.',
 	// River at {name}: below its reserve on **all of the {days} to {date}**.
@@ -1743,8 +1749,6 @@ export const af: Catalogue = {
 	'43783ca2': 'Waterbehoefte met {factor} vermenigvuldig',
 	// The Reserve’s rule table replaced at {site}
 	'bbfcbbe8': 'Die Reserwe se reëltabel by {site} vervang',
-	// the catchment outlet
-	'bb27ae88': 'die opvanggebied se uitloop',
 	// The Reserve’s rule table removed at {site}
 	'53b61e58': 'Die Reserwe se reëltabel by {site} verwyder',
 	// {unit} moved to drain into {to}
@@ -2039,8 +2043,6 @@ export const af: Catalogue = {
 	'2ba7c149': 'Kies watter waarskuwings jy per e-pos kry vir elke opvanggebied, en hoe gereeld. Waarskuwings kom van die opvanggebied se model: skattings, nie opdragte nie.',
 	// Back to your account
 	'eb3bc0dd': 'Terug na jou rekening',
-	// At most {cap} alert emails a day come right away. Any more wait for the next morning’s summary (06:00).
-	'6e6c53b1': 'Hoogstens {cap} waarskuwings-e-posse per dag kom dadelik. Die res wag vir die volgende oggend se opsomming (06:00).',
 	// What are alert emails?
 	'ae5d5695': 'Wat is waarskuwings-e-posse?',
 	// Loading…

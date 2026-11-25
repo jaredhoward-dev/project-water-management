@@ -42,6 +42,7 @@ import type {
 	AlertRule,
 	AlertRuleChange,
 	ProjectAlerts,
+	MyAlerts,
 	Unsubscribed,
 	FeedbackAnswered,
 	AlertFeedbackSummary,
@@ -1082,8 +1083,8 @@ export function createApi(baseUrl: string, fetchFn: FetchFn = (...a) => fetch(..
 		},
 		/** Alert emails (WP-2.13, docs/api.md § Alerts). */
 		alerts: {
-			/** Your choices, per catchment you can get alerts for. */
-			mine: () => request<{ projects: ProjectAlerts[] }>('GET', '/me/alerts').then((r) => r.projects),
+			/** Your choices, per catchment you can get alerts for, and the daily cap on immediate alert mails (ALERTS_DAILY_CAP). */
+			mine: () => request<MyAlerts>('GET', '/me/alerts'),
 			/** Change some of your choices for one catchment; answers that catchment's choices. */
 			save: (projectId: string, items: AlertChoiceChange[]) =>
 				request<{ project: ProjectAlerts }>('PUT', `/me/alerts/${enc(projectId)}`, { items }).then((r) => r.project),

@@ -1122,7 +1122,9 @@ flowchart LR
    turning those past the daily cap (5 since the last 06:00 in the project's
    time zone, 059_local_day) into
    digest lines; after 06:00 there `app_alert_claim_digest` claims each person's
-   digest lines, one email per catchment. Each mail is built in a
+   digest lines, one email per catchment, each person by one worker only
+   (a per-person advisory try lock, 357, so two workers at once never split
+   one person's lines over two digests). Each mail is built in a
    transaction **as its recipient** (`withUser`): `app_alert_my_mode`
    re-checks their access and choice, and RLS limits what the mail can say
    (a farmer's names only their farm). The unsubscribe token is derived

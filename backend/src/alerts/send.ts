@@ -30,7 +30,7 @@ import { alertMail, digestMail, type AlertFacts, type Feedback, type MailProject
 import { sendMail, type Mail } from '../mail/transport.js';
 import { DEFAULT_TIME_ZONE } from '../projects/timeZone.js';
 import { alertsEnabled, newestForecast } from './evaluate.js';
-import type { AlertKind, AlertMode } from './rules.js';
+import { dailyCap, type AlertKind, type AlertMode } from './rules.js';
 import { alertsTokenSecret, feedbackPageUrl, feedbackToken, newNonce, newSubscriptionSecret, oneClickUrl, unsubscribePageUrl, unsubscribeToken } from './tokens.js';
 import { logEvent } from '../logging/logEvent.js';
 
@@ -61,14 +61,6 @@ export const DIGEST_MAX_LINES = 20;
 /** Lines claimed per person for one digest (app_alert_claim_digest); older ones are skipped as over the limit. */
 export const DIGEST_CLAIM_LINES = 200;
 
-/** At most this many immediate alert mails per person per digest day; the rest wait for the digest. */
-export const DEFAULT_DAILY_CAP = 5;
-
-/** At most this many immediate mails per person per digest day (ALERTS_DAILY_CAP, default 5). */
-export function dailyCap(): number {
-	const n = Number(process.env.ALERTS_DAILY_CAP);
-	return process.env.ALERTS_DAILY_CAP?.trim() && Number.isInteger(n) && n >= 0 ? n : DEFAULT_DAILY_CAP;
-}
 
 type Prepared = { mail: Mail } | { skip: string };
 
