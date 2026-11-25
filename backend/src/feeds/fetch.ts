@@ -260,10 +260,12 @@ export function fetchWindow(
 		case 'agera5_et0': {
 			// Up to yesterday; ET0_REVISION_DAYS re-read, so a day NASA POWER filled is replaced by AgERA5's once the copy
 			// holds its month (feeds/fromMirrorEt0.ts), and at most ET0_MAX_DAYS (a year: one read of the finals' year chunks).
+			// A startDate after yesterday leaves the window empty (start after end), as CHIRPS's: it reads nothing, never a
+			// day before the floor (et0FromMirror).
 			const end = addDays(today, -1);
 			const start = from(ET0_REVISION_DAYS, ET0_FIRST_DAYS, span(ET0_MAX_DAYS), end);
 			const capped = toEpochDay(end) - toEpochDay(start) + 1 > ET0_MAX_DAYS ? addDays(start, ET0_MAX_DAYS - 1) : end;
-			return { start: start > end ? end : start, end: capped };
+			return { start, end: capped };
 		}
 		case 'station_api':
 			return stationWindow(config as StationApiConfig, lastDataDate, today, readThrough, opts.nowMs ?? Date.now());
@@ -648,6 +650,9 @@ export async function runFetch(req: FetchRequest, http: FeedHttp, budget: FetchB
 				return { ok: true, startDate: r.startDate, values: r.values, meta: r.meta };
 			}
 			case 'dws': {
+				// An empty window (a startDate after today, fetchWindow) has no day to ask DWS for: never a request whose
+				// StartDT is after its EndDT.
+				if (req.start > req.end) return { ok: true, startDate: null, values: [], meta: { days: 0, gaps: 0 } };
 				const page = await http.text(dwsUrl((req.config as DwsConfig).station, req.start, req.end));
 				if (page === null) throw new FeedFormatError(DWS_FORMAT_FAILURES.notFound[0]);
 				// Never a day after today: the feed's newest day drives its next window and its health.

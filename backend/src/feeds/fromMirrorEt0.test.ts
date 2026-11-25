@@ -70,6 +70,18 @@ describe('the live copy (the committed fixture, read as it stood)', () => {
 		expect(r).toMatchObject({ startDate: null, values: [], meta: { days: 0, agera5Days: 0, powerDays: 0 } });
 	});
 
+	it('an empty window (a startDate in the future, fetch.ts fetchWindow) reads nothing and answers no days', async () => {
+		let asked = 0;
+		const counting: Et0Reader = async (cells, window) => {
+			asked++;
+			return reader(cells, window);
+		};
+		const r = await et0FromMirror(config, { start: '2026-11-15', end: '2026-10-26' }, counting);
+		expect(r).toMatchObject({ startDate: null, values: [], meta: { days: 0, agera5Days: 0, powerDays: 0 } });
+		expect(asked).toBe(0);
+		expect(FetchResult.safeParse(r).success).toBe(true);
+	});
+
 	it('refuses a cell outside the region', async () => {
 		await expect(et0FromMirror({ cells: [{ lat: -40, lon: 20, weight: 1 }] }, { start: '2025-06-01', end: '2025-06-01' }, reader)).rejects.toThrow(MirrorOutsideRegionError);
 	});
