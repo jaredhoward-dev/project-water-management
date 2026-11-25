@@ -117,6 +117,14 @@ describe('fetchWindow', () => {
 		expect(fetchWindow('agera5_et0', { ...grid, startDate: '2026-09-01' }, '2026-10-24', '2026-10-27')).toEqual({ start: '2026-09-01', end: '2026-10-26' });
 	});
 
+	it('reference ET: a startDate in the future asks for no days, never yesterday before it', () => {
+		// As CHIRPS's: an empty window (start after end) that reads nothing, so no day before the floor is written.
+		expect(fetchWindow('agera5_et0', { ...grid, startDate: '2026-11-15' }, null, '2026-10-27')).toEqual({ start: '2026-11-15', end: '2026-10-26' });
+		expect(fetchWindow('agera5_et0', { ...grid, startDate: '2026-10-27' }, null, '2026-10-27')).toEqual({ start: '2026-10-27', end: '2026-10-26' });
+		// Its first day, once it is yesterday, is read.
+		expect(fetchWindow('agera5_et0', { ...grid, startDate: '2026-10-26' }, null, '2026-10-27')).toEqual({ start: '2026-10-26', end: '2026-10-26' });
+	});
+
 	it('DWS: ten years back at first, asked for two years at a time; then a year of revisions before the newest', () => {
 		// Production, 2026-10-26: the first fetch asked for all ten years in one request and got the ScriptServer error page.
 		expect(DWS_WINDOW_DAYS).toBe(730);

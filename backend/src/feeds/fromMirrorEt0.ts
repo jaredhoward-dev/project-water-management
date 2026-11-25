@@ -200,6 +200,8 @@ export async function et0FromMirror(config: GridConfig, window: FetchWindow, rea
 	// Each 0.1° cell's weight: the sum of the feed's cells (and their weights) inside it.
 	const weights = new Array<number>(unique.length).fill(0);
 	grid.forEach((g, i) => (weights[index.get(key(g))!]! += cells[i]!.weight));
+	// An empty window (a startDate after yesterday, fetch.ts fetchWindow) has no day to read.
+	if (window.start > window.end) return { ok: true, startDate: null, values: [], meta: { days: 0, agera5Days: 0, powerDays: 0 } };
 	const r = await reader(unique, window);
 	const s = toEpochDay(window.start);
 	let agera5Days = 0;
