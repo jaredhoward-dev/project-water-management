@@ -61,6 +61,21 @@ describe.each(ZONES)('under TZ=%s', (zone) => {
 		expect(zonedTimeToUtc(2026, 7, 1, 9, 'America/New_York')).toBe(Date.parse('2026-07-01T13:00:00Z'));
 	});
 
+	it('an hour skipped by daylight saving lands just after the gap, on its own day, whichever side of UTC the zone is', () => {
+		process.env.TZ = zone;
+		// New York springs forward at 02:00 on 8 Mar 2026: 02:00 is 03:00 EDT (07:00 UTC), never 01:00 EST the hour before.
+		expect(zonedTimeToUtc(2026, 3, 8, 2, 'America/New_York')).toBe(Date.parse('2026-03-08T07:00:00Z'));
+		// Berlin at 02:00 on 29 Mar 2026: 03:00 CEST (01:00 UTC).
+		expect(zonedTimeToUtc(2026, 3, 29, 2, 'Europe/Berlin')).toBe(Date.parse('2026-03-29T01:00:00Z'));
+		// Santiago skips Sunday 6 Sep 2026's midnight: a Sunday 00:00 schedule fires at 01:00 Sunday (04:00 UTC), not 23:00 on the Saturday.
+		const sunday: ScheduleTiming = { frequency: 'weekly', weekday: 7, monthDay: null, hour: 0, timezone: 'America/Santiago' };
+		expect(zonedTimeToUtc(2026, 9, 6, 0, 'America/Santiago')).toBe(Date.parse('2026-09-06T04:00:00Z'));
+		// Saturday 23:30 there: the next time is still ahead, never one already past.
+		const satNight = at('2026-09-06T03:30:00Z');
+		expect(iso(nextFireAt(sunday, satNight))).toBe('2026-09-06T04:00:00.000Z');
+		expect(iso(latestFireAt(sunday, satNight))).toBe('2026-08-30T04:00:00.000Z');
+	});
+
 	it('is due once per time, never for a time before the schedule was saved', () => {
 		process.env.TZ = zone;
 		const now = at('2026-09-23T12:00:00Z');
