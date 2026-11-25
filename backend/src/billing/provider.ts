@@ -26,6 +26,8 @@ import { ApiError } from '../http/errors.js';
 import type { PublicPlan } from './entitlements.js';
 import { SIGNATURE_HEADER, verifySignature } from './provider/signature.js';
 import { normaliseStripeEvent } from './provider/stripe.js';
+import { billingEnvironment } from './provider/environment.js';
+export { BILLING_ENVIRONMENT_SHAPE, billingEnvironment, LOCAL_BILLING_ENVIRONMENT } from './provider/environment.js';
 import { MOCK_SESSION_TTL_SECONDS, seatsChangedEvent, signMockSession } from './provider/mock.js';
 import { createHash } from 'node:crypto';
 import { cancelSubscription, changeSeatItem, createCheckoutSession, createCustomer, createInvoice as createStripeInvoice, createPortalSession, ensureExtraSeatProduct, expireCheckoutSession, getSubscriptionItems, listOpenCheckoutSessions, listOpenSubscriptions, orphanCancelAndRefund, StripeApiError, type InvoiceLine, type OrphanResult } from './provider/stripeApi.js';
@@ -76,9 +78,13 @@ export interface InvoiceGrantPayload {
 	issuedMinor: number | null;
 	currency: string | null;
 }
+/**
+ * `environment`: the deployment tag the object's metadata carries (wm_environment, stamped at checkout;
+ * absent when it carries none). Never sent to app_billing_apply: only the webhook's orphan check reads it.
+ */
 export type NormalisedEvent =
-	| { eventId: string; type: 'subscription.updated' | 'subscription.deleted'; payload: SubscriptionPayload }
-	| { eventId: string; type: 'checkout.completed' | 'invoice.paid' | 'invoice.payment_failed' | 'subscription.pending'; payload: RecordPayload };
+	| { eventId: string; type: 'subscription.updated' | 'subscription.deleted'; payload: SubscriptionPayload; environment?: string }
+	| { eventId: string; type: 'checkout.completed' | 'invoice.paid' | 'invoice.payment_failed' | 'subscription.pending'; payload: RecordPayload; environment?: string };
 
 export type VerifyResult =
 	| { ok: true; event: NormalisedEvent }
@@ -269,9 +275,11 @@ export interface BillingProvider {
 	cancelSubscriptions(req: CancelRequest): Promise<string[]>;
 	/**
 	 * A live subscription whose account can't be found (a checkout paid after the account was
-	 * deleted; billing/webhook.ts): cancel it now and refund what was paid for it, safe to repeat
-	 * (a redelivered event refunds once). Throws when either fails, so the webhook answers
-	 * non-2xx and the provider retries (docs/billing.md § Deleting an account).
+	 * deleted; billing/webhook.ts): cancel it now and refund its first invoice when that was paid
+	 * within the refund window (stripeApi.ts ORPHAN_REFUND_WINDOW_SECONDS), safe to repeat (a
+	 * redelivered event refunds once); an ended one with an older first invoice is `skipped`.
+	 * Throws when a step fails, so the webhook answers non-2xx and the provider retries
+	 * (docs/billing.md § Deleting an account).
 	 */
 	cancelOrphan(req: OrphanRequest): Promise<OrphanResult>;
 }
@@ -371,7 +379,7 @@ function mockProvider(secret: string | undefined, now: () => number): BillingPro
 		// The same answer as Stripe's for a subscription it cancelled, with no network: a mock subscription for an
 		// account that is gone has no row (323's cascade) and nothing charged a card, so nothing is refunded.
 		async cancelOrphan() {
-			return { cancelled: true, refunds: 0, refundedMinor: 0 };
+			return { cancelled: true, refunds: 0, refundedMinor: 0, skipped: false };
 		}
 	};
 }
@@ -412,6 +420,7 @@ function stripeProvider(webhookSecret: string | undefined, secretKey: string | u
 					extraSeats: prices.extraSeats,
 					extraSeatMinor: prices.extraSeatMinor,
 					interval,
+					environment: billingEnvironment(),
 					successUrl: urls.successUrl,
 					cancelUrl: urls.cancelUrl
 				});
@@ -499,7 +508,7 @@ function stripeProvider(webhookSecret: string | undefined, secretKey: string | u
 		},
 		async cancelOrphan(req) {
 			const o = client();
-			return call(() => orphanCancelAndRefund(o, req.subscriptionRef, req.accountId));
+			return call(() => orphanCancelAndRefund(o, req.subscriptionRef, req.accountId, now()));
 		}
 	};
 }

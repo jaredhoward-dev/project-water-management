@@ -165,7 +165,10 @@ export function normaliseStripeEvent(body: unknown): NormaliseResult {
 	if (r.kind !== 'event' || !isObj(body)) return r;
 	const created = time(body.created);
 	if (created === undefined) return { kind: 'invalid', why: 'invalid created time' };
-	return { kind: 'event', event: { ...r.event, payload: { ...r.event.payload, eventCreated: created } } as NormalisedEvent };
+	// The deployment that sold it (checkout's metadata wm_environment), for the webhook's orphan check only.
+	const object = isObj(body.data) && isObj(body.data.object) ? body.data.object : null;
+	const environment = object && isObj(object.metadata) ? str(object.metadata.wm_environment) : null;
+	return { kind: 'event', event: { ...r.event, payload: { ...r.event.payload, eventCreated: created }, ...(environment ? { environment } : {}) } as NormalisedEvent };
 }
 
 function normalise(body: unknown): NormaliseResult {

@@ -20,6 +20,7 @@ describe('normaliseStripeEvent', () => {
 		expect(created).toEqual({
 			kind: 'event',
 			event: {
+				environment: 'local',
 				eventId: 'evt_synthetic_sub_created_0001',
 				type: 'subscription.updated',
 				payload: {
@@ -47,6 +48,16 @@ describe('normaliseStripeEvent', () => {
 		const r = normaliseStripeEvent(fixture('subscription-updated'));
 		if (r.kind !== 'event' || r.event.type !== 'subscription.updated') throw new Error('expected a subscription event');
 		for (const t of [r.event.payload.periodStart, r.event.payload.periodEnd, r.event.payload.trialEnd]) expect(t).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+	});
+
+	it('carries the deployment tag checkout stamped (metadata wm_environment) beside the payload, never in it, and none when absent', () => {
+		for (const name of ['subscription-updated', 'checkout-completed']) {
+			const r = normaliseStripeEvent(fixture(name));
+			expect(r.kind === 'event' && r.event.environment, name).toBe('local');
+			expect(r.kind === 'event' && JSON.stringify(r.event.payload), name).not.toContain('local');
+		}
+		const untagged = normaliseStripeEvent(fixture('subscription-deleted'));
+		expect(untagged.kind === 'event' && 'environment' in untagged.event).toBe(false);
 	});
 
 	it('customer.subscription.deleted is subscription.deleted, canceled', () => {
