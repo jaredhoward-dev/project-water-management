@@ -19,6 +19,7 @@ import {
 	OBJECTIVES,
 	pairedMembers,
 	pairedRefusal,
+	RAIN_SOURCES,
 	resolveEnsembleOptions,
 	summariseEnsemble,
 	summarisePaired,
@@ -85,7 +86,8 @@ export async function runModelInput(db: Db, projectId: string, runId: string): P
 	return { settings: snap.settings, model: snap.model, series: current.series };
 }
 
-const RAIN = z.enum(['recorded', 'chirps']);
+// Every rain source a member may run on (issue #834 added the gap-filling products): the engine's list, so a member's rain is stored as named.
+const RAIN = z.enum(RAIN_SOURCES);
 const RECORD = z.enum(['flow_observed_m3s', 'flow_logger_m3s']);
 const LEVEL = z.enum(['ok', 'note', 'query', 'unusable']);
 
@@ -100,7 +102,7 @@ const StartBody = z.union([
 					bounds: z.enum(['wide', 'typical']).optional(),
 					free: z.array(z.string().max(40)).max(10).optional(),
 					panOffset: z.number().optional(),
-					rainSources: z.array(RAIN).max(2).optional(),
+					rainSources: z.array(RAIN).max(RAIN_SOURCES.length).optional(),
 					records: z.array(RECORD).max(2).optional(),
 					thresholds: z
 						.object({

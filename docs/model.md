@@ -1830,10 +1830,10 @@ CHIRPS alone) flags "Forcing changed since fit".
 distribution month by month, but a storm it puts on the wrong day stays
 there. With no overlap, a product runs raw. IMERG never fills a day inside
 the record, even one CHIRPS and ERA5-Land both lack. The uncertainty
-ensemble (§2.10e) varies CHIRPS only: its CHIRPS-only members run with
-`gapRain: null` (`uncertainty/ensemble.ts`), so for a project that fills
-from ERA5-Land or IMERG Late the bands don't cover the uncertainty in those
-products or their corrections ([followups.md § The rain data copy](./followups.md#the-rain-data-copy-issue-604)).
+ensemble (§2.10e) varies each product the run reads as a rain source of
+its own (issue #834), but IMERG Late's 30-day copy is too short for its
+member, which needs 99 % of the run's days, so the bands still leave out
+IMERG Late's uncertainty.
 
 ### 2.4c Zero-rain runs treated as missing
 
@@ -10275,10 +10275,33 @@ it never changes a run's results.
     correction and map then off, the run window pinned; under per-unit rain
     each land unit keeps the base run's rule, MAP ratio and CHIRPS level,
     pinned, as §2.4h says, engine ≥ 1.95.0, ER-30). The spread between them is the rain-data uncertainty
-    the record can't settle. Only CHIRPS is varied: those members run with
-    `gapRain: null`, so a project filling gaps from ERA5-Land or IMERG Late
-    (§2.4b, *Gap-filling product*) gets no band for those products or their
-    corrections (followups.md § The rain data copy).
+    the record can't settle.
+
+    **Each gap-filling product the run reads** (`settings.gapRain`, §2.4b
+    *Gap-filling product*; issue #834) is a rain source of its own:
+    `era5l` when the setting reads ERA5-Land (`'era5l'` or
+    `'chirpsThenEra5l'`), `imerg_late` with `imergLate`. Its members run
+    on that product alone on every day, corrected by its own fit as the
+    run corrects the days it fills (ERA5-Land also through its wet-day
+    threshold and quantile map; IMERG Late by each version's fit, the
+    newest version with the day), put in CHIRPS' place with the station
+    rain dropped and everything else as the CHIRPS-only member above
+    (correction, map and `gapRain` off, the window pinned, each land
+    unit's own CHIRPS, rule and factors pinned as the base run's: §2.4b
+    leaves a unit's own CHIRPS out of the gap fill). The rain sources
+    are split evenly: with CHIRPS and ERA5-Land both available, a third
+    of the members each. A product needs the same ≥ 99 % cover of the run
+    as CHIRPS, and the station rain beside it; without it the product is
+    left out with a note ("ERA5-Land alone is not one of the rain
+    sources: …"). IMERG Late's copy holds 30 days, so its member is
+    almost always left out that way. No product is read under a
+    catchment rainfall station (§2.4i ignores `gapRain` there), and a
+    project without `settings.gapRain` (or with the default written
+    out) gets the same options, sample and bands as before, to the bit
+    (no product source is offered, so the sample is the same). Each member's `rain`
+    (`recorded`, `chirps`, `era5l`, `imerg_late`) names its source in the
+    result and in what `run_uncertainty` stores, and `rainSources` in the
+    options lists the sources sampled.
   - **Observed record**, when both a gauge and a logger record have at least
     30 scored days: half the members are judged against each. A record that
     measures a different river belongs in

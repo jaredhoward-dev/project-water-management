@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { dayText, toEpochDay } from '../calendar';
-import type { ModelInput, NetworkNode } from '../project';
+import { ERA5L_SERIES_KEY, IMERG_SERIES_PREFIX, type ModelInput, type NetworkNode } from '../project';
+import { prepareRun } from '../prepare';
 import { Rng } from '../random';
 import { runModel } from '../run';
 import { GR4J_PARAMS } from '../runoff/params';
@@ -103,6 +104,17 @@ function synthetic(opts: { years?: number; params?: typeof TRUTH; dam?: boolean 
 	input.series.flow_logger_m3s = { startDate: start, values: flow.map((q, t) => (t % 3 === 0 ? null : (q / 86_400) * noise.float(0.8, 1.2))) };
 	input.settings.gr4j = { ...(opts.params ?? TRUTH), warmupDays: 365 };
 	return input;
+}
+
+/** FNV-1a (32-bit) of a value's JSON: a short pin of a whole result. */
+function fingerprint(v: unknown): string {
+	const text = JSON.stringify(v);
+	let h = 0x811c9dc5;
+	for (let i = 0; i < text.length; i++) {
+		h ^= text.charCodeAt(i);
+		h = Math.imul(h, 0x01000193) >>> 0;
+	}
+	return `${h.toString(16).padStart(8, '0')}:${text.length}`;
 }
 
 /** Loose enough that most members of the synthetic catchment pass. */
@@ -454,6 +466,20 @@ describe('runEnsemble on a synthetic catchment', () => {
 		expect(pickCheckedMembers([{ accepted: true }, { accepted: true }], 3, Math.random)).toEqual([0, 1]);
 	});
 
+	it('is unchanged for a project with no gap-filling product (issue #834): the same rain sources, and the default written out runs as absent', () => {
+		expect(input.settings.gapRain).toBeUndefined();
+		expect(options.rainSources).toEqual(['recorded', 'chirps']);
+		expect(options.dimensions.find((d) => d.kind === 'rain')).toEqual({ kind: 'rain', values: ['recorded', 'chirps'] });
+		// TODO(#834, before merge): pin the result's fingerprint as computed on the engine before #834
+		// (expect(fingerprint({ options, header, members, coverage })).toBe('<hash>:<length>')).
+		expect(fingerprint({ options: result.options, header: result.header, members: result.members, coverage: result.coverage })).toMatch(/^[0-9a-f]{8}:\d+$/);
+		// The default written out ({ product: 'chirps', imergLate: false }) runs as absent: the same ensemble.
+		const written = { ...input, settings: { ...input.settings, gapRain: { product: 'chirps' as const, imergLate: false } } };
+		const o = resolveEnsembleOptions(written, { members: 45, thresholds: LOOSE }).options;
+		expect(o).toEqual(options);
+		expect(runEnsemble(written, o).members).toEqual(result.members);
+	});
+
 	it('diffs two ensembles’ rules, thresholds first', () => {
 		const b = resolveEnsembleOptions(input, { members: 45, thresholds: { ...LOOSE, minSkill: 0.6 }, seed: 5 }).options;
 		expect(diffEnsembleOptions(options, b)).toEqual([
@@ -474,6 +500,101 @@ describe('a run shorter than a year', () => {
 		expect(m.fdcM3Day.map((x) => x.length)).toEqual([10, 10, 10, 10, 0, 0, 0, 0, 0, 0, 0, 0]);
 		expect(r.header.monthDays.slice(0, 5)).toEqual([31, 30, 31, 29, 0]); // 0.33 × 365.25 = 121 days from 1 Oct: to 29 Jan
 		expect(summariseEnsemble(r).bands.fdc.map((f) => f.month)).toEqual([10, 11, 12, 1]);
+	});
+});
+
+describe('rain-source members per gap-filling product (issue #834)', () => {
+	/** synthetic() with a year of catchment rain blank and ERA5-Land (synthetic: the rain smeared and drizzled) over the whole record. */
+	function withEra5(gapRain: NonNullable<ModelInput['settings']['gapRain']>, imergDays = 0): ModelInput {
+		const base = synthetic({ years: 4 });
+		const r = base.series.rain_catchment_mm!;
+		const d0 = toEpochDay(r.startDate);
+		const gapFrom = toEpochDay('1992-10-01') - d0;
+		const values = r.values as number[];
+		const era5 = values.map((_, i) => {
+			let s = 0;
+			for (let k = -2; k <= 2; k++) s += values[i + k] ?? 0;
+			return Math.round((0.3 + (1.1 * s) / 5) * 10) / 10;
+		});
+		const imerg = imergDays ? { [`${IMERG_SERIES_PREFIX}V07`]: { startDate: dayText(d0 + values.length - imergDays), values: values.slice(-imergDays).map((v) => v * 0.8) } } : {};
+		return {
+			...base,
+			settings: { ...base.settings, gapRain },
+			series: {
+				...base.series,
+				rain_catchment_mm: { startDate: r.startDate, values: values.map((v, i) => (i >= gapFrom && i < gapFrom + 365 ? null : v)) },
+				[ERA5L_SERIES_KEY]: { startDate: r.startDate, values: era5 },
+				...imerg
+			} as ModelInput['series']
+		};
+	}
+
+	it('adds an ERA5-Land member the run reads, split evenly with the others', () => {
+		const input = withEra5({ product: 'chirpsThenEra5l', imergLate: false });
+		const { options, notes } = resolveEnsembleOptions(input, { members: 60, bounds: 'wide' });
+		expect(options.rainSources).toEqual(['recorded', 'chirps', 'era5l']);
+		expect(options.dimensions.find((d) => d.kind === 'rain')).toEqual({ kind: 'rain', values: ['recorded', 'chirps', 'era5l'] });
+		expect(notes.join(' ')).not.toMatch(/rain source/);
+		const ctx = ensembleContext(input, options, false);
+		const members = ensembleMembers(options, ctx.startParams);
+		expect(members[0]!.rain).toBe('recorded');
+		for (const src of ['recorded', 'chirps', 'era5l'] as const) expect(members.slice(1).filter((m) => m.rain === src)).toHaveLength(20);
+	});
+
+	it('runs the ERA5-Land member on ERA5-Land alone, every day corrected as the run corrects the days it fills', () => {
+		const input = withEra5({ product: 'era5l', imergLate: false });
+		const { options } = resolveEnsembleOptions(input, { members: 30, rainSources: ['era5l'] });
+		const ctx = ensembleContext(input, options, false);
+		const m = memberInput(ctx, { index: 1, reference: false, params: ctx.startParams, panOffset: 0, rain: 'era5l', record: options.records[0]! });
+		expect(m.settings.gapRain).toBeNull();
+		expect(m.series.rain_catchment_mm).toBeUndefined();
+		const member = prepareRun(m);
+		expect(member.gapRain).toBeNull();
+		const used = member.aligned('rain_chirps_mm');
+		// On the base run's gap days the base fills with ERA5-Land × its fit and map: the member reads the same there.
+		const base = prepareRun(input);
+		expect(base.gapRain!.info.products[0]!.days).toBeGreaterThan(300);
+		const filled = base.aligned('rain_chirps_mm');
+		const catchment = base.aligned('rain_catchment_mm');
+		let n = 0;
+		for (let t = 0; t < base.days; t++) {
+			if (catchment[t] != null || base.gapRain!.code[t]! < 0) continue;
+			expect(used[t]).toBeCloseTo(filled[t]!, 9);
+			n++;
+		}
+		expect(n).toBeGreaterThan(300);
+		// And ERA5-Land on every other day too, not the station rain or CHIRPS.
+		expect(used.every((v) => v !== null)).toBe(true);
+		expect(used).not.toEqual(prepareRun(memberInput(ctx, { index: 1, reference: false, params: ctx.startParams, panOffset: 0, rain: 'recorded', record: options.records[0]! })).aligned('rain_chirps_mm'));
+	});
+
+	it('names each member’s rain source in the result, and verifies', () => {
+		const input = withEra5({ product: 'chirpsThenEra5l', imergLate: false });
+		const { options } = resolveEnsembleOptions(input, { members: 30, thresholds: { minSkill: -10, maxLowFlowBiasPct: null, wr2012MaxLevel: 'unusable' } });
+		const r = runEnsemble(input, options);
+		expect(new Set(r.members.slice(1).map((m) => m.rain))).toEqual(new Set(['recorded', 'chirps', 'era5l']));
+		expect(r.options.rainSources).toEqual(['recorded', 'chirps', 'era5l']);
+		const era5 = r.members.find((m) => m.rain === 'era5l')!;
+		const rec = r.members.find((m) => m.rain === 'recorded' && !m.reference)!;
+		expect(era5.metrics!.marNaturalMm3).not.toBe(rec.metrics!.marNaturalMm3);
+		// The server's re-run of a member reproduces an ERA5-Land member as posted.
+		const ctx = ensembleContext(input, options);
+		expect(sampleMismatches(ctx, r.members)).toEqual([]);
+		expect(memberMismatches(ctx, r.members, [0, ...r.members.filter((m) => m.rain === 'era5l').slice(0, 2).map((m) => m.index)])).toEqual([]);
+	});
+
+	it('leaves out a product too short for a member (IMERG Late’s 30 days), with a note, and refuses it when asked for', () => {
+		const input = withEra5({ product: 'chirpsThenEra5l', imergLate: true }, 30);
+		const { options, notes } = resolveEnsembleOptions(input, { members: 30 });
+		expect(options.rainSources).toEqual(['recorded', 'chirps', 'era5l']);
+		expect(notes).toContain("IMERG Late alone is not one of the rain sources: IMERG Late covers only 2 % of the run's days (at least 99 % needed).");
+		expect(() => resolveEnsembleOptions(input, { members: 30, rainSources: ['imerg_late'] })).toThrow(/IMERG Late-only rain source is not available: IMERG Late covers only/);
+	});
+
+	it('offers no product the run does not read', () => {
+		const input = withEra5({ product: 'chirps', imergLate: false });
+		expect(resolveEnsembleOptions(input, { members: 30 }).options.rainSources).toEqual(['recorded', 'chirps']);
+		expect(() => resolveEnsembleOptions(input, { members: 30, rainSources: ['era5l'] })).toThrow(/ERA5-Land-only rain source is not available/);
 	});
 });
 

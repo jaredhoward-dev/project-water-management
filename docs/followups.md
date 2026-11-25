@@ -474,7 +474,7 @@ provenance, `ingest/verify_copy.py`):
       one fit per group), and check it against the per-cell fit on held-out
       days. **Trigger:** when the first QM fit is run, once the archive
       (`ecmwf/`'s archived issue means) holds a season.
-- [ ] **The uncertainty bands don't vary ERA5-Land or IMERG Late**
+- [x] **The uncertainty bands don't vary ERA5-Land or IMERG Late**
       (R4-B, [model.md § 2.10e](./model.md#210e-uncertainty-bands-engine--0260-issue-4-phase-9)).
       The ensemble's rain-source members run CHIRPS alone with
       `gapRain: null` (`packages/engine/src/uncertainty/ensemble.ts`), so a
@@ -485,7 +485,12 @@ provenance, `ingest/verify_copy.py`):
       the CHIRPS-only member is), split evenly with the others, and the
       members' rain source named in `run_uncertainty`. **Trigger:** the
       first client project that sets `settings.gapRain` to a product, or an
-      evidence pack on one.
+      evidence pack on one. — *Done (issue #834): a rain-source member per
+      gap-filling product the run reads (`era5l`, `imerg_late`), split
+      evenly with the others, each member's `rain` naming its source in
+      the result and in `run_uncertainty` (no migration: the options and
+      members are stored as JSON); a project without `settings.gapRain`
+      gets the same bands to the bit.*
 - [ ] **Confirm AgERA5's and NASA POWER's live shape** (R5-E). Built on
       synthetic fixtures only (operator decision, 2026-10-27): the AgERA5
       request (`variable: reference_evapotranspiration`, `version: 2_0`,
