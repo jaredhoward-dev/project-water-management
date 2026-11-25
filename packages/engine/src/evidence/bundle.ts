@@ -733,6 +733,9 @@ async function checkBundle(bytes: Uint8Array<ArrayBuffer>, opts: CheckPackBundle
 		if (opts.expectManifestSha256 && sha !== opts.expectManifestSha256.toLowerCase()) problems.push(`manifest.json hashes to ${sha}, not the expected ${opts.expectManifestSha256}`);
 		if (packManifestText(manifest) !== mText) problems.push('manifest.json is not in its canonical (RFC 8785) form');
 		if (manifest.pack?.id !== index.pack.id || manifest.pack?.version !== index.pack.version) problems.push('manifest.json names another pack or version than bundle.json');
+		// The code a reader matches against the one printed on the pack, and the result's first line: it must be this hash's.
+		if (index.pack.shortCode !== packShortCode(index.pack.manifestSha256))
+			problems.push(`bundle.json's short code ${index.pack.shortCode} isn't its manifest hash's (${packShortCode(index.pack.manifestSha256)})`);
 		if (!add('manifest', problems.length === 0, problems.join('; ') || `manifest.json hashes to the pack's manifest hash ${sha}`)) return result(index.pack, runEngines);
 	}
 
