@@ -97,7 +97,11 @@ export function zonedTimeToUtc(y: number, m: number, d: number, h: number, tz: s
 	const guess = Date.UTC(y, m - 1, d, h);
 	const first = guess - offsetAt(guess, tz);
 	const second = guess - offsetAt(first, tz);
-	return second;
+	// In a gap the two guesses straddle it: one reads the hour before (on the
+	// day before, for a midnight gap), the other the hour after. The later is
+	// just after the gap, on either side of UTC (New York's is `first`,
+	// Berlin's `second`).
+	return wallClock(second, tz).h === h ? second : Math.max(first, second);
 }
 
 /** A calendar date `days` after y-m-d, as y, m, d. */

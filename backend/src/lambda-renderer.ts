@@ -20,7 +20,11 @@
 // attempt could succeed (reports/render.ts: only the API's coded refusal of
 // the token, the page's own "can't show this", or a page that tried to leave
 // are final), and the worker then asks again with a fresh token, after a
-// backoff (jobs/handlers/report-render.ts requestRenderAgain).
+// backoff (jobs/handlers/report-render.ts requestRenderAgain). A request that
+// waited on the queue longer than its token lives (a burst of renders, two at
+// a time) gets that retryable answer at once, with no browser
+// (reports/render.ts RENDER_REQUEST_MAX_AGE_MS): its token would be refused
+// as final.
 //
 // An evidence pack's request (type `render_pack`, 119_pack_render) prints the
 // pack's own page the same way, stores the PDF in the packs bucket under
@@ -43,7 +47,7 @@ import {
 	parseRenderRequest,
 	sendToQueue
 } from './jobs/transport.js';
-import { renderOptionsFromEnv, RenderError, renderReportPdf } from './reports/render.js';
+import { renderOptionsFromEnv, RenderError, renderReportPdf, STALE_REQUEST_ERROR, staleRenderRequest } from './reports/render.js';
 import { applicantPackPdfKey, packPdfKey, putPackPdf, putPdf, reportKey } from './reports/storage.js';
 import { logEvent } from './logging/logEvent.js';
 import { safeError } from './logging/safeError.js';
@@ -59,23 +63,30 @@ export const handler = async (event: SQSEvent): Promise<SQSBatchResponse> => {
 			logEvent('warn', { event: 'render_request_ignored', messageId: record.messageId });
 			continue;
 		}
+		// Waited past its token's life (a burst of renders): retryable, never a browser on a dead token.
+		const stale = staleRenderRequest(record.attributes?.SentTimestamp);
 		if (req.type === 'render_pack') {
-			if (!(await renderPack(req))) failures.push({ itemIdentifier: record.messageId });
+			if (!(await renderPack(req, stale))) failures.push({ itemIdentifier: record.messageId });
 			continue;
 		}
 		let result: RenderResult;
-		let reason: 'render' | 'store' = 'render';
-		try {
-			const rendered = await renderReportPdf({ projectId: req.projectId, runId: req.runId, against: req.against, token: req.token }, renderOptionsFromEnv());
-			await putPdf(reportKey(req.projectId, req.reportId), rendered.pdf);
-			result = { ok: true, pages: rendered.pages, bytes: rendered.pdf.length, ms: rendered.ms };
-		} catch (err) {
-			const e = err instanceof RenderError ? err : new RenderError('the PDF could not be stored');
-			if (!(err instanceof RenderError)) {
-				reason = 'store';
-				logEvent('error', { event: 'report_store_failed', reportId: req.reportId, ...safeError(err) });
+		let reason: 'render' | 'store' | 'expired' = 'render';
+		if (stale) {
+			result = { ok: false, error: STALE_REQUEST_ERROR, retry: true };
+			reason = 'expired';
+		} else {
+			try {
+				const rendered = await renderReportPdf({ projectId: req.projectId, runId: req.runId, against: req.against, token: req.token }, renderOptionsFromEnv());
+				await putPdf(reportKey(req.projectId, req.reportId), rendered.pdf);
+				result = { ok: true, pages: rendered.pages, bytes: rendered.pdf.length, ms: rendered.ms };
+			} catch (err) {
+				const e = err instanceof RenderError ? err : new RenderError('the PDF could not be stored');
+				if (!(err instanceof RenderError)) {
+					reason = 'store';
+					logEvent('error', { event: 'report_store_failed', reportId: req.reportId, ...safeError(err) });
+				}
+				result = { ok: false, error: e.message.slice(0, 300), retry: e.retry };
 			}
-			result = { ok: false, error: e.message.slice(0, 300), retry: e.retry };
 		}
 		const message: RenderResultMessage = { v: 1, type: 'rendered', reportId: req.reportId, result };
 		try {
@@ -106,25 +117,30 @@ export const handler = async (event: SQSEvent): Promise<SQSBatchResponse> => {
 };
 
 /** One pack request: render, store, answer. False when the answer couldn't be sent (SQS retries the record). */
-async function renderPack(req: PackRenderRequestMessage): Promise<boolean> {
+async function renderPack(req: PackRenderRequestMessage, stale: boolean): Promise<boolean> {
 	let result: PackRenderResult;
-	let reason: 'render' | 'store' = 'render';
-	try {
-		// An applicant's copy (165): their party's page, stored beside the pack's PDF under applicant/.
-		const target = { projectId: req.projectId, packId: req.packId, token: req.token, ...(req.scenarioId ? { scenarioId: req.scenarioId } : {}) };
-		const rendered = await renderReportPdf(target, renderOptionsFromEnv());
-		if (rendered.pages < 1) throw new RenderError('the PDF has no pages');
-		const sha256 = createHash('sha256').update(rendered.pdf).digest('hex');
-		const key = req.scenarioId ? applicantPackPdfKey(req.projectId, req.packId, sha256) : packPdfKey(req.projectId, req.packId, sha256);
-		await putPackPdf(key, rendered.pdf, sha256);
-		result = { ok: true, pages: rendered.pages, bytes: rendered.pdf.length, ms: rendered.ms, sha256 };
-	} catch (err) {
-		const e = err instanceof RenderError ? err : new RenderError('the PDF could not be stored');
-		if (!(err instanceof RenderError)) {
-			reason = 'store';
-			logEvent('error', { event: 'pack_store_failed', packId: req.packId, ...safeError(err) });
+	let reason: 'render' | 'store' | 'expired' = 'render';
+	if (stale) {
+		result = { ok: false, error: STALE_REQUEST_ERROR, retry: true };
+		reason = 'expired';
+	} else {
+		try {
+			// An applicant's copy (165): their party's page, stored beside the pack's PDF under applicant/.
+			const target = { projectId: req.projectId, packId: req.packId, token: req.token, ...(req.scenarioId ? { scenarioId: req.scenarioId } : {}) };
+			const rendered = await renderReportPdf(target, renderOptionsFromEnv());
+			if (rendered.pages < 1) throw new RenderError('the PDF has no pages');
+			const sha256 = createHash('sha256').update(rendered.pdf).digest('hex');
+			const key = req.scenarioId ? applicantPackPdfKey(req.projectId, req.packId, sha256) : packPdfKey(req.projectId, req.packId, sha256);
+			await putPackPdf(key, rendered.pdf, sha256);
+			result = { ok: true, pages: rendered.pages, bytes: rendered.pdf.length, ms: rendered.ms, sha256 };
+		} catch (err) {
+			const e = err instanceof RenderError ? err : new RenderError('the PDF could not be stored');
+			if (!(err instanceof RenderError)) {
+				reason = 'store';
+				logEvent('error', { event: 'pack_store_failed', packId: req.packId, ...safeError(err) });
+			}
+			result = { ok: false, error: e.message.slice(0, 300), retry: e.retry };
 		}
-		result = { ok: false, error: e.message.slice(0, 300), retry: e.retry };
 	}
 	const message: PackRenderResultMessage = { v: 1, type: 'rendered_pack', packId: req.packId, ...(req.scenarioId ? { copy: 'applicant' as const } : {}), result };
 	try {

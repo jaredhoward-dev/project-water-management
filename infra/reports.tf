@@ -706,7 +706,7 @@ resource "aws_cloudwatch_metric_alarm" "render_requests_age" {
 # renderer_errors never sees it. lambda-renderer.ts logs one line per failed
 # answer:
 #   {"event":"report_render_failed","reportId":"…","projectId":"…","reason":"render","retry":true}
-# the ids, render or store, and whether the worker asks again, never the error
+# the ids, render, store or expired, and whether the worker asks again, never the error
 # text or the render token. The log group exists before the function does, so
 # this filter and its alarm are not gated on renderer_enabled.
 resource "aws_cloudwatch_log_metric_filter" "report_render_failed" {

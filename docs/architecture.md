@@ -3071,7 +3071,10 @@ sequenceDiagram
   never reach the stored error. The token exchange fails for good only on
   the API's own coded refusal (`render_token_refused`); any other answer (a
   WAF rate-limit `403`, a `429`, a `5xx`) is retried. In production the
-  renderer Lambda's answer carries that `retry` flag back, and the worker
+  renderer Lambda answers a request that waited on its queue past 4 of its
+  token's 5 minutes as retryable without opening a browser (a burst of
+  renders, two at a time: the token would be refused as final;
+  `RENDER_REQUEST_MAX_AGE_MS`). Its answer carries that `retry` flag back, and the worker
   asks again with a fresh token after 2, then 4 minutes, up to 3 renders
   (`jobs/handlers/report-render.ts` `requestRenderAgain`).
 - **Storage** (`reports/storage.ts`, `STORAGE`): one S3 client.
@@ -3098,7 +3101,8 @@ sequenceDiagram
   is noted on the report, not a failed job (the PDF is there to download).
 - **Schedules** (`report_schedule` + recipients): weekly or monthly, at an
   hour in the schedule's own IANA zone (`reports/due.ts`, pure and tested
-  under skewed process zones). Every tick (`jobs/runner.ts`) reads the
+  under skewed process zones; an hour a daylight-saving change skips fires
+  just after the gap, on its own day). Every tick (`jobs/runner.ts`) reads the
   enabled schedules through `app_report_schedules_to_check`, works out the
   latest due time, claims it atomically (`app_claim_report_schedule`: later
   than the last one, after the schedule was saved), and queues a render of
