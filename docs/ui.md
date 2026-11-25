@@ -14115,7 +14115,10 @@ with read-only tools over the project's data. It never changes anything.
   ends with a **Compare plans** link to the Plan page of the account that
   bills the catchment (the team's, `/teams/:id/plan`, for a team admin; the
   price list, `/welcome/pricing`, for anyone else in a team catchment, who
-  can't open the team's plan; else `/account/plan`; `billing/planLink.ts`;
+  can't open the team's plan, with planLink's line before it, "This
+  catchment is on <team>'s plan: ask a team admin to change it." (its
+  team's plan, unnamed, for someone shared the catchment directly;
+  `data-testid="plan-ask-admin"`); else `/account/plan`; `billing/planLink.ts`;
   `data-testid="assistant-compare-plans"`), the month's after "Pro includes
   about 15 times as much." (Free $1, Pro $15 a month, 323's plan limits).
   The Free pool never upsells (it isn't the person's doing), nor does a

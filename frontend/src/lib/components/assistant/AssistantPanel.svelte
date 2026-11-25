@@ -52,8 +52,12 @@
 		onapply?: (proposal: AssistantProposal) => void | Promise<void>;
 	} = $props();
 
-	/** Compare plans opens the plan that bills this catchment: its team's, else your own (planLink.ts). */
+	/**
+	 * Compare plans opens the plan that bills this catchment: its team's for a team admin, your own for a personal
+	 * one; anyone else in a team catchment gets the price list and planLink's "ask a team admin" line (planLink.ts).
+	 */
 	const billingTeam = useBillingTeam();
+	const capPlans = $derived(planLink(billingTeam(), basePath()));
 
 	/** This site's address, for the disclaimer's `{site}` (the Terms link), as liability/Disclaimer.svelte. */
 	const site = typeof location === 'undefined' ? basePath() : `${location.origin}${basePath()}`;
@@ -320,13 +324,17 @@
 				</p>
 			{:else if chat.refusal?.kind === 'cap'}
 				<!-- A dollar cap (billing enforced): the server's words, then when it's back in the viewer's time. Free's day and
-				     month offer Compare plans (the month adds what Pro includes); the Free pool, a reverse trial's caps and a
+				     month offer Compare plans (the month adds what Pro includes; a non-admin in a team catchment also gets planLink's
+				     "ask a team admin" line, since the link is the price list); the Free pool, a reverse trial's caps and a
 				     paid account's caps never upsell. -->
 				<p class="note warn" role="alert" data-testid="assistant-cap" data-code={chat.refusal.code}>
 					{chat.refusal.message}
 					Back {fmtWhen(chat.refusal.resetsAt)} your time.
 					{#if capOffersPlans(chat.refusal) && chat.refusal.code === 'assistant_monthly_cap'}Pro includes about 15 times as much.{/if}
-					{#if capOffersPlans(chat.refusal)}<a class="cap-plans" href={planLink(billingTeam(), basePath()).href} data-testid="assistant-compare-plans">Compare plans</a>{/if}
+					{#if capOffersPlans(chat.refusal)}
+						{#if capPlans.note}<span data-testid="plan-ask-admin">{capPlans.note}</span>{/if}
+						<a class="cap-plans" href={capPlans.href} data-testid="assistant-compare-plans">Compare plans</a>
+					{/if}
 				</p>
 			{:else if chat.spent && st}
 				<p class="note warn" role="alert" data-testid="assistant-budget-spent">

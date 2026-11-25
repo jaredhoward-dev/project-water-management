@@ -1167,7 +1167,9 @@ are #641's checklist. Open items from building it:
       team's plan, anyone else in a team catchment the public price list
       with "This catchment is on *team*'s plan: ask a team admin to change
       it." (billing.md § Who the plan belongs to). Not their own plan: the
-      catchment bills to the team, so it wouldn't help.
+      catchment bills to the team, so it wouldn't help. Round 3: the
+      assistant panel's cap note shows that line beside its *Compare plans*
+      too (it had only the link's address changed; ui.md § Assistant).
 - [ ] **Free's verified-email gate: what 343 left** (issue #641 round 9,
       2026-11-24). `343_free_email_gate` refuses the assistant and switching
       a feed on, on Free, to an unverified or disposable-domain address when
