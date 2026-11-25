@@ -1192,8 +1192,14 @@ row names a source, where to read it and the series it merges into:
     total's day whose first reading has nothing before it to rise from is a
     gap, so a re-read never writes a short total over a stored day; so is
     every day from a missing reading to the next reading read when they fall
-    in different days (the rise holds rain no reading split), and a day of
-    missing readings is never 0 mm, whatever `noReadingsMeans` says. `{end}`
+    in different days (the rise holds rain no reading split), and so (engine
+    ≥ 1.119.0) is every day from the one after the last reading read through
+    the next reading's when the logger sent nothing at all for a whole rain
+    day between them (readings 12 on the 1st and 20 on the 3rd: the 2nd and
+    the 3rd are gaps, never 0 and 8 mm), unless the total didn't change
+    across the silence (no rain fell, so the silent days follow
+    `noReadingsMeans`). A day of missing readings is never 0 mm, whatever
+    `noReadingsMeans` says. `{end}`
     written as a time runs an hour past the window's last rain day (an API
     that reads its end as exclusive would otherwise drop the reading stamped
     there); readings past the window are ignored.
