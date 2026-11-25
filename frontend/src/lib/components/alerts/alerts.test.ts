@@ -122,12 +122,18 @@ describe('the paused-alerts banner (SES suppressed the address)', () => {
 		);
 	});
 
-	it('explains the day’s wait (429), and passes any other failure’s message through', () => {
+	it('explains the day’s wait (429), and words any other failure from its status, never the server’s English text', () => {
 		expect(resumeProblem(new ApiError(429, 'too soon'))).toBe(
 			'Emails to this address were refused again less than a day after you turned them back on. Check the address, then try again tomorrow.'
 		);
-		expect(resumeProblem(new ApiError(500, 'Internal error'))).toBe('Internal error');
-		expect(resumeProblem('offline')).toBe('offline');
+		expect(resumeProblem(new ApiError(429, 'too soon', undefined, 'alerts_resume_throttled'))).toBe(
+			'Emails to this address were refused again less than a day after you turned them back on. Check the address, then try again tomorrow.'
+		);
+		// The resume route's 500 (SES's release failed) and a dropped connection: the catalogue's words, which a
+		// translated page shows in the reader's language, not the API's English (docs/STACK.md § i18n messages).
+		expect(resumeProblem(new ApiError(500, 'Internal error'))).toBe('Something went wrong on our side. Try again in a moment.');
+		expect(resumeProblem(new ApiError(0, 'Failed to fetch'))).toBe('Couldn’t reach the server. Check your connection and try again.');
+		expect(resumeProblem('offline')).toBe('Something went wrong. Try again.');
 	});
 });
 

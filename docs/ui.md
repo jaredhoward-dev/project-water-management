@@ -16127,7 +16127,9 @@ the catalogue, [§ Language](#language)); both unit-tested.
   back on." in a status line). The banner and its button go, so the focus
   moves to a title that stays: the page's title on `/account/alerts`, the
   **Alert emails** panel's title on the account page. Turned back on and
-  refused again within a day, it says to check the address and try tomorrow.
+  refused again within a day, it says to check the address and try tomorrow;
+  any other failure is worded from its status in the reader's language
+  (`errorText`, never the API's English text).
 - **`/alerts/unsubscribe`** (an alert email's *Stop these emails* link;
   signed in or out, on the sign-in pages' `AuthCard`; translated): reads the
   token from the fragment (`#t=…`) once, strips it from the address bar,
