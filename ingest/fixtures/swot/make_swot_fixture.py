@@ -52,7 +52,7 @@ def area(h: float) -> float:
 def main(out: Path = HERE) -> None:
     rng = random.Random(625)
     with open(out / "dams.csv", "w", newline="") as f:
-        w = csv.writer(f)
+        w = csv.writer(f, lineterminator="\n")
         w.writerow(["dam", "lat", "lon", "capacity_m3"])
         for key, (ring, cap) in DAMS.items():
             for i, (lon, lat) in enumerate(ring):
@@ -81,11 +81,11 @@ def main(out: Path = HERE) -> None:
     granules.append({**granules[0], "name": granules[0]["name"][: -len("_01")] + "_02"})  # the same pass again
     (out / "passes.json").write_text(json.dumps(granules, indent=1) + "\n")
     with open(out / "observed-areas.csv", "w", newline="") as f:
-        w = csv.writer(f)
+        w = csv.writer(f, lineterminator="\n")
         w.writerow(["dam", "date", "area_m2"])
         w.writerows(observed)
     with open(out / "survey.csv", "w", newline="") as f:
-        w = csv.writer(f)
+        w = csv.writer(f, lineterminator="\n")
         w.writerow(["dam", "area_m2", "volume_m3"])
         for i in range(11):
             h = H0 + DEPTH * i / 10
