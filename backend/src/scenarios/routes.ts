@@ -185,6 +185,24 @@ async function checkTerms(db: Db, projectId: string, s: ScenarioRow, role: Role,
 	return { ops, opsSha256: opsSha256(ops), opNames: namesToStore(s, opNames(ops, base.model, s.opNames), s.ownedNodeIds) };
 }
 
+/**
+ * Only a scenario whose every op applies to its base may be submitted (422
+ * with the problems otherwise): what is frozen is a scenario that runs, and
+ * the evidence report's § 4 counts it. POST …/submit and a team editor's
+ * PATCH { status: 'submitted' } both hold it, on the ops being frozen.
+ */
+async function assertSubmittable(db: Db, projectId: string, s: ScenarioRow, role: Role) {
+	const base = await loadBaseInput(db, projectId, s.baseRunId, role);
+	const { problems, maskedRules } = checkScenario(base, s, await hiddenHolders(db, s));
+	if (problems.length)
+		throw new ApiError(
+			422,
+			// A rule hidden from the applicant broke a line: say what the refusal is (issue #523 G7).
+			`a scenario whose changes don't all apply to its base can't be submitted${maskedRules.length ? `. ${IN_APP_CHECK}` : ''}`,
+			{ problems, maskedRules }
+		);
+}
+
 async function move(db: Db, projectId: string, s: ScenarioRow, to: ScenarioStatus, decision: DecisionRecord | null = null) {
 	if (!STATUS_MOVES[s.status].includes(to)) throw new ApiError(409, `a ${s.status} scenario can't become ${to}`);
 	// Only from the status the caller read: a concurrent move (the applicant
@@ -382,6 +400,9 @@ export const scenarioRoutes = new Hono<AuthEnv>()
 					...set.map(([, v]) => v)
 				])
 				.catch(duplicateName(isApplication(s)));
+			// Submitted by PATCH (a team editor's submit): held as …/submit holds it, on the ops this UPDATE left (its
+			// row lock keeps them until the commit), so a refusal rolls the whole PATCH back.
+			if (body.status === 'submitted' && s.status !== 'submitted') await assertSubmittable(db, id, await loadScenario(db, id, sid), role);
 			// Only the fields whose value moved: a PATCH that re-sends the scenario as it is logs nothing.
 			const was: Record<string, unknown> = {
 				name: s.name,
@@ -567,15 +588,7 @@ export const scenarioRoutes = new Hono<AuthEnv>()
 			await db.query('SELECT 1 FROM scenario WHERE project_id = $1 AND id = $2 FOR UPDATE', [id, sid]);
 			const s = await loadScenario(db, id, sid);
 			if (s.status !== 'draft') throw new ApiError(409, `a ${s.status} scenario can't be submitted`);
-			const base = await loadBaseInput(db, id, s.baseRunId, role);
-			const { problems, maskedRules } = checkScenario(base, s, await hiddenHolders(db, s));
-			if (problems.length)
-				throw new ApiError(
-					422,
-					// A rule hidden from the applicant broke a line: say what the refusal is (issue #523 G7).
-					`a scenario whose changes don't all apply to its base can't be submitted${maskedRules.length ? `. ${IN_APP_CHECK}` : ''}`,
-					{ problems, maskedRules }
-				);
+			await assertSubmittable(db, id, s, role);
 			await move(db, id, s, 'submitted');
 			await recordAudit(db, id, 'scenario.submitted', subject(s, { opsSha256: s.opsSha256 }));
 			return c.json(await withCheck(db, id, await loadScenario(db, id, sid), role));
