@@ -20,7 +20,7 @@
 import { MAP_MM_MAX, MAP_MM_MIN, UNIT_MAP_METHOD, unitMapGridCitation, unitMapGridOfSource, unitMapSource } from '@water-management/engine';
 import type { Db } from '../db/tx.js';
 import { loadUnits, unitParcel } from '../feeds/fromUnits.js';
-import { outlineChanged, type PolygonStamp } from './acceptances.js';
+import { outlineChanged, polygonStamp, type PolygonStamp } from './acceptances.js';
 import type { Geometry } from './geojson.js';
 import { cellAreaM2, gridShares, toGrid } from './gridShares.js';
 import { rainMapDatasets, type RainMapDataset } from './rainMap.js';
@@ -210,7 +210,7 @@ export async function unitMapProposal(db: Db, projectId: string, asked?: string)
 		const p = unitParcel(u);
 		if (p === null) withoutPolygon.push({ nodeId: u.nodeId, name: u.name });
 		else if (p === 'several') refused.push({ nodeId: u.nodeId, name: u.name, reason: 'the unit has several parcels on the map and none is its area: use one parcel’s area for the unit on the Map tab first' });
-		else placed.push({ nodeId: u.nodeId, name: u.name, featureId: p.id, polygon: { featureId: p.id, updatedAt: p.updatedAt, areaM2: p.areaM2 }, geometry: p.geometry, current: mapOf.get(u.nodeId) ?? { mapMm: null, mapSource: null } });
+		else placed.push({ nodeId: u.nodeId, name: u.name, featureId: p.id, polygon: polygonStamp(p), geometry: p.geometry, current: mapOf.get(u.nodeId) ?? { mapMm: null, mapSource: null } });
 	}
 	const over = new Map<string, UnitOverGrid[]>();
 	for (const g of grids) {

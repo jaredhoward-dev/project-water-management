@@ -31,6 +31,7 @@ import { citeDataset, croplandDatasets, cultivatedAreas, type CroplandDataset, t
 import { cropTypeAreas, cropTypeDatasets, layerM2, type CropTypeArea, type CropTypeResult } from './cropTypes.js';
 import { LAYER_WORDS } from './cropTypeGrid.js';
 import type { Geometry } from './geojson.js';
+import { polygonStamp } from './acceptances.js';
 
 export const CropAreaFromLandCover = z
 	.object({
@@ -122,6 +123,24 @@ async function pickDataset(db: Db, wanted: string | undefined): Promise<{ datase
 }
 
 const round = (x: number) => Math.round(x);
+
+/** crop_area_land_cover.polygons' CHECK (273): at most 500 stamps in at most 100 000 bytes of jsonb text. */
+const STAMPS_MAX = 500;
+const STAMPS_MAX_BYTES = 100_000;
+
+/**
+ * The polygons an accepted area was summed over, as crop_area_land_cover.polygons records them: each one's stamp with
+ * its outline's hash (followups F7). More than the column holds is unknown (null). Should the hashes not fit the
+ * column's bytes (500 stamps of very long areas), the stamps go without them, which reads by the area rule.
+ */
+export function landCoverStamps(parcels: readonly Pick<Polygon, 'id' | 'geometry' | 'updatedAt' | 'areaM2'>[]): string | null {
+	if (parcels.length > STAMPS_MAX) return null;
+	const stamps = parcels.map((p) => polygonStamp({ id: p.id, geometry: p.geometry, updatedAt: p.updatedAt ?? '', areaM2: p.areaM2 ?? null }));
+	const text = JSON.stringify(stamps);
+	// jsonb's text puts a space after each ':' and ',': at most 2 per key and 4 keys a stamp, plus the commas between.
+	if (Buffer.byteLength(text) + stamps.length * 10 <= STAMPS_MAX_BYTES) return text;
+	return JSON.stringify(stamps.map(({ geomHash: _h, ...rest }) => rest));
+}
 const ha = (m2: number) => `${(m2 / 10_000).toFixed(2)} ha`;
 /**
  * A planted area's History reason: what was taken, then the dataset's citation (always whole, or its short reference
@@ -300,9 +319,9 @@ export const croplandRoutes = new Hono<AuthEnv>()
 					body.featureId ? 'parcel' : 'unit',
 					body.featureId ? (parcels[0]!.name || 'unnamed').slice(0, 100) : null,
 					body.layer ?? null,
-					// The polygons it was summed over as they stand (273, issue #646 F7): a redrawn one shows as changed since.
-					// More than the column holds (500) is recorded as unknown.
-					parcels.length <= 500 ? JSON.stringify(parcels.map((p) => ({ featureId: p.id, updatedAt: p.updatedAt, areaM2: p.areaM2 }))) : null
+					// The polygons it was summed over as they stand (273, issue #646 F7), each with its outline's hash
+					// (followups F7): a redrawn one shows as changed since. More than the column holds (500) is recorded as unknown.
+					landCoverStamps(parcels)
 				]
 			);
 			const revision = await recordModelRevision(db, id, {

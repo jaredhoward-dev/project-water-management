@@ -146,7 +146,8 @@ describe('accepting the proposal', () => {
 		// The boundary it was summarised over, as it stood (273, issue #646 F8): the map's list carries it for the Checks.
 		const map = (await viewer.call('GET', at('/map/features'))).body;
 		const b = map.features.find((f: { kind: string }) => f.kind === 'catchment_boundary');
-		expect(map.accepted.evaporation).toEqual([{ target: 'pe', boundary: { featureId: b.id, updatedAt: b.updatedAt, areaM2: b.areaM2 } }]);
+		expect(b.geomHash).toMatch(/^[0-9a-f]{32}$/);
+		expect(map.accepted.evaporation).toEqual([{ target: 'pe', boundary: { featureId: b.id, updatedAt: b.updatedAt, areaM2: b.areaM2, geomHash: b.geomHash } }]);
 	});
 
 	it('the provenance stops being current once the row is typed over', async () => {

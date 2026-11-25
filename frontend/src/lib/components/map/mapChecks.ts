@@ -488,9 +488,10 @@ export function mapChecks(features: readonly MapFeature[], nodes: readonly MapNo
 		if (was.kind === 'catchment_boundary') {
 			if (!f || !isPolygon(f.geometry)) why = 'the catchment boundary it was looked up at is gone';
 			else if (
-				outlineChanged({ featureId: was.id, updatedAt: was.updatedAt, areaM2: was.areaM2 ?? 0 }, f) ||
-				// A reshape that keeps the area (F7) still counts once the point it was looked up at is outside.
-				(f.updatedAt !== was.updatedAt && !polysOf(f).some((poly) => inPoly(proj.to(lk.point), poly)))
+				outlineChanged({ featureId: was.id, updatedAt: was.updatedAt, areaM2: was.areaM2 ?? 0, ...(was.geomHash ? { geomHash: was.geomHash } : {}) }, f) ||
+				// A lookup recorded before the outline's hash (followups F7): a reshape that keeps the area still counts once
+				// the point it was looked up at is outside.
+				(!was.geomHash && f.updatedAt !== was.updatedAt && !polysOf(f).some((poly) => inPoly(proj.to(lk.point), poly)))
 			) {
 				why = `the catchment boundary has been redrawn since it was looked up at its centre (${at})`;
 			}

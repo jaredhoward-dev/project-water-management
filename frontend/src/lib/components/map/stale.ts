@@ -13,15 +13,30 @@ import { isPolygon } from './mapData';
 /** Two areas of one polygon within this (m²) are one outline: a rename or a relink bumps updatedAt but not the area. backend acceptances.ts OUTLINE_SLACK_M2. */
 export const OUTLINE_SLACK_M2 = 0.5;
 
-type Outline = Pick<MapFeature, 'id' | 'updatedAt' | 'areaM2'>;
+type Outline = Pick<MapFeature, 'id' | 'updatedAt' | 'areaM2' | 'geomHash'>;
 
 /**
  * Whether the polygon a value was read over is another outline now (backend acceptances.ts outlineChanged): gone,
- * another feature, or the same one edited since with another area. A rename or a relink keeps the outline.
+ * another feature, or the same one with another outline. With the outline's hash on both sides (followups F7) the
+ * hashes decide, so a reshape to the same area is a change and a rename or a relink isn't. A stamp from before the
+ * hash (or a server that serves none) falls back to the area rule: edited since with another area.
  */
 export function outlineChanged(then: PolygonStamp, now: Outline | null | undefined): boolean {
 	if (!now) return true;
-	return then.featureId !== now.id || (then.updatedAt !== now.updatedAt && Math.abs(then.areaM2 - (now.areaM2 ?? 0)) > OUTLINE_SLACK_M2);
+	if (then.featureId !== now.id) return true;
+	if (then.geomHash && now.geomHash) return then.geomHash !== now.geomHash;
+	return then.updatedAt !== now.updatedAt && Math.abs(then.areaM2 - (now.areaM2 ?? 0)) > OUTLINE_SLACK_M2;
+}
+
+/**
+ * Whether a unit feed's `unit` mark was read over another outline than the unit's polygon now: as outlineChanged, but
+ * a mark without the hash (from before followups F7) keeps its area to 0.001 km² (feeds/fromUnits.ts), so the area
+ * is compared at that.
+ */
+export function unitRainChanged(mark: MapAcceptances['unitRain'][number], now: Outline | null | undefined): boolean {
+	if (!now || mark.featureId !== now.id) return true;
+	if (mark.geomHash && now.geomHash) return mark.geomHash !== now.geomHash;
+	return mark.updatedAt !== now.updatedAt && Math.round((now.areaM2 ?? 0) / 1e3) / 1e3 !== mark.areaKm2;
 }
 
 /**
@@ -77,11 +92,8 @@ export function staleValues(features: readonly MapFeature[], nodes: readonly Map
 		const nowId = now?.id ?? null;
 		const map = accepted.unitMap.find((a) => a.nodeId === n.id);
 		if (map && outlineChanged(map.polygon, now)) out.push({ kind: 'unit-map', nodeId: n.id, featureId: nowId });
-		// The rain mark keeps its area to 0.001 km² (feeds/fromUnits.ts), so the area is compared at that.
 		const rain = accepted.unitRain.find((a) => a.nodeId === n.id);
-		if (rain && (!now || rain.featureId !== now.id || (rain.updatedAt !== now.updatedAt && Math.round((now.areaM2 ?? 0) / 1e3) / 1e3 !== rain.areaKm2))) {
-			out.push({ kind: 'unit-rain', nodeId: n.id, featureId: nowId });
-		}
+		if (rain && unitRainChanged(rain, now)) out.push({ kind: 'unit-rain', nodeId: n.id, featureId: nowId });
 		for (const lc of accepted.landCover) {
 			if (lc.nodeId !== n.id) continue;
 			if (lc.polygons.some((p) => outlineChanged(p, features.find((f) => f.id === p.featureId)))) out.push({ kind: 'land-cover', nodeId: n.id, featureId: nowId, what: lc.cropName });

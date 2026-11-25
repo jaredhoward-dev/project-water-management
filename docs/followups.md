@@ -8458,11 +8458,15 @@ editor's and a large boundary's notes in step 4
       polygonise them as it does a routed unit's piece). Trigger: a rest
       over ~20 % of the catchment in a client model, or the next Start
       change.
-- [ ] **Changed since is told by area** (F7). A redraw that keeps the area
-      to 0.5 m² (a unit feed's mark: 0.001 km²) reads as the same outline,
-      so a rename or relink (which bump `updated_at`) isn't flagged. Durable
-      fix: a geometry hash in the stamp (and in the feed marks). Trigger: a
-      client report of a reshaped boundary not flagged.
+- [x] **Changed since is told by area** (F7). A redraw that keeps the area
+      to 0.5 m² (a unit feed's mark: 0.001 km²) read as the same outline,
+      so a reshaped boundary wasn't flagged. Done: every stamp (MAP from
+      the grid, land cover, evaporation, a unit feed's `unit` mark, the
+      WR2012 lookup) records the outline's hash (`geo/geomHash.ts`: SHA-256
+      of the outline rounded to 1e-7°, rings opened, wound and started
+      canonically, holes and parts sorted), the server serves it on every
+      polygon feature, and the hashes decide when both sides have one; a
+      stamp from before falls back to the area rule (maps.md § Checks).
 
 ## Planning outputs against the mock-ups (2026-11-03)
 

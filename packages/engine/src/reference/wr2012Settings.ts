@@ -47,10 +47,11 @@ export interface Wr2012Lookup {
 	code: string;
 	/**
 	 * The feature the point came from: the catchment boundary (its centre) or
-	 * a gauge, with its `updatedAt` and area (m², null for a gauge) then.
-	 * null for typed coordinates.
+	 * a gauge, with its `updatedAt` and area (m², null for a gauge) then, and
+	 * a boundary's outline hash (`geomHash`, followups F7; absent before it
+	 * was recorded, and for a gauge). null for typed coordinates.
 	 */
-	feature: { id: string; kind: 'catchment_boundary' | 'gauge'; updatedAt: string; areaM2: number | null } | null;
+	feature: { id: string; kind: 'catchment_boundary' | 'gauge'; updatedAt: string; areaM2: number | null; geomHash?: string } | null;
 }
 
 /**

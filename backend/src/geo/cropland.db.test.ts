@@ -172,7 +172,10 @@ describe('accepting a cultivated area as a crop’s planted area', () => {
 			nodeId: farmA.id,
 			cropId: lucerne.id,
 			cropName: 'Lucerne',
-			polygons: expect.arrayContaining(parcels.map((f: { id: string; updatedAt: string; areaM2: number }) => ({ featureId: f.id, updatedAt: f.updatedAt, areaM2: f.areaM2 })))
+			// Each with its outline's hash (followups F7), as the map serves it.
+			polygons: expect.arrayContaining(
+				parcels.map((f: { id: string; updatedAt: string; areaM2: number; geomHash: string }) => ({ featureId: f.id, updatedAt: f.updatedAt, areaM2: f.areaM2, geomHash: f.geomHash }))
+			)
 		});
 		expect(lc.polygons).toHaveLength(parcels.length);
 	});
