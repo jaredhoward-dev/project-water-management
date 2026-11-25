@@ -373,7 +373,7 @@
 			{#if st || chat.turns.length}
 				<div class="meta">
 					{#if chat.dayMeter}
-						<!-- A capped account's day (Free, a reverse trial; billing enforced): an estimate from its median question. -->
+						<!-- A capped account's day (Free, a reverse trial; billing enforced): an estimate from the person's own median question. -->
 						<span class="day-meter" data-testid="assistant-day-meter">{chat.dayMeter}</span>
 					{/if}
 					{#if st}

@@ -224,15 +224,23 @@ and only on a per-seat plan; on Free or Pro it is kept for when the team
 moves to Team. Like the other caps, nothing refuses past it unless billing is
 enforced.
 
-**The questions-left meter** (`350_assistant_day_meter.sql`, `usage.ts`
-`dayMeter`). With billing enforced, the assistant's status (`GET
+**The questions-left meter** (`350_assistant_day_meter.sql`,
+`351_assistant_day_meter_own_median.sql`, `usage.ts` `dayMeter`). With billing enforced, the assistant's status (`GET
 /projects/:id/assistant`, [api.md § Assistant](./api.md#assistant)) carries
 `day` for a person on a capped account, Free or a reverse trial: the SAST
 day's dollars and what's left of them (the day row's cost plus every
 reservation begun today, as the begin counts them), Free's messages left, the
-trial's whole $2 left, and the account's median question: the median, over
-its day rows of the last 30 SAST days that recorded a priced turn, of the
-row's cost ÷ its messages, rounded up. The panel turns that into "About 6
+trial's whole $2 left, and the person's own median question: the median,
+over their own day rows on the account in the last 30 SAST days that
+recorded a priced turn, of the row's cost ÷ its messages, rounded up (351;
+350 took every member's rows, which let any viewer of a Free or trial
+project read the account's typical spend, so the operator moved it to the
+person's own, 2026-11-24). With no priced day of their own it is null, and
+the panel falls back: Free says its messages left, a trial the share of its
+day left. The trial's $2 left is the one account-wide figure in `day`, by
+nature: the trial's $2 is the account's (the begin counts every member's
+rows and reservations against it, 342), so a member sees what the account
+has left of it, which is what refuses their next turn. The panel turns that into "About 6
 questions left today, at what your questions usually cost (an estimate)"
 ([ui.md § Assistant](./ui.md#assistant)). Per-turn costs aren't kept (the
 month and day rows hold sums), so the median is of daily averages, and a

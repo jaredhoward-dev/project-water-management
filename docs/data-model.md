@@ -3768,10 +3768,12 @@ page holds the conversation and sends it with each turn.
   counted as spent. Spend and reservations are summed in one statement
   (`assistant_month_spent`), so a charge committing alongside is seen once.
   `app_assistant_day_meter(project, free_usd_micros_per_day,
-  free_messages_per_day)` (350, SECURITY DEFINER, STABLE) answers the
-  status's day meter: one row (`kind` `free` or `trial`, the day's dollars
-  and what's left of them, Free's messages left, the trial's whole allowance
-  left, the account's median question over 30 SAST days) only with billing
+  free_messages_per_day)` (350, its median the caller's own since 351;
+  SECURITY DEFINER, STABLE) answers the status's day meter: one row (`kind`
+  `free` or `trial`, the day's dollars and what's left of them, Free's
+  messages left, the trial's whole allowance left (the account's, by
+  nature), the caller's own median question over 30 SAST days on that
+  account, never another member's) only with billing
   enforced, on a Free or reverse-trial account, to a viewer and above; no
   row otherwise ([billing.md § Assistant dollar
   caps](./billing.md#assistant-dollar-caps)).
@@ -3810,7 +3812,7 @@ page holds the conversation and sends it with each turn.
   turn still running keeps counting with its `user_id` cleared, until it is
   charged or expires.
 
-### Billing (323_billing.sql, 331_billing_rls_order.sql, 338_live_catchments.sql, 339_team_assistant_share.sql, 340_live_catchment_gaps.sql, 341_plan_pause.sql, 343_free_email_gate.sql, 344_trial_checkout.sql, 345_plan_keep_picker.sql, 346_billing_notices.sql, 347_email_change.sql, 348_email_gate_refusals.sql, 349_project_trial_end.sql, 350_assistant_day_meter.sql)
+### Billing (323_billing.sql, 331_billing_rls_order.sql, 338_live_catchments.sql, 339_team_assistant_share.sql, 340_live_catchment_gaps.sql, 341_plan_pause.sql, 343_free_email_gate.sql, 344_trial_checkout.sql, 345_plan_keep_picker.sql, 346_billing_notices.sql, 347_email_change.sql, 348_email_gate_refusals.sql, 349_project_trial_end.sql, 350_assistant_day_meter.sql, 351_assistant_day_meter_own_median.sql)
 
 Plans, who each project bills to, and monthly usage, in **shadow mode**
 (issue #641 Phase 1): everything is counted, nothing is refused, and no

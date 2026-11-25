@@ -965,7 +965,10 @@ are #641's checklist. Open items from building it:
       panel says "About N questions left today …" as an estimate
       (billing.md § Assistant dollar caps, ui.md § Assistant;
       `dollarCaps.db.test.ts`, `reverseTrial.db.test.ts`,
-      `chat.svelte.test.ts`, `AssistantPanel.test.ts`, `assistant.spec.ts`).*
+      `chat.svelte.test.ts`, `AssistantPanel.test.ts`, `assistant.spec.ts`).
+      Since 2026-11-24 (operator decision) the median is the person's own
+      questions, not the account's (`351_assistant_day_meter_own_median.sql`),
+      so no viewer reads the account's typical spend.*
 - [x] **Terraform doesn't set the dollar-cap settings.** The assistant
       Lambda ran on the code's defaults ($0.30, 20 messages, a $30 pool),
       and the production check didn't require `ASSISTANT_FREE_*`.
