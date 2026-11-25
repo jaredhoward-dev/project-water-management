@@ -96,7 +96,8 @@ is listed as "not read", never guessed.
   separator, or a space, must group the digits in threes (`1,500`,
   `12 000`, `1.500,5`), so the other locale's decimal (`"1,5"` in a `,`
   file, `1.5` in a `;` file) is a row error that says so, never read as 15
-  or 1 500 (`parseNumber`, `allocations/parse.ts`).
+  or 1 500 (`parseNumber`, `allocations/parse.ts`). In a `,` file a cell with
+  a comma in it is quoted (`"1,500"`), as a spreadsheet saves it.
 - **One row per s21 water use** (issue #72). WARMS registers water per
   water use, per property: a 21(a) row's registered volume is a take per
   year, but a 21(b) row's is the dam's storage. So each row is read by its
@@ -133,7 +134,10 @@ is listed as "not read", never guessed.
 - **Row problems** (listed per row; those rows are not imported): an unknown
   authorisation or water source, a missing volume, a volume or storage that
   isn't a number ≥ 0, a date that isn't `YYYY-MM-DD` (or `YYYY/MM/DD`), valid
-  from after valid to, no registration number, property or farm to match by.
+  from after valid to, no registration number, property or farm to match by,
+  more cells than the header (a delimiter inside an unquoted cell: `1,500`
+  in a comma file would read as a volume of 1 and a storage of 500, so the
+  cell needs double quotes, `"1,500"`).
   A WARMS extract without an authorisation column is read as registrations;
   the template must say.
 - **Authorisation words** (`parseAuthorisation`, issue #281): "existing",
@@ -698,7 +702,7 @@ reasoning is in [security.md § Allocations](./security.md#allocations-popia-min
 | --- | --- | --- | --- |
 | A member acting for the responsible authority (a confirmed delegate, 229) | all, with how each is held (licence, verified existing lawful use, unverified registration, general authorisation, Schedule 1), **always** (#523 G6) | all, **always** | yes (an editor) |
 | Owner, editor | all | all | yes |
-| Viewer | only when an owner switches **What viewers see** on (`project.allocations_viewer_units`, 162); otherwise today's total per water source (volume and storage in force today) at 5 or more registered users in force, none holding more than 80 % of it nor two more than 90 % (provisional, #92); a run's use by water year and the evidence report's totals of other units as modelled use only, never a registered m³ nor a status per year (#523 G–O, round 6, provisional, #92), with at most one judgement for a whole run whose rows are today's total's all through it, at the run's own band; nothing by year for a cap or full-allocation run, whose use is the volume | none | no |
+| Viewer | only when an owner switches **What viewers see** on (`project.allocations_viewer_units`, 162); otherwise today's total per water source (volume and storage in force today, the catchment's day in the project's time zone, not UTC's) at 5 or more registered users in force, none holding more than 80 % of it nor two more than 90 % (provisional, #92); a run's use by water year and the evidence report's totals of other units as modelled use only, never a registered m³ nor a status per year (#523 G–O, round 6, provisional, #92), with at most one judgement for a whole run whose rows are today's total's all through it, at the run's own band; nothing by year for a cap or full-allocation run, whose use is the volume | none | no |
 | Farmer | their linked farms' allocations only (RLS); the farm view shows their own farm's totals | their own only (not shown on the farm view) | no |
 | Share links, pack links, the verify page | none (any later total at 5 or more holders, never per unit) | none | no |
 | An issued evidence pack | the applicant's own units; the rest as totals at 5 or more units (`evidence-15`), at 5 or more registered users in force each water year with the dominance rule (`evidence-18`); a viewer kept from each volume reads the totals' modelled use only, and page 1's unit-years over the band for the applicant's own units only (#523 G1c), and gets no PDF that prints more; an applicant's own pack view has no § 5 | none | no |
