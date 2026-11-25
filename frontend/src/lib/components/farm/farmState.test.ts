@@ -110,6 +110,23 @@ describe('FarmState', () => {
 		}
 	});
 
+	it('forgets the copy of the unit shown last once the catchment no longer lists it, and shows one it does list', async () => {
+		const OLD = 'n-unlinked';
+		const old = vaalbankFixture();
+		old.farm = { ...old.farm, nodeId: OLD, name: 'Unlinked unit' };
+		writeSaved('u1', P, OLD, old);
+		const view = vi.fn(async (_p: string, node: string) => (node === OLD ? Promise.reject(new ApiError(404, 'x')) : vaalbankFixture()));
+		const api = { ...fakeApi(), farm: { ...fakeApi().farm, view } };
+		const s = new FarmState(api, () => 'u1');
+		await s.load(P, null);
+		expect(s.phase).toEqual({ kind: 'ready' });
+		expect(s.nodeId).toBe(N);
+		expect(s.view?.farm.name).toBe('Vaalbank (example)');
+		// The unit is no longer theirs: its figures don't stay on the phone (savedCopy.ts: cleared on a 403 or 404 for that farm).
+		expect(readSaved('u1', P, OLD)).toBeNull();
+		expect(readSaved('u1', P, N)?.view.farm.name).toBe('Vaalbank (example)');
+	});
+
 	it('treats a ?node= that isn’t the user’s, in a catchment they still see, as not theirs (not “no longer”)', async () => {
 		const s = new FarmState(fakeApi(), () => 'u1');
 		await s.load(P, 'someone-else');

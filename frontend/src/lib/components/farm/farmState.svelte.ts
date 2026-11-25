@@ -155,6 +155,12 @@ export class FarmState {
 		const nodeId = pickNode(index, asked, guess);
 		// The catchment answered: an asked-for unit it doesn't list isn't theirs, but the units it does list are.
 		if (!nodeId) return this.#removed(projectId, asked, index.farms.length > 0);
+		// The unit shown last on this phone isn't listed any more (pickNode chose another): it is no longer theirs,
+		// so its copy goes, as on a 403 or 404 for it, rather than keeping its figures on the phone for 30 days.
+		if (guess && nodeId !== guess) {
+			clearSaved(projectId, guess);
+			memo.delete(`${user ?? ''}|${projectId}/${guess}`);
+		}
 		this.nodeId = nodeId;
 		if (!index.publication) {
 			if (user) clearSaved(projectId, undefined);

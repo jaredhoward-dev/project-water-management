@@ -22,7 +22,7 @@ import { rank, requireRole, UUID, type Role } from '../projects/access.js';
 import { localDate } from '../projects/timeZone.js';
 import { isStale } from '../portfolio/status.js';
 import { projectPrivacyContact } from '../teams/privacyContact.js';
-import type { StoredCatchmentView } from '../publish/publish.js';
+import { hiddenOutletName, type StoredCatchmentView } from '../publish/publish.js';
 import { allocationUnitsHidden } from '../allocations/viewerUnits.js';
 import { compareDam, fullAreaOf, type ObservedSource } from '../dams/observed/compare.js';
 import { OBSERVED_ATTRIBUTION, observationsOf, observedFeatures } from '../dams/observed/read.js';
@@ -183,10 +183,26 @@ export async function currentFor(db: Db, projectId: string, nodeId: string): Pro
  * `nodeId`'s own farmer would count it (104), so the WUA's "Preview as
  * farmer" hides the even share where that farmer's page does.
  */
-export async function farmerProjection(db: Db, projectId: string, nodeId: string, view: FarmProjection): Promise<FarmProjection> {
+export async function farmerProjection(db: Db, projectId: string, nodeId: string, view: FarmProjection, catchment: Pick<StoredCatchmentView, 'sites'>): Promise<FarmProjection> {
 	const { rows: h } = await db.query<{ n: number | null }>('SELECT app_other_farm_holders($1, $2) AS n', [projectId, nodeId]);
-	if ((h[0]?.n ?? 0) >= FARMER_K - 1) return view;
-	return { ...view, river: { ...view.river, equitableFraction: null, aboveBelowShareM3Day: null, cutBeyondShare: false } };
+	const named = withoutOutletName(view, await hiddenOutletName(db, projectId, catchment));
+	if ((h[0]?.n ?? 0) >= FARMER_K - 1) return named;
+	return { ...named, river: { ...named.river, equitableFraction: null, aboveBelowShareM3Day: null, cutBeyondShare: false } };
+}
+
+/**
+ * The projection with the outlet's name blanked where the farmer may not
+ * read it (`hidden`, hiddenOutletName: the outflow node may be a neighbour's
+ * farm). Every other site is a gauge (ewrSiteNodes), so only the outlet's
+ * entries can carry that name; the page words a blank one as the catchment outlet.
+ */
+export function withoutOutletName(view: FarmProjection, hidden: string | null): FarmProjection {
+	if (hidden === null) return view;
+	const r = view.river;
+	return {
+		...view,
+		river: { ...r, sites: r.sites.map((s) => (s.name === hidden ? { ...s, name: '' } : s)), bindingSite: r.bindingSite === hidden ? '' : r.bindingSite }
+	};
 }
 
 /** What the farm's map draws (FarmMap): its own parcels and dams, and the catchment's boundary, rivers and gauges for orientation. */
@@ -356,13 +372,15 @@ export const farmViewRoutes = new Hono<AuthEnv>()
 				'SELECT name, time_zone AS "timeZone", wua_name AS "wuaName" FROM project WHERE id = $1',
 				[id]
 			);
-			const farm = await farmerProjection(db, id, nodeId, cur.view);
+			const farm = await farmerProjection(db, id, nodeId, cur.view, cur.catchment_view);
 			const { rows: ctx } = await db.query<{ farms_upstream: number; farms_downstream: number; farm_count: number }>(
 				'SELECT farms_upstream, farms_downstream, farm_count FROM app_farm_context($1, $2)',
 				[id, nodeId]
 			);
 			const cv = cur.catchment_view;
 			const outlet = cv.sites.find((s) => s.isOutlet) ?? cv.sites[0];
+			// Unnamed unless it is a gauge: the outflow node may be a neighbour's farm (hiddenOutletName); the page says "the catchment outlet".
+			const outletHidden = await hiddenOutletName(db, id, cv);
 			// Counted to today where the catchment is (project.time_zone, 058), not UTC's day or the phone's.
 			const today = localDate(new Date(), p[0]!.timeZone);
 			const body: FarmView = {
@@ -383,7 +401,7 @@ export const farmViewRoutes = new Hono<AuthEnv>()
 					},
 					nextExpectedOn: cur.next_expected_on
 				},
-				outlet30: { name: outlet?.name ?? '', daysNotMet: outlet?.daysNotMet.last30 ?? 0, days: cv.last30.days },
+				outlet30: { name: outlet && outlet.name !== outletHidden ? outlet.name : '', daysNotMet: outlet?.daysNotMet.last30 ?? 0, days: cv.last30.days },
 				stale: isStale(farm.dataUntil, today),
 				// The seasonal outlook the WUA published, this farm's own figures (issue #53 R5, E3), until its season ends there.
 				// Not an outlook on a cap or full-allocation base to a preview kept from the volumes (#523 I).

@@ -179,13 +179,29 @@ const endorsementOf = (r: PublicationRow): PublicationEndorsement | null =>
 
 const iso = (d: Date | null) => (d ? d.toISOString() : null);
 
-/** The catchment view without its staff-only part (recent farm shortfall counts), for a farmer. */
-function staffOnlyRemoved(cv: StoredCatchmentView): StoredCatchmentView {
-	const { recent: _recent, ...rest } = cv;
-	return rest;
+/**
+ * The outlet's name when a farmer may not read it, else null. The outflow
+ * node may be any kind, a neighbour's farm included, and a farmer may read
+ * the gauges' names (public infrastructure, node_select_farmer) and no other
+ * node's: the outlet is named to them only when a gauge of the project has
+ * that name (read under the caller's RLS; a viewer reads every gauge too, so
+ * "Preview as farmer" answers alike). The share link drops it for the same
+ * reason (app_share_view). docs/security.md § Publications and the farm view.
+ */
+export async function hiddenOutletName(db: Db, projectId: string, cv: Pick<StoredCatchmentView, 'sites'>): Promise<string | null> {
+	const name = cv.sites.find((s) => s.isOutlet)?.name;
+	if (!name) return null;
+	const { rows } = await db.query(`SELECT 1 FROM node WHERE project_id = $1 AND kind = 'gauge' AND name = $2 LIMIT 1`, [projectId, name]);
+	return rows[0] ? null : name;
 }
 
-function toPublication(r: PublicationRow, withNote: boolean): Publication {
+/** The catchment view as a farmer reads it: without its staff-only part (recent farm shortfall counts), and the outlet unnamed when it isn't a gauge (hiddenOutletName). */
+function forFarmer(cv: StoredCatchmentView, hiddenOutlet: string | null): StoredCatchmentView {
+	const { recent: _recent, ...rest } = cv;
+	return hiddenOutlet === null ? rest : { ...rest, sites: rest.sites.map((s) => (s.isOutlet ? { ...s, name: '' } : s)) };
+}
+
+function toPublication(r: PublicationRow, withNote: boolean, hiddenOutlet: string | null = null): Publication {
 	return {
 		id: r.id,
 		runId: r.run_id,
@@ -194,7 +210,7 @@ function toPublication(r: PublicationRow, withNote: boolean): Publication {
 		...(withNote ? { note: r.note } : {}),
 		restriction: { level: r.restriction_level, pct: r.restriction_pct === null ? null : Number(r.restriction_pct), notice: r.notice },
 		nextExpectedOn: r.next_expected_on,
-		catchmentView: withNote ? r.catchment_view : staffOnlyRemoved(r.catchment_view),
+		catchmentView: withNote ? r.catchment_view : forFarmer(r.catchment_view, hiddenOutlet),
 		supersededAt: iso(r.superseded_at),
 		...(withNote ? { endorsement: endorsementOf(r) } : {}),
 		updatedAt: iso(r.updated_at),
@@ -216,7 +232,8 @@ const toMeta = (r: PublicationRow, withNote: boolean): PublicationMeta => ({
 export async function listPublications(db: Db, projectId: string, withNote: boolean): Promise<{ current: Publication | null; history: PublicationMeta[] }> {
 	const { rows } = await db.query<PublicationRow>(`${SELECT_PUBLICATION} WHERE p.project_id = $1 ORDER BY p.published_at DESC, p.id DESC`, [projectId]);
 	const cur = rows.find((r) => r.superseded_at === null);
-	return { current: cur ? toPublication(cur, withNote) : null, history: rows.map((r) => toMeta(r, withNote)) };
+	const hidden = cur && !withNote ? await hiddenOutletName(db, projectId, cur.catchment_view) : null;
+	return { current: cur ? toPublication(cur, withNote, hidden) : null, history: rows.map((r) => toMeta(r, withNote)) };
 }
 
 async function getPublication(db: Db, id: string): Promise<Publication> {

@@ -2222,7 +2222,11 @@ In short:
   publication back as current. The farm routes
   (`/projects/:id/farm…`) admit the farmer role, answer `404` alike for a
   node the farmer isn't linked to, a gauge or a node that doesn't exist, and
-  null the even share below `k − 1` other holders per viewer. Tests:
+  null the even share below `k − 1` other holders per viewer. The outlet is
+  named to a farmer (farm view, publication list, data export) only when a
+  gauge of the project has its name: the outflow node may be a neighbour's
+  farm (`publish.ts hiddenOutletName`, `farms/outlet-name-privacy.db.test.ts`),
+  as the share link already drops it. Tests:
   `publish/publication.db.test.ts` scans a farmer's farm view and
   publication list for every other farm's id and name, with positive
   controls; `role-ladder.db.test.ts` keeps every other `/projects/:id` route
