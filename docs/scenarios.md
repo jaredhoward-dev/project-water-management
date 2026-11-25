@@ -1002,7 +1002,11 @@ bodies), `execute.ts` (`executeScenarioRun`).
   clients never send names.
 - **Status.** `draft → submitted → withdrawn | decided`, and `withdrawn →
   draft`. Only a draft's ops, owned nodes and base change; a submitted or
-  decided scenario can't be deleted. On a team scenario any editor moves it;
+  decided scenario can't be deleted. Only a scenario whose every op applies
+  to its base is submitted, by `…/submit` or a team editor's `PATCH {
+  status: 'submitted' }` alike (`422` with the problems), so nothing frozen
+  is a scenario that can't run (§ 4 of the evidence report counts a
+  submitted one). On a team scenario any editor moves it;
   on an application only its owner, and only an assessor decides it
   ([§ Applications](#applications-wp-33)).
 - **The base is cited** (`model_run_cited`), so it can't be deleted,

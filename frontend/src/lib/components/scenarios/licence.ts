@@ -25,6 +25,18 @@ export function licensedTerms(s: Pick<Scenario, 'licence' | 'grantedTerms' | 'de
 }
 
 /**
+ * Which ops a run of the scenario applied, by the hash it recorded: the ones
+ * the scenario has now (`applied`), the terms of its licence in force
+ * (`licensed`: POST …/runs { terms: 'licensed' }, or the background run a
+ * decision queues, 293), or neither (`stale`: the ops were edited since, or
+ * the terms it ran are no longer the ones in force).
+ */
+export function runTerms(runOpsSha256: string, s: Pick<Scenario, 'opsSha256' | 'licence' | 'grantedTerms' | 'decisionEvents'>): 'applied' | 'licensed' | 'stale' {
+	if (runOpsSha256 === s.opsSha256) return 'applied';
+	return licensedTerms(s)?.opsSha256 === runOpsSha256 ? 'licensed' : 'stale';
+}
+
+/**
  * Where the licence stands, one sentence: counting on its granted terms (or a
  * variation's), set aside, or no licence at all; and, with an appeal open,
  * that nothing changes until it is decided. null until decided with an outcome.
