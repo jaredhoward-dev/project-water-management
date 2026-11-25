@@ -324,7 +324,7 @@ MUTANTS = [
     # Bed losses in the reaches (§2.6b).
     ("bed losses are left in the river", "                    H += U[u] - lost", "                    H += U[u]"),
     ("bed losses ignore the daily cap", "return min(c_, f_ * q) if q > 0 else 0.0", "return f_ * q if q > 0 else 0.0"),
-    ("a senior claim is not grossed up for the reaches on the way", "                sen_y[fid][i] += v", "                sen_y[fid][i] += Dn[u[\"id\"]][i] * shares.get(fid, 0.0) / tot"),
+    ("a senior claim is not grossed up for the reaches on the way", "            sen_y[fid][i] += v", "            sen_y[fid][i] += Dn[uid][i] * ratio"),
     (
         "the senior requirement crosses a reach whole",
         "                zs_in += ZS[u] - min(ZS[u], sen_led[u][i]) if u in sen_led else ZS[u]",
@@ -453,7 +453,7 @@ MUTANTS = [
     # 1.105.0, issue #616; Per unit only from 1.109.0, issue #658).
     ("the natural MAR share is ignored (no unit gets a share)", "    if split_src is not None:", "    if False:"),
     ("the EWR is split by area, the flow by the natural MAR share", 'ewr_share = {x["id"]: shares.get(x["id"], 0.0) for x in farms}', 'ewr_share = dict(area_share)'),
-    ("the senior users' claims are split by area, not the natural MAR share", ("            tot += shares.get(fid, 0.0)\n", "            tot += area_share.get(fid, 0.0)\n"), ('v = Dn[u["id"]][i] * shares.get(fid, 0.0) / tot', 'v = Dn[u["id"]][i] * area_share.get(fid, 0.0) / tot')),
+    ("the senior users' claims are split by area, not the natural MAR share", ("            tot += shares.get(fid, 0.0)\n", "            tot += area_share.get(fid, 0.0)\n"), ('sen_paths.append((u["id"], fid, shares.get(fid, 0.0) / tot, path))', 'sen_paths.append((u["id"], fid, area_share.get(fid, 0.0) / tot, path))')),
     ("the natural MAR is taken over every day, not the complete water years", "period = full if full else list(range(hist))", "period = list(range(hist))"),
     # Calibration zones (§2.10n, engine 1.106.0, issue #555); calibration locations (engine 1.110.0, issue #659).
     ("a unit in a calibration zone runs on the site's parameters, not its zone's", 'zp = zone_p.get(u["id"], g)', "zp = g"),
@@ -543,4 +543,7 @@ MUTANTS = [
     ("drought: a filling dam's review reads it counted only", "                    return min(full, drought_share_level(", "                    return full if True else min(full, drought_share_level("),
     ("drought: a filling dam's review reads it left out only", "                    return min(full, drought_share_level(", "                    return (lambda _f: _f)(drought_share_level("),
     ("drought: a filling dam joins below θ", 'if c_ > 0 and storage[fid] / c_ >= drule["theta"]:', 'if c_ > 0 and storage[fid] / c_ >= 0.5 * drule["theta"]:'),
+    ("drought: a `dams` rule listing a dam twice is applied", "if not dams or len(set(dams)) < len(dams):", "if not dams:"),
+    ("drought: a `dams` rule listing no dam is applied", "if not dams or len(set(dams)) < len(dams):", "if dams and len(set(dams)) < len(dams):"),
+    ("drought: a rule listing a unit twice is applied", "if nodes is not None and (not nodes or len(set(nodes)) < len(nodes)):", "if nodes is not None and not nodes:"),
 ]
