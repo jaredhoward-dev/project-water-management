@@ -124,7 +124,7 @@ describe('GET /compare/runs', () => {
 		expect(res.body.b.run.inputs.settings.wr2012).toMatchObject({ scaling: 'areaRain', calibrationPenalty: { enabled: true, weight: 1 } });
 		expect(res.body.changes.map((c: { text: string }) => c.text)).toEqual([
 			'WR2012 naturalised MAR: 12 Mm³/a → 13 Mm³/a',
-			'WR2012 monthly means: changed in 12 months',
+			'WR2012 monthly means: changed in 12 months: total 12 → 13 Mm³ (+1), most in Oct 1.018 → 1.103 Mm³',
 			'WR2012 scaling: area ratio → area and rainfall ratio',
 			'WR2012 calibration penalty: off → on',
 			'WR2012 calibration penalty weight: 0.5 → 1'

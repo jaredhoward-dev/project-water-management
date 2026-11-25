@@ -40,6 +40,8 @@
 	import PlausibilityCompare from '#lib/components/compare/PlausibilityCompare.svelte';
 	import { chirpsFitNote } from '#lib/components/compare/chirpsFit.js';
 	import { fmtMetric } from '#lib/components/compare/delta.js';
+	import { comparisonCsv, comparisonCsvName } from '#lib/components/compare/csv.js';
+	import { saveBlob } from '#lib/export/download.js';
 	import { rainSourceNote } from '#lib/components/compare/rainSource.js';
 	import { asFitRecord } from '#lib/components/compare/fit.js';
 	import { compareDamStorage, leadChange, outcomeRows, takeaways } from '#lib/components/compare/summary.js';
@@ -655,6 +657,8 @@
 							</dd>
 						</div>
 					</dl>
+					<!-- The whole comparison as a file (issue #830): the outcomes unrounded, each unit, every input difference. -->
+					<p class="csv-row"><button type="button" class="btn btn-sm" data-testid="compare-csv" onclick={() => data && saveBlob(new Blob([comparisonCsv(data)], { type: 'text/csv;charset=utf-8' }), comparisonCsvName(data))}>Download the comparison (CSV)</button></p>
 					{#if sameRun}
 						<div class="alert alert-info" role="status">Both sides are the same run, so nothing has changed. Pick a different run for the baseline or the what-if.</div>
 					{/if}
@@ -1042,6 +1046,9 @@
 	}
 	.empty p:last-child {
 		margin-bottom: 0;
+	}
+	.csv-row {
+		margin: 0 0 0.5rem;
 	}
 	.sides {
 		display: grid;
