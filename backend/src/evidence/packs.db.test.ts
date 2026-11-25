@@ -60,6 +60,7 @@ import { outbox } from '../mail/transport.js';
 import { sendPackNotices } from './notices.js';
 import { packVolumesWithheld } from './packs.js';
 import { acceptPackRenderResult } from '../reports/schedule.js';
+import { freeRenderSlot, packSlot } from '../reports/renderSlots.js';
 import { packBundleKey, packPdfKey, packsBucket, putPackBundle, putPackPdf, resetStorageClient } from '../reports/storage.js';
 import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { trimRuns } from '../runs/execute.js';
@@ -860,13 +861,19 @@ describe.skipIf(!minio)('issuing, superseding and withdrawing', () => {
 				[projectId, v1.id]
 			);
 		const tick = () => runTick({ feeds: false, reports: false, alerts: false });
-		const answer = (result: PackRenderResult) => acceptPackRenderResult({ v: 1, type: 'rendered_pack', packId: v1.id, result });
+		/** What the worker does with a render-results message (lambda-worker.ts): free the pack's render slot (353), queue the answer. */
+		const answer = async (result: PackRenderResult) => {
+			await freeRenderSlot(packSlot(v1.id));
+			return acceptPackRenderResult({ v: 1, type: 'rendered_pack', packId: v1.id, result });
+		};
 		const pdfState = async () => (await viewer.call('GET', packPath(v1.id))).body.pdf;
 		/** A request carrying only a cookie (the render session's), as the headless browser sends it. */
 		const asCookie = async (cookie: string, path: string) => (await app.request(path, { headers: { origin: 'http://localhost:7777', cookie } })).status;
 
 		beforeAll(() => {
 			vi.stubEnv('REPORT_RENDERER', 'sqs');
+			// No answer ever comes here to free a render slot (353): room for every request this file sends.
+			vi.stubEnv('RENDER_CONCURRENCY', '100');
 			vi.stubEnv('RENDER_REQUESTS_QUEUE_URL', 'memory://render-requests');
 		});
 		afterAll(() => {
@@ -1031,6 +1038,8 @@ describe.skipIf(!minio)('issuing, superseding and withdrawing', () => {
 		// REPORT_RENDERER=sqs, so a render this tick may claim is a captured message, never a Chromium print.
 		beforeAll(() => {
 			vi.stubEnv('REPORT_RENDERER', 'sqs');
+			// No answer ever comes here to free a render slot (353): room for every request this file sends.
+			vi.stubEnv('RENDER_CONCURRENCY', '100');
 			vi.stubEnv('RENDER_REQUESTS_QUEUE_URL', 'memory://render-requests');
 		});
 		afterAll(() => {
@@ -1266,6 +1275,8 @@ describe.skipIf(!minio)('an application pack’s bundle', () => {
 
 	it('the server re-run records a stored bundle that isn’t the recorded bytes as not reproduced (the clean pack above reproduced)', async () => {
 		vi.stubEnv('REPORT_RENDERER', 'sqs');
+		// No answer ever comes here to free a render slot (353): room for every request this file sends.
+		vi.stubEnv('RENDER_CONCURRENCY', '100');
 		vi.stubEnv('RENDER_REQUESTS_QUEUE_URL', 'memory://render-requests');
 		const [row] = await asOwner('SELECT bundle_key, bundle_sha256 FROM evidence_pack WHERE id = $1', [first.id]);
 		const { bytes: original } = await downloadBundle(viewer, first.id);
@@ -1357,6 +1368,8 @@ describe.skipIf(!minio)('an application pack’s bundle', () => {
 describe.skipIf(!minio)('an application pack with a mitigation alternative (bundle-3, evidence-26)', () => {
 	it('issues it with the alternative’s run in its bundle, which reproduces offline and on the server (one part for the alternative)', async () => {
 		vi.stubEnv('REPORT_RENDERER', 'sqs');
+		// No answer ever comes here to free a render slot (353): room for every request this file sends.
+		vi.stubEnv('RENDER_CONCURRENCY', '100');
 		vi.stubEnv('RENDER_REQUESTS_QUEUE_URL', 'memory://render-requests');
 		try {
 			const runId = await scenarioRun('Upper dam, weighed', [{ op: 'node.set', nodeId: '', field: 'damCapacityM3', value: 400_000 }]);
@@ -2043,6 +2056,8 @@ describe.skipIf(!minio)('an applicant’s application pack citing the applicant�
 
 	it('issues it, and the bundle reproduces the alternative offline and on the server', async () => {
 		vi.stubEnv('REPORT_RENDERER', 'sqs');
+		// No answer ever comes here to free a render slot (353): room for every request this file sends.
+		vi.stubEnv('RENDER_CONCURRENCY', '100');
 		vi.stubEnv('RENDER_REQUESTS_QUEUE_URL', 'memory://render-requests');
 		try {
 			const p = await draft(editor, appRunId);

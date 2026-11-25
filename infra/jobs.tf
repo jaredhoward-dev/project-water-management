@@ -226,13 +226,15 @@ resource "aws_lambda_function" "worker" {
         # the renderer; the worker records them and emails the link (SES).
         REPORT_RENDERER           = "sqs"
         RENDER_REQUESTS_QUEUE_URL = aws_sqs_queue.render_requests.url
-        STORAGE                   = "s3"
-        REPORTS_BUCKET            = aws_s3_bucket.reports.bucket
-        PACKS_BUCKET              = aws_s3_bucket.packs.bucket
-        MAIL_TRANSPORT            = "ses"
-        MAIL_FROM                 = "${var.mail_from_display_name} <${local.mail_from_address}>"
-        SITE_URL                  = local.site_origin
-        SES_CONFIGURATION_SET     = aws_sesv2_configuration_set.main.configuration_set_name
+        # Never more requests in flight than the renderer runs (reports.tf).
+        RENDER_CONCURRENCY    = tostring(local.renderer_concurrency)
+        STORAGE               = "s3"
+        REPORTS_BUCKET        = aws_s3_bucket.reports.bucket
+        PACKS_BUCKET          = aws_s3_bucket.packs.bucket
+        MAIL_TRANSPORT        = "ses"
+        MAIL_FROM             = "${var.mail_from_display_name} <${local.mail_from_address}>"
+        SITE_URL              = local.site_origin
+        SES_CONFIGURATION_SET = aws_sesv2_configuration_set.main.configuration_set_name
         # The operator's copy of the licence-record notices (161_licence_record,
         # backend/src/licence/record.ts): the mailbox that gets the alarms.
         OPERATOR_EMAIL = var.budget_alert_email

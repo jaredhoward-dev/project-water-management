@@ -28,7 +28,8 @@ const NO_RLS = new Set(['schema_migrations']);
 // assistant_reservation (264): a turn's reserved budget, read and written only by the assistant's definer functions.
 // billing_event (326): the billing webhook's de-duplication, written only by app_billing_apply from a session with no user.
 // email_gate_refusal (348): the verified-email gate's daily refusal counts, written only by app_email_gate_refused, read by the owner's report.
-const OWNER_ONLY = new Set(['assistant_reservation', 'reverse_trial_claim', 'billing_event', 'erasure_log', 'reference_load', 'mfa_reset_cancel', 'mfa_reset_quota', 'allocation_holder_salt', 'run_allocation_holder', 'dam_observation_load_mark', 'et_observation_load_mark', 'email_gate_refusal']);
+// render_slot (353): render requests in flight to the renderer and those waiting, only through app_render_slot_take / _free.
+const OWNER_ONLY = new Set(['render_slot', 'assistant_reservation', 'reverse_trial_claim', 'billing_event', 'erasure_log', 'reference_load', 'mfa_reset_cancel', 'mfa_reset_quota', 'allocation_holder_salt', 'run_allocation_holder', 'dam_observation_load_mark', 'et_observation_load_mark', 'email_gate_refusal']);
 /**
  * Views that may run with their owner's rights (security_invoker off), each
  * with why. An owner-rights view reads its tables as the schema owner, so RLS
@@ -62,7 +63,7 @@ const COLUMN_ONLY_UPDATE: Record<string, string[]> = {
 	// An ensemble is completed once with its result; its seed and options never change (014_run_uncertainty.sql).
 	run_uncertainty: ['accepted', 'completed_at', 'result', 'status', 'summary'],
 	// A report's project, run, job, requester and recipients are fixed at insert; only its outcome changes (023_reports.sql).
-	report: ['bytes', 'error', 'finished_at', 'pages', 'status'],
+	report: ['bytes', 'error', 'finished_at', 'pages', 'sent_at', 'status'],
 	// A publication's run, projection and publisher never change; the notice, the note, the next date and the supersession do (022_publication.sql),
 	// and the responsible authority's endorsement, once (163_licensing_authority.sql).
 	run_publication: [

@@ -9,7 +9,7 @@
 // does; contributorKinds.db.test.ts checks this list is exactly the kinds the
 // job table's insert policies let someone below viewer queue. A new kind a
 // contributor can queue fails there until it is listed here with its keys.
-import { applicantCopyDedupeKey, applicantCopyResultDedupeKey, applicantCopyRetryDedupeKey } from '../evidence/applicantCopy.js';
+import { applicantCopyDedupeKey, applicantCopyRequeueDedupeKey, applicantCopyResultDedupeKey, applicantCopyRetryDedupeKey } from '../evidence/applicantCopy.js';
 import { YieldRequest, yieldDedupeKey } from '../yield/store.js';
 import type { JobKind } from './registry.js';
 
@@ -20,7 +20,7 @@ const SAMPLE_YIELD = YieldRequest.parse({ kind: 'firm', scenarioId: SAMPLE_ID, n
 export const CONTRIBUTOR_JOB_DEDUPE_KEYS: Partial<Record<JobKind, readonly ((userId: string) => string)[]>> = {
 	// yield/routes.ts: a contributor's request (an editor's is shared by the editors, who read every job).
 	yield: [(u) => yieldDedupeKey(SAMPLE_YIELD, u)],
-	// evidence/applicantPacks.ts (the request), jobs/handlers/applicant-pack-render.ts (the retry),
+	// evidence/applicantPacks.ts (the request), jobs/handlers/applicant-pack-render.ts (the retry and the requeue of an expired request),
 	// reports/schedule.ts acceptPackRenderResult (the renderer's answer).
-	applicant_pack_render: [(u) => applicantCopyDedupeKey(SAMPLE_ID, u), (u) => applicantCopyRetryDedupeKey(SAMPLE_ID, u, 1), (u) => applicantCopyResultDedupeKey(SAMPLE_ID, u)]
+	applicant_pack_render: [(u) => applicantCopyDedupeKey(SAMPLE_ID, u), (u) => applicantCopyRetryDedupeKey(SAMPLE_ID, u, 1), (u) => applicantCopyRequeueDedupeKey(SAMPLE_ID, u, 1), (u) => applicantCopyResultDedupeKey(SAMPLE_ID, u)]
 };

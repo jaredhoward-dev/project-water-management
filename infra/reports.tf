@@ -39,9 +39,17 @@
 # ----------------------------------------------------------------------------
 
 locals {
-  renderer_function_name   = "${local.project}-renderer"
-  renderer_function_arn    = "arn:aws:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:${local.renderer_function_name}"
-  renderer_timeout_s       = 120
+  renderer_function_name = "${local.project}-renderer"
+  renderer_function_arn  = "arn:aws:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:${local.renderer_function_name}"
+  renderer_timeout_s     = 120
+  # How many renders run at once: the renderer's SQS trigger's
+  # maximum_concurrency (2, the least SQS allows; renderer_reserved_concurrency
+  # is at least this). The worker gets the same number (RENDER_CONCURRENCY,
+  # jobs.tf) and never has more requests in flight: each waits in the job
+  # table for a slot and gets its 5-minute render token only when it is sent
+  # (backend/src/reports/renderSlots.ts, 353_render_slot), so none waits in
+  # render-requests past its token's life. Raising it means raising both.
+  renderer_concurrency     = 2
   renderer_enabled         = var.renderer_image_tag != ""
   report_retention_days    = 7
   render_queue_retention_s = 345600 # 4 days
@@ -433,7 +441,8 @@ resource "aws_lambda_event_source_mapping" "renderer_requests" {
   function_response_types = ["ReportBatchItemFailures"]
 
   scaling_config {
-    maximum_concurrency = 2
+    # The worker sends at most this many at once (local.renderer_concurrency).
+    maximum_concurrency = local.renderer_concurrency
   }
 }
 

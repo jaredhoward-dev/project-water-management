@@ -41,6 +41,7 @@ import { envInt, runTick, type TickResult } from './jobs/runner.js';
 import { acceptIngestResult } from './feeds/schedule.js';
 import { acceptMailEvent } from './mail/suppression.js';
 import { acceptPackRenderResult, acceptRenderResult } from './reports/schedule.js';
+import { answeredSlot, freeRenderSlot } from './reports/renderSlots.js';
 import { parseWorkerMessage } from './jobs/transport.js';
 import { emitMetricLine, logEvent } from './logging/logEvent.js';
 import { safeError } from './logging/safeError.js';
@@ -124,13 +125,16 @@ async function acceptRecord(record: SQSRecord): Promise<void> {
 		const outcome = await acceptIngestResult(message);
 		if (outcome !== 'queued') logEvent('warn', { event: 'feed_result_dropped', messageId: record.messageId, reason: outcome });
 	}
-	// A render's outcome (render-results queue): becomes a report_render job.
+	// A render's outcome (render-results queue): its render slot is free (whatever the answer, 353), and it
+	// becomes a report_render job.
 	else if (message.type === 'rendered') {
+		await freeRenderSlot(answeredSlot(message));
 		const outcome = await acceptRenderResult(message);
 		if (outcome !== 'queued') logEvent('warn', { event: 'render_result_dropped', messageId: record.messageId, reason: outcome });
 	}
 	// An evidence pack's render outcome (render-results queue): becomes a pack_render job.
 	else if (message.type === 'rendered_pack') {
+		await freeRenderSlot(answeredSlot(message));
 		const outcome = await acceptPackRenderResult(message);
 		if (outcome !== 'queued') logEvent('warn', { event: 'pack_render_result_dropped', messageId: record.messageId, reason: outcome });
 	}

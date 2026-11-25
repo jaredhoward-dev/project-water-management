@@ -33,7 +33,8 @@ import { enqueueJob } from '../queue.js';
 import { defineHandler } from '../registry.js';
 import { type PackRenderRequestMessage, PackRenderResult, reportRenderer, sendToQueue } from '../transport.js';
 import { sha256Hex } from './pack-render.js';
-import { applicantCopyDedupeKey, applicantCopyRetryDedupeKey } from '../../evidence/applicantCopy.js';
+import { applicantCopyDedupeKey, applicantCopyRequeueDedupeKey, applicantCopyRequeueDedupePrefix, applicantCopyRetryDedupeKey } from '../../evidence/applicantCopy.js';
+import { applicantPackSlot, expiredUnrendered, MAX_EXPIRED_REQUESTS, sendWithSlot } from '../../reports/renderSlots.js';
 
 
 export const ApplicantPackRenderPayload = z
@@ -44,15 +45,31 @@ export const ApplicantPackRenderPayload = z
 	})
 	.strict();
 
-/** As requestPackRenderAgain: another request job, delayed 2^n minutes, until REPORT_MAX_ATTEMPTS since the party last asked. */
-export async function requestApplicantCopyAgain(db: Db, projectId: string, packId: string, userId: string): Promise<boolean> {
-	const { rows } = await db.query<{ n: number }>(
-		`SELECT count(*)::int AS n FROM job
+/**
+ * As requestPackRenderAgain: another request job, delayed 2^n minutes, until REPORT_MAX_ATTEMPTS since the party
+ * last asked; an `expired` answer (nothing rendered) asks again at once without counting, up to MAX_EXPIRED_REQUESTS.
+ */
+export async function requestApplicantCopyAgain(db: Db, projectId: string, packId: string, userId: string, { expired = false }: { expired?: boolean } = {}): Promise<boolean> {
+	const requeue = applicantCopyRequeueDedupePrefix(packId, userId);
+	const { rows } = await db.query<{ made: number; requeued: number }>(
+		`SELECT count(*) FILTER (WHERE NOT starts_with(coalesce(dedupe_key, ''), $4))::int AS made,
+			count(*) FILTER (WHERE starts_with(coalesce(dedupe_key, ''), $4))::int AS requeued
+		 FROM job
 		 WHERE project_id = $1 AND kind = 'applicant_pack_render' AND payload->>'packId' = $2 AND NOT (payload ? 'result')
 			AND created_at >= coalesce((SELECT max(created_at) FROM job WHERE project_id = $1 AND kind = 'applicant_pack_render' AND dedupe_key = $3), '-infinity')`,
-		[projectId, packId, applicantCopyDedupeKey(packId, userId)]
+		[projectId, packId, applicantCopyDedupeKey(packId, userId), requeue]
 	);
-	const made = rows[0]?.n ?? 0;
+	const { made = 0, requeued = 0 } = rows[0] ?? {};
+	if (expired && requeued < MAX_EXPIRED_REQUESTS) {
+		await enqueueJob(db, {
+			projectId,
+			kind: 'applicant_pack_render',
+			payload: { packId },
+			dedupeKey: applicantCopyRequeueDedupeKey(packId, userId, requeued),
+			maxAttempts: REPORT_MAX_ATTEMPTS
+		});
+		return true;
+	}
 	if (made >= REPORT_MAX_ATTEMPTS) return false;
 	await enqueueJob(db, {
 		projectId,
@@ -87,7 +104,7 @@ export const applicantPackRenderHandler = defineHandler({
 
 		if (payload.result) {
 			if (!payload.result.ok) {
-				if (payload.result.retry && (await requestApplicantCopyAgain(db, job.projectId, payload.packId, job.actingUserId))) return;
+				if (payload.result.retry && (await requestApplicantCopyAgain(db, job.projectId, payload.packId, job.actingUserId, { expired: expiredUnrendered(payload.result) }))) return;
 				throw new JobError(`the renderer failed: ${payload.result.error}`, { retry: false });
 			}
 			// As the pack's own PDF: recorded only when the packs bucket holds it under that hash, with that checksum.
@@ -108,13 +125,17 @@ export const applicantPackRenderHandler = defineHandler({
 		}
 
 		// Committed now, on its own connection: the renderer uses it before this job commits.
-		const token = await withUser(job.actingUserId, (tx) => issueApplicantPackRenderToken(tx, job.projectId, payload.packId));
+		const issue = () => withUser(job.actingUserId, (tx) => issueApplicantPackRenderToken(tx, job.projectId, payload.packId));
 
 		if (reportRenderer() === 'sqs') {
-			const message: PackRenderRequestMessage = { v: 1, type: 'render_pack', packId: payload.packId, projectId: job.projectId, scenarioId, token };
-			await sendToQueue(process.env.RENDER_REQUESTS_QUEUE_URL, 'RENDER_REQUESTS_QUEUE_URL', message);
+			// Only with a render slot (reports/renderSlots.ts), as report_render: the token is issued once it can go.
+			await sendWithSlot(applicantPackSlot(payload.packId), async () => {
+				const message: PackRenderRequestMessage = { v: 1, type: 'render_pack', packId: payload.packId, projectId: job.projectId, scenarioId, token: await issue() };
+				await sendToQueue(process.env.RENDER_REQUESTS_QUEUE_URL, 'RENDER_REQUESTS_QUEUE_URL', message);
+			});
 			return;
 		}
+		const token = await issue();
 
 		let rendered;
 		try {

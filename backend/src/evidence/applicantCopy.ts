@@ -13,6 +13,13 @@ export const applicantCopyDedupeKey = (packId: string, userId: string) => `appli
 export const applicantCopyRetryDedupeKey = (packId: string, userId: string, made: number) => `applicant_copy_retry:${packId}:${userId}:${made}`;
 
 /**
+ * A request asked again after the renderer refused it only for waiting past its token's life (nothing rendered;
+ * reports/renderSlots.ts expiredUnrendered), the `n`-th: its own key, not counted as a retry, and the party's.
+ */
+export const applicantCopyRequeueDedupePrefix = (packId: string, userId: string) => `applicant_copy_requeue:${packId}:${userId}:`;
+export const applicantCopyRequeueDedupeKey = (packId: string, userId: string, n: number) => `${applicantCopyRequeueDedupePrefix(packId, userId)}${n}`;
+
+/**
  * The renderer Lambda's answer for a party's copy, queued as that party (reports/schedule.ts acceptPackRenderResult).
  * Per party: two of a party's members can each ask for the copy, and a key shared between them would meet the
  * other's pending answer, which they can't read (issue #386). Redelivered answers still collapse, and the first

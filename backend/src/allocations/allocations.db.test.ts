@@ -1520,6 +1520,8 @@ describe('no viewer GET carries a registered volume while the owners keep them f
 
 		beforeAll(() => {
 			vi.stubEnv('REPORT_RENDERER', 'sqs');
+			// No answer ever comes here to free a render slot (353): room for every request this file sends.
+			vi.stubEnv('RENDER_CONCURRENCY', '100');
 			vi.stubEnv('RENDER_REQUESTS_QUEUE_URL', 'http://queue.test/render-requests');
 		});
 		afterAll(async () => {
