@@ -1,5 +1,6 @@
-// The WUA's name on the farm index and view (095_wua_name) and the run's
-// first date on the projection (`dataFrom`). Two farms in a line, as in
+// The WUA's name on the farm index and view (095_wua_name), the run's first
+// date on the projection (`dataFrom`), who reads the farm view, and the farm
+// series and history routes removed on 2026-11-25. Two farms in a line, as in
 // series-privacy.db.test.ts; the farmer is linked to Down only.
 import { beforeAll, describe, expect, it } from 'vitest';
 import { asOwner, monthly, node, signUp } from '../__tests__/helpers.js';
@@ -8,6 +9,7 @@ type User = Awaited<ReturnType<typeof signUp>>;
 
 let owner: User;
 let farmer: User; // linked to Down only
+let stranger: User;
 let projectId: string;
 const outlet = node('Outlet weir', null);
 const down = node('Lower farm', outlet.id, { damCapacityM3: 50_000 });
@@ -27,7 +29,7 @@ let firstRun: string;
 let currentRun: string;
 
 beforeAll(async () => {
-	[owner, farmer] = (await Promise.all([signUp('Hisowner'), signUp('Hisfarmer')])) as [User, User];
+	[owner, farmer, stranger] = (await Promise.all([signUp('Hisowner'), signUp('Hisfarmer'), signUp('Hisstranger')])) as [User, User, User];
 	projectId = (await owner.call('POST', '/projects', { name: 'Farm history' })).body.project.id;
 	const model = {
 		nodes: [outlet, down, up],
@@ -84,5 +86,36 @@ describe('the run’s first date on the projection (dataFrom)', () => {
 		expect(stored.has).toBe(false);
 		expect((await farmer.call('GET', `/projects/${projectId}/farm/${down.id}`)).body.farm.dataFrom).toBe(RAIN_START);
 		expect(firstRun).not.toBe(currentRun);
+	});
+});
+
+describe('who reads the farm view (kept from the removed farm-history.db.test.ts)', () => {
+	it('404s the neighbour’s farm, a gauge, an unknown id and a stranger; the farmer reads their own, the owner the neighbour (positive controls)', async () => {
+		for (const n of [up.id, outlet.id, '00000000-0000-4000-8000-000000000000', 'not-a-uuid']) {
+			expect((await farmer.call('GET', `/projects/${projectId}/farm/${n}`)).status, n).toBe(404);
+		}
+		expect((await stranger.call('GET', `/projects/${projectId}/farm/${down.id}`)).status).toBe(404);
+		const own = await farmer.call('GET', `/projects/${projectId}/farm/${down.id}`);
+		expect(own.status).toBe(200);
+		const text = JSON.stringify(own.body);
+		expect(text).not.toContain(up.id);
+		expect(text).not.toContain(up.name);
+		expect((await owner.call('GET', `/projects/${projectId}/farm/${up.id}`)).status).toBe(200);
+	});
+});
+
+describe('the removed farm series and history routes (2026-11-25, no caller)', () => {
+	it('answer 404 to members who can see the farm, whose farm view answers 200 (positive control)', async () => {
+		for (const [who, nodeId] of [
+			[owner, up.id],
+			[owner, down.id],
+			[farmer, down.id]
+		] as const) {
+			const at = `/projects/${projectId}/farm/${nodeId}`;
+			expect((await who.call('GET', at)).status, at).toBe(200);
+			for (const path of ['/series?key=supplied', '/history']) {
+				expect((await who.call('GET', `${at}${path}`)).status, `${at}${path}`).toBe(404);
+			}
+		}
 	});
 });
