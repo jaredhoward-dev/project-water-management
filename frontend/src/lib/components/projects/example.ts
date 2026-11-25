@@ -10,6 +10,7 @@
 // example.test.ts keeps every static import of it out.
 import type { ImportResult, ProjectFile } from '#lib/api/index.js';
 import { startedAutoRunsOff } from '#lib/components/billing/liveLimit.js';
+import type { BillingTeam } from '#lib/components/billing/planLink.js';
 import { loadOnce, type Loader } from '#lib/components/common/lazy.js';
 
 export const loadExample: Loader<ProjectFile> = () =>
@@ -31,7 +32,7 @@ export interface ExampleStarted {
 	 * docs/billing.md § Live catchments (Free)), with the team that bills it
 	 * (null: the person's own plan) for Compare plans.
 	 */
-	autoRunsOff?: { teamId: string | null };
+	autoRunsOff?: { team: BillingTeam | null };
 }
 
 /**
@@ -62,7 +63,7 @@ export async function startFromExample(
 	try {
 		const r = await importProject(file, { run: true });
 		const id = encodeURIComponent(r.project.id);
-		const off = startedAutoRunsOff(r) ? { autoRunsOff: { teamId: r.project.team?.id ?? null } } : {};
+		const off = startedAutoRunsOff(r) ? { autoRunsOff: { team: r.project.team ?? null } } : {};
 		if (r.runId) return { ok: true, path: `/projects/${id}?tab=runs&run=${encodeURIComponent(r.runId)}`, ...off };
 		return { ok: true, path: `/projects/${id}`, runError: r.runError ?? 'the model didn’t run', ...off };
 	} catch (error) {

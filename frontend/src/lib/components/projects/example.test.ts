@@ -31,12 +31,12 @@ describe('startFromExample', () => {
 
 	it('started with automatic runs off at Free’s live limit, it says so, for the plan that bills it', async () => {
 		const ok = await startFromExample(async () => result({ runId: 'r1', autoRunsOff: 'live_catchments' }), loaded);
-		expect(ok).toEqual({ ok: true, path: '/projects/p%201?tab=runs&run=r1', autoRunsOff: { teamId: null } });
+		expect(ok).toEqual({ ok: true, path: '/projects/p%201?tab=runs&run=r1', autoRunsOff: { team: null } });
 		const inTeam = await startFromExample(
-			async () => ({ project: { id: 'p2', team: { id: 't1', name: 'T' } } as Project, runError: 'no rain', autoRunsOff: 'live_catchments' }) as ImportResult,
+			async () => ({ project: { id: 'p2', team: { id: 't1', name: 'T', role: 'admin' } } as Project, runError: 'no rain', autoRunsOff: 'live_catchments' }) as ImportResult,
 			loaded
 		);
-		expect(inTeam).toEqual({ ok: true, path: '/projects/p2', runError: 'no rain', autoRunsOff: { teamId: 't1' } });
+		expect(inTeam).toEqual({ ok: true, path: '/projects/p2', runError: 'no rain', autoRunsOff: { team: { id: 't1', name: 'T', role: 'admin' } } });
 	});
 
 	it('any other autoRunsOff, or none, leaves automatic runs out of it', async () => {
@@ -63,7 +63,7 @@ describe('opensStraightAway', () => {
 	it('opens a run that went well with nothing to say, and holds the card for a failed run or automatic runs off', () => {
 		expect(opensStraightAway({ ok: true, path: '/projects/p' })).toBe(true);
 		expect(opensStraightAway({ ok: true, path: '/projects/p', runError: 'x' })).toBe(false);
-		expect(opensStraightAway({ ok: true, path: '/projects/p', autoRunsOff: { teamId: null } })).toBe(false);
+		expect(opensStraightAway({ ok: true, path: '/projects/p', autoRunsOff: { team: null } })).toBe(false);
 	});
 });
 
@@ -76,7 +76,7 @@ describe('GetStarted after the example import', () => {
 	});
 
 	it('shows the shared auto-runs-off line, for the plan that bills the example, only when the answer said so', () => {
-		expect(GET_STARTED).toContain('{#if held?.autoRunsOff}<div class="held-note"><AutoRunsOffNotice teamId={held.autoRunsOff.teamId} /></div>{/if}');
+		expect(GET_STARTED).toContain('{#if held?.autoRunsOff}<div class="held-note"><AutoRunsOffNotice team={held.autoRunsOff.team} /></div>{/if}');
 		expect(GET_STARTED).toContain("import AutoRunsOffNotice from '#lib/components/billing/AutoRunsOffNotice.svelte';");
 		expect(GET_STARTED).not.toMatch(/Free runs one catchment live/);
 	});

@@ -123,7 +123,7 @@
 			The example is ready, with its first run. <a href="{basePath()}{held.path}">Open the example</a>
 		</div>
 	{/if}
-	{#if held?.autoRunsOff}<div class="held-note"><AutoRunsOffNotice teamId={held.autoRunsOff.teamId} /></div>{/if}
+	{#if held?.autoRunsOff}<div class="held-note"><AutoRunsOffNotice team={held.autoRunsOff.team} /></div>{/if}
 </section>
 
 <style>

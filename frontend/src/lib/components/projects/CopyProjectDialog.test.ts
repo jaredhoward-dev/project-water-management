@@ -27,13 +27,20 @@ describe('CopyProjectDialog', () => {
 	});
 
 	it('a copy made with automatic runs off: says why, Compare plans opens the team’s plan, and Open project opens the copy', () => {
-		const h = html({ done: copied({ id: 't1', name: 'WUA' }, 'live_catchments') });
+		const h = html({ done: copied({ id: 't1', name: 'WUA', role: 'admin' }, 'live_catchments') });
 		expect(h).toContain('Project copied');
 		expect(h).toContain('data-testid="copy-done"');
 		expect(h).toContain(AUTO_RUNS_OFF_TEXT);
 		expect(h).toContain('href="/teams/t1/plan"');
 		expect(h).toContain('href="/projects/p2"');
 		expect(h).not.toContain('id="cp-name"');
+	});
+
+	it('a team member who isn’t its admin gets the price list and whose plan it is, not a plan page they can’t open', () => {
+		const h = html({ done: copied({ id: 't1', name: 'WUA', role: 'member' }, 'live_catchments') });
+		expect(h).toContain('href="/welcome/pricing"');
+		expect(h).toContain('WUA');
+		expect(h).not.toContain('/teams/');
 	});
 
 	it('a personal copy’s Compare plans opens your own plan', () => {
