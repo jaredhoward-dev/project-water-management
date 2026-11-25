@@ -650,6 +650,9 @@ export async function runFetch(req: FetchRequest, http: FeedHttp, budget: FetchB
 				return { ok: true, startDate: r.startDate, values: r.values, meta: r.meta };
 			}
 			case 'dws': {
+				// An empty window (a startDate after today, fetchWindow) has no day to ask DWS for: never a request whose
+				// StartDT is after its EndDT.
+				if (req.start > req.end) return { ok: true, startDate: null, values: [], meta: { days: 0, gaps: 0 } };
 				const page = await http.text(dwsUrl((req.config as DwsConfig).station, req.start, req.end));
 				if (page === null) throw new FeedFormatError(DWS_FORMAT_FAILURES.notFound[0]);
 				// Never a day after today: the feed's newest day drives its next window and its health.

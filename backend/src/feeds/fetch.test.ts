@@ -357,6 +357,20 @@ describe('runFetch on the fixtures', () => {
 		for (const d of days) expect(d.v).toBe(dwsFixtureValue(d.day));
 	});
 
+	it('DWS: an empty window (a startDate in the future) asks DWS for nothing and answers no days', async () => {
+		const config = { station: 'X0H000', startDate: '2026-12-01' };
+		const w = fetchWindow('dws', config, null, '2026-10-21');
+		expect(w.start > w.end).toBe(true);
+		const asked: string[] = [];
+		const counting: FeedHttp = { ...fixtureHttp(() => '2026-10-21'), text: async (url) => (asked.push(url), null) };
+		const r = await runFetch({ source: 'dws', config, ...w, today: '2026-10-21' }, counting);
+		expect(r).toEqual({ ok: true, startDate: null, values: [], meta: { days: 0, gaps: 0 } });
+		expect(asked).toEqual([]);
+		// Positive control: a window with days asks once.
+		await runFetch({ source: 'dws', config: { station: 'X0H000' }, start: '2026-07-01', end: '2026-07-02', today: '2026-10-21' }, counting);
+		expect(asked).toHaveLength(1);
+	});
+
 	it('DWS: keeps only the days asked for, never a day after today', async () => {
 		const table = ['DATE D_AVG_FR QUAL', '20201231 9 1', '20210101 1 1', '20210102 2 1', '20210103 3 1', '20300101 7 1'].join('\n');
 		const http: FeedHttp = { range: async () => null, text: async () => `<pre>${table}</pre>` };
