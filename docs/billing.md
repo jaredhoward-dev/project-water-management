@@ -1188,6 +1188,10 @@ a second one when `BILLING_ENFORCED` is on.
   The copy dialog and the import dialog show it in their done state: one
   information line saying why, with *Compare plans*
   (`AutoRunsOffNotice.svelte`; [ui.md § Project list](./ui.md#project-list)).
+  The empty list's *Start from an example* shows the same line on its card
+  and waits for *Open the example* rather than opening the project (the
+  shipped example has automatic runs off, so this only guards one that
+  gains them).
   Automatic runs are the only way a new project is live: a copy leaves feeds
   with the original and copies no alert rules or publications, and an import
   has none. Below the limit, or with enforcement off, the copy keeps them on.

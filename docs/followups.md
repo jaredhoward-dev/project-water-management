@@ -1139,7 +1139,10 @@ are #641's checklist. Open items from building it:
       team catchment's team plan, else the person's own); ~~(8) the copy and
       import dialogs don't show the API's `autoRunsOff`~~
       (`AutoRunsOffNotice` in both done states, with *Compare plans*;
-      billing.md § Live catchments (Free)). Nothing left.
+      billing.md § Live catchments (Free)); ~~the empty list's *Start from
+      an example* ignores it~~ (round 2: the card holds with the same line
+      and *Open the example*, `opensStraightAway` in `projects/example.ts`;
+      ui.md § Project list). Nothing left.
 - [ ] **Free's verified-email gate: what 343 left** (issue #641 round 9,
       2026-11-24). `343_free_email_gate` refuses the assistant and switching
       a feed on, on Free, to an unverified or disposable-domain address when
