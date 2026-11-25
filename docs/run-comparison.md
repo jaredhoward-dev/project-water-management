@@ -204,6 +204,14 @@ bottom:
    every input difference as the list below words it (area, kind, subject,
    change). Cells a spreadsheet would read as a formula are defused, as in
    every CSV export ([security.md](./security.md)).
+   **Download the comparison (.xlsx)** beside it (issue #843,
+   `compare/xlsx.ts` `comparisonXlsx`) saves the same rows and columns on
+   one sheet, `Comparison`, numbers as number cells (unrounded, as in the
+   CSV) and text defused the same way. It is written with the app's own
+   OOXML writer (`lib/spreadsheet/export/writer.ts`, no SheetJS in app
+   code), loaded by a dynamic import on the first click so the writer stays
+   out of the compare page's chunk; a failure to load or write it is shown
+   under the buttons.
 2. **Inputs that differ** ("What changed" until issue #466). Every difference in the inputs, grouped by network, crops,
    transfers, settings and time series. **The size of a change** (issue
    #830, engine ≥ 1.121.0): a monthly table changed in one to three months
@@ -835,7 +843,7 @@ pack's engine version, so its text moves only with an `ENGINE_VERSION` bump. Set
 | `compareRuns`, `diffInputs`, types | `packages/engine/src/compare.ts` (pure, unit-tested in `compare.test.ts`) |
 | `GET /compare/runs` | `backend/src/compare/routes.ts`, contract in [api.md § Compare runs](./api.md#compare-runs) |
 | Page | `frontend/src/routes/compare/+page.svelte` (heading, back link, URL) and the workspace's `compare` tab, both showing `lib/components/compare/CompareView.svelte` (the pickers and the comparison; the host passes the pair and builds URLs through `hrefFor`) |
-| Components + pure helpers | `frontend/src/lib/components/compare/` (`delta.ts` formatting, sorting and the farm feature columns, `picker.ts` URL state and defaults, `chirpsFit.ts` the CHIRPS factors note, `overlay.ts` the daily series overlay's node matching, zero-filled feature series, B − A and read-out, exported for reuse by scenario comparison, issue #18; `csv.ts` the comparison's CSV download, issue #830) |
+| Components + pure helpers | `frontend/src/lib/components/compare/` (`delta.ts` formatting, sorting and the farm feature columns, `picker.ts` URL state and defaults, `chirpsFit.ts` the CHIRPS factors note, `overlay.ts` the daily series overlay's node matching, zero-filled feature series, B − A and read-out, exported for reuse by scenario comparison, issue #18; `csv.ts` the comparison's CSV download, issue #830, and its rows, `xlsx.ts` the same as .xlsx, issue #843) |
 | Uncertainty and paired bands | `packages/engine/src/uncertainty/paired.ts`; `frontend/src/lib/components/uncertainty/PairedUncertaintyPanel.svelte` |
 
 Access follows the usual rules. You need at least **viewer** on both projects.
