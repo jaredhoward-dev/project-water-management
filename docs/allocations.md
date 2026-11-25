@@ -150,8 +150,12 @@ is listed as "not read", never guessed.
   in by hand keep what was picked.
 - **Matching** a row to a node, in order: an earlier allocation with the same
   registration number, then the same property, then a farm or water user
-  whose **name** equals the row's farm (or property), ignoring case and
-  spacing. Two nodes with the same name match neither. The rest are
+  whose **name** equals the row's farm (or property). Every one of these
+  compares the same way, ignoring case, the ends and repeated spaces
+  (`parse.ts` `matchKey`), and so does the preview's **already in project**
+  note on a row whose registration number the project holds (outside the
+  demo users), so "SYN  001" is matched and marked as "syn 001" alike. Two
+  nodes with the same name match neither. The rest are
   "not matched"; the preview lists rows with problems first, then unmatched
   rows, each with a farm picker. The synthetic extract
   (`backend/src/allocations/fixtures/warms-synthetic.csv`) matches 9 of 10
@@ -329,7 +333,10 @@ so it shows before the model has run.
   states a farm as "123/456", farm number and portion) and holder name
   (case and spacing ignored), added up.
 - **The rules are the comparison's**, read on one day, today, as a viewer's
-  totals per water source are: a row counts while `valid_from ≤ today ≤
+  totals per water source are. Today is the project's calendar day in its
+  time zone (058; `projects/freshness.ts` `projectToday`, the backend's
+  `localDate` with `project.time_zone`), not the viewer's device's, so a
+  consultant abroad sees what the API counts. A row counts while `valid_from ≤ today ≤
   valid_to` (either open); the water use is its takes' (21a) volumes,
   surface and groundwater added; the irrigated area the areas its takes
   state; the dam capacity its registered storage, 21b rows and the storage

@@ -18,13 +18,15 @@
 	import { confirmDialog } from '#lib/components/common/confirm.svelte.js';
 	import { api, type AllocationList } from '#lib/api/index.js';
 	import { saveBlob } from '#lib/export/download.js';
-	import { fmtDate, fmtNum, localIsoDate } from '#lib/format/number.js';
+	import { fmtDate, fmtNum } from '#lib/format/number.js';
+	import { projectToday } from '#lib/components/projects/freshness.js';
 	import { registeredUsers, registeredUsersCsv, type RegisteredFigures } from './registeredUsers';
 
 	let {
 		projectId,
 		data,
 		canEdit,
+		timeZone,
 		focusUnit = null,
 		onstart,
 		onchanged,
@@ -33,6 +35,8 @@
 		projectId: string;
 		data: AllocationList;
 		canEdit: boolean;
+		/** The project's IANA zone (058): today is the project's day, as the API counts it (allocations.md § Registered users by hydrological unit). */
+		timeZone?: string;
 		/** A unit picked on the map: its group opens (under the fold) and scrolls into view. */
 		focusUnit?: { id: string; at: number } | null;
 		/** An action starts: the page clears the last one's notice. */
@@ -42,7 +46,7 @@
 		onfailed: (err: unknown) => void;
 	} = $props();
 
-	const day = localIsoDate();
+	const day = $derived(projectToday(timeZone));
 	const holders = $derived(data.canSeeHolders);
 	const table = $derived(registeredUsers(data.allocations, data.nodes, day, holders));
 	const demo = $derived(data.sources.find((s) => s.kind === 'demo') ?? null);
