@@ -43,12 +43,14 @@ import { withUser, type Db } from '../db/tx.js';
 import { readJson } from '../http/body.js';
 import { ApiError } from '../http/errors.js';
 import { recordAudit } from '../history/record.js';
+import { geometryHash } from '../geo/geomHash.js';
 import { requireRole } from '../projects/access.js';
 import { boundaryCells, type BoundaryCell, type BoundaryGrid, CHIRPS_GRID, ET0_GRID } from './boundaryCells.js';
 import { sameProvenance } from '@water-management/engine';
 import { SeriesStartDate } from '../series/limits.js';
 import {
 	type BoundaryMark,
+	boundaryMarkCurrent,
 	CHIRPS_DAILY_PRODUCTS,
 	CHIRPS_FIRST_DAY,
 	CHIRPS_PRODUCT_FIRST_DAY,
@@ -134,12 +136,11 @@ async function loadBoundary(db: Db, projectId: string): Promise<BoundaryRow> {
 	return rows[0];
 }
 
-const mark = (b: BoundaryRow): BoundaryMark => ({
-	featureId: b.id,
-	name: b.name,
-	updatedAt: b.updated_at.toISOString(),
-	areaKm2: Math.round(b.area_m2 / 1e3) / 1e3
-});
+/** The boundary as a feed's mark records it: its version and area, and its outline's hash (followups F7). */
+const mark = (b: BoundaryRow): BoundaryMark => {
+	const geomHash = geometryHash(b.geometry);
+	return { featureId: b.id, name: b.name, updatedAt: b.updated_at.toISOString(), areaKm2: Math.round(b.area_m2 / 1e3) / 1e3, ...(geomHash ? { geomHash } : {}) };
+};
 
 function cellsOf(b: BoundaryRow, k: BoundarySource) {
 	const r = boundaryCells(b.geometry, 'the catchment boundary', k.grid);
@@ -150,10 +151,10 @@ function cellsOf(b: BoundaryRow, k: BoundarySource) {
 /** A feed's listed cells as the feed config keeps them (weight only; the share is the proposal's to show). */
 const configCells = (cells: readonly BoundaryCell[]) => cells.map(({ lat, lon, weight }) => ({ lat, lon, weight }));
 
-/** Whether the feed (of `k`'s source) already reads this version of the boundary. */
+/** Whether the feed (of `k`'s source) already reads the boundary as it is: its outline, or for a mark from before the hash, this version (boundaryMarkCurrent). */
 const readsBoundary = (k: BoundarySource, f: Pick<FeedMeta, 'source' | 'config'>, b: BoundaryRow) => {
 	const m = f.source === k.source ? (f.config as GridConfig).boundary : undefined;
-	return !!m && m.featureId === b.id && m.updatedAt === b.updated_at.toISOString();
+	return !!m && boundaryMarkCurrent(m, { id: b.id, updatedAt: b.updated_at.toISOString(), geomHash: geometryHash(b.geometry) });
 };
 
 /**
