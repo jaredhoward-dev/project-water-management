@@ -142,7 +142,7 @@
 	const free = $derived(params.filter((p) => session.picked[p.key]).map((p) => p.key));
 	// The WR2012 MAR penalty (its fields beside the choices, penaltyFields) adds a fit without it, for comparison.
 	const penalty = $derived(marPenaltyOn(settings()));
-	// The fit without the regional prior, when asked (engine 1.120.0): one more optimisation, so the report says what the prior cost.
+	// The fit without the regional prior, when asked (engine 1.120.0): one more optimisation per start, so the report says what the prior cost.
 	const priorCostOn = $derived(session.priorUse !== 'off' && session.priorCost);
 	const runs = $derived(totalRuns(session.budget ?? 0, session.validate, penalty, startsOk ? session.starts! : 1, priorCostOn));
 	// The regional prior (issue #622): a penalty, the search box or both; its weight only matters with the penalty.
@@ -380,7 +380,7 @@
 				{#if session.priorUse !== 'off' && priorNo === null}
 					<label class="check" data-testid="fit-prior-cost-choice">
 						<input type="checkbox" bind:checked={session.priorCost} disabled={status === 'running'} />
-						Also fit without the prior, to show what it cost (one more fit)
+						Also fit without the prior, to show what it cost (one more fit per start)
 					</label>
 				{/if}
 			</div>

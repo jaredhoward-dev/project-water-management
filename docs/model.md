@@ -12004,16 +12004,27 @@ followups.md's).
 
 **What the prior cost the fit** (engine 1.120.0,
 `CalibrateOptions.fitWithoutPrior`, off by default). Asked, `calibrate()`
-runs one more optimisation after every other: the whole record from the
-seed, with no prior penalty and, where the fit searched the prior's box,
-the wide box instead (`unpriorBounds`); the WR2012 MAR penalty stays as the
-fit has it, so only the prior differs, as `marPenalty.unpenalised` (§2.10c)
-differs only by the MAR term. The report's `prior.unpriored` holds its
-parameters, the box it searched, its scores over the whole record and the
-prior's (unweighted) penalty at its parameters, or `null` when the fit was
-cancelled first; a note gives the objective with and without the prior and
-the difference, "the prior cost 0.050 of KGE′" (`priorCostNote`; nothing,
-when the fit with the prior scores as well). Off, or without a prior, the
+runs as many more optimisations as the fit has starts, after every other:
+the whole record from the same seeds (`startSeed`), keeping the lowest loss
+as the fit with the prior does (CR-2), so both get the same search; with no
+prior penalty and, where the fit searched the prior's box, the wide box
+instead (`unpriorBounds`); the WR2012 MAR penalty stays as the fit has it,
+so only the prior differs, as `marPenalty.unpenalised` (§2.10c) differs
+only by the MAR term. They start where the fit does, except when the
+starting parameters are the prior's ("Start from the prior": the target's
+start record in `settings.gr4jPrior` still holds them, or they are the
+prior's p50s): then they start from GR4J's defaults for the free parameters
+(X1 350 mm, X3 90 mm, X4 1.7 days, held inside the box searched), so the
+prior has no say in the fit without it. The report's `prior.unpriored`
+holds the kept parameters, the box searched, their scores over the whole
+record and the prior's (unweighted) penalty at them, or `null` when the fit
+was cancelled before any of them ran; a note gives the objective with and
+without the prior and the difference, "the prior cost 0.050 of KGE′"
+(`priorCostNote`). When the fit with the prior scores higher, the note says
+so with the number ("the fit with the prior scored 0.012 higher; the
+comparison can't separate that from search luck"): it is not read as the
+prior's gain, since a search's luck can do as much; equal to three places,
+"the two fits score the same". Off, or without a prior, the
 report is the same as before it to the bit and has no `unpriored`
 (`prior-calibrate.test.ts`). It changes no fitted parameter, only the
 report's and the fit record's shape, which is why the version moved.

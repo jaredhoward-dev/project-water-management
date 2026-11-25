@@ -608,10 +608,11 @@ export interface PriorFitResult {
 	penaltyAtStart: number;
 	/**
 	 * The same full fit without the prior (engine 1.120.0, CalibrateOptions.fitWithoutPrior),
-	 * so a hydrologist sees what the prior cost: its parameters, the box it searched (the
+	 * from as many starts as the fit (the lowest loss kept), so a hydrologist sees what the
+	 * prior cost: its parameters, the box it searched (the
 	 * wide one where the fit searched the prior's), its scores over the whole record and the
 	 * prior's penalty (unweighted) at its parameters. Absent when not asked; null when the
-	 * fit was cancelled before it ran.
+	 * fit was cancelled before any of its starts ran.
 	 */
 	unpriored?: { params: ParamSet; bounds: FitBounds; fit: ScoredPeriod; penaltyAtFit: number } | null;
 }
