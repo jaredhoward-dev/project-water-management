@@ -57,7 +57,7 @@ import { type CellsResult, copyWindowYears, type FetchRequest, type FetchWindow,
 import { DAY_SKIP } from '../../feeds/sources/chirps.js';
 import { withUser } from '../../db/tx.js';
 import { feedHttp, LiveFeedRequestRefusedError } from '../../feeds/http.js';
-import { JobError } from '../errors.js';
+import { JobError, JobRelease } from '../errors.js';
 import { fetchFromMirror } from '../../feeds/fromMirror.js';
 import { fillGapProducts } from '../../feeds/gapRainFill.js';
 import { fetchGefsFromMirror } from '../../feeds/fromMirrorGefs.js';
@@ -66,7 +66,7 @@ import { fetchEt0FromMirror } from '../../feeds/fromMirrorEt0.js';
 import { ingestResult } from '../../feeds/ingest.js';
 import { chirpsSource } from '../../mirror/source.js';
 import { dwsSource, fetchFromGaugeRecord } from '../../feeds/fromGaugeRecord.js';
-import { beginFeedFetch, feedForJob, takeFeedFetch } from '../../feeds/store.js';
+import { beginFeedFetch, beginStationFetch, feedForJob, takeFeedFetch } from '../../feeds/store.js';
 import { logEvent } from '../../logging/logEvent.js';
 import { defineHandler } from '../registry.js';
 import { feedFetcher, type FetchRequestMessage, sendToQueue } from '../transport.js';
@@ -110,6 +110,18 @@ export function fetchQueue(source: FeedSource, env: Record<string, string | unde
 		? { url: env.STATION_FETCH_REQUESTS_QUEUE_URL, name: 'STATION_FETCH_REQUESTS_QUEUE_URL' }
 		: { url: env.FETCH_REQUESTS_QUEUE_URL, name: 'FETCH_REQUESTS_QUEUE_URL' };
 }
+
+/**
+ * Per-project fairness on the station queue (issue #784 follow-up, 363_station_feed_fairness): a project has at most
+ * this many station fetches out at once (sent to the station queue, answer not yet applied). Every project's station
+ * feeds share the station queue's 2 fetcher executions (infra/feeds.tf), so without it a project with many feeds on
+ * slow hosts queued all of them ahead of another project's one feed; now another project's feed waits behind at most
+ * this many of each project's. Equal to those 2 executions, so a project alone still uses them both.
+ */
+export const STATION_FETCHES_PER_PROJECT = 2;
+
+/** How long a station fetch with no place in its project's share waits before it asks again (JobRelease). */
+export const STATION_TURN_WAIT_SECONDS = 30;
 
 export const feedFetchHandler = defineHandler({
 	role: 'editor',
@@ -201,7 +213,14 @@ export const feedFetchHandler = defineHandler({
 			// third of a second, and an answer that beat the commit, or met a
 			// job that rolled back after sending (a lost lease, a timeout), was
 			// dropped without a trace: the feed never showed the failure.
-			await withUser(job.actingUserId, (tx) => beginFeedFetch(tx, feed.id, job.id, window));
+			// A station fetch also needs a place in its project's share of the station queue (363): without one it
+			// records nothing and goes back to the job table, its attempt given back, to ask again.
+			if (feed.source === 'station_api') {
+				const placed = await withUser(job.actingUserId, (tx) => beginStationFetch(tx, feed.id, job.id, window, STATION_FETCHES_PER_PROJECT));
+				if (!placed) throw new JobRelease('waiting for its project’s other station fetches', STATION_TURN_WAIT_SECONDS);
+			} else {
+				await withUser(job.actingUserId, (tx) => beginFeedFetch(tx, feed.id, job.id, window));
+			}
 			const message: FetchRequestMessage = { v: 1, type: 'fetch', fetchJobId: job.id, feedId: feed.id, feedVersion: feed.version, request };
 			try {
 				// One message group per source host (fetchGroup): the FIFO queue hands the fetcher one fetch per group at a time (infra/feeds.tf).

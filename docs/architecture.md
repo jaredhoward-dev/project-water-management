@@ -1244,7 +1244,12 @@ row names a source, where to read it and the series it merges into:
     feed’s key can’t be used: …, Replace key"). In production a station feed
     goes through the fetcher (`FEED_FETCHER=sqs`), in its own FIFO message
     group per host (`station:<host>`), never CHC's or DWS's, and takes no
-    CHC slot. The fetcher logs a refused key as `key_refused` and a key
+    CHC slot. A project has at most 2 station fetches out at once
+    (`STATION_FETCHES_PER_PROJECT`, `app_begin_station_fetch`, 363): a
+    further one goes back to the job table, its attempt given back, and asks
+    again in 30 s, so one project's slow hosts can't queue all its feeds
+    ahead of another project's ([security.md § Station API
+    feeds](./security.md#station-api-feeds), "The fetcher's capacity"). The fetcher logs a refused key as `key_refused` and a key
     problem as `credential`, with fixed labels (`lambda-fetcher.ts`
     `failureDetail`).
   - *The fixtures* (`FEED_SOURCE=fixtures`): a synthetic station API on
