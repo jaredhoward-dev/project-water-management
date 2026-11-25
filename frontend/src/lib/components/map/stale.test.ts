@@ -2,7 +2,7 @@
 // map now. Synthetic shapes and names only.
 import { describe, expect, it } from 'vitest';
 import type { MapAcceptances, MapFeature, MapFeatureKind, MapNodeArea, StartProposal } from '#lib/api/types.js';
-import { boundaryOf, outlineChanged, restOfCatchment, staleValues, unitPolygonOf } from './stale';
+import { boundaryOf, outlineChanged, restOfCatchment, staleValues, unitPolygonOf, unitRainChanged } from './stale';
 
 const square = (x: number) => ({ type: 'Polygon' as const, coordinates: [[[x, -34], [x + 0.02, -34], [x + 0.02, -33.98], [x, -33.98], [x, -34]]] as [number, number][][] });
 const feature = (id: string, kind: MapFeatureKind, over: Partial<MapFeature> = {}): MapFeature => ({
@@ -36,6 +36,48 @@ describe('outlineChanged', () => {
 		expect(outlineChanged(stamp('p', '2026-09-01T00:00:00.000Z', 3e6), f)).toBe(true);
 		// A rename or relink bumps updatedAt but keeps the area: the same outline.
 		expect(outlineChanged(stamp('p', '2026-09-01T00:00:00.000Z', 4e6 + 0.4), f)).toBe(false);
+	});
+
+	// followups F7: the outline's hash, when both sides have it, decides before the area.
+	const H1 = 'a'.repeat(32);
+	const H2 = 'b'.repeat(32);
+	const later = '2026-10-05T00:00:00.000Z';
+	it('flags a reshape that keeps the area once both sides carry the hash', () => {
+		const reshaped = feature('p', 'farm_parcel', { updatedAt: later, geomHash: H2 });
+		expect(outlineChanged({ ...stamp('p'), geomHash: H1 }, reshaped)).toBe(true);
+	});
+
+	it('keeps a rename or a relink (another updatedAt, the same hash), whatever the area', () => {
+		const renamed = feature('p', 'farm_parcel', { name: 'Renamed', updatedAt: later, geomHash: H1 });
+		expect(outlineChanged({ ...stamp('p'), geomHash: H1 }, renamed)).toBe(false);
+		// The hash decides over the area: a recomputed area with the same outline is the same outline.
+		expect(outlineChanged({ ...stamp('p', '2026-10-01T00:00:00.000Z', 3e6), geomHash: H1 }, renamed)).toBe(false);
+		// Another feature is another outline, even with the same hash (a copy drawn over it).
+		expect(outlineChanged({ ...stamp('q'), geomHash: H1 }, renamed)).toBe(true);
+	});
+
+	it('falls back to the area rule for a stamp from before the hash, or a feature served without one', () => {
+		const reshaped = feature('p', 'farm_parcel', { updatedAt: later, geomHash: H2 });
+		// Old stamp, same area: not flagged (no guessing), as before F7.
+		expect(outlineChanged(stamp('p'), reshaped)).toBe(false);
+		expect(outlineChanged(stamp('p', '2026-10-01T00:00:00.000Z', 3e6), reshaped)).toBe(true);
+		// A server that serves no hash: the stamp's hash can't be compared, so the area rule.
+		expect(outlineChanged({ ...stamp('p'), geomHash: H1 }, feature('p', 'farm_parcel', { updatedAt: later }))).toBe(false);
+	});
+});
+
+describe('unitRainChanged', () => {
+	const mark = { nodeId: 'a', featureId: 'p', updatedAt: '2026-10-01T00:00:00.000Z', areaKm2: 4 };
+	const later = '2026-10-05T00:00:00.000Z';
+	it('compares the hash first when the mark has one (followups F7)', () => {
+		expect(unitRainChanged({ ...mark, geomHash: 'a'.repeat(32) }, feature('p', 'farm_parcel', { updatedAt: later, geomHash: 'b'.repeat(32) }))).toBe(true);
+		expect(unitRainChanged({ ...mark, geomHash: 'a'.repeat(32) }, feature('p', 'farm_parcel', { updatedAt: later, areaM2: 9e6, geomHash: 'a'.repeat(32) }))).toBe(false);
+	});
+
+	it('reads a mark from before the hash at its 0.001 km²', () => {
+		expect(unitRainChanged(mark, feature('p', 'farm_parcel', { updatedAt: later, areaM2: 4e6 + 200, geomHash: 'b'.repeat(32) }))).toBe(false);
+		expect(unitRainChanged(mark, feature('p', 'farm_parcel', { updatedAt: later, areaM2: 4.01e6 }))).toBe(true);
+		expect(unitRainChanged(mark, null)).toBe(true);
 	});
 });
 
@@ -87,6 +129,22 @@ describe('staleValues', () => {
 			// The A-pan row from before 273 records no boundary: nothing to compare.
 			{ kind: 'evaporation', nodeId: null, featureId: 'bd', what: 'GR4J’s PE' }
 		]);
+	});
+
+	it('names every value read over a polygon reshaped to the same area, when the stamps carry its hash (followups F7)', () => {
+		const h = 'c'.repeat(32);
+		const hashed: MapAcceptances = {
+			unitMap: [{ nodeId: 'a', polygon: { ...stamp('p'), geomHash: h } }],
+			unitRain: [{ ...accepted.unitRain[0]!, geomHash: h }],
+			landCover: [{ ...accepted.landCover[0]!, polygons: [{ ...stamp('p'), geomHash: h }] }],
+			evaporation: []
+		};
+		const later = '2026-10-05T00:00:00.000Z';
+		const renamed = { ...p, name: 'Renamed', updatedAt: later, geomHash: h };
+		const reshaped = { ...p, updatedAt: later, geomHash: 'd'.repeat(32) };
+		expect(staleValues([{ ...p, geomHash: h }, bd], [unit('a')], hashed)).toEqual([]);
+		expect(staleValues([renamed, bd], [unit('a')], hashed)).toEqual([]);
+		expect(staleValues([reshaped, bd], [unit('a')], hashed).map((v) => v.kind)).toEqual(['unit-map', 'unit-rain', 'land-cover']);
 	});
 
 	it('compares the rain mark at its 0.001 km², and skips units no longer in the model', () => {

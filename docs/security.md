@@ -2223,7 +2223,11 @@ In short:
   publication back as current. The farm routes
   (`/projects/:id/farm…`) admit the farmer role, answer `404` alike for a
   node the farmer isn't linked to, a gauge or a node that doesn't exist, and
-  null the even share below `k − 1` other holders per viewer. Tests:
+  null the even share below `k − 1` other holders per viewer. The outlet is
+  named to a farmer (farm view, publication list, data export) only when a
+  gauge of the project has its name: the outflow node may be a neighbour's
+  farm (`publish.ts hiddenOutletName`, `farms/outlet-name-privacy.db.test.ts`),
+  as the share link already drops it. Tests:
   `publish/publication.db.test.ts` scans a farmer's farm view and
   publication list for every other farm's id and name, with positive
   controls; `role-ladder.db.test.ts` keeps every other `/projects/:id` route
@@ -2292,7 +2296,10 @@ In short:
   operator deleting `app_user` rows among them; its re-read needs READ
   COMMITTED, the level every write runs at. Tests:
   `projects/last-owner-race.db.test.ts` (forced interleavings through the
-  routes and straight at the triggers).
+  routes and straight at the triggers: two leaving, two demoting each other,
+  and for a team also two removing each other, where the second finds
+  itself out of the team and gets `404`, and one demoting the other as that
+  one leaves).
 - **Runs are immutable by privilege.** `water_app` may `UPDATE` only
   `model_run.notes` (a column-level grant, 007_run_notes), so no API bug can
   rewrite a run's inputs, outputs or label after the fact; who last changed

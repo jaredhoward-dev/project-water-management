@@ -126,7 +126,8 @@ export type BoundaryMark = z.output<typeof BoundaryMark>;
 /**
  * The land unit a feed's listed cells came from (issue #482,
  * feeds/fromUnits.ts): the unit (its node id), its map polygon (the farm
- * parcel's id and when it was last changed) and the polygon's area. Only the
+ * parcel's id and when it was last changed), the polygon's area and its
+ * outline's hash (followups F7; a mark from before has none). Only the
  * from-units route writes it; the plain feed routes refuse it, and a new list
  * of cells drops it. A feed with it writes that unit's own rain: the series it
  * creates is sited at the unit (209_unit_rain_series' time_series_site_from_feed).
@@ -136,7 +137,12 @@ const UnitMark = z
 		nodeId: z.uuid(),
 		featureId: z.uuid(),
 		updatedAt: z.iso.datetime({ offset: true }),
-		areaKm2: z.number().finite().nonnegative()
+		areaKm2: z.number().finite().nonnegative(),
+		/** The polygon's outline hash (geo/geomHash.ts, followups F7); absent on a mark written before it. */
+		geomHash: z
+			.string()
+			.regex(/^[0-9a-f]{32}$/)
+			.optional()
 	})
 	.strict();
 export type UnitMark = z.output<typeof UnitMark>;

@@ -5,6 +5,7 @@ import type { AlertChoice, AlertEvent, AlertMode, FeedbackAnswered, Unsubscribed
 import { ApiError } from '#lib/api/client.js';
 import { fmtPct } from '#lib/components/farm/numbers.js';
 import { msg, t, type Msg } from '#lib/i18n/locale.svelte.js';
+import { errorText } from '#lib/i18n/apiError.js';
 
 export const ALERT_MODES: readonly AlertMode[] = ['immediate', 'daily_digest', 'off'];
 
@@ -94,10 +95,14 @@ export function suppressedText(s: NonNullable<User['mailSuppressed']>, email: st
 	return t(s.reason === 'complaint' ? 'Your alert emails are paused. An email we sent to {email} was marked as spam, so we stopped sending.' : 'Your alert emails are paused. Our emails to {email} bounced back: the address may be wrong, or the mailbox full or closed.', { email });
 }
 
-/** What the banner says when turning mail back on failed: the day's wait (429), else the server's message. */
+/**
+ * What the banner says when turning mail back on failed: the day's wait
+ * (429), else the failure worded from its code or status (errorText), never
+ * the server's English message: these are translated pages.
+ */
 export function resumeProblem(e: unknown): string {
 	if (e instanceof ApiError && e.status === 429) return t('Emails to this address were refused again less than a day after you turned them back on. Check the address, then try again tomorrow.');
-	return e instanceof Error ? e.message : String(e);
+	return errorText(e);
 }
 
 const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);

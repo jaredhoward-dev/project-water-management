@@ -516,7 +516,12 @@ const Wr2012Lookup = z
 				id: z.string().uuid(),
 				kind: z.enum(['catchment_boundary', 'gauge']),
 				updatedAt: z.iso.datetime({ offset: true }),
-				areaM2: z.number().min(0).max(1e13).nullable()
+				areaM2: z.number().min(0).max(1e13).nullable(),
+				// The boundary's outline hash (geo/geomHash.ts, followups F7); absent before it was recorded.
+				geomHash: z
+					.string()
+					.regex(/^[0-9a-f]{32}$/)
+					.optional()
 			})
 			.strict()
 			.nullable()

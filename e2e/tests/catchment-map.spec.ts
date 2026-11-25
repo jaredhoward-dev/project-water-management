@@ -263,7 +263,7 @@ test('the quaternary under the boundary proposes the WR2012 values, one at a tim
 	await expectNoViolations(page);
 });
 
-test('a WR2012 reference looked up at the boundary is flagged in the Checks once the boundary is redrawn (followups F8, F14)', async ({ page, owner }) => {
+test('a WR2012 reference looked up at the boundary is flagged in the Checks once the boundary is redrawn, even to the same area, but not renamed (followups F7, F8, F14)', async ({ page, owner }) => {
 	void owner;
 	await loadSyntheticQuaternaries();
 	const project = await seedRunnableProject(page.request, 'Catchment map quaternary recheck');
@@ -287,12 +287,26 @@ test('a WR2012 reference looked up at the boundary is flagged in the Checks once
 	const saved = await (await page.request.get(`${API_URL}/projects/${project.id}`)).json();
 	const map = await (await page.request.get(`${API_URL}/projects/${project.id}/map/features`)).json();
 	const b = map.features.find((f: { kind: string }) => f.kind === 'catchment_boundary');
-	expect(saved.project.settings.wr2012.reference.lookup).toMatchObject({ code: 'Z01B', feature: { id: b.id, kind: 'catchment_boundary', updatedAt: b.updatedAt } });
+	// The lookup records the boundary's outline hash with it (followups F7).
+	expect(b.geomHash).toMatch(/^[0-9a-f]{32}$/);
+	expect(saved.project.settings.wr2012.reference.lookup).toMatchObject({ code: 'Z01B', feature: { id: b.id, kind: 'catchment_boundary', updatedAt: b.updatedAt, geomHash: b.geomHash } });
 
-	// Unchanged: no warning. Redrawn larger: the Checks flag the reference and link back to the lookup.
+	// Unchanged, or renamed: no warning.
 	await openMap(page, project.id, '&checks=1');
 	const check = page.getByTestId('map-checks').locator(`[data-check="wr2012-lookup:${b.id}"]`);
 	await expect(check).toHaveCount(0);
+	const renamed = await page.request.patch(`${API_URL}/projects/${project.id}/map/features/${b.id}`, { data: { name: 'Renamed catchment' } });
+	expect(renamed.status(), await renamed.text()).toBe(200);
+	await openMap(page, project.id, '&checks=1');
+	await expect(check).toHaveCount(0);
+	// Moved 0.001° east, the same area with its centre still inside: the outline's hash flags it. Then redrawn larger:
+	// still flagged, and the check links back to the lookup.
+	const shifted = await page.request.patch(`${API_URL}/projects/${project.id}/map/features/${b.id}`, {
+		data: { geometry: { type: 'Polygon', coordinates: [box(21.301, -33.7, 0.1)] } }
+	});
+	expect(shifted.status(), await shifted.text()).toBe(200);
+	await openMap(page, project.id, '&checks=1');
+	await expect(check).toContainText("The WR2012 reference's quaternary Z01B was looked up on the map, and the catchment boundary has been redrawn since");
 	const patched = await page.request.patch(`${API_URL}/projects/${project.id}/map/features/${b.id}`, {
 		data: { geometry: { type: 'Polygon', coordinates: [box(21.3, -33.7, 0.15)] } }
 	});

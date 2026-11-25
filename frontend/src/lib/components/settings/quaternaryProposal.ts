@@ -106,7 +106,7 @@ export interface LookupPoint {
 export function lookupPoints(features: readonly MapFeature[]): LookupPoint[] {
 	const out: LookupPoint[] = [];
 	const b = features.find((f) => f.kind === 'catchment_boundary');
-	if (b) out.push({ id: b.id, label: `The catchment boundary’s centre${b.name ? ` (${b.name})` : ''}`, at: b.center, feature: { id: b.id, kind: 'catchment_boundary', updatedAt: b.updatedAt, areaM2: b.areaM2 } });
+	if (b) out.push({ id: b.id, label: `The catchment boundary’s centre${b.name ? ` (${b.name})` : ''}`, at: b.center, feature: { id: b.id, kind: 'catchment_boundary', updatedAt: b.updatedAt, areaM2: b.areaM2, ...(b.geomHash ? { geomHash: b.geomHash } : {}) } });
 	for (const g of features.filter((f) => f.kind === 'gauge')) {
 		out.push({ id: g.id, label: `Gauge ${g.name || g.nodeName || ''}`.trim(), at: g.center, feature: { id: g.id, kind: 'gauge', updatedAt: g.updatedAt, areaM2: null } });
 	}

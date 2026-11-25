@@ -93,7 +93,7 @@ export interface MonthTotals {
 
 /** An EWR site the farm is upstream of, over the season. */
 export interface RiverSite {
-	/** The gauge's name, or the outlet's. Gauges are public infrastructure. */
+	/** The gauge's name, or the outlet's. Gauges are public infrastructure; the farm API blanks the outlet's ('') unless a gauge has its name, since the outflow node may be a neighbour's farm (backend publish.ts hiddenOutletName). */
 	name: string;
 	daysNotMet: number;
 	/** Of daysNotMet, days whose shortfall was wholly natural (no charged part). */

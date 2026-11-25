@@ -417,6 +417,15 @@ export async function viewerUnitsSwitch(db: Db, projectId: string): Promise<bool
 	return !!rows[0]?.on;
 }
 
+/**
+ * Today where the catchment is (project.time_zone, 058): the day "in force today" is read on, as the farm view and the
+ * editors' Registered users table read it. UTC's date is a day behind between midnight and 02:00 in South Africa.
+ */
+async function projectToday(db: Db, projectId: string): Promise<string> {
+	const { rows } = await db.query<{ timeZone: string | null }>('SELECT time_zone AS "timeZone" FROM project WHERE id = $1', [projectId]);
+	return localDate(new Date(), rows[0]?.timeZone ?? DEFAULT_TIME_ZONE);
+}
+
 export const allocationRoutes = new Hono<AuthEnv>()
 	.get('/:id/allocations', async (c) => {
 		const id = c.req.param('id');
@@ -431,7 +440,7 @@ export const allocationRoutes = new Hono<AuthEnv>()
 			// Who reads each row and each name is the database's one rule (231), which allocation_select and
 			// allocation_holder_select read too: a member acting for the authority always (#523 G6).
 			const unitsHidden = !(await readsAllocationUnits(db, id));
-			const totals = unitsHidden ? volumeTotals(await loadVolumes(db, id), new Date().toISOString().slice(0, 10)) : null;
+			const totals = unitsHidden ? volumeTotals(await loadVolumes(db, id), await projectToday(db, id)) : null;
 			return c.json({ allocations, sources, nodes, canSeeHolders: await readsAllocationHolders(db, id), viewerUnits, unitsHidden, totals });
 		});
 	})
@@ -740,7 +749,7 @@ export const allocationRoutes = new Hono<AuthEnv>()
 					run: runOut,
 					comparison: null,
 					capYears: [],
-					totals: comparisonTotals({ startDate: r.startDate, nodes, tolerance: own, rows: await loadVolumes(db, id), today: new Date().toISOString().slice(0, 10) }),
+					totals: comparisonTotals({ startDate: r.startDate, nodes, tolerance: own, rows: await loadVolumes(db, id), today: await projectToday(db, id) }),
 					totalsWithheld: null
 				});
 			}

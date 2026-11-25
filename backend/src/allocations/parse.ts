@@ -540,6 +540,12 @@ export function parseAllocationTable(text: string, kind: AllocationSourceKind): 
 			irrigatedAreaHa: null,
 			errors
 		};
+		// More cells than headings: a delimiter inside an unquoted cell (1,500 in a comma file) moved every later cell a
+		// column right, so the volume would read as 1 and the storage as 500. Refused, not read shifted.
+		if (r.cells.length > header.cells.length)
+			errors.push(
+				`the row has ${r.cells.length} cells but the header has ${header.cells.length}: a “${delimiter}” inside a cell (such as 1${delimiter}500) needs the cell in double quotes`
+			);
 		for (const f of ['holder', 'reference', 'propertyRef', 'farm', 'conditions'] as const)
 			if (LOOKS_LIKE_ID_NUMBER.test(get(f).replace(/\s/g, ''))) errors.push(`${columns[f]} looks like an ID number; the app doesn't keep those`);
 

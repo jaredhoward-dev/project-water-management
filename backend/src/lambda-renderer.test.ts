@@ -104,6 +104,37 @@ describe('renderer Lambda', () => {
 		expect(warn).not.toHaveBeenCalled();
 	});
 
+	// A burst (a Monday's schedules, two renders at a time) can keep a request queued past its token's 5 minutes.
+	// The API would refuse that token as final (render_token_refused): the request is answered as retryable
+	// instead, without a browser, so the worker asks again with a fresh token.
+	it('answers a request that waited past its token’s life as retryable, without rendering', async () => {
+		vi.stubEnv('RENDER_RESULTS_QUEUE_URL', 'https://sqs.example/render-results');
+		vi.spyOn(console, 'info').mockImplementation(() => {});
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		const { sessionRefusal } = await import('./reports/render.js');
+		renderReportPdf.mockRejectedValue(sessionRefusal(400, { code: 'render_token_refused' }));
+		const sentAt = String(Date.now() - 6 * 60_000);
+		const res = await handler({ Records: [{ ...record('m1', request), attributes: { SentTimestamp: sentAt } }] } as never);
+		expect(res).toEqual({ batchItemFailures: [] });
+		expect(renderReportPdf).not.toHaveBeenCalled();
+		expect(sent[0]!.message).toEqual({
+			v: 1,
+			type: 'rendered',
+			reportId: ids.reportId,
+			result: { ok: false, error: 'the request waited too long in the queue: its render token expired', retry: true }
+		});
+		expect(warn).toHaveBeenCalledWith(JSON.stringify({ event: 'report_render_failed', reportId: ids.reportId, projectId: ids.projectId, reason: 'expired', retry: true }));
+	});
+
+	it('renders a request sent within its token’s life (or with no sent time)', async () => {
+		vi.spyOn(console, 'info').mockImplementation(() => {});
+		renderReportPdf.mockResolvedValue({ pdf: Buffer.from('%PDF'), pages: 1, ms: 1 });
+		const sentAt = String(Date.now() - 2 * 60_000);
+		await handler({ Records: [{ ...record('m1', request), attributes: { SentTimestamp: sentAt } }, record('m2', request)] } as never);
+		expect(renderReportPdf).toHaveBeenCalledTimes(2);
+		expect(sent.map((m) => (m.message as { result: { ok: boolean } }).result.ok)).toEqual([true, true]);
+	});
+
 	it('drops a request it cannot parse, and retries only a failed answer', async () => {
 		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 		vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -168,6 +199,22 @@ describe('renderer Lambda, an evidence pack', () => {
 		expect(warn).toHaveBeenCalledWith(JSON.stringify({ event: 'report_render_failed', packId: pack.packId, projectId: pack.projectId, reason: 'store', retry: true }));
 		expect(err).toHaveBeenCalledWith(JSON.stringify({ event: 'pack_store_failed', packId: pack.packId, error: 'BadDigest' }));
 		expect(JSON.stringify(err.mock.calls)).not.toContain('arn:aws');
+	});
+
+	it('answers a pack request that waited past its token’s life as retryable, without rendering', async () => {
+		vi.spyOn(console, 'info').mockImplementation(() => {});
+		vi.spyOn(console, 'warn').mockImplementation(() => {});
+		renderReportPdf.mockResolvedValue({ pdf: bytes, pages: 1, ms: 1 });
+		const sentAt = String(Date.now() - 6 * 60_000);
+		await handler({ Records: [{ ...record('m1', packRequest), attributes: { SentTimestamp: sentAt } }] } as never);
+		expect(renderReportPdf).not.toHaveBeenCalled();
+		expect(putPackPdf).not.toHaveBeenCalled();
+		expect(sent[0]!.message).toEqual({
+			v: 1,
+			type: 'rendered_pack',
+			packId: pack.packId,
+			result: { ok: false, error: 'the request waited too long in the queue: its render token expired', retry: true }
+		});
 	});
 
 	it('refuses a PDF with no pages, and retries only a failed answer', async () => {

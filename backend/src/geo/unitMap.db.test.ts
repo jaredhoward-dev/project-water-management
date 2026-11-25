@@ -262,7 +262,8 @@ describe('POST /projects/:id/map/unit-map', () => {
 		);
 		const features = (await editor.call('GET', `/projects/${pid}/map/features`)).body;
 		const parcelA = features.features.find((f: { nodeId: string | null; name: string }) => f.nodeId === id['Unit A'] && f.name === 'P0');
-		expect(stamps[0]).toEqual({ name: 'Unit A', map_polygon: { featureId: parcelA.id, updatedAt: parcelA.updatedAt, areaM2: parcelA.areaM2 } });
+		expect(parcelA.geomHash).toMatch(/^[0-9a-f]{32}$/);
+		expect(stamps[0]).toEqual({ name: 'Unit A', map_polygon: { featureId: parcelA.id, updatedAt: parcelA.updatedAt, areaM2: parcelA.areaM2, geomHash: parcelA.geomHash } });
 		// The map's list says what each was taken over (a viewer reads it too).
 		const listed = (await viewer.call('GET', `/projects/${pid}/map/features`)).body.accepted;
 		expect(listed.unitMap).toEqual(
@@ -271,6 +272,16 @@ describe('POST /projects/:id/map/unit-map', () => {
 
 		// A rename keeps the outline: still the same. Redrawn (A takes A2's square too): no longer the same, though the coarse cell's MAP is.
 		expect((await editor.call('PATCH', `/projects/${pid}/map/features/${parcelA.id}`, { name: 'P0 renamed' })).status).toBe(200);
+		expect((await editor.call('GET', at(pid, COARSE))).body.units.find((u: { nodeId: string }) => u.nodeId === id['Unit A']).same).toBe(true);
+		// Moved 0.001° east, the same area (within the 0.5 m² of the area rule) in the same coarse cell: the outline's hash
+		// tells it apart (followups F7), so it is no longer the same; a stamp without the hash would have read it as one.
+		const shifted = { type: 'Polygon', coordinates: [ring(25.021, -30.1, 25.061, -30.06)] };
+		const moved = await editor.call('PATCH', `/projects/${pid}/map/features/${parcelA.id}`, { geometry: shifted });
+		expect(moved.status).toBe(200);
+		expect(Math.abs(moved.body.feature.areaM2 - parcelA.areaM2)).toBeLessThanOrEqual(0.5);
+		expect(moved.body.feature.geomHash).not.toBe(parcelA.geomHash);
+		expect((await editor.call('GET', at(pid, COARSE))).body.units.find((u: { nodeId: string }) => u.nodeId === id['Unit A'])).toMatchObject({ mapMm: 700, same: false });
+		await asOwner('UPDATE node SET map_polygon = map_polygon - \'geomHash\' WHERE id = $1', [id['Unit A']]);
 		expect((await editor.call('GET', at(pid, COARSE))).body.units.find((u: { nodeId: string }) => u.nodeId === id['Unit A']).same).toBe(true);
 		const wider = { type: 'Polygon', coordinates: [ring(25.02, -30.1, 25.1, -30.06)] };
 		expect((await editor.call('PATCH', `/projects/${pid}/map/features/${parcelA.id}`, { geometry: wider })).status).toBe(200);

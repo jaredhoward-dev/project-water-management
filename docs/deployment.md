@@ -3658,7 +3658,9 @@ run on the job queue, with the rendering done outside the VPC (infra/reports.tf)
   only the API's coded refusal of the token (`render_token_refused`), the
   report page's own "can't show this" and a page that tried to leave the
   site are final. Anything else (a WAF block, which is a plain `403`, a
-  `429`, a `5xx`, a timeout) makes the worker ask again with a fresh token
+  `429`, a `5xx`, a timeout, or a request that waited on the queue longer
+  than its token lives, which the renderer answers at once without a
+  browser) makes the worker ask again with a fresh token
   after 2, then 4 minutes, up to 3 renders; the report shows "rendering"
   meanwhile. A render request in the DLQ can't be redriven usefully (the
   token expired after 5 minutes): purge it; a render result in the DLQ can.
@@ -3691,6 +3693,11 @@ run on the job queue, with the rendering done outside the VPC (infra/reports.tf)
     (the report's own error, on the Reports tab, has the text). With `retry`
     true: a timeout, a WAF block or a browser crash, asked again with
     backoff; many at once usually means the WAF (`waf-blocked-requests`).
+    `expired` (always `retry` true): the request waited on `render-requests`
+    longer than its token lives (4 of its 5 minutes,
+    `RENDER_REQUEST_MAX_AGE_MS`), so the renderer answered without a
+    browser and the worker asks again with a fresh token; many mean a burst
+    (a popular schedule hour) is outrunning the renderer's concurrency.
 - **SES**: report emails go to members, so they count against the same SES
   sending limits as account email; production access (Operator step 8a) is
   needed before a schedule can mail anyone but verified addresses.

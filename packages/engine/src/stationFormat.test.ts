@@ -227,6 +227,35 @@ describe('running totals', () => {
 		expect(d.values).toEqual([null, 6.5, 0.5]);
 		expect(d.gaps).toBe(1);
 	});
+	it('makes a missing reading a gap, and the day after it too when the rise from before it crosses into that day', () => {
+		// Hourly totals from midnight; the logger lost the whole of the 2nd (null readings), then reads 20 on the 3rd.
+		const missing = (z: string | null) => [`2024-03-02T${z}:30:00Z`, null] as const;
+		const pairs: (readonly [string, number | null])[] = [
+			['2024-02-29T23:30:00Z', 10],
+			['2024-03-01T00:30:00Z', 10],
+			['2024-03-01T12:00:00Z', 12],
+			...['00', '06', '12', '23'].map(missing),
+			['2024-03-03T12:00:00Z', 20],
+			['2024-03-03T18:00:00Z', 21]
+		];
+		const text = JSON.stringify({ obs: pairs.map(([t, total]) => ({ t: at(t) / 1000, total })) });
+		// The 3rd's first rise (12 → 20) holds the 2nd's rain, which no reading split: the 2nd and the 3rd are gaps,
+		// never 8 mm on the 3rd (and, with noReadingsMeans 'zero', never 0 on the 2nd).
+		for (const g of [f, { ...f, noReadingsMeans: 'zero' as const }]) {
+			const d = stationDays(readStationAnswer(text, g), g, '2024-03-01', '2024-03-03', LATER);
+			expect(d.values).toEqual([2, null, null]);
+		}
+	});
+	it('keeps a rise across a missing reading inside the day it ends in, and gaps the missing readings left at the end', () => {
+		const text = JSON.stringify({ obs: [['2024-02-29T23:30:00Z', 10], ['2024-03-01T06:00:00Z', null], ['2024-03-01T12:00:00Z', 12], ['2024-03-02T12:00:00Z', 13]].map(([t, total]) => ({ t: at(t as string) / 1000, total })) });
+		const d = stationDays(readStationAnswer(text, f), f, '2024-03-01', '2024-03-02', LATER);
+		// The 06:00 reading is missing, but 10 → 12 still falls on the 1st, as it would with no reading between.
+		expect(d.values).toEqual([2, 1]);
+		// Missing readings with nothing after them: their day's rain is unknown, a gap even for a logger whose silence means 0.
+		const tail = JSON.stringify({ obs: [['2024-02-29T23:30:00Z', 10], ['2024-03-01T00:30:00Z', 10], ['2024-03-01T12:00:00Z', 12], ['2024-03-02T06:00:00Z', null]].map(([t, total]) => ({ t: at(t as string) / 1000, total })) });
+		const z = { ...f, noReadingsMeans: 'zero' as const };
+		expect(stationDays(readStationAnswer(tail, z), z, '2024-03-01', '2024-03-02', LATER).values).toEqual([2, null]);
+	});
 	it('asks from an hour before the first rain day, so its first interval has a reading to rise from', () => {
 		const r = stationRange(f, '2024-03-01', '2024-03-01');
 		expect(r).toEqual({ startMs: at('2024-02-29T23:00:00Z'), endMs: at('2024-03-02T00:00:00Z') });

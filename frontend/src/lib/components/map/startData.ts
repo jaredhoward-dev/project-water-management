@@ -27,6 +27,7 @@ export type DataItemId =
 	| 'unit-rain'
 	| 'unit-map'
 	| 'evaporation'
+	| 'et0'
 	| 'wr2012'
 	| 'flow'
 	| 'dams'
@@ -88,6 +89,8 @@ export interface DataInput {
 const OBSERVED = ['flow_observed_m3s', 'flow_logger_m3s'];
 /** The daily A-pan series (an A-pan record read instead of the monthly row). */
 const DAILY_APAN = 'evap_apan_mm';
+/** The daily reference ET series (an `agera5_et0` feed's, or a station's own): GR4J reads it under a monthly PE row only. */
+const DAILY_ET0 = 'evap_et0_mm';
 const plural = (n: number, one: string, many = `${one}s`) => `${fmtNum(n)} ${n === 1 ? one : many}`;
 /** "2 of 3 units": done for some. */
 const someOf = (k: number, m: number) => `${fmtNum(k)} of ${plural(m, 'unit')}`;
@@ -101,7 +104,7 @@ function perUnit(k: number, m: number): DataStatus {
 /**
  * The to-do list, in the order a run reads it: the units' areas, how natural
  * flow is made, the catchment's rain and MAP, each unit's rain and MAP,
- * evaporation, the WR2012 check, observed flow, the composite dams, the
+ * evaporation (and the daily ET₀ under a monthly PE row), the WR2012 check, observed flow, the composite dams, the
  * cultivated area, the EWR, then Run the model, and after it the fit to the
  * observed flow and a run that uses it (WP-4.10's "first calibrated run").
  */
@@ -243,6 +246,30 @@ export function startDataItems(s: DataInput): DataItem[] {
 		where: 'Model settings → Demand',
 		more: { href: '?tab=calibration#set-evaporation', text: 'Evaporation from the map' }
 	});
+
+	// The daily ET₀ (issue #604 R5-E): only GR4J reads it, and only under a monthly PE row, where it replaces the row's
+	// share on the days it has a value. So the item is there only then, optional (the row stands in), and its link opens
+	// the reference ET feed's proposal from the boundary (`?feed=agera5_et0`, DataFeedsPanel).
+	if (set?.pe.kind === 'monthly') {
+		const et0Series = s.series ? s.series.some((x) => x.kind === DAILY_ET0 && x.length > 0) : null;
+		const et0Feed = s.feeds ? s.feeds.some((f) => f.source === 'agera5_et0') : null;
+		const known = et0Series !== null && et0Feed !== null;
+		items.push({
+			id: 'et0',
+			title: 'Daily ET₀ from the boundary',
+			status: !known ? 'unknown' : et0Series ? 'done' : et0Feed ? 'partial' : 'todo',
+			detail: !known
+				? 'Reading the feeds…'
+				: et0Series
+					? 'A daily reference ET record is read: GR4J takes it over the monthly PE row on the days it has a value.'
+					: et0Feed
+						? 'A reference ET feed is attached: its record arrives with its first fetch.'
+						: `GR4J reads the monthly PE row; a daily reference ET feed (AgERA5) over the boundary’s cells would replace its share day by day.${s.hasBoundary ? '' : ' Draw the catchment boundary first, or attach it over grid cells.'}${ownerNote}`,
+			href: '?tab=series&feed=agera5_et0#data-feeds',
+			where: 'Data → Data feeds',
+			optional: true
+		});
+	}
 
 	const wr = set?.wr2012.reference ?? null;
 	items.push({

@@ -4,7 +4,8 @@
 // load still shows something.
 //
 // It holds only what the farmer may see anyway. It is cleared on sign-out, on
-// a 403 or 404 for that farm, when a different user signs in on the phone,
+// a 403 or 404 for that farm, when the catchment's list of the user's farms no
+// longer has it (farmState.svelte.ts), when a different user signs in on the phone,
 // and after 30 days unused. "Don't keep a copy on this phone" (the farm
 // Menu) turns it off and clears it, for a phone shared with a foreman or
 // family. Every storage access is wrapped: private windows, full or blocked

@@ -117,6 +117,14 @@ describe('fetchWindow', () => {
 		expect(fetchWindow('agera5_et0', { ...grid, startDate: '2026-09-01' }, '2026-10-24', '2026-10-27')).toEqual({ start: '2026-09-01', end: '2026-10-26' });
 	});
 
+	it('reference ET: a startDate in the future asks for no days, never yesterday before it', () => {
+		// As CHIRPS's: an empty window (start after end) that reads nothing, so no day before the floor is written.
+		expect(fetchWindow('agera5_et0', { ...grid, startDate: '2026-11-15' }, null, '2026-10-27')).toEqual({ start: '2026-11-15', end: '2026-10-26' });
+		expect(fetchWindow('agera5_et0', { ...grid, startDate: '2026-10-27' }, null, '2026-10-27')).toEqual({ start: '2026-10-27', end: '2026-10-26' });
+		// Its first day, once it is yesterday, is read.
+		expect(fetchWindow('agera5_et0', { ...grid, startDate: '2026-10-26' }, null, '2026-10-27')).toEqual({ start: '2026-10-26', end: '2026-10-26' });
+	});
+
 	it('DWS: ten years back at first, asked for two years at a time; then a year of revisions before the newest', () => {
 		// Production, 2026-10-26: the first fetch asked for all ten years in one request and got the ScriptServer error page.
 		expect(DWS_WINDOW_DAYS).toBe(730);
@@ -347,6 +355,20 @@ describe('runFetch on the fixtures', () => {
 		expect(dwsFixtureLastDataDay('2026-10-23')).toBe('2026-07-25');
 		// Every value served is the replay's value for that date.
 		for (const d of days) expect(d.v).toBe(dwsFixtureValue(d.day));
+	});
+
+	it('DWS: an empty window (a startDate in the future) asks DWS for nothing and answers no days', async () => {
+		const config = { station: 'X0H000', startDate: '2026-12-01' };
+		const w = fetchWindow('dws', config, null, '2026-10-21');
+		expect(w.start > w.end).toBe(true);
+		const asked: string[] = [];
+		const counting: FeedHttp = { ...fixtureHttp(() => '2026-10-21'), text: async (url) => (asked.push(url), null) };
+		const r = await runFetch({ source: 'dws', config, ...w, today: '2026-10-21' }, counting);
+		expect(r).toEqual({ ok: true, startDate: null, values: [], meta: { days: 0, gaps: 0 } });
+		expect(asked).toEqual([]);
+		// Positive control: a window with days asks once.
+		await runFetch({ source: 'dws', config: { station: 'X0H000' }, start: '2026-07-01', end: '2026-07-02', today: '2026-10-21' }, counting);
+		expect(asked).toHaveLength(1);
 	});
 
 	it('DWS: keeps only the days asked for, never a day after today', async () => {

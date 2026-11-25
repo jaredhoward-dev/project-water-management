@@ -690,6 +690,8 @@ describe('SettingsPatch.wr2012', () => {
 		expect(ok({ reference: { ...reference, lookup: { point: [21.35, -33.65], code: 'Z99A', feature: { ...feature, kind: 'gauge', areaM2: null } } } })).toBe(true);
 		expect(ok({ reference: { ...reference, lookup: { point: [21.35, -33.65], code: 'Z99A', feature: null } } })).toBe(true);
 		expect(ok({ reference: { ...reference, lookup: null } })).toBe(true);
+		// With the boundary's outline hash (followups F7).
+		expect(ok({ reference: { ...reference, lookup: { point: [21.35, -33.65], code: 'Z99A', feature: { ...feature, geomHash: '0123456789abcdef0123456789abcdef' } } } })).toBe(true);
 	});
 
 	it('rejects a malformed lookup', () => {
@@ -702,6 +704,7 @@ describe('SettingsPatch.wr2012', () => {
 			{ ...lookup, feature: { ...feature, kind: 'dam' } },
 			{ ...lookup, feature: { ...feature, id: 'not-a-uuid' } },
 			{ ...lookup, feature: { ...feature, updatedAt: 'yesterday' } },
+			{ ...lookup, feature: { ...feature, geomHash: 'not-a-hash' } },
 			{ ...lookup, extra: 1 }
 		]) {
 			expect(ok({ reference: { ...reference, lookup: bad } }), JSON.stringify(bad)).toBe(false);

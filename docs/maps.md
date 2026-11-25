@@ -917,18 +917,40 @@ someone takes it again. These checks say so:
   the grid, its rain feed's cells, a planted area from land cover, and an
   evaporation row from the map, each linking where it is proposed again (MAP
   from the grid, Rain for each unit, Crops, Evaporation from the map). What
-  each was read over is recorded with it as `{ featureId, updatedAt, areaM2 }`
-  (`273_acceptance_polygons`: `node.map_polygon`,
+  each was read over is recorded with it as `{ featureId, updatedAt, areaM2,
+  geomHash }` (`273_acceptance_polygons`: `node.map_polygon`,
   `crop_area_land_cover.polygons`, `evaporation_accepted.boundary`; a unit
-  feed's `unit` mark already had it), and GET …/map/features returns them as
-  `accepted` (`geo/acceptances.ts`). The polygon now is the unit's polygon
-  (`geo/unitPolygon.ts`'s rule), the boundary the oldest one. It is another
-  outline when it is gone, another feature, or edited since with another
-  area (`OUTLINE_SLACK_M2`, 0.5 m²; a unit feed's mark keeps its area to
-  0.001 km²): a rename or a relink, which also moves `updatedAt`, keeps it
-  (`map/stale.ts`, the backend's `acceptances.ts outlineChanged`). A value
-  from before 273 records nothing, so it is never flagged. The boundary's
-  rain feed keeps its own flag (the Getting started pill, MapRainLink).
+  feed's `unit` mark already had the rest, with its area in km²), and GET
+  …/map/features returns them as `accepted` (`geo/acceptances.ts`). The
+  polygon now is the unit's polygon (`geo/unitPolygon.ts`'s rule), the
+  boundary the oldest one. It is another outline when it is gone, or another
+  feature; for the same feature, when the stamp and the map both carry the
+  outline's hash, the hashes decide, so a reshape that keeps the area is
+  flagged and a rename or a relink (which also move `updatedAt`) isn't. A
+  stamp from before the hash (followups F7) falls back to the area rule:
+  edited since with another area (`OUTLINE_SLACK_M2`, 0.5 m²; a unit feed's
+  mark keeps its area to 0.001 km²), which can't see a reshape to the same
+  area; it is never guessed at (`map/stale.ts`, the backend's
+  `acceptances.ts outlineChanged`). A value from before 273 records nothing,
+  so it is never flagged. The boundary's rain feed keeps its own flag (the
+  Getting started pill, MapRainLink).
+- **The outline's hash** (followups F7, `geo/geomHash.ts`): the server
+  serves it on every polygon feature (`geomHash`, null for points and
+  lines), and each stamp records it as the feature had it. It is the first
+  32 hex digits of SHA-256 over a normalised outline, so the same shape
+  always hashes alike however its GeoJSON is written: coordinates rounded
+  to 1e-7° (about 1 cm); each ring opened (the closing vertex dropped) and
+  repeated vertices in a row dropped, and a ring left with fewer than 3
+  dropped; outer rings anticlockwise and holes clockwise; each ring started
+  at its least vertex (by longitude, then latitude); a polygon's holes and
+  a MultiPolygon's parts sorted, so a Polygon and a one-part MultiPolygon
+  hash alike. Any move of a vertex by more than the rounding is another
+  outline. Changing the normalisation would read every stored stamp as
+  redrawn, so a new one needs a new field, never a new meaning for
+  `geomHash`. Each stamp is computed where it is written, on the server
+  (MAP from the grid, land cover, evaporation, Rain for each unit), and the
+  WR2012 lookup copies the served hash; a project copy keeps the stamps'
+  hashes, since its features are the same outlines.
 - **The rest of the catchment's area** (F8): the unit Start made beside
   units' boundaries has no outline; its area is the boundary less the units
   as the boundary stood. After the boundary's area changes, while the rest
@@ -951,10 +973,12 @@ someone takes it again. These checks say so:
   quaternary was looked up with the reference
   (`settings.wr2012.reference.lookup`, engine `Wr2012Lookup`: the point,
   the code found there, and the boundary or gauge the point came from with
-  its `updatedAt` and area then; [§ Quaternary lookup](#quaternary-lookup)).
-  The check flags the reference when that boundary is gone or is another
-  outline (`stale.ts outlineChanged`, as above), or was edited since and the
-  point now lies outside it (a reshape that kept the area), and when that
+  its `updatedAt` and area then, and a boundary's `geomHash`;
+  [§ Quaternary lookup](#quaternary-lookup)). The check flags the reference
+  when that boundary is gone or is another outline (`stale.ts
+  outlineChanged`, as above: with the hash, any reshape), or, for a lookup
+  recorded before the hash, was edited since and the point now lies outside
+  it (a reshape that kept the area), and when that
   gauge is gone or moved more than `GAUGE_MOVED_M` (50 m); it links to
   **WR2012 check: Propose from the map** to look it up again. A reference
   typed by hand, saved before lookups were recorded, looked up at typed
@@ -1337,7 +1361,8 @@ values (code, area, MAP, naturalised MAR, reference period, monthly means,
 source) beside what the form holds, each with **Use**. A used value goes into
 the form only; **Save** keeps it, with where it was looked up
 (`reference.lookup`: the point, the code found there, and the boundary or
-gauge the point came from as it stood, or none for typed coordinates), so
+gauge the point came from as it stood, a boundary with its outline hash,
+or none for typed coordinates), so
 the Map's [Checks](#checks) can flag the reference once that feature is
 redrawn or moved. The source shown is the dataset's own,
 with the quaternary and the point appended. Nothing fills itself, and a
@@ -2236,7 +2261,8 @@ in [design/start-from-map.md](./design/start-from-map.md); the screen in
   needs, in the order a run reads them: the units' areas and order, how
   natural flow is made, rain from the boundary, the catchment's MAP, rain
   for each unit, MAP for each unit, evaporation (the A-pan, and Evaporation
-  from the map), the WR2012 check, observed flow (its link opens Data
+  from the map), the daily ET₀ from the boundary (only under a monthly PE
+  row, optional; `?feed=agera5_et0` opens the reference ET proposal), the WR2012 check, observed flow (its link opens Data
   feeds on a DWS gauge with the nearest gauging stations proposed,
   `?feed=dws`), each unit's composite dam, the cultivated area (linked to
   the first unit with nothing planted, in its drawer, where land cover

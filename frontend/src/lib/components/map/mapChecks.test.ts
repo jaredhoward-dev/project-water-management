@@ -427,6 +427,16 @@ describe('the WR2012 quaternary looked up at a feature edited since (followups F
 		expect(wr([{ ...b, geometry: rect(10, 0, 4, 4), updatedAt: later }], ref)).toHaveLength(1);
 	});
 
+	it('with the outline hash recorded (followups F7): flags a same-area reshape the point still lies in, keeps a rename', () => {
+		const b = { ...boundary(0, 0, 4, 4), geomHash: 'e'.repeat(32) };
+		const ref = reference({ point: place([2, -2]), code: 'Z99A', feature: { ...stamp(b), geomHash: b.geomHash } });
+		const later = '2026-11-24T00:00:00.000Z';
+		expect(wr([b], ref)).toEqual([]);
+		expect(wr([{ ...b, name: 'Renamed', updatedAt: later }], ref)).toEqual([]);
+		// Same 16 km², moved 1 km east: the point is still inside, but it is another outline.
+		expect(wr([{ ...b, geometry: rect(1, 0, 4, 4), updatedAt: later, geomHash: 'f'.repeat(32) }], ref)).toHaveLength(1);
+	});
+
 	it('flags a boundary or gauge that is gone', () => {
 		const b = boundary(0, 0, 4, 4);
 		expect(wr([], reference({ point: place([2, -2]), code: 'Z99A', feature: stamp(b) }))[0]!.text).toContain('the catchment boundary it was looked up at is gone');
