@@ -12,6 +12,21 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { anon, app, asOwner, lastMailTo, node, signUp } from '../__tests__/helpers.js';
 import { withoutUser, withUser } from '../db/tx.js';
 
+// A provider whose cancel the test controls: `race.onCancel`, when set, runs in place of the configured
+// provider's cancelSubscriptions (the mock's), as a checkout completing at the provider meanwhile would.
+const race = vi.hoisted(() => ({ onCancel: null as null | ((req: { accountId: string; subscriptionRefs: string[] }) => Promise<string[]>) }));
+vi.mock('../billing/provider.js', async (importOriginal) => {
+	const real = await importOriginal<typeof import('../billing/provider.js')>();
+	return {
+		...real,
+		billingProvider: (...args: Parameters<typeof real.billingProvider>) => {
+			const p = real.billingProvider(...args);
+			const hook = race.onCancel;
+			return p && hook ? { ...p, cancelSubscriptions: hook } : p;
+		}
+	};
+});
+
 // The race the route guards against: someone else gives up ownership between
 // the up-front check and the delete. `blind.times` makes that many soleHoldings
 // calls see nothing held: the route asks before cancelling the plan, again in the
@@ -318,6 +333,37 @@ describe('DELETE /auth/me: the person’s own paid plan is cancelled at the prov
 		expect((await withFailingStripe(() => deleteMe(u))).status).toBe(204);
 		expect(await exists(u)).toBe(false);
 		expect(await asOwner(`SELECT 1 FROM audit_event WHERE project_id = $1 AND kind = 'member.removed'`, [pid])).toHaveLength(1);
+	});
+
+	it('refuses with 503 when a checkout completes while the plan is being cancelled, deleting and recording nothing', async () => {
+		const [u, partner] = (await Promise.all(['Drace', 'Dracepartner'].map((n) => signUp(n)))) as [User, User];
+		const pid = (await u.call('POST', '/projects', { name: `Race ${tag}` })).body.project.id;
+		expect((await u.call('POST', `/projects/${pid}/members`, { email: partner.email, role: 'owner' })).status).toBe(201);
+		const ref = `sub_mock_${crypto.randomUUID().replace(/-/g, '')}`;
+		const late = `sub_mock_late${crypto.randomUUID().replace(/-/g, '')}`;
+		await liveSub(await ownAccount(u), 'mock', ref);
+		race.onCancel = async (req) => {
+			// During the provider's round trips the cancel's own webhook ends the old plan, and a checkout that completed
+			// meanwhile lands a new live subscription the cancel didn't reach (one live per account: 323's index).
+			await asOwner(`UPDATE subscription SET status = 'canceled' WHERE external_ref = $1`, [ref]);
+			await liveSub(req.accountId, 'mock', late);
+			return [...req.subscriptionRefs];
+		};
+		let res: Awaited<ReturnType<typeof deleteMe>>;
+		try {
+			res = await deleteMe(u);
+		} finally {
+			race.onCancel = null;
+		}
+		expect(res.status).toBe(503);
+		expect(res.body).toMatchObject({ code: 'account_plan_not_cancelled' });
+		expect(await exists(u)).toBe(true);
+		expect(await subStatus(late)).toEqual(['active']);
+		expect(await asOwner(`SELECT 1 FROM audit_event WHERE project_id = $1 AND kind = 'member.removed'`, [pid])).toEqual([]);
+		// The session still works; once that one ends too, the same request goes through (positive control).
+		await asOwner(`UPDATE subscription SET status = 'canceled' WHERE external_ref = $1`, [late]);
+		expect((await deleteMe(u)).status).toBe(204);
+		expect(await exists(u)).toBe(false);
 	});
 
 	it('refuses a live Stripe subscription when the configured provider can’t cancel it (the mock)', async () => {

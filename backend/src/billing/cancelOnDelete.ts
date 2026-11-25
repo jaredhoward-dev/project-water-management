@@ -12,6 +12,7 @@ import type { BillingProvider } from './provider.js';
 import type { Db } from '../db/tx.js';
 import { ApiError } from '../http/errors.js';
 import { logEvent } from '../logging/logEvent.js';
+
 /** A billing account as the provider knows it: its customer (328) and its live subscriptions a provider holds. */
 export type AccountBilling = { accountId: string; customerRef: string | null; live: { provider: string; externalRef: string }[] };
 

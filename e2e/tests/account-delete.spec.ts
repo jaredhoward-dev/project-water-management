@@ -78,6 +78,32 @@ test('the only owner and admin is refused with what to hand over; once handed ov
 	await asColleague.close();
 });
 
+// A paid plan the provider couldn't cancel (503 account_plan_not_cancelled, docs/billing.md § Deleting an
+// account): the dialog says so in plain words, and nothing changes: still signed in, the account still there.
+test('a paid plan the provider couldn’t cancel refuses the deletion, and the person stays signed in', async ({ page, owner, fetchRoute }) => {
+	const refuse = await fetchRoute(page, `${API_URL}/auth/me`, async (route) => {
+		if (route.request().method() !== 'DELETE') return route.fallback();
+		return route.fulfill({
+			status: 503,
+			contentType: 'application/json',
+			body: JSON.stringify({ error: 'your paid plan couldn’t be cancelled with the payment provider, so your account wasn’t deleted; try again in a few minutes', code: 'account_plan_not_cancelled' })
+		});
+	});
+	const dialog = await openDialog(page);
+	await dialog.getByLabel('Your password').fill(owner.password);
+	await dialog.getByRole('button', { name: 'Delete my account' }).click();
+	await expect(dialog.getByRole('alert')).toHaveText('Your paid plan couldn’t be cancelled with the payment provider, so your account wasn’t deleted. Try again in a few minutes.');
+	await expect(page).toHaveURL('/account');
+	await refuse.unroute();
+
+	// Still signed in: the session answers, and the account page loads again with their name.
+	expect((await page.request.get(`${API_URL}/auth/me`)).status()).toBe(200);
+	await dialog.getByRole('button', { name: 'Cancel' }).click();
+	await page.reload();
+	await expect(page.getByRole('heading', { level: 1, name: 'Account' })).toBeVisible();
+	await expect(page.getByLabel('Display name')).toHaveValue(owner.displayName);
+});
+
 // axe on the open dialog in both themes, at desktop and phone width.
 for (const colorScheme of ['light', 'dark'] as const) {
 	for (const [sizeName, viewport] of [

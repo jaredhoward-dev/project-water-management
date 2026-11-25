@@ -1,6 +1,21 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { asOwner, monthly, node, signUp } from '../__tests__/helpers.js';
 import { withUser } from '../db/tx.js';
+
+// A provider whose cancel the test controls: `race.onCancel`, when set, runs in place of the configured
+// provider's cancelSubscriptions (the mock's), as a checkout completing at the provider meanwhile would.
+const race = vi.hoisted(() => ({ onCancel: null as null | ((req: { accountId: string; subscriptionRefs: string[] }) => Promise<string[]>) }));
+vi.mock('../billing/provider.js', async (importOriginal) => {
+	const real = await importOriginal<typeof import('../billing/provider.js')>();
+	return {
+		...real,
+		billingProvider: (...args: Parameters<typeof real.billingProvider>) => {
+			const p = real.billingProvider(...args);
+			const hook = race.onCancel;
+			return p && hook ? { ...p, cancelSubscriptions: hook } : p;
+		}
+	};
+});
 
 describe('teams', () => {
 	it('gives team members access to every team project (admin → owner, member → editor)', async () => {
@@ -285,7 +300,6 @@ describe('team viewer', () => {
 	});
 });
 
-
 describe('DELETE /teams/:id: the team’s paid plan is cancelled at the provider first (docs/billing.md § Deleting an account)', () => {
 	const teamWithPlan = async (name: string, provider: string, ref: string) => {
 		const admin = await signUp(name);
@@ -326,5 +340,56 @@ describe('DELETE /teams/:id: the team’s paid plan is cancelled at the provider
 		expect((await admin.call('DELETE', `/teams/${teamId}`)).status).toBe(204);
 		expect(await teamExists(teamId)).toBe(false);
 		expect(await asOwner('SELECT 1 FROM subscription WHERE external_ref = $1', [ref])).toEqual([]);
+	});
+
+	it('refuses with 503 when a checkout completes while the plan is being cancelled, so its subscription is never orphaned', async () => {
+		const ref = `sub_mock_teamrace${crypto.randomUUID().replace(/-/g, '')}`;
+		const late = `sub_mock_teamlate${crypto.randomUUID().replace(/-/g, '')}`;
+		const { admin, teamId } = await teamWithPlan('TeamPlanRace', 'mock', ref);
+		race.onCancel = async (req) => {
+			// During the provider's round trips the cancel's own webhook ends the old plan, and a checkout that completed
+			// meanwhile lands a new live subscription the cancel didn't reach (one live per account: 323's index).
+			await asOwner(`UPDATE subscription SET status = 'canceled' WHERE external_ref = $1`, [ref]);
+			await asOwner(
+				`INSERT INTO subscription (billing_account_id, plan_code, status, provider, external_ref, period_start, period_end)
+				 VALUES ($1, 'team', 'active', 'mock', $2, now(), now() + interval '30 days')`,
+				[req.accountId, late]
+			);
+			return [...req.subscriptionRefs];
+		};
+		try {
+			const res = await admin.call('DELETE', `/teams/${teamId}`);
+			expect(res.status).toBe(503);
+			expect(res.body.code).toBe('billing_provider_error');
+		} finally {
+			race.onCancel = null;
+		}
+		expect(await teamExists(teamId)).toBe(true);
+		expect(await asOwner(`SELECT 1 FROM audit_event WHERE kind = 'team.deleted' AND subject->>'teamId' = $1`, [teamId])).toEqual([]);
+		expect(await asOwner('SELECT status FROM subscription WHERE external_ref = $1', [late])).toEqual([{ status: 'active' }]);
+		// Once that one ends too, the same request goes through (positive control).
+		await asOwner(`UPDATE subscription SET status = 'canceled' WHERE external_ref = $1`, [late]);
+		expect((await admin.call('DELETE', `/teams/${teamId}`)).status).toBe(204);
+		expect(await teamExists(teamId)).toBe(false);
+	});
+
+	it('never asks the provider to cancel for someone who isn’t the team’s admin', async () => {
+		const ref = `sub_mock_teamview${crypto.randomUUID().replace(/-/g, '')}`;
+		const { admin, teamId } = await teamWithPlan('TeamPlanViewer', 'mock', ref);
+		const editor = await signUp('TeamPlanEditor');
+		expect((await admin.call('POST', `/teams/${teamId}/members`, { email: editor.email, role: 'member' })).status).toBe(201);
+		const calls: string[] = [];
+		race.onCancel = async (req) => {
+			calls.push(req.accountId);
+			return [...req.subscriptionRefs];
+		};
+		try {
+			expect((await editor.call('DELETE', `/teams/${teamId}`)).status).toBe(403);
+		} finally {
+			race.onCancel = null;
+		}
+		expect(calls).toEqual([]);
+		expect(await teamExists(teamId)).toBe(true);
+		expect(await asOwner('SELECT status FROM subscription WHERE external_ref = $1', [ref])).toEqual([{ status: 'active' }]);
 	});
 });
