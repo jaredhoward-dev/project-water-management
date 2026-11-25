@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bookedDay, CsvError, parseDate, parseSeriesCsv, parseTime } from './csv';
+import { bookedDay, CsvError, parseDate, parseSeriesCsv, parseTime, subDailyAggregate } from './csv';
 
 describe('parseDate', () => {
 	it('accepts ISO, slashed and day-first dates', () => {
@@ -125,29 +125,31 @@ describe('sub-daily files', () => {
 	for (const s of ['2020-03-05 21:00', '2020-03-05 22:00', '2020-03-05 23:00', '2020-03-06 00:00', '2020-03-06 01:00', '2020-03-06 02:00', '2020-03-06 03:00', '2020-03-06 04:00']) storm[s] = 2;
 
 	it('adds a storm straddling midnight into one 08:00–08:00 day, booked to the day it starts', () => {
-		const r = parseSeriesCsv(hourly(storm), { dayBoundary: '08:00' });
+		const r = parseSeriesCsv(hourly(storm), { dayBoundary: '08:00', aggregate: 'sum' });
 		// Windows: 4th 08:00 → 5th 08:00, 5th → 6th, 6th → 7th; the whole storm falls on the 5th.
 		expect(r.startDate).toBe('2020-03-04');
 		expect(r.values).toEqual([0, 16, 0]);
-		expect(r.subDaily).toEqual({ dayBoundary: '08:00', readings: 72, readingsPerDay: 24, incompleteDays: 0 });
+		expect(r.subDaily).toEqual({ dayBoundary: '08:00', aggregate: 'sum', readings: 72, readingsPerDay: 24, incompleteDays: 0 });
 	});
 
 	it('splits the same storm at midnight with the 00:00 boundary', () => {
-		const r = parseSeriesCsv(hourly(storm), { dayBoundary: '00:00' });
-		// The 4th (09:00–24:00: 16 readings), 5th (21:00–24:00: 4 × 2 mm), 6th (01:00–04:00), 7th (01:00–08:00).
-		expect(r.startDate).toBe('2020-03-04');
-		expect(r.values).toEqual([0, 8, 8, 0]);
+		const r = parseSeriesCsv(hourly(storm), { dayBoundary: '00:00', aggregate: 'sum' });
+		// The 4th (09:00–24:00: 16 readings) and the 7th (01:00–08:00: 8) are only partly recorded and left out;
+		// the 5th (21:00–24:00: 4 × 2 mm) and the 6th (01:00–04:00) are whole.
+		expect(r.startDate).toBe('2020-03-05');
+		expect(r.values).toEqual([8, 8]);
 		expect(r.subDaily!.readingsPerDay).toBe(24);
-		expect(r.subDaily!.incompleteDays).toBe(2);
+		expect(r.subDaily!.incompleteDays).toBe(0);
+		expect(r.subDaily!.partialEdges).toEqual({ first: '2020-03-04', last: '2020-03-07' });
 	});
 
 	it('gives the same days at UTC+14 and UTC−11 (no local-time parsing)', () => {
 		const tz = process.env.TZ;
 		try {
 			process.env.TZ = 'Pacific/Kiritimati';
-			const east = parseSeriesCsv(hourly(storm), { dayBoundary: '08:00' });
+			const east = parseSeriesCsv(hourly(storm), { dayBoundary: '08:00', aggregate: 'sum' });
 			process.env.TZ = 'Pacific/Pago_Pago';
-			expect(parseSeriesCsv(hourly(storm), { dayBoundary: '08:00' })).toEqual(east);
+			expect(parseSeriesCsv(hourly(storm), { dayBoundary: '08:00', aggregate: 'sum' })).toEqual(east);
 		} finally {
 			process.env.TZ = tz;
 		}
@@ -165,8 +167,8 @@ describe('sub-daily files', () => {
 		expect((err as CsvError).message).toMatch(/^Line 3: several readings on 2020-03-04: this looks like sub-daily data/);
 		// A plain duplicate date is still just that.
 		expect(() => parseSeriesCsv('2020-01-01,1\n2020-01-01,2')).toThrow(/duplicate date 2020-01-01/);
-		expect(() => parseSeriesCsv('2020-01-01 10:00,1\n2020-01-01,2', { dayBoundary: '08:00' })).toThrow(/has no time/);
-		expect(() => parseSeriesCsv('2020-01-01 25:00,1', { dayBoundary: '08:00' })).toThrow(/isn't HH:MM/);
+		expect(() => parseSeriesCsv('2020-01-01 10:00,1\n2020-01-01,2', { dayBoundary: '08:00', aggregate: 'sum' })).toThrow(/has no time/);
+		expect(() => parseSeriesCsv('2020-01-01 25:00,1', { dayBoundary: '08:00', aggregate: 'sum' })).toThrow(/isn't HH:MM/);
 		// A daily file whose dates carry midnight still reads as daily.
 		expect(parseSeriesCsv('2020-01-01 00:00:00,1\n2020-01-02 00:00:00,2').values).toEqual([1, 2]);
 	});
@@ -190,12 +192,89 @@ describe('sub-daily files', () => {
 		expect(day('2020-01-06', '08:00')).toBe('2020-01-05');
 		expect(day('2020-01-06', '08:01')).toBe('2020-01-06');
 		expect(day('2020-01-06', '00:00')).toBe('2020-01-05');
-		const r = parseSeriesCsv('2020-01-05 09:00,1\n2020-01-05 10:00,\n2020-01-06 09:00,', { dayBoundary: '08:00' });
-		// The 6th has only a blank: no reading, not 0.
-		expect(r.values).toEqual([1, null]);
+		// Twelve-hourly: the 5th's day (20:00, 08:00 on the 6th) has a blank, the 6th's only blanks: no reading, not 0.
+		const r = parseSeriesCsv('2020-01-05 20:00,1\n2020-01-06 08:00,\n2020-01-06 20:00,\n2020-01-07 08:00,\n2020-01-07 20:00,0\n2020-01-08 08:00,0', {
+			dayBoundary: '08:00',
+			aggregate: 'sum'
+		});
+		expect([r.startDate, r.values]).toEqual(['2020-01-05', [1, null, 0]]);
+		expect(r.subDaily!.incompleteDays).toBe(1);
 		// An evening reading on a 12-hour clock belongs to the day it falls in, not the window before.
-		const pm = parseSeriesCsv('2020-01-02 7:00 AM,1\n2020-01-02 7:00 PM,2\n2020-01-03 7:00 AM,4', { dayBoundary: '08:00' });
-		expect([pm.startDate, pm.values]).toEqual(['2020-01-01', [1, 6]]);
+		const pm = parseSeriesCsv('2020-01-02 7:00 AM,1\n2020-01-02 7:00 PM,2\n2020-01-03 7:00 AM,4\n2020-01-03 7:00 PM,0\n2020-01-04 7:00 AM,0', {
+			dayBoundary: '08:00',
+			aggregate: 'sum'
+		});
+		expect([pm.startDate, pm.values]).toEqual(['2020-01-02', [6, 0]]);
+		expect(pm.subDaily!.partialEdges).toEqual({ first: '2020-01-01' });
+	});
+});
+
+// Issue #829: a flow is a rate, so its sub-daily readings are averaged into a
+// day; only depths (rain, evaporation) are added up. Synthetic loggers.
+describe('sub-daily flow and rain (issue #829)', () => {
+	/** `days` whole midnight days from 2021-06-01 at `step` minutes, each reading `value(i)`, stamps closing their interval. */
+	function logger(step: number, days: number, value: (i: number) => number): string {
+		const rows = ['timestamp,value'];
+		const n = (days * 1440) / step;
+		for (let i = 1; i <= n; i++) {
+			const iso = new Date(Date.UTC(2021, 5, 1) + i * step * 60_000).toISOString();
+			rows.push(`${iso.slice(0, 10)} ${iso.slice(11, 16)},${value(i)}`);
+		}
+		return rows.join('\n');
+	}
+	const flow = { dayBoundary: '00:00', aggregate: 'mean' } as const;
+	const rain = { dayBoundary: '00:00', aggregate: 'sum' } as const;
+
+	it('picks the aggregate from the kind: averaged for a flow, added up for a depth', () => {
+		expect(subDailyAggregate('flow_logger_m3s')).toBe('mean');
+		expect(subDailyAggregate('flow_observed_m3s')).toBe('mean');
+		expect(subDailyAggregate('rain_catchment_alt_mm')).toBe('sum');
+		expect(subDailyAggregate('evap_apan_mm')).toBe('sum');
+	});
+
+	it('averages an hourly m³/s flow into its day, not 24 × it', () => {
+		// 2 m³/s for 12 hours, then 4 m³/s: the day's mean is 3, not the sum 72.
+		const r = parseSeriesCsv(logger(60, 2, (i) => ((i - 1) % 24 < 12 ? 2 : 4)), flow);
+		expect(r.values).toEqual([3, 3]);
+		expect(r.subDaily).toEqual({ dayBoundary: '00:00', aggregate: 'mean', readings: 48, readingsPerDay: 24, incompleteDays: 0 });
+		// Positive control: the same file read as a depth adds up to 24 × the mean.
+		expect(parseSeriesCsv(logger(60, 2, (i) => ((i - 1) % 24 < 12 ? 2 : 4)), rain).values).toEqual([72, 72]);
+	});
+
+	it('averages a 15-minute flow into its day, not 96 × it', () => {
+		const r = parseSeriesCsv(logger(15, 3, () => 1.5), flow);
+		expect(r.values).toEqual([1.5, 1.5, 1.5]);
+		expect(r.subDaily!.readingsPerDay).toBe(96);
+	});
+
+	it('adds up hourly and 15-minute rain', () => {
+		expect(parseSeriesCsv(logger(60, 2, (i) => (i === 5 ? 3 : 0.5)), rain).values).toEqual([14.5, 12]);
+		const fifteen = parseSeriesCsv(logger(15, 2, (i) => (i <= 8 ? 1 : 0)), rain);
+		expect(fifteen.values).toEqual([8, 0]);
+		expect(fifteen.subDaily!.readingsPerDay).toBe(96);
+	});
+
+	it('averages a day with a missed reading over the readings it has, and says it is incomplete', () => {
+		const text = logger(60, 2, (i) => (i === 3 ? NaN : 2)).replace(',NaN', ',');
+		const r = parseSeriesCsv(text, flow);
+		expect(r.values).toEqual([2, 2]);
+		expect(r.subDaily!.incompleteDays).toBe(1);
+	});
+
+	it('leaves out a first and last day the logger covers only in part, and says which', () => {
+		// Starts at 13:00 on 1 June and stops at 11:00 on 4 June: the 2nd and 3rd are whole.
+		const rows = logger(60, 4, (i) => (i < 13 ? 100 : 2)).split('\n');
+		const text = [rows[0], ...rows.slice(13, 84)].join('\n');
+		const r = parseSeriesCsv(text, flow);
+		expect([r.startDate, r.endDate, r.values]).toEqual(['2021-06-02', '2021-06-03', [2, 2]]);
+		expect(r.subDaily!.partialEdges).toEqual({ first: '2021-06-01', last: '2021-06-04' });
+		// Positive control: a file of whole days has none.
+		expect(parseSeriesCsv(logger(60, 2, () => 2), flow).subDaily).not.toHaveProperty('partialEdges');
+	});
+
+	it('refuses a file with no whole day rather than storing a part day', () => {
+		expect(() => parseSeriesCsv('2021-06-01 10:00,1\n2021-06-01 11:00,1', flow)).toThrow(/no whole day: the readings cover only part of 2021-06-01/);
+		expect(() => parseSeriesCsv('2021-06-01 23:00,1\n2021-06-02 00:00,1\n2021-06-02 01:00,1', rain)).toThrow(/cover only parts of 2021-06-01 and 2021-06-02/);
 	});
 });
 
@@ -285,8 +364,9 @@ describe('negative values (issue #51)', () => {
 	});
 
 	it('leaves a negative sub-daily reading out of its day’s total', () => {
-		const p = parseSeriesCsv('date,value\n2020-01-01 09:00,-999\n2020-01-01 10:00,2\n2020-01-02 09:00,1', { dayBoundary: '08:00' });
+		// Six-hourly, midnight days: the 1st's four readings, one of them -999.
+		const p = parseSeriesCsv('date,value\n2020-01-01 06:00,-999\n2020-01-01 12:00,2\n2020-01-01 18:00,0\n2020-01-02 00:00,1', { dayBoundary: '00:00', aggregate: 'sum' });
 		expect(p.negativeGaps).toBe(1);
-		expect(p.values[0]).toBe(2);
+		expect(p.values).toEqual([3]);
 	});
 });

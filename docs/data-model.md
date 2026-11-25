@@ -419,8 +419,9 @@ sub-daily readings (issue #40 (b) amendment 5, [model.md
 `'08:00'` = each day is 08:00 to 08:00 the next morning, booked to the day
 it starts (the manual-gauge convention); `'00:00'` = midnight to midnight;
 `NULL` = daily values as uploaded (a CHECK allows only these). The browser
-adds an hourly or other sub-daily CSV up into days (each timestamp closes
-its interval) and sends the boundary with the values.
+makes an hourly or other sub-daily CSV into days (each timestamp closes
+its interval; a depth added up, a flow averaged, a part first or last day
+left out, issue #829) and sends the boundary with the values.
 
 - **Set by** an upload (`PUT …/series` with `dayBoundary`; a replace that
   doesn't say clears it), a merge into an empty or new series, a copy, and

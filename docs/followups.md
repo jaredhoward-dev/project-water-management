@@ -58,6 +58,28 @@ are in. Still open:
       `redirect_domains`. Trigger: the domain bought, in the client's name if
       they will own the brand.
 
+## Sub-daily flow series stored summed (issue #829)
+
+Before the fix, an hourly or 15-minute flow CSV was added up into days, so
+its days were 24 × or 96 × too large. Any flow series stored then with a
+day boundary was made that way. The operator checks production read-only
+(the schema owner's `psql`; no write):
+
+```sql
+SELECT ts.project_id, ts.id, ts.kind, ts.name, ts.day_boundary
+FROM time_series ts
+WHERE ts.kind LIKE '%\_m3s' AND ts.day_boundary IS NOT NULL
+ORDER BY ts.project_id, ts.kind, ts.name;
+```
+
+- [ ] Operator: run the query. No rows: tick this and the next. Rows: each
+  series is uploaded again from its original file (now averaged), or its
+  owner told; the runs that read it are re-run. A stored series can't be
+  divided back safely (the readings a day aren't kept), so don't patch the
+  values in SQL.
+- [ ] Series revisions (`series_revision`, `day_boundary` kept) of a flow
+  series hold the same summed values: restoring one brings them back.
+
 ## Blocking releases (operator)
 
 The checklist for these is issue #62; the history scrub is #63.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canonicalUnit, scaleValues, seriesUnit, unitOptions } from './units';
+import { canonicalUnit, scaleValues, seriesDimension, seriesUnit, unitOptions } from './units';
 
 describe('seriesUnit', () => {
 	it('stores flow in m³/s and rain in mm, converting the common alternatives', () => {
@@ -54,5 +54,15 @@ describe('unit spellings with long whitespace runs', () => {
 		expect(seriesUnit('flow_observed_m3s', `m3${' '.repeat(200_000)}/s`)).toMatchObject({ ok: true, factor: 1 });
 		expect(seriesUnit('flow_observed_m3s', `m3${' '.repeat(200_000)}x`)).toMatchObject({ ok: false });
 		expect(seriesUnit('flow_observed_m3s', 'm3 \t PER  \n sec')).toMatchObject({ ok: true, factor: 1 });
+	});
+});
+
+describe('seriesDimension', () => {
+	it('says flow for every m³/s kind and depth for every mm kind (sub-daily readings averaged or added up, issue #829)', () => {
+		expect(seriesDimension('flow_logger_m3s')).toBe('flow');
+		expect(seriesDimension('flow_reference_m3s')).toBe('flow');
+		expect(seriesDimension('rain_chirps_mm')).toBe('depth');
+		expect(seriesDimension('evap_et0_mm')).toBe('depth');
+		expect(seriesDimension('unknown')).toBeNull();
 	});
 });

@@ -2121,7 +2121,7 @@ export const TIPS: HelpTipText[] = [
 	{
 		id: 'day-boundary',
 		term: 'Day boundary of sub-daily readings',
-		short: 'How several readings a day add up into days: 08:00 to 08:00, booked to the day it starts (the manual-gauge day), or midnight to midnight.',
+		short: 'How several readings a day make days: 08:00 to 08:00, booked to the day it starts (the manual-gauge day), or midnight to midnight. Rain and evaporation are added up; a flow is averaged.',
 		category: 'data'
 	},
 	{

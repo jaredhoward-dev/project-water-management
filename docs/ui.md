@@ -6971,15 +6971,25 @@ with a mean annual total in its row like a rain series; a file whose name or
 header says evap, A-pan or A pan is guessed as that kind, and a newer daily
 A-pan record counts as new data since the last run. It replaces the monthly
 A-pan means on the days it covers ([model.md §2.3a](./model.md#23a-daily-a-pan-evaporation-engine--0380-issue-45)). A CSV with several timed readings a day (an automatic
-station's hourly log) is not refused: the form asks how to add it up into
+station's hourly log) is not refused: the form asks how to make it into
 days, **08:00 to 08:00, booked to the day it starts** (the default, the
-manual-gauge day) or **midnight to midnight**, and its summary says how many
-readings, how many a day and how many days are short of that. Each
+manual-gauge day) or **midnight to midnight**. A depth (rain, evaporation: mm
+in the interval) is added up into its day; a flow (m³/s, l/s: a rate) is
+averaged over the readings the day has, by the kind's flow-or-depth split in
+the engine's `units.ts` (issue #829: adding an hourly m³/s log up made its day
+24 × too large, a 15-minute one 96 ×). The form reads the file again when the
+kind changes. Readings a whole day holds is 1 440 minutes over the file's
+most common interval (24 for hourly, 96 for 15-minute). A first or last day
+the file covers only in part (a logger started or stopped partway through
+the window) is left out, not stored as a short total or a part-day average,
+and the summary names it; a file with no whole day is refused. The summary
+says how many readings, how many a day, the days left out and how many kept
+days are short of whole. Each
 timestamp closes its interval. A time is HH:MM (seconds optional) or a
 12-hour time with its AM/PM (7:00 PM is 19:00, 12:00 AM midnight); a time
 followed by anything else (a zone, `Z`) is refused, not trimmed. The series records the choice
 (`dayBoundary`), shown as *08:00–08:00 days, added up from sub-daily
-readings* on its row, and a merge of the
+readings* on its row (*averaged from* for a flow), and a merge of the
 other window into it is refused ([model.md §2.4e](./model.md#24e-rain-source-periods-engine--0300-issue-40-b)).
 The table's breakpoints are container queries on the page's column
 (`@container data-page`), not the viewport, since the sidebar takes 240 px.

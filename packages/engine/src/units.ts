@@ -6,11 +6,18 @@
 // this table doesn't know is refused, never guessed.
 import type { SeriesKind } from './project';
 
-type Dimension = 'flow' | 'depth';
+export type Dimension = 'flow' | 'depth';
 
 export const CANONICAL_UNIT: Record<Dimension, string> = { flow: 'm³/s', depth: 'mm' };
 
 const dimensionOf = (kind: SeriesKind | string): Dimension | null => (kind.endsWith('_m3s') ? 'flow' : kind.endsWith('_mm') ? 'depth' : null);
+
+/**
+ * Whether a series of this kind is a flow (a rate, m³/s) or a depth (mm a
+ * day), null for a kind with no unit table. Sub-daily readings are averaged
+ * into a day for a flow and added up for a depth (issue #829).
+ */
+export const seriesDimension = (kind: SeriesKind | string): Dimension | null => dimensionOf(kind);
 
 /** The unit a series of this kind is stored in (and the model reads it in). */
 export const canonicalUnit = (kind: SeriesKind | string): string | null => {

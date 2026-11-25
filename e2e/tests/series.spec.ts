@@ -425,9 +425,9 @@ test('an hourly file is added up into 08:00 days, or midnight days, and the seri
 	const boundary = form.getByTestId('day-boundary');
 	await expect(boundary.getByRole('radio', { name: /^08:00 to 08:00/ })).toBeChecked();
 	await expect(form.getByTestId('sub-daily-summary')).toHaveText('72 readings, 24 a day, 08:00–08:00');
-	// Midnight splits the storm over two days, with two partial days at the ends; back to 08:00 for the upload.
+	// Midnight splits the storm over two days, with two partly recorded days at the ends, left out (issue #829); back to 08:00 for the upload.
 	await boundary.getByRole('radio', { name: /^midnight to midnight/ }).check();
-	await expect(form.getByTestId('sub-daily-summary')).toContainText('2 days have fewer readings');
+	await expect(form.getByTestId('sub-daily-partial')).toContainText('left out as only partly recorded');
 	await boundary.getByRole('radio', { name: /^08:00 to 08:00/ }).check();
 	await form.getByLabel('Product').fill('SASSCAL AWS');
 	await form.getByLabel('Version').fill('1');
