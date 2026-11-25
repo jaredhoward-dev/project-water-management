@@ -5186,7 +5186,11 @@ role and not before it.
       `RENDER_CONCURRENCY` (Terraform's `local.renderer_concurrency`, also the
       trigger's `maximum_concurrency`); the token is issued only on send; the
       rest wait in the job table, in order, their attempts given back; a slot
-      frees on any answer, a failed send, or 10 minutes. An expired,
+      frees on the answer to the request in flight (its echoed `requestId`, a
+      digest of its token; a stale or redelivered answer frees nothing, one
+      without an id only an unnamed slot), a failed send, or 10 minutes, and
+      each free makes the next waiter due at once and wakes the worker. A
+      re-asked report waiting for a slot moves `sent_at` to each ask. An expired,
       never-rendered answer (an SQS redelivery) asks again uncounted, up to 5
       times. Reports, packs and applicants' copies alike; a report's answer
       window counts from its send (`report.sent_at`). Tests:

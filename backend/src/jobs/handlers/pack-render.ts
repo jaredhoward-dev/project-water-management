@@ -139,8 +139,8 @@ export const packRenderHandler = defineHandler({
 
 		if (reportRenderer() === 'sqs') {
 			// Only with a render slot (reports/renderSlots.ts), as report_render: the token is issued once it can go.
-			await sendWithSlot(packSlot(payload.packId), async () => {
-				const message: PackRenderRequestMessage = { v: 1, type: 'render_pack', packId: payload.packId, projectId: job.projectId, token: await issue() };
+			await sendWithSlot(packSlot(payload.packId), job.id, issue, async (token) => {
+				const message: PackRenderRequestMessage = { v: 1, type: 'render_pack', packId: payload.packId, projectId: job.projectId, token };
 				await sendToQueue(process.env.RENDER_REQUESTS_QUEUE_URL, 'RENDER_REQUESTS_QUEUE_URL', message);
 			});
 			return;

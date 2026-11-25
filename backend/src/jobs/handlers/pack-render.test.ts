@@ -34,7 +34,7 @@ vi.mock('../transport.js', async (orig) => ({
 vi.mock('../../reports/renderSlots.js', async (orig) => ({
 	...(await orig<typeof import('../../reports/renderSlots.js')>()),
 	// The slot itself is a database's (reports/renderSlots.db.test.ts): here it is always free, and named.
-	sendWithSlot: async (target: string, send: () => Promise<void>) => (calls.slots.push(target), send())
+	sendWithSlot: async (target: string, _jobId: string, issue: () => Promise<string>, send: (token: string) => Promise<void>) => (calls.slots.push(target), send(await issue()))
 }));
 vi.mock('../queue.js', () => ({ enqueueJob: async (_db: unknown, j: Record<string, unknown>) => (calls.enqueued.push(j), { job: { id: 'j2' }, created: true }) }));
 

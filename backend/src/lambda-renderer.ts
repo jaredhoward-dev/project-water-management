@@ -9,7 +9,9 @@
 // and put objects under reports/ in the reports bucket. Nothing else. For
 // each request it opens the site like a browser (CloudFront, WAF, the API's
 // render-session exchange), prints the report (reports/render.ts), stores the
-// PDF under the key derived from the ids, and answers with the outcome only.
+// PDF under the key derived from the ids, and answers with the outcome only,
+// plus the request's id (jobs/transport.ts renderRequestId, a one-way digest
+// of its token), which the worker's render slot matches (353).
 // The request's render token is single use and dies in 5 minutes; it is never
 // logged.
 //
@@ -45,6 +47,7 @@ import {
 	type RenderResult,
 	type RenderResultMessage,
 	parseRenderRequest,
+	renderRequestId,
 	sendToQueue
 } from './jobs/transport.js';
 import { renderOptionsFromEnv, RenderError, renderReportPdf, STALE_REQUEST_ERROR, staleRenderRequest } from './reports/render.js';
@@ -88,7 +91,7 @@ export const handler = async (event: SQSEvent): Promise<SQSBatchResponse> => {
 				result = { ok: false, error: e.message.slice(0, 300), retry: e.retry };
 			}
 		}
-		const message: RenderResultMessage = { v: 1, type: 'rendered', reportId: req.reportId, result };
+		const message: RenderResultMessage = { v: 1, type: 'rendered', reportId: req.reportId, requestId: renderRequestId(req.token), result };
 		try {
 			await sendToQueue(process.env.RENDER_RESULTS_QUEUE_URL, 'RENDER_RESULTS_QUEUE_URL', message);
 		} catch (err) {
@@ -142,7 +145,7 @@ async function renderPack(req: PackRenderRequestMessage, stale: boolean): Promis
 			result = { ok: false, error: e.message.slice(0, 300), retry: e.retry };
 		}
 	}
-	const message: PackRenderResultMessage = { v: 1, type: 'rendered_pack', packId: req.packId, ...(req.scenarioId ? { copy: 'applicant' as const } : {}), result };
+	const message: PackRenderResultMessage = { v: 1, type: 'rendered_pack', packId: req.packId, ...(req.scenarioId ? { copy: 'applicant' as const } : {}), requestId: renderRequestId(req.token), result };
 	try {
 		await sendToQueue(process.env.RENDER_RESULTS_QUEUE_URL, 'RENDER_RESULTS_QUEUE_URL', message);
 	} catch (err) {

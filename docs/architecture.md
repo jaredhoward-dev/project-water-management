@@ -3107,15 +3107,38 @@ sequenceDiagram
   to the job table (`JobRelease`, its attempt given back) and asks again in
   15 s, keeping its place in a first-asked, first-sent line, so a burst
   (many Monday 07:00 schedules) waits in our queue, not in `render-requests`
-  with its tokens dying. A slot frees when the renderer's answer arrives
-  (`lambda-worker.ts`, any answer, before it is queued as a job), when the
-  send fails, or on its own 10 minutes after it was taken (a token's 5, a
-  render's 2, a margin: the answer was lost or dead-lettered); a waiter that
-  stops asking (its report deleted) leaves the line as long after its last
-  ask. One target (a report, a pack, an applicant's copy) is never in
-  flight twice. A report's 1-hour answer window counts from its send
-  (`report.sent_at`), not from when it was asked for. Locally
-  (`REPORT_RENDERER=inline`) the job renders itself and takes no slot.
+  with its tokens dying. Each request sent on a slot is named first
+  (`app_render_slot_sent`) by its request id, a one-way digest of its render
+  token (`jobs/transport.ts renderRequestId`), which the renderer echoes in
+  its answer (`requestId`, optional in the result schema). A slot frees
+  when the answer *to that request* arrives (`lambda-worker.ts`, any
+  outcome, before it is queued as a job), when the send fails, or on its own
+  10 minutes after it was taken (a token's 5, a render's 2, a margin: the
+  answer was lost or dead-lettered). A late or redelivered answer of an
+  earlier request (an SQS redelivery, the first answer after an expired
+  request was asked again, the answer of a slot that timed out and was taken
+  again) frees nothing, so no more than `RENDER_CONCURRENCY` ever run. An
+  answer with no `requestId` (a renderer older than 353) frees only a slot
+  not yet named, which in practice is none: that slot frees on its 10
+  minutes. Whenever a slot frees (an answer, a failed send, an expired slot
+  reclaimed by a take) the oldest waiter whose job is still queued is made
+  due at once and the worker woken (`app_render_slot_wake`: NOTIFY
+  `job_queued` for the local worker; in production the answer's own worker
+  invocation runs the tick that claims it), so a free slot never idles until
+  the 5-minute tick. A waiter that stops asking (its report deleted) leaves
+  the line as long after its last ask. One target (a report, a pack, an
+  applicant's copy) is never in flight twice. A report's 1-hour answer
+  window counts from its send (`report.sent_at`), not from when it was
+  asked for; a report asked again (`requestRenderAgain`) that waits for a
+  slot moves `sent_at` to each ask, so a live wait never reads as an
+  unanswered send, and a wait whose job stops asking still fails it an hour
+  on. **Rollout:** the request message is unchanged (an older renderer
+  would refuse a new field), and the worker accepts answers with or without
+  `requestId`, so the release order (worker first, then the renderer's
+  image; deployment.md § Releasing) is safe; between the two, the old
+  renderer's answers free nothing and its slots free on their 10 minutes.
+  Locally (`REPORT_RENDERER=inline`) the job renders itself and takes no
+  slot.
 - **Storage** (`reports/storage.ts`, `STORAGE`): one S3 client.
   `local` (the default) is MinIO from docker-compose on :9002, bucket created
   on first use; `s3` is the private production bucket (SSE, 7-day

@@ -55,7 +55,7 @@ import { minioUp, S3_ENDPOINT } from '../__tests__/minio.js';
 import { withoutUser, withUser } from '../db/tx.js';
 import { enqueueJob } from '../jobs/queue.js';
 import { runTick } from '../jobs/runner.js';
-import { PackRenderRequestMessage, type PackRenderResult } from '../jobs/transport.js';
+import { PackRenderRequestMessage, type PackRenderResult, renderRequestId } from '../jobs/transport.js';
 import { outbox } from '../mail/transport.js';
 import { sendPackNotices } from './notices.js';
 import { packVolumesWithheld } from './packs.js';
@@ -861,10 +861,15 @@ describe.skipIf(!minio)('issuing, superseding and withdrawing', () => {
 				[projectId, v1.id]
 			);
 		const tick = () => runTick({ feeds: false, reports: false, alerts: false });
-		/** What the worker does with a render-results message (lambda-worker.ts): free the pack's render slot (353), queue the answer. */
+		/**
+		 * What the worker does with a render-results message (lambda-worker.ts): free the pack's render slot (353; the
+		 * answer echoes its request's id, as the renderer does, for the latest request sent), queue the answer.
+		 */
 		const answer = async (result: PackRenderResult) => {
-			await freeRenderSlot(packSlot(v1.id));
-			return acceptPackRenderResult({ v: 1, type: 'rendered_pack', packId: v1.id, result });
+			const last = sent.filter((m) => m.type === 'render_pack' && m.packId === v1.id).at(-1);
+			const requestId = last ? renderRequestId(String(last.token)) : undefined;
+			await freeRenderSlot(packSlot(v1.id), requestId);
+			return acceptPackRenderResult({ v: 1, type: 'rendered_pack', packId: v1.id, ...(requestId ? { requestId } : {}), result });
 		};
 		const pdfState = async () => (await viewer.call('GET', packPath(v1.id))).body.pdf;
 		/** A request carrying only a cookie (the render session's), as the headless browser sends it. */

@@ -107,7 +107,9 @@ export async function loadReport(db: Db, projectId: string, reportId: string): P
  * is shown as failed (its message was lost or dead-lettered, which alarms).
  * It counts from the send (report.sent_at, 353), not from the ask: a report
  * that waited in our queue for a render slot (reports/renderSlots.ts) wasn't
- * with the renderer meanwhile.
+ * with the renderer meanwhile. A report asked again that waits for a slot
+ * moves it to each ask (jobs/handlers/report-render.ts), so a live wait never
+ * reads as failed, and a wait whose job stops asking still does an hour on.
  */
 export const RENDER_ANSWER_WITHIN_MS = 60 * 60 * 1000;
 

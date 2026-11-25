@@ -36,7 +36,7 @@ import { putPdf, reportKey } from '../../reports/storage.js';
 import { failReport, finishReport, loadReport, REPORT_MAX_ATTEMPTS } from '../../reports/store.js';
 import { issueRenderToken } from '../../reports/tokens.js';
 import { expiredUnrendered, MAX_EXPIRED_REQUESTS, reportSlot, sendWithSlot } from '../../reports/renderSlots.js';
-import { JobError } from '../errors.js';
+import { JobError, JobRelease } from '../errors.js';
 import { enqueueJob } from '../queue.js';
 import { defineHandler } from '../registry.js';
 import { type RenderRequestMessage, RenderResult, reportRenderer, sendToQueue } from '../transport.js';
@@ -51,7 +51,7 @@ import { logEvent } from '../../logging/logEvent.js';
  * REPORT_MAX_ATTEMPTS requests have been made in all. Each request issues a
  * fresh token when it gets a render slot (reports/renderSlots.ts). The report
  * stays `rendering` meanwhile (the 1-hour answer window, store.ts, counts
- * from each send).
+ * from each send, or from the latest ask while it waits for a slot).
  *
  * `expired`: the renderer refused the request only because it waited past its
  * token's life, and rendered nothing (renderSlots.ts expiredUnrendered: an
@@ -129,11 +129,21 @@ export const reportRenderHandler = defineHandler({
 
 		if (reportRenderer() === 'sqs') {
 			// Only with a render slot (reports/renderSlots.ts): else back to the job table to wait, and no token issued.
-			await sendWithSlot(reportSlot(report.id), async () => {
-				const token = await issue();
-				const message: RenderRequestMessage = { v: 1, type: 'render', reportId: report.id, projectId: job.projectId, runId, ...(against ? { against } : {}), token };
-				await sendToQueue(process.env.RENDER_REQUESTS_QUEUE_URL, 'RENDER_REQUESTS_QUEUE_URL', message);
-			});
+			try {
+				await sendWithSlot(reportSlot(report.id), job.id, issue, async (token) => {
+					const message: RenderRequestMessage = { v: 1, type: 'render', reportId: report.id, projectId: job.projectId, runId, ...(against ? { against } : {}), token };
+					await sendToQueue(process.env.RENDER_REQUESTS_QUEUE_URL, 'RENDER_REQUESTS_QUEUE_URL', message);
+				});
+			} catch (err) {
+				// A request asked again (requestRenderAgain) waiting for a slot: the report is still `rendering`, and
+				// its answer window moves to this ask, so a live wait never reads as an unanswered send (store.ts
+				// reportState); a wait whose job stops asking still fails it an hour on. Committed on its own: the
+				// release rolls this transaction back.
+				if (err instanceof JobRelease && report.status === 'rendering') {
+					await withUser(job.actingUserId, (tx) => tx.query(`UPDATE report SET sent_at = now() WHERE id = $1 AND status = 'rendering'`, [report.id]));
+				}
+				throw err;
+			}
 			// The answer window counts from the send (353): a wait for a slot isn't the renderer's.
 			await db.query(`UPDATE report SET status = 'rendering', sent_at = now() WHERE id = $1`, [report.id]);
 			return;

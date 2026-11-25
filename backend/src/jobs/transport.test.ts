@@ -141,6 +141,12 @@ describe('the report messages (render-requests / render-results)', () => {
 		expect(parseWorkerMessage(JSON.stringify({ ...ok, key: 'reports/x.pdf' }))).toBeNull();
 		expect(parseWorkerMessage(JSON.stringify({ ...ok, result: { ...ok.result, key: 'reports/x.pdf' } }))).toBeNull();
 		expect(parseWorkerMessage(JSON.stringify({ ...failed, result: { ...failed.result, error: 'x'.repeat(301) } }))).toBeNull();
+		// The echoed request id (353): optional (a renderer older than it sends none), and only a 32-hex digest.
+		expect(parseWorkerMessage(JSON.stringify({ ...ok, requestId: 'c3'.repeat(16) }))).toEqual({ ...ok, requestId: 'c3'.repeat(16) });
+		expect(parseWorkerMessage(JSON.stringify({ ...ok, requestId: 'a'.repeat(43) }))).toBeNull();
+		const pack = { v: 1, type: 'rendered_pack', packId: ids.reportId, requestId: 'c3'.repeat(16), result: { ok: false, error: 'x', retry: true } };
+		expect(parseWorkerMessage(JSON.stringify(pack))).toEqual(pack);
+		expect(parseWorkerMessage(JSON.stringify({ ...pack, requestId: 'C3'.repeat(16) }))).toBeNull();
 	});
 
 	it('REPORT_RENDERER defaults to inline (local-first) and knows only inline and sqs', () => {
