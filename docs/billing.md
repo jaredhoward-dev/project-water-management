@@ -1699,6 +1699,22 @@ payment provider. So the route cancels the plan there first
   refused (`409 account_sole_holder`) until they make someone else admin,
   so the team's plan always has an admin to manage it. `DELETE /teams/:id`
   (an admin deleting the team) cancels the team's plan the same way.
+- **Open checkouts first.** Under Stripe, the customer's open Checkout
+  sessions (`GET /v1/checkout/sessions?customer=…&status=open`) are
+  expired first (`POST /v1/checkout/sessions/:id/expire`): one started
+  before the deletion and paid after it would otherwise start a
+  subscription for an account that is gone, charge the card, and reach a
+  webhook that ignores the unknown account. Every session we make names
+  the account's customer (`customer=`, never `customer_email`), so listing
+  by customer finds them all. A session Stripe refuses to expire because it
+  is no longer open (it completed or expired in between) is fine: a
+  completed one's subscription is in the subscription list read next, and
+  cancelled. Left open: a checkout *started* in the moment between the
+  cancel and the delete (a second tab), whose subscription would arrive
+  after the account is gone. The window is the length of the delete
+  transaction, and the durable fix is for the webhook to cancel at Stripe
+  a subscription whose account no longer exists (tracked in
+  [followups.md](./followups.md)).
 - **What is cancelled.** Every live (`trialing`, `active`, `past_due`)
   subscription a provider holds (not a `manual` grant or the reverse trial,
   which nothing charges for), and, under Stripe, every other open
@@ -1722,13 +1738,28 @@ payment provider. So the route cancels the plan there first
   `account_delete_plan_not_cancelled` with the account's random id.
 - **Order.** Self-service checks what the person alone holds first (no
   cancel for a deletion that would be refused anyway), cancels outside the
-  deleting transaction (no row locks held over Stripe's round trip), then
-  deletes; a live subscription that appeared in between (a checkout that
-  completed) refuses the deletion rather than orphan it. If the deletion is
-  refused after the cancel (a co-owner left at the same moment), the plan
-  stays cancelled: Stripe's `customer.subscription.deleted` ends it here
-  too, and the person is on Free. Deleting a team cancels inside its
-  transaction.
+  deleting transaction (no row locks held over Stripe's round trips), then
+  reads the live subscriptions again inside the deleting transaction: one
+  that appeared in between (a checkout that completed) refuses the deletion
+  (`503 account_plan_not_cancelled`) rather than orphan it. Deleting a team
+  does the same: the admin check, then the cancel outside the transaction
+  (a non-admin never triggers one), then the same re-check inside the
+  deleting transaction (`503 billing_provider_error`).
+- **A refused deletion may already have ended the plan.** A refusal after
+  the cancel (a checkout completed in between, or a co-owner left at the
+  same moment) leaves the plan cancelled: Stripe's
+  `customer.subscription.deleted` ends it here too, and the person (or the
+  team) is on Free. Trying again is safe: a second attempt cancels only
+  what is still live, and goes through once nothing is.
+- **No usable provider is an erasure blocker.** While the account has a
+  live provider subscription and no provider that can cancel it is
+  configured (`BILLING_PROVIDER=manual`, an unknown value, Stripe with no
+  key, or the mock while the subscription is Stripe's), self-service
+  deletion is refused every time. That blocks a POPIA s24 erasure request,
+  so it can't be left standing: the operator cancels the subscription in
+  Stripe's dashboard and deletes the account by the runbook
+  ([deployment.md § Runbooks](./deployment.md#runbooks), item 7), or
+  restores the provider's configuration so the person can retry.
 - **The customer is kept.** The Stripe customer (`cus_…`) and its invoices
   stay at Stripe as the record of the sale, which tax law requires keeping
   (5 years under the Tax Administration Act s29 once registered; the US
@@ -1747,10 +1778,14 @@ payment provider. So the route cancels the plan there first
 Tests: `billing/cancelOnDelete.test.ts` (fake providers: cancel asked,
 failure refuses, nothing asked with nothing to cancel, another provider's
 subscription refused), `provider.test.ts` and `provider/stripeApi.test.ts`
-(the list and cancel calls), `auth/delete-me.db.test.ts` (a mock plan
-deleted with the account, a failing provider refuses with nothing deleted,
-a team admin's deletion leaves the team's plan) and `teams/teams.db.test.ts`
-(the team's own deletion).
+(the checkout session list and expiry, the subscription list and cancel
+calls, in that order), `auth/delete-me.db.test.ts` (a mock plan deleted
+with the account, a failing provider refuses with nothing deleted, a
+checkout landing during the cancel refuses with nothing deleted, a team
+admin's deletion leaves the team's plan) and `teams/teams.db.test.ts` (the
+team's own deletion, the same race, and no cancel asked for by a
+non-admin); `e2e/tests/account-delete.spec.ts` (the dialog's words for
+`account_plan_not_cancelled`, still signed in).
 
 ## Later phases
 

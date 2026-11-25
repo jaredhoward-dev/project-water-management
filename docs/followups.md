@@ -897,6 +897,17 @@ are #641's checklist. Open items from building it:
       the tax record (billing.md § Deleting an account; counsel's § 6 items
       9 and 13 remain).* Trigger: before the first charge
       (`BILLING_PROVIDER=stripe`), with Gates A, C and D.
+- [ ] **A checkout started during an account's deletion can still charge.**
+      Deleting an account or team expires its customer's open Stripe
+      Checkout sessions and re-checks its live subscriptions inside the
+      deleting transaction (round 2026-11-24 r2), but a session started in
+      another tab after the expiry and paid after the delete commits makes
+      a subscription for an account that is gone; the webhook answers it
+      `unknown_account` and the card is charged. Durable fix: the webhook,
+      on a live subscription event for an unknown account whose metadata
+      names one of ours, cancels it at Stripe (now, no proration) and
+      refunds its first invoice, logged; a webhook test with faked Stripe
+      HTTP. Trigger: before the first charge (`BILLING_PROVIDER=stripe`).
 - [x] **The Plan page's "Compare plans" could link the public pricing
       page.** `/welcome/pricing` (Phase 4) now shows the three plans side by
       side; the Plan page (`PlanUsage.svelte`) and its Compare plans links

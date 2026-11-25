@@ -4378,8 +4378,17 @@ same way.
   (every live subscription of their `user` billing account, and any other
   open one of their Stripe customer), now and with no refund; if the
   provider can't, it answers `503 account_plan_not_cancelled` and deletes
-  nothing, so a card is never left charging for an account that is gone. A
-  team's plan stays with the team (deleting the team cancels it the same
+  nothing, so a card is never left charging for an account that is gone.
+  Under Stripe it first expires the customer's open Checkout sessions, so
+  none can start a subscription after the account is gone, and it reads
+  the live subscriptions again inside the deleting transaction, refusing
+  if a checkout completed meanwhile. A refused deletion may already have
+  ended the plan; retrying is safe. While a live provider subscription
+  exists and no provider that can cancel it is configured, every attempt
+  is refused: that blocks a POPIA s24 erasure, so the operator cancels in
+  Stripe's dashboard and deletes by the runbook below (item 7) instead
+  (billing.md § Deleting an account). A team's plan stays with the team
+  (deleting the team cancels it the same way, and checks again the same
   way). The operator's SQL path can't reach Stripe, so its runbook cancels
   the subscription in Stripe's dashboard first ([deployment.md §
   Runbooks](./deployment.md#runbooks), item 7). **The Stripe customer
