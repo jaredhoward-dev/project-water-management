@@ -6366,6 +6366,16 @@ the Map tab, Settings → WR2012 check → Propose from the map;
       only when the importer flags a unit. Parity: `fixture.test.ts` against
       the committed `synthetic_b023.run-of-river.*` output, and the local
       `sourceWorkbooks.test.ts` on the client workbooks.
+- [x] **A dated `demand.scale` that changes no day applied anyway** (round 4
+      finding, 2026-11-24). Its months never between its dates, or its window
+      outside the run, left a scenario that said demand changed while its run
+      equalled its base; `series.scale` already refused the same. Done (engine
+      1.119.0): refused as a problem (`overrides.ts`
+      `datedDemandWindowProblem`, against an outer bound of the run window as
+      the earlier ops leave the simulation period; scenarios.md § Demand
+      scaling). A saved scenario holding such an op now shows it as "Doesn't
+      apply", and running, submitting or freezing licence terms with it is
+      refused (422) until the op is deleted; nothing stored is migrated.
 
 ## Rain forcing, fitting at import and river off-takes (issue #54)
 

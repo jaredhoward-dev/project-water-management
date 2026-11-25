@@ -4,7 +4,7 @@
 // backend loads the base input, this transforms plain data, and runModel is
 // unchanged. Future climate is ./climate.ts (climate.delta, engine 1.107.0);
 // stochastic transforms (WP-4.11) will sit beside them.
-import { toEpochDay } from '../calendar';
+import { dayText, fromEpochDay, monthOfEpochDay, toEpochDay } from '../calendar';
 import { withMonthlyRates } from '../network/transferRates';
 import { isSplitTransfer, transferDestinations, withDestinations } from '../network/transferSplits';
 import { DAM_AREA_EXPONENT, DEFAULT_IRRIGATION_SYSTEMS, DEMAND_PARTS, estimatedDamAreaM2, MONTHLY_ROW_OF, replacedByMonth, returnFlowFromLossReturn, upgradeLegacyModel, type Borehole, type DemandFactorWindow, type IrrigationSystemDef, type DailySeries, type LandCoverPatch, type ModelInput, type NetworkNode, type Transfer } from '../project';
@@ -948,6 +948,9 @@ function applyOne(d: Draft, op: ScenarioOp, see: Visibility = SEE_ALL): string[]
 			if (op.from !== undefined || op.to !== undefined) {
 				// Dated (engine ≥ 1.82.0, issue #514): a window on each node, its months' factor on its days only.
 				if (op.part !== undefined && !allowed(DEMAND_PARTS, op.part)) fail(`"${String(op.part)}" is not a part of a unit's demand`);
+				// A window that would change no day is refused (engine ≥ 1.119.0), as series.scale's is: before, it applied and the run equalled its base.
+				const none = datedDemandWindowProblem(d, op.from, op.to, op.months);
+				if (none) fail(none);
 				const factor = Array.from({ length: 12 }, (_, i) => (wy.has(i) ? op.factor : 1));
 				for (const n of targets) {
 					const w: DemandFactorWindow = { ...(op.from !== undefined ? { from: op.from } : {}), ...(op.to !== undefined ? { to: op.to } : {}), factor: factor.slice(), ...(op.part !== undefined ? { part: op.part } : {}) };
@@ -1028,6 +1031,66 @@ function applyOne(d: Draft, op: ScenarioOp, see: Visibility = SEE_ALL): string[]
 			fail(`unknown op ${(op as { op?: unknown }).op as string}`);
 	}
 	return notes;
+}
+
+const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/**
+ * The first and last epoch day a run of `d` can cover at most: the simulation
+ * start and end when set, else the span of every series the input carries.
+ * An outer bound of prepareRun's window (which reads only the rain series
+ * among them, and moves an end left unset in to the last rained day), so a
+ * day outside it is never a run day, while a day inside it may still not be
+ * one. Null when nothing bounds it (no series and no dates set).
+ */
+function runDayBounds(d: ModelInput): [number, number] | null {
+	let first = Infinity;
+	let last = -Infinity;
+	for (const s of Object.values(d.series ?? {}) as (DailySeries | undefined)[]) {
+		if (!s || !Array.isArray(s.values) || s.values.length === 0 || !isIsoDate(s.startDate)) continue;
+		const d0 = toEpochDay(s.startDate);
+		first = Math.min(first, d0);
+		last = Math.max(last, d0 + s.values.length - 1);
+	}
+	const { simulationStart, simulationEnd } = d.settings as { simulationStart?: unknown; simulationEnd?: unknown };
+	if (isIsoDate(simulationStart)) first = toEpochDay(simulationStart);
+	if (isIsoDate(simulationEnd)) last = toEpochDay(simulationEnd);
+	if (first === Infinity && last === -Infinity) return null;
+	return [first === Infinity ? -Infinity : first, last === -Infinity ? Infinity : last];
+}
+
+/** Does any of the calendar `months` (1–12) fall on a day of `a`–`b` (epoch days, inclusive)? */
+function monthFallsIn(months: readonly number[], a: number, b: number): boolean {
+	if (!Number.isFinite(a) || !Number.isFinite(b) || b - a >= 366) return true;
+	for (let t = a; t <= b; t++) if (months.includes(monthOfEpochDay(t))) return true;
+	return false;
+}
+
+/**
+ * Why a dated demand.scale window (engine ≥ 1.119.0) would change no day, or
+ * null: its months never fall between its dates (whatever the run), or none
+ * of its days, or none of its months' days, is one a run of `d` can cover
+ * (runDayBounds: the simulation period as the ops before it leave it). In the
+ * words of series.scale's "no day of … falls in …".
+ */
+function datedDemandWindowProblem(d: ModelInput, from: string | undefined, to: string | undefined, months: readonly number[] | undefined): string | null {
+	const lo = from === undefined ? -Infinity : toEpochDay(from);
+	const hi = to === undefined ? Infinity : toEpochDay(to);
+	const names = months ? [...months].sort((x, y) => x - y).map((m) => MONTH_ABBR[m - 1]).join(', ') : '';
+	const end = (iso: string | undefined, open: string) => (iso === undefined ? open : dayText(iso));
+	if (months && from !== undefined && to !== undefined && !monthFallsIn(months, lo, hi)) return `its months (${names}) never fall between ${dayText(from)} and ${dayText(to)}, so it would change no day`;
+	const run = runDayBounds(d);
+	if (!run) return null;
+	const day = (t: number) => dayText(fromEpochDay(t));
+	const span = Number.isFinite(run[0]) && Number.isFinite(run[1]) ? `${day(run[0])} – ${day(run[1])}` : Number.isFinite(run[0]) ? `from ${day(run[0])}` : `to ${day(run[1])}`;
+	const a = Math.max(lo, run[0]);
+	const b = Math.min(hi, run[1]);
+	if (a > b) return `no day the run can cover (${span}) falls in ${end(from, 'its start')} – ${end(to, 'its end')}, so it would change no day`;
+	if (months && !monthFallsIn(months, a, b)) {
+		const clip = run[0] > lo && run[1] < hi ? `the run’s days are ${span}` : run[0] > lo ? `the run’s days start ${day(run[0])}` : `the run’s days end ${day(run[1])}`;
+		return `none of its months (${names}) falls on a day the run can cover between ${end(from, 'its start')} and ${end(to, 'its end')} (${clip}), so it would change no day`;
+	}
+	return null;
 }
 
 /**

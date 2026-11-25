@@ -1283,6 +1283,52 @@ describe('demand.scale with dates (engine ≥ 1.82.0, issue #514: a dry-year str
 		expect(none.avg).toBeCloseTo(230 - (205 * 30) / none.days, 9);
 	});
 
+	it('refuses a window that would change no day, as series.scale does (engine ≥ 1.119.0)', () => {
+		// The base's rain runs 1 Oct 2020 – 12 Feb 2022 (500 days).
+		const problem = (op: ScenarioOp, b = base()) => {
+			const r = one(op, b);
+			// Refused whole: no window on any node, so the run is the base's and says so.
+			for (const n of r.input.model.nodes) expect(n.demandFactorWindows).toBeUndefined();
+			expect(r.applied).toEqual([]);
+			return r.problems;
+		};
+		// Months that never fall between its dates, whatever the run.
+		expect(problem({ op: 'demand.scale', factor: 1.3, nodeIds: ['A'], months: [6, 7], from: '2021-10-01', to: '2021-12-31' })).toEqual([
+			'op 1 (demand.scale): its months (Jun, Jul) never fall between 1 Oct 2021 and 31 Dec 2021, so it would change no day'
+		]);
+		// Wholly outside the days the run can cover, either side, open ends included.
+		expect(problem({ op: 'demand.scale', factor: 1.3, from: '2030-01-01' })).toEqual([
+			'op 1 (demand.scale): no day the run can cover (1 Oct 2020 – 12 Feb 2022) falls in 1 Jan 2030 – its end, so it would change no day'
+		]);
+		expect(problem({ op: 'demand.scale', factor: 0.5, category: 'user', to: '2020-09-30' }, withUser())[0]).toMatch(/no day the run can cover \(.*\) falls in its start – 30 Sep 2020/);
+		// Inside the run only on days none of its months falls on: June 2022 is past the run's end.
+		expect(problem({ op: 'demand.scale', factor: 1.3, nodeIds: ['A'], months: [6], from: '2021-12-01', to: '2022-12-31' })).toEqual([
+			'op 1 (demand.scale): none of its months (Jun) falls on a day the run can cover between 1 Dec 2021 and 31 Dec 2022 (the run’s days end 12 Feb 2022), so it would change no day'
+		]);
+		// One day inside is enough.
+		expect(one({ op: 'demand.scale', factor: 1.3, nodeIds: ['A'], from: '2022-02-12', to: '2030-01-01' }).problems).toEqual([]);
+		expect(one({ op: 'demand.scale', factor: 1.3, nodeIds: ['A'], months: [10], to: '2020-10-01' }).problems).toEqual([]);
+		// No series to bound the run (a form previewing a model alone): only the dates' own months are checked.
+		const bare = { ...base(), series: {} };
+		expect(one({ op: 'demand.scale', factor: 1.3, nodeIds: ['A'], from: '2030-01-01' }, bare).problems).toEqual([]);
+		expect(one({ op: 'demand.scale', factor: 1.3, nodeIds: ['A'], months: [6], from: '2030-01-01', to: '2030-03-31' }, bare).problems).toHaveLength(1);
+	});
+
+	it('checks the window against the simulation period as the ops before it leave it', () => {
+		const b = base();
+		b.settings.simulationEnd = '2021-06-30';
+		const late: ScenarioOp = { op: 'demand.scale', factor: 1.3, nodeIds: ['A'], from: '2021-10-01', to: '2021-12-31' };
+		expect(one(late, b).problems).toEqual(['op 1 (demand.scale): no day the run can cover (1 Oct 2020 – 30 Jun 2021) falls in 1 Oct 2021 – 31 Dec 2021, so it would change no day']);
+		// Moving the end first lets it apply; moving it after doesn't rescue it (each op meets the input as the ops before it leave it).
+		const end: ScenarioOp = { op: 'settings.set', path: 'simulationEnd', value: null };
+		expect(applyScenario(b, [end, late]).problems).toEqual([]);
+		expect(applyScenario(b, [late, end]).problems).toHaveLength(1);
+		// An explicit start bounds it too.
+		const c = base();
+		c.settings.simulationStart = '2021-01-01';
+		expect(one({ op: 'demand.scale', factor: 1.3, nodeIds: ['A'], to: '2020-12-31' }, c).problems[0]).toMatch(/\(1 Jan 2021 – 12 Feb 2022\)/);
+	});
+
 	it('is checked as series.scale’s dates are, stored as sent, and listed by run comparison', () => {
 		expect(validateScenarioOps([{ op: 'demand.scale', factor: 1.3, months: [1], from: '2021-10-01', to: '2022-09-30', junk: 1 } as unknown as ScenarioOp]).ops).toEqual([
 			{ op: 'demand.scale', factor: 1.3, months: [1], from: '2021-10-01', to: '2022-09-30' }
