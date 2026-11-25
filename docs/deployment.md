@@ -750,7 +750,9 @@ Applied 2026-10-04 (minimal tier), and tested plan-only with mocked providers in
   Lambda errors and throttles (`lambda-throttles`: the API at its reserved
   concurrency, issue #541), `unhandled_error`, `mail_send_failed`,
   `run_stamp_drift` and `client_error`, 15 alarm metrics; 18 once `ingest_image_tag` is set, with the data mirror's
-  two freshness alarms and `mirror-backfill-failed` (§ The data mirror).
+  two freshness alarms and `mirror-backfill-failed` (§ The data mirror),
+  and one more with `billing_provider = "stripe"`, `billing-orphan-failed`
+  (§ Billing alarms).
   Everything else listed above is declared but not created; its metrics and
   log lines are still there, just unpaged. Set `alarm_tier = "full"` in the
   prod tfvars to page on all of it (~$5/month in af-south-1). The RDS event
@@ -3416,6 +3418,43 @@ key goes into a chat, an issue or a CI log.
 To turn it off: `billing_provider = "manual"` and apply. The webhook route
 answers `404` again and checkout falls back to recording by hand; disable the
 endpoint in Stripe's dashboard and remove both sops keys.
+
+### Billing alarms
+
+An **orphan** is a subscription Stripe made for an account that was deleted
+(a checkout paid after the delete; [billing.md § The
+route](./billing.md#the-route), "An orphan"). The webhook cancels and refunds
+it at Stripe; when that fails it answers `503`, Stripe redelivers, and the
+event row stays `orphan_pending`. Stripe stops redelivering about 3 days
+after the first send, so if every attempt fails the customer keeps paying.
+Two signals, so neither depends on the other:
+
+- **`billing-orphan-failed`** (`infra/alarms.tf`, essential tier, only with
+  `billing_provider = "stripe"`): any one `billing_webhook` line with
+  `result: 'orphan_failed'` in the API's log group in an hour pages the
+  alerts topic. Stripe is still retrying then, so a passing outage at
+  Stripe clears itself: check the endpoint's delivery log in Stripe's
+  dashboard for a later `200` (`orphan_refunded`) for the same event.
+- **The billing report** (`billing-report` through the billing-admin
+  workflow, or `pnpm dev:billing:report` locally) opens with every row
+  still `orphan_pending` more than 3 days after it was received: the
+  provider, Stripe's event id, its type and its age, under `ACTION:`. These
+  are the ones Stripe has given up on. It reads `billing_event` as the
+  schema owner, so it works with the logs gone; run it after the alarm has
+  fired and the 3 days have passed, and with each month's report.
+
+**When either fires, finish the orphan in Stripe's dashboard.** Open
+Developers → Events and find the event by its id (`evt_…`); it names the
+subscription. On the subscription: cancel it now (not at the period's end),
+with no proration or final invoice. Then on each of its paid invoices'
+payments: refund the whole amount, reason "Requested by customer". A payment
+already refunded or disputed needs nothing. The webhook's own refunds carry
+the metadata `wm_reason=account_deleted`, so a refund it made before failing
+shows there. Nothing in the app needs changing: the account is gone, and the
+row ages out with the other events after 90 days. The row stays
+`orphan_pending` (no owner action marks it done), so the report lists it
+until then; note the event id in the incident log so the next report's line
+is known.
 
 ## The cutover
 

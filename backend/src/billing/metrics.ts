@@ -337,6 +337,44 @@ export const NOT_YET_MEASURABLE: { metric: string; needs: string }[] = [
 	{ metric: 'Suspensions', needs: 'no suspend action yet' }
 ];
 
+/**
+ * Stripe stops redelivering a webhook event about 3 days after it was first sent (live mode). An orphan event row
+ * (352) still `orphan_pending` past that will never be retried: the operator finishes its cancel and refund in
+ * Stripe's dashboard (docs/deployment.md § Billing alarms).
+ */
+export const ORPHAN_RETRY_DAYS = 3;
+
+/** An event row still `orphan_pending` (352): its subscription not yet cancelled and refunded. */
+export interface OrphanPendingRow {
+	provider: string;
+	eventId: string;
+	type: string;
+	receivedAt: Date;
+}
+
+export interface StaleOrphan {
+	provider: string;
+	eventId: string;
+	type: string;
+	receivedAt: string;
+	/** Whole days since it was first received. */
+	days: number;
+}
+
+/** The pending orphans received more than ORPHAN_RETRY_DAYS before `now`, oldest first: the provider has stopped retrying them. */
+export function staleOrphans(rows: OrphanPendingRow[], now: Date): StaleOrphan[] {
+	return rows
+		.filter((r) => now.getTime() - r.receivedAt.getTime() > ORPHAN_RETRY_DAYS * DAY_MS)
+		.sort((a, b) => a.receivedAt.getTime() - b.receivedAt.getTime())
+		.map((r) => ({
+			provider: r.provider,
+			eventId: r.eventId,
+			type: r.type,
+			receivedAt: r.receivedAt.toISOString(),
+			days: Math.floor((now.getTime() - r.receivedAt.getTime()) / DAY_MS)
+		}));
+}
+
 export interface Report {
 	month: string;
 	generatedAt: string;
@@ -349,6 +387,8 @@ export interface Report {
 	abuse: AbuseReport;
 	gateRefusals: GateRefusals;
 	reverseTrial: ReverseTrialConversion;
+	/** Orphans the provider stopped retrying, whatever the month (352): the operator finishes each in the provider's dashboard. */
+	staleOrphans: StaleOrphan[];
 	notYetMeasurable: typeof NOT_YET_MEASURABLE;
 }
 
@@ -359,7 +399,8 @@ export function buildReport(
 	people: PersonRow[],
 	freeLimits: PlanLimits,
 	refusals: GateRefusalRow[] = [],
-	trials: ReverseTrialRow[] = []
+	trials: ReverseTrialRow[] = [],
+	orphans: OrphanPendingRow[] = []
 ): Report {
 	return {
 		month,
@@ -373,6 +414,7 @@ export function buildReport(
 		abuse: abuseReport(people),
 		gateRefusals: gateRefusals(refusals),
 		reverseTrial: reverseTrialToPaid(trials, now),
+		staleOrphans: staleOrphans(orphans, now),
 		notYetMeasurable: NOT_YET_MEASURABLE
 	};
 }
@@ -392,6 +434,13 @@ const usd = (micros: number | null) => (micros === null ? 'n/a' : `$${(micros / 
 export function formatReport(r: Report, showEmails: boolean): string {
 	const out: string[] = [];
 	out.push(`Billing metrics for ${r.month} (generated ${r.generatedAt}; ${r.accounts} billing accounts; plans as they are today)`, '');
+	// First, since it is the one line that needs action now (352; docs/deployment.md § Billing alarms).
+	if (r.staleOrphans.length === 0) out.push(`Orphaned subscriptions still pending past the provider's ${ORPHAN_RETRY_DAYS}-day retries: none`, '');
+	else {
+		out.push(`ACTION: ${r.staleOrphans.length} orphaned subscription(s) still pending past the provider's ${ORPHAN_RETRY_DAYS}-day retries; cancel and refund each in the provider's dashboard`);
+		for (const o of r.staleOrphans) out.push(`  ${o.provider}  ${o.eventId}  ${o.type}  received ${o.receivedAt} (${o.days} days ago)`);
+		out.push('');
+	}
 	const a = r.activation;
 	out.push('Activation (verified sign-ups with a run within 7 days)');
 	out.push(`  ${a.activated} of ${a.cohort} = ${pct(a.share)}  (threshold: < 30% → fix onboarding first)`);

@@ -271,7 +271,7 @@ pnpm dev:billing:report --show-emails       # operator only: prints the addresse
 It reads two owner-only functions (`325_billing_metrics.sql`; never granted
 to `water_app`, [data-model.md](./data-model.md)), 338's owner-only
 `app_live_catchments_in_use`, `billing_grant_log` and `subscription` (the
-reverse trials) and the owner-only `email_gate_refusal` table (348) on this checkout's
+reverse trials), the owner-only `email_gate_refusal` table (348) and `billing_event` (352's orphans still pending) on this checkout's
 database (`MIGRATION_DATABASE_URL`); in production the operator runs the
 same code through the migrate Lambda's `billing-report` owner action
 (`.github/workflows/billing-admin.yml`, approved in the `production`
@@ -281,13 +281,15 @@ it: never `--show-emails`. The maths is `backend/src/billing/metrics.ts`
 (unit tests beside it), the script `backend/scripts/billing-report.ts`.
 
 **What it prints.** Counts and aggregates; account or person ids only where a
-signal needs a follow-up (the heaviest Free accounts, canonical clusters);
+signal needs a follow-up (the heaviest Free accounts, canonical clusters),
+and a provider's event id for an orphan past its retries;
 email domains only for a domain cluster. **No address** unless
 `--show-emails` is given. That flag is for the operator's own terminal: its
 output never goes into an issue, a PR, a chat or an agent's transcript.
 
 | Metric | How it is worked out | Threshold (the issue's) |
 | --- | --- | --- |
+| Orphans past the retries (printed first) | Rows of `billing_event` still `orphan_pending` (352) more than 3 days after they were received, whatever the month: the provider, its event id, type and age, oldest first. Stripe has stopped redelivering them, so nothing will cancel or refund them but the operator ([deployment.md § Billing alarms](./deployment.md#billing-alarms)). No account or person: the account is gone | any one → finish it in Stripe's dashboard |
 | Activation | Verified sign-ups of the month (SAST) with a model run within 7 days of signing up. Sign-ups under 7 days old are left out and counted as pending | < 30% → fix onboarding first |
 | Active Free accounts near / at each limit | Active = a run, a server report or assistant use this month on the account's projects. Near ≥ 80% of the limit, at ≥ 100%, for reports (5), the assistant's dollars ($1), catchments (Free has no limit, so none) and live catchments (1: the share at the live-catchment limit). Catchments and live catchments are counted **today**; live is 338's count (`app_live_catchments_in_use`: an enabled feed or alert rule, automatic runs on, or a publication; [§ Live catchments](#live-catchments-free)), so an account past its limit from before enforcement counts as at it, and an idle account with a live catchment isn't in the share | > 15% at reports → 10 a month; < 3% at the monthly assistant cap → room to raise |
 | Reverse trial → paid within 30 days | The reverse trials (342) that **began in the report's SAST month**: `billing_grant_log` `grant` rows by `reverse trial`, one per account (one trial per canonical email). Paid = the account's first paid plan at or after the trial's start: a subscription from a payment provider (`stripe`, or `mock` locally) whose first payment was taken: `active`, `past_due` or `canceled` (so a plan bought and later cancelled counts; not `trialing`, and not `expired`, Stripe's `incomplete_expired`, a first payment never made), or a paid B2B invoice's grant (`billing_grant_log` `grant` by `invoice`, 335); a staff grant is not paid. Converted when it came at most 30 days after the start. A trial under 30 days old is left out and counted as pending (with how many of those already pay). A deleted account's trial goes with it (`billing_grant_log` cascades) | |
@@ -430,7 +432,7 @@ How each result of `app_billing_apply` is answered:
 | `conflict`, `unknown_account` | `200` (a retry wouldn't change them) | warn, for the operator to read |
 | `invalid` | `400` (326 doesn't record it, so a corrected retry under the same id still applies) | warn |
 | an orphan, cancelled and refunded | `200 { received: true, result: 'orphan_refunded' }` | warn, with `cancelled`, `refunds`, `refundedMinor` |
-| an orphan whose cancel or refund failed | `503 { error }` (the event stays `orphan_pending`; Stripe redelivers it) | error, `result: 'orphan_failed'` |
+| an orphan whose cancel or refund failed | `503 { error }` (the event stays `orphan_pending`; Stripe redelivers it) | error, `result: 'orphan_failed'`: the `billing-orphan-failed` alarm |
 
 A database error is the app's generic `500`, which Stripe retries. Each answer
 logs one line (`billing_webhook` or `billing_webhook_rejected`) with the
@@ -453,6 +455,15 @@ redelivered event whose account was deleted afterwards (and whose plan the
 delete already cancelled) is never refunded. An unknown account's
 `subscription.deleted`, an ended status, an `invoice.*` event and a
 `subscription.pending` stay `unknown_account` or `recorded`, as before.
+
+Stripe redelivers for about 3 days. Should every attempt fail, two signals
+reach the operator: the `billing-orphan-failed` alarm on the first
+`orphan_failed` line (`infra/alarms.tf`, with `billing_provider = "stripe"`),
+and, not on logs, the [billing report](#metrics-and-the-abuse-report)'s
+first line, which lists every row still `orphan_pending` more than 3 days
+after it was received (`ORPHAN_RETRY_DAYS`, `metrics.ts` `staleOrphans`).
+The operator then cancels and refunds it in Stripe's dashboard
+([deployment.md § Billing alarms](./deployment.md#billing-alarms)).
 
 ### Event order
 
@@ -1755,7 +1766,8 @@ payment provider. So the route cancels the plan there first
   subscription's events, and every redelivery, refund once. Any other
   failure answers `503` and Stripe retries (for up to 3 days); past that
   the row stays `orphan_pending` for the operator to finish in the
-  dashboard. The mock has nothing to cancel or refund and answers at once,
+  dashboard (the alarm and the billing report find it: [deployment.md §
+  Billing alarms](./deployment.md#billing-alarms)). The mock has nothing to cancel or refund and answers at once,
   with no network. Endpoints checked against Stripe's API reference on
   2026-11-24 (cancel a subscription, list invoices, list invoice payments,
   create a refund, error codes). This refund is not the Terms' refund

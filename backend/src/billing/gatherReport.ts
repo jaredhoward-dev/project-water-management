@@ -1,11 +1,11 @@
 // The billing metrics report's rows (325_billing_metrics's owner-only
-// functions, 338's live count, 342's reverse trials in billing_grant_log) on a schema-owner connection, built into the report by
+// functions, 338's live count, 342's reverse trials in billing_grant_log, 352's orphans still pending) on a schema-owner connection, built into the report by
 // metrics.ts (issue #641; docs/billing.md § Metrics and the abuse report).
 // Two callers: the local script (scripts/billing-report.ts) and the migrate
 // Lambda's billing-report action (ops/ownerActions.ts), which answers with
 // redact(report) only. No dotenv here: the migrate Lambda bundles this module.
 import type pg from 'pg';
-import { buildReport, type AccountRow, type GateRefusalRow, type PersonRow, type PlanLimits, type Report, type ReverseTrialRow } from './metrics.js';
+import { buildReport, type AccountRow, type GateRefusalRow, type OrphanPendingRow, type PersonRow, type PlanLimits, type Report, type ReverseTrialRow } from './metrics.js';
 
 /** The month's report (YYYY-MM, or null for the current SAST month), addresses included: redact before it leaves the caller. */
 export async function gatherReportOn(client: pg.ClientBase, month: string | null, now = new Date()): Promise<Report> {
@@ -67,5 +67,12 @@ export async function gatherReportOn(client: pg.ClientBase, month: string | null
 			[first]
 		)
 	).rows.map((r): ReverseTrialRow => ({ startedAt: r.started_at, firstPaidAt: r.first_paid_at }));
-	return buildReport(first.slice(0, 7), now, accounts, people, limits, refusals, trials);
+	// Orphans (352) still pending, whatever the month: buildReport keeps those past the provider's retries. billing_event
+	// is owner-only, like the rest; the rows carry the provider's event id and type, never an account or a person.
+	const orphans = (
+		await client.query<{ provider: string; event_id: string; type: string; received_at: Date }>(
+			`SELECT provider, event_id, type, received_at FROM billing_event WHERE outcome = 'orphan_pending' ORDER BY received_at`
+		)
+	).rows.map((r): OrphanPendingRow => ({ provider: r.provider, eventId: r.event_id, type: r.type, receivedAt: r.received_at }));
+	return buildReport(first.slice(0, 7), now, accounts, people, limits, refusals, trials, orphans);
 }

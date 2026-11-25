@@ -177,6 +177,36 @@ describe('the reverse trial and the live catchments (342, 338)', () => {
 	});
 });
 
+describe('orphans past the provider\'s retries (352)', () => {
+	const NOW = new Date('2026-11-24T12:00:00Z');
+	const ids = ['evt_metrics_orphan_old', 'evt_metrics_orphan_new', 'evt_metrics_orphan_done'];
+
+	beforeAll(async () => {
+		await asOwner(
+			`INSERT INTO billing_event (provider, event_id, type, outcome, received_at) VALUES
+			 ('mock', $1, 'subscription.updated', 'orphan_pending', '2026-11-20T00:00:00Z'),
+			 ('mock', $2, 'checkout.completed', 'orphan_pending', '2026-11-23T00:00:00Z'),
+			 ('mock', $3, 'subscription.updated', 'orphan_refunded', '2026-11-01T00:00:00Z')`,
+			ids
+		);
+	});
+
+	afterAll(async () => {
+		await asOwner(`DELETE FROM billing_event WHERE provider = 'mock' AND event_id = ANY($1)`, [ids]);
+	});
+
+	it('lists a pending orphan received more than 3 days ago, whatever the month; not a newer one or a refunded one', async () => {
+		const mine = (r: Awaited<ReturnType<typeof gatherReport>>) => r.staleOrphans.filter((o) => ids.includes(o.eventId));
+		const r = await gatherReport(process.env.TEST_MIGRATION_DATABASE_URL!, '2001-03', NOW);
+		expect(mine(r)).toEqual([
+			{ provider: 'mock', eventId: 'evt_metrics_orphan_old', type: 'subscription.updated', receivedAt: '2026-11-20T00:00:00.000Z', days: 4 }
+		]);
+		// Positive control: once its 3 days pass, the newer one is listed too.
+		const later = await gatherReport(process.env.TEST_MIGRATION_DATABASE_URL!, '2001-03', new Date('2026-11-26T12:00:00Z'));
+		expect(mine(later).map((o) => o.eventId)).toEqual(['evt_metrics_orphan_old', 'evt_metrics_orphan_new']);
+	});
+});
+
 describe('owner only', () => {
 	it('water_app can neither execute nor call them; the owner can (positive control)', async () => {
 		const grants = (await asOwner(
