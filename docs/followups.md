@@ -5543,12 +5543,14 @@ Left, from the WP:
 - [ ] **First-login tour** over the synthetic example catchment (6–8
       steps, in-house, dismissible, keyboard-accessible,
       `app_user.settings.tour_done`). The example itself is built (#286).
-- [ ] **An ET₀ feed proposed from the boundary in the to-do list.** The
+- [x] **An ET₀ feed proposed from the boundary in the to-do list.** The
       `agera5_et0` feed source exists (Data feeds), but the list's
-      Evaporation item links only the A-pan row and Evaporation from the
-      map; a `?feed=agera5_et0` deep link that opens the attach card on the
-      boundary would close the gap. Only GR4J under a monthly PE row reads
-      it, so it doesn't block a first run.
+      Evaporation item linked only the A-pan row and Evaporation from the
+      map. Done 2026-11-24: under a monthly PE row (the only place GR4J
+      reads it) the list has an optional **Daily ET₀ from the boundary**
+      item (`startData.ts`), whose `?feed=agera5_et0` link opens Data feeds'
+      attach card on the AgERA5 source and the boundary, its proposal
+      focused (`askedFeed`, `DataFeedsPanel.svelte`; ui.md § Data feeds).
 - [ ] **The timed usability test** with the hydrologist (≤ 4 hours from an
       empty project to a calibrated run on a real, uncommitted catchment):
       the WP's acceptance. Operator to schedule.

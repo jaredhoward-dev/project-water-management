@@ -2236,7 +2236,8 @@ in [design/start-from-map.md](./design/start-from-map.md); the screen in
   needs, in the order a run reads them: the units' areas and order, how
   natural flow is made, rain from the boundary, the catchment's MAP, rain
   for each unit, MAP for each unit, evaporation (the A-pan, and Evaporation
-  from the map), the WR2012 check, observed flow (its link opens Data
+  from the map), the daily ET₀ from the boundary (only under a monthly PE
+  row, optional; `?feed=agera5_et0` opens the reference ET proposal), the WR2012 check, observed flow (its link opens Data
   feeds on a DWS gauge with the nearest gauging stations proposed,
   `?feed=dws`), each unit's composite dam, the cultivated area (linked to
   the first unit with nothing planted, in its drawer, where land cover

@@ -18,10 +18,13 @@
 //   until clicked, and stays open once the map draws;
 // - the A-pan row (issue #646 item 5) reads "A-pan not set" until the A-pan
 //   is, and a unit boundary redrawn after the start shows in the Checks as an
-//   area from an earlier outline, whose Use takes the area now (item 4, F6).
+//   area from an earlier outline, whose Use takes the area now (item 4, F6);
+// - under a monthly PE row (only then), an optional Daily ET₀ from the
+//   boundary item, whose link (`?feed=agera5_et0`) opens Data feeds' attach
+//   card on the reference ET proposal from the boundary.
 import type { APIRequestContext, Page } from '@playwright/test';
 import { expectNoViolations } from '../support/a11y.ts';
-import { createProject } from '../support/api.ts';
+import { createProject, updateSettings } from '../support/api.ts';
 import { answerConfirm } from '../support/confirm.ts';
 import { FIXTURE_DAM, FIXTURE_LOWER_UNIT, FIXTURE_UPPER_UNIT } from '../support/dem.ts';
 import { API_URL } from '../support/env.ts';
@@ -257,4 +260,33 @@ test('the A-pan row says it isn’t set until it is, and a redrawn unit boundary
 	await expect(check).toHaveCount(0);
 	const after = await (await page.request.get(`${API_URL}/projects/${id}/map/features`)).json();
 	expect(after.nodes.find((n: { id: string }) => n.id === unit.id).areaKm2).toBeCloseTo(nowKm2, 9);
+});
+
+test('under a monthly PE row the list offers the daily ET₀ from the boundary, and its link opens the reference ET proposal', async ({ page, owner }) => {
+	void owner;
+	test.setTimeout(60_000);
+	const id = await startedProject(page.request, 'Start data ET0');
+	// The default PE is the pan, which never reads a daily ET₀: no item.
+	await openMap(page, id, '&start=1');
+	await expect(page.getByTestId('start-sheet')).toHaveAttribute('data-step', 'data');
+	await expect(listItem(page, 'evaporation')).toBeVisible();
+	await expect(listItem(page, 'et0')).toHaveCount(0);
+
+	await updateSettings(page.request, id, { pe: { kind: 'monthly', mm: new Array(12).fill(90), source: 'Synthetic station ET₀' } });
+	await openMap(page, id, '&start=1');
+	const et0 = listItem(page, 'et0');
+	await expect(et0).toHaveAttribute('data-status', 'todo');
+	await expect(et0).toContainText('(optional)');
+	await expect(et0).not.toHaveAttribute('data-next', 'true');
+	const link = startSheet(page).getByRole('link', { name: 'Daily ET₀ from the boundary' });
+	await expect(link).toHaveAttribute('href', '?tab=series&feed=agera5_et0#data-feeds');
+	await link.click();
+
+	// Data → Data feeds, the attach card on the AgERA5 source and the boundary, its proposal's heading focused.
+	await expect(page).toHaveURL(/[?&]feed=agera5_et0/);
+	const panel = page.getByRole('region', { name: 'Data feeds' });
+	await expect(panel.getByLabel('Source')).toHaveValue('agera5_et0');
+	await expect(panel.getByLabel('Area')).toHaveValue('boundary');
+	await expect(page.getByRole('heading', { name: 'Reference ET from the catchment boundary' })).toBeFocused();
+	await expect(page.getByRole('region', { name: 'Reference ET from the catchment boundary' }).getByTestId('boundary-rain-cells')).toHaveText(/^\d+ AgERA5 cells of 0\.1°/);
 });

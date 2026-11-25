@@ -4,6 +4,7 @@ import { kindLabel } from '#lib/series/kinds.js';
 import { fmtDay } from '#lib/format/number.js';
 import {
 	applyWords,
+	askedFeed,
 	boundaryApplyBody,
 	boundaryChoice,
 	boundaryFeedState,
@@ -716,5 +717,13 @@ describe('station API feeds (issue #784)', () => {
 			['PATCH', '/projects/p1/feeds/f1', { credential: { secret: 'k' } }],
 			['PATCH', '/projects/p1/feeds/f1', { credential: null }]
 		]);
+	});
+});
+
+describe('askedFeed: the attach card a ?feed= link opens', () => {
+	it('takes a DWS gauge or the reference ET feed from the boundary, and nothing else', () => {
+		expect(askedFeed('dws')).toBe('dws');
+		expect(askedFeed('agera5_et0')).toBe('agera5_et0');
+		for (const v of [null, '', 'chirps', 'AGERA5_ET0', 'agera5_et0 ', 'station_api', 'power_et0']) expect(askedFeed(v)).toBeNull();
 	});
 });

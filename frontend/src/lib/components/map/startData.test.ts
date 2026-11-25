@@ -223,6 +223,32 @@ describe('startDataItems', () => {
 		expect(dataDone(startDataItems(stale))).toBe(false);
 	});
 
+	it('offers the daily ET₀ from the boundary only under a monthly PE row, the one place GR4J reads it', () => {
+		// The default PE is the pan: no ET₀ item, the list as it was.
+		expect(startDataItems(fresh()).some((i) => i.id === 'et0')).toBe(false);
+		const settings = defaultProjectSettings();
+		settings.pe = { kind: 'monthly', mm: APAN, source: 'FAO-56 station' };
+		const items = startDataItems(fresh({ settings }));
+		// Right after Evaporation, optional, so it never holds the list open or becomes Next.
+		expect(items.map((i) => i.id).slice(6, 9)).toEqual(['evaporation', 'et0', 'wr2012']);
+		const et0 = items.find((i) => i.id === 'et0')!;
+		expect(et0).toMatchObject({ status: 'todo', optional: true, href: '?tab=series&feed=agera5_et0#data-feeds', where: 'Data → Data feeds', title: 'Daily ET₀ from the boundary' });
+		expect(et0.detail).toMatch(/^GR4J reads the monthly PE row; a daily reference ET feed \(AgERA5\)/);
+		expect(et0.detail).not.toContain('An owner');
+		expect(nextItem(items)!.id).not.toBe('et0');
+		// An editor is told an owner attaches it; without a boundary, what to do first.
+		expect(item(fresh({ settings, owner: false }), 'et0').detail).toContain('An owner of the project attaches it.');
+		expect(item(fresh({ settings, hasBoundary: false }), 'et0').detail).toContain('Draw the catchment boundary first');
+		// Attached: started until its record arrives; a record (a feed's or a station's own) is done; an empty one isn't.
+		expect(item(fresh({ settings, feeds: [{ source: 'agera5_et0', config: {} }] }), 'et0').status).toBe('partial');
+		expect(item(fresh({ settings, series: [{ kind: 'evap_et0_mm', length: 365 }] }), 'et0').status).toBe('done');
+		expect(item(fresh({ settings, series: [{ kind: 'evap_et0_mm', length: 0 }] }), 'et0').status).toBe('todo');
+		expect(item(fresh({ settings, feeds: null }), 'et0').status).toBe('unknown');
+		expect(item(fresh({ settings, series: null }), 'et0').status).toBe('unknown');
+		// Settings still loading: no PE to read, so no item yet.
+		expect(startDataItems(fresh({ settings: null })).some((i) => i.id === 'et0')).toBe(false);
+	});
+
 	it('says up front that a boundary past ~2 500 km² is too large for rain from the boundary (F14)', () => {
 		const big = item(fresh({ boundaryAreaM2: 3_100e6 }), 'rain');
 		expect(big.detail).toContain('The boundary is 3');

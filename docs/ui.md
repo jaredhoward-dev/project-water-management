@@ -4754,7 +4754,12 @@ map" card) stays the schematic; this is the geography.
   boundary (`?rain=boundary`), The catchment’s MAP (`#set-share`), Rain for
   each unit (`?rain=units`), MAP for each unit (`#set-unit-map`),
   Evaporation (Settings' Demand group, the A-pan the dams lose, with
-  Evaporation from the map beside it), WR2012 check (`#set-wr2012`),
+  Evaporation from the map beside it), Daily ET₀ from the boundary (only
+  under a monthly PE row, the one place GR4J reads a daily ET₀; optional,
+  since the row stands in: To do, Started once an `agera5_et0` feed is
+  attached, Done once an `evap_et0_mm` record is read, a station's own
+  included; `?tab=series&feed=agera5_et0#data-feeds` opens the reference ET
+  proposal from the boundary), WR2012 check (`#set-wr2012`),
   Observed flow (`?tab=series&feed=dws#data-feeds`: the attach card opens
   on a DWS gauge with the nearest gauging stations proposed, for an
   owner), Each unit’s composite dam (Dams: its volume and the area
@@ -7313,7 +7318,12 @@ editors run one now and read the map's proposals, viewers read.
   Getting started step and the Start sheet's data step
   (`?tab=series&rain=boundary#data-feeds`, and **Observed flow**
   `?tab=series&feed=dws#data-feeds`, which opens the DWS gauge's card with
-  the nearest gauging stations for an owner), Model settings' Rain for each unit line (Flow generation)
+  the nearest gauging stations for an owner, and, under a monthly PE row,
+  **Daily ET₀ from the boundary** `?tab=series&feed=agera5_et0#data-feeds`,
+  which opens the card on the AgERA5 source with the catchment boundary as
+  its area, the reference ET proposal's heading focused, for an owner;
+  `askedFeed` in `feeds.ts` reads the parameter, anything else opens
+  nothing, nor does a source the server doesn't list), Model settings' Rain for each unit line (Flow generation)
   (`?tab=series&rain=units#data-feeds`) and Runs & results' stub for a run
   with no forecast (`res-forecast`, `runs/missingPanel.ts`). Each lands
   through `landOnAnchor` (`help/anchor.ts`): once the lazy panel's heading

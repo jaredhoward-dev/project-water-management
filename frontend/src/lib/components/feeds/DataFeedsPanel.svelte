@@ -25,6 +25,7 @@
 	import BoundaryRain from './BoundaryRain.svelte';
 	import UnitRain from './UnitRain.svelte';
 	import {
+		askedFeed,
 		calibrationNote,
 		et0Note,
 		gapFillNote,
@@ -289,19 +290,28 @@
 	});
 
 	// ?feed=dws (the Map's Start sheet and Getting started pill, issue #646 F4) opens the card on a DWS gauge, so the
-	// nearest gauging stations to the outlet are proposed at once; once per arrival. An owner's only: an editor's card
-	// holds the map's rain proposals alone (DWS feeds are an owner's to attach).
-	const feedAsked = $derived(page.url.searchParams.get('feed') === 'dws');
-	let feedAnswered = false;
+	// nearest gauging stations to the outlet are proposed at once; ?feed=agera5_et0 (the Start sheet's Daily ET₀ item,
+	// under a monthly PE row) opens it on the daily reference ET feed from the catchment boundary, its proposal focused.
+	// Once per arrival. An owner's only: an editor's card holds the map's rain proposals alone (DWS and reference ET
+	// feeds are an owner's to attach), and a source this server doesn't list opens nothing.
+	const feedAsked = $derived(askedFeed(page.url.searchParams.get('feed')));
+	let feedAnswered: string | null = null;
 	$effect(() => {
-		if (!feedAsked) {
-			feedAnswered = false;
+		const asked = feedAsked;
+		if (!asked) {
+			feedAnswered = null;
 			return;
 		}
-		if (!data?.canEdit || feedAnswered || !data.sources.some((x) => x.source === 'dws')) return;
-		feedAnswered = true;
+		if (!data?.canEdit || feedAnswered === asked || !data.sources.some((x) => x.source === asked)) return;
+		feedAnswered = asked;
 		untrack(() => {
-			void startAdding().then(() => pickSource('dws'));
+			if (asked === 'dws') void startAdding().then(() => pickSource('dws'));
+			else {
+				// startAdding sets the card up before its first await when it focuses the proposal, so the source is
+				// switched before the card first draws: the boundary's CHIRPS proposal is never asked for.
+				void startAdding('boundary', true);
+				pickSource('agera5_et0');
+			}
 		});
 	});
 

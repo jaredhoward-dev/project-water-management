@@ -236,6 +236,15 @@ export interface RunSeriesWords {
  * on its 0.05° grid, and the daily reference ET feed on our copy's 0.1° grid (no daily product).
  */
 export type BoundarySource = 'chirps' | 'agera5_et0';
+/**
+ * The attach card a `?feed=` link opens on Data → Data feeds: `dws` on a DWS gauge, the nearest gauging stations
+ * proposed (the Map's Start sheet's Observed flow, issue #646 F4); `agera5_et0` on the daily reference ET feed from
+ * the catchment boundary (its Daily ET₀ item, only under a monthly PE row). Anything else opens nothing.
+ */
+export type AskedFeed = 'dws' | 'agera5_et0';
+export function askedFeed(v: string | null): AskedFeed | null {
+	return v === 'dws' || v === 'agera5_et0' ? v : null;
+}
 /** The first day a reference ET feed may read (backend config.ts GridConfig's floor, CHIRPS_FIRST_DAY). */
 export const ET0_FEED_FIRST_DAY = '1981-01-01';
 
