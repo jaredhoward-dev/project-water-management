@@ -1161,9 +1161,7 @@ describe('no viewer GET carries a registered volume while the owners keep them f
 			if (!all[name]) throw new Error(`${pattern}: no fixture for :${name} (plant one in the canary sweep's beforeAll)`);
 			return all[name]!;
 		});
-		// The farm view's series need a key (a farmer's route; the viewer's answer is the role check's).
-		const query = s.query ?? (pattern.endsWith('/farm/:nodeId/series') ? { key: 'supplied' } : undefined);
-		if (query) path += `?${new URLSearchParams(query)}`;
+		if (s.query) path += `?${new URLSearchParams(s.query)}`;
 		return path;
 	};
 

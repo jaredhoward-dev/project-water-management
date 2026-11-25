@@ -47,7 +47,7 @@ export interface GapRainFeedOption {
 	runsRead: boolean;
 }
 
-/** The widest window one request reads: ten years (FARM_SERIES_MAX_DAYS's span), about 3,650 values a product. */
+/** The widest window one request reads: ten years (3,653 days), about 3,650 values a product. */
 export const GAP_VIEW_MAX_DAYS = 3653;
 
 /** What the runs' feed's latest fetch made of a product (last_meta.gapEra5l / gapImergLate, feeds/gapRainFill.ts). */

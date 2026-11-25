@@ -5,7 +5,7 @@
 // the same as a node that doesn't exist. Everything comes from the project's
 // *current* publication; a response names no other node (no id, no name)
 // beyond the gauges, which are public infrastructure.
-import { FARMER_K, FARMER_SERIES_KEYS, fromEpochDay, toEpochDay, type FarmHistoryEntry, type FarmIndex, type FarmProjection, type FarmRegistered, type FarmSeries, type FarmView, type NoticeText, type RestrictionLevel, dayText, isIsoDate } from '@water-management/engine';
+import { FARMER_K, FARMER_SERIES_KEYS, fromEpochDay, toEpochDay, type FarmIndex, type FarmProjection, type FarmRegistered, type FarmView, type NoticeText, type RestrictionLevel, dayText, isIsoDate } from '@water-management/engine';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import type { AuthEnv } from '../auth/middleware.js';
@@ -61,21 +61,10 @@ export async function farmRegistered(db: Db, projectId: string, nodeId: string, 
 	return { asOf: day, surfaceM3PerYear: r.surface, groundwaterM3PerYear: r.groundwater, storageM3: r.storage };
 }
 
-/** The chart series route's window by default: the year to dataUntil (roadmap WP-2.6; a whole run is too much for a phone). */
-export const FARM_SERIES_DEFAULT_DAYS = 365;
-/** The farmer's CSV's window by default: the same year to dataUntil (issue #124); `?from=` reaches further back. */
-export const FARM_CSV_DEFAULT_DAYS = FARM_SERIES_DEFAULT_DAYS;
+/** The farmer's CSV's window by default: the year to dataUntil (issue #124; a whole run is too much for a phone); `?from=` reaches further back. */
+export const FARM_CSV_DEFAULT_DAYS = 365;
 /** A farmer's figure in whole m³ (every farm series is m³ or m³/day): full precision reads as noise (0.30000000000000004). */
 export const wholeM3 = (v: number | null): number | null => (typeof v === 'number' && Number.isFinite(v) ? Math.round(v) || 0 : null);
-/** The widest window one series request answers: ten years, about 40 kB of JSON. */
-export const FARM_SERIES_MAX_DAYS = 3653;
-const SeriesQuery = z
-	.object({ key: z.enum(FARMER_SERIES_KEYS), from: isoDate.optional(), to: isoDate.optional() })
-	.refine((q) => !q.from || !q.to || q.from <= q.to, { message: '`from` must not be after `to`', path: ['from'] });
-
-/** How many of the farm's publications its history lists, newest first. */
-export const FARM_HISTORY_LIMIT = 12;
-
 const notFound = () => new ApiError(404, 'not found');
 const notPublished = () => new ApiError(404, 'not published yet');
 
@@ -438,72 +427,6 @@ export const farmViewRoutes = new Hono<AuthEnv>()
 				[id, nodeId]
 			);
 			return c.json({ people: rows.map((r) => ({ displayName: r.display_name, role: r.role, you: r.is_you })) });
-		});
-	})
-	// One of the farm's own daily series from the published run, for a chart:
-	// the farm allowlist only (FARMER_SERIES_KEYS), the year to dataUntil by
-	// default, never past dataUntil (the forecast days are the projection's).
-	.get('/:id/farm/:nodeId/series', async (c) => {
-		const { id, nodeId } = c.req.param();
-		return withUser(c.get('userId'), async (db) => {
-			await requireFarm(db, id, nodeId);
-			// After the farm check: another farm answers 404 whatever the query.
-			const q = SeriesQuery.parse(c.req.query());
-			const cur = await currentFor(db, id, nodeId);
-			if (!cur?.view) throw notPublished();
-			const start = cur.catchment_view.runStart;
-			const until = cur.view.dataUntil;
-			const to = q.to && q.to < until ? q.to : until;
-			const from = q.from ?? fromEpochDay(toEpochDay(to) - (FARM_SERIES_DEFAULT_DAYS - 1));
-			const lo = Math.max(0, toEpochDay(from) - toEpochDay(start));
-			const hi = toEpochDay(to) - toEpochDay(start);
-			if (hi < lo) throw new ApiError(400, `the window is outside the published figures (${dayText(start)} … ${dayText(until)})`);
-			if (hi - lo + 1 > FARM_SERIES_MAX_DAYS) throw new ApiError(400, `at most ${FARM_SERIES_MAX_DAYS} days at a time; narrow it with ?from=YYYY-MM-DD&to=YYYY-MM-DD`);
-			// Postgres arrays are 1-based; the slice keeps a decades-long run on the server.
-			const { rows } = await db.query<{ label: string | null; unit: string | null; values: (number | null)[] }>(
-				`SELECT meta->>'label' AS label, meta->>'unit' AS unit, "values"[$4:$5] AS "values"
-				 FROM run_series WHERE run_id = $1 AND node_id = $2 AND key = $3`,
-				[cur.run_id, nodeId, q.key, lo + 1, hi + 1]
-			);
-			const r = rows[0];
-			if (!r) throw notPublished();
-			const body: FarmSeries = { key: q.key, label: r.label ?? q.key, unit: r.unit, startDate: fromEpochDay(toEpochDay(start) + lo), values: r.values };
-			return c.json(body, 200, { 'Cache-Control': 'no-store' });
-		});
-	})
-	// The farm across the WUA's publications (roadmap WP-2.6): what each one
-	// said about this farm, newest first. Only the farm's own figures: never
-	// the even share, which is a catchment ratio (design §10.3).
-	.get('/:id/farm/:nodeId/history', async (c) => {
-		const { id, nodeId } = c.req.param();
-		return withUser(c.get('userId'), async (db) => {
-			const { keptFromVolumes } = await requireFarm(db, id, nodeId);
-			// A preview kept from the volumes: without the publications of a cap or full-allocation run (#523 I).
-			const { rows } = await db.query<{ published_at: Date; superseded_at: Date | null; restriction_level: RestrictionLevel; restriction_pct: string | null; view: FarmProjection }>(
-				`SELECT p.published_at, p.superseded_at, p.restriction_level, p.restriction_pct, f.view
-				 FROM publication_farm f JOIN run_publication p ON p.id = f.publication_id
-				 WHERE f.project_id = $1 AND f.node_id = $2
-				   AND NOT ($4::boolean AND EXISTS (SELECT 1 FROM model_run r WHERE r.id = p.run_id AND ${CAP_OR_FULL_SQL}))
-				 ORDER BY p.published_at DESC LIMIT $3`,
-				[id, nodeId, FARM_HISTORY_LIMIT, keptFromVolumes]
-			);
-			const publications: FarmHistoryEntry[] = rows.map((r) => ({
-				publishedAt: r.published_at.toISOString(),
-				current: r.superseded_at === null,
-				dataUntil: r.view.dataUntil,
-				season: {
-					from: r.view.season.from,
-					to: r.view.season.to,
-					demandM3: r.view.season.demandM3,
-					suppliedM3: r.view.season.suppliedM3,
-					fraction: r.view.season.fraction,
-					shortDays: r.view.season.shortDays
-				},
-				damPct: r.view.dam?.pct ?? null,
-				model: { headline: r.view.river.headline, band: r.view.river.band },
-				restriction: { level: r.restriction_level, pct: r.restriction_pct === null ? null : Number(r.restriction_pct) }
-			}));
-			return c.json({ publications });
 		});
 	})
 	// The farm's own daily figures from the published run: the farm allowlist

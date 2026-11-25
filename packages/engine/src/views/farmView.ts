@@ -263,32 +263,6 @@ export interface FarmIndex {
 	publication: { publishedAt: string; restriction: { level: RestrictionLevel } } | null;
 }
 
-/** GET /projects/:id/farm/:nodeId/series: one of the farm's own daily series (FARMER_SERIES_KEYS) from the published run. */
-export interface FarmSeries {
-	key: string;
-	label: string;
-	unit: string | null;
-	/** The day of values[0] (ISO). */
-	startDate: string;
-	/** One per day to the window's end, never past dataUntil; null where the run has no value. */
-	values: (number | null)[];
-}
-
-/** One publication in GET /projects/:id/farm/:nodeId/history: what it said about this farm, its own figures only. */
-export interface FarmHistoryEntry {
-	publishedAt: string;
-	/** Still the current publication. */
-	current: boolean;
-	dataUntil: string;
-	season: { from: string; to: string; demandM3: number; suppliedM3: number; fraction: number | null; shortDays: number };
-	/** The dam on dataUntil (0–1); null without a dam. */
-	damPct: number | null;
-	/** The model's E7 headline and band (design §6.2): they carry no neighbour's figure, so they show at any k. */
-	model: { headline: number | null; band: ModelBand | null };
-	/** What the WUA published with it. */
-	restriction: { level: RestrictionLevel; pct: number | null };
-}
-
 /** k in the aggregate rule (D2, pending the client): catchment aggregates need at least FARMER_K − 1 other holders. */
 export const FARMER_K = 5;
 

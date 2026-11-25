@@ -3,6 +3,7 @@
 // control: the same farmer sees their own farm, a viewer sees every farm.
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { app, asOwner, makeStoredLegacyRun, monthly, node, signUp } from '../__tests__/helpers.js';
+import { toEpochDay } from '@water-management/engine';
 import { withUser } from '../db/tx.js';
 import { trimRuns } from '../runs/execute.js';
 import { ALLOCATION_MODE_NOT_PUBLISHABLE } from './publish.js';
@@ -462,14 +463,15 @@ describe('what a farmer reads', () => {
 		expect(days[0]!.startsWith('2022-12-30,')).toBe(true);
 		expect(days.at(-1)!.startsWith('2023-12-29,')).toBe(true);
 		// Every figure is a whole number, and each is its full-precision value
-		// rounded: the series route answers the same year unrounded.
+		// rounded: the published run's stored series, over the same year.
 		const cols = header!.split(',').slice(1);
+		const [pub] = await asOwner(`SELECT run_id, catchment_view->>'runStart' AS run_start FROM run_publication WHERE project_id = $1 AND superseded_at IS NULL`, [projectId]);
+		const first = toEpochDay('2022-12-30') - toEpochDay(pub.run_start);
 		let fractional = 0;
 		for (const [c, key] of cols.entries()) {
-			const s = await farmer.call('GET', `/projects/${projectId}/farm/${farms[0]!.id}/series?key=${key}`);
-			expect(s.status, key).toBe(200);
-			expect(s.body.startDate, key).toBe('2022-12-30');
-			const exact = s.body.values as (number | null)[];
+			const [stored] = await asOwner(`SELECT "values" FROM run_series WHERE run_id = $1 AND node_id = $2 AND key = $3`, [pub.run_id, farms[0]!.id, key]);
+			const exact = (stored.values as (number | null)[]).slice(first, first + days.length);
+			expect(exact, key).toHaveLength(days.length);
 			fractional += exact.filter((v) => v !== null && !Number.isInteger(v)).length;
 			const cells = days.map((d) => d.split(',')[c + 1]!);
 			expect(cells.every((v) => /^-?\d*$/.test(v)), key).toBe(true);
@@ -669,7 +671,7 @@ describe('the season decision log (issue #119)', () => {
 		expect((await owner.call('DELETE', `/projects/${p}`)).status).toBe(204);
 	});
 
-	it('is staff-only: a viewer reads every farm’s line, a farmer none (they read their own farm’s history)', async () => {
+	it('is staff-only: a viewer reads every farm’s line, a farmer none', async () => {
 		const seen = await log(viewer, projectId);
 		expect(seen.status).toBe(200);
 		const published = seen.events.find((e) => e.kind === 'publication.published')!;
@@ -678,10 +680,6 @@ describe('the season decision log (issue #119)', () => {
 		expect(await rowsAs(farmer, `SELECT id FROM audit_event WHERE project_id = $1 AND kind LIKE 'publication.%'`, [projectId])).toEqual([]);
 		// Positive control at the database: the viewer's RLS shows the same rows the route did.
 		expect((await rowsAs(viewer, `SELECT id FROM audit_event WHERE project_id = $1 AND kind = 'publication.published'`, [projectId])).length).toBeGreaterThan(0);
-		// The farmer's own line, through their farm's history.
-		const own = await farmer.call('GET', `/projects/${projectId}/farm/${farms[0]!.id}/history`);
-		expect(own.status).toBe(200);
-		expect(own.body.publications.length).toBeGreaterThan(0);
 	});
 });
 

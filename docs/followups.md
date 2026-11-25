@@ -7284,6 +7284,22 @@ assume, the questions for counsel); these are the actions, with triggers.
       tests, its line in docs/api.md and its row in the route-auth inventory
       (`src/routes.test.ts`). **Trigger:** the next backend round; don't
       leave them undecided past it.
+      - [x] Done (2026-11-25): farm `series` removed. No caller in
+            `frontend/src`, `e2e/`, `scripts/` or `backend/scripts`; the
+            only external surface is `/ingest/v1` (planned-work.md § Public
+            API docs); the farm page charts its 12 months from the projection.
+      - [x] Done (2026-11-25): farm `history` removed. No caller anywhere,
+            and design/farmer-view.md §12 chose "compared with last season"
+            from `lastSeason`, not `/history`.
+      - [ ] Decided (2026-11-25): remove `POST /projects/:id/jobs`. No
+            caller outside backend DB tests (`jobs/jobs.db.test.ts`,
+            `runs/autoRun.db.test.ts`, which use it to queue a `rerun`) and
+            run-locally.md's mention; not an integrator route. Left for a
+            follow-up PR: re-point those tests at `enqueueJob`, keep the
+            `rerun` handler's `manual` trigger for jobs already queued, and
+            drop its lines in api.md, architecture.md, run-locally.md,
+            security.md, data-model.md and the route sample/write-route
+            tables. **Trigger:** the next backend round.
 - [ ] **A client navigation to a glossary topic once never committed
       (2026-10-30, seen once).** help.spec.ts › "a guide shows its diagrams
       and links into the glossary" failed once at load average ~70 (other
