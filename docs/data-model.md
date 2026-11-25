@@ -3980,7 +3980,7 @@ through one function, which is the **only writer of subscription status**.
 
 | Table | Holds |
 | --- | --- |
-| `billing_event` | One row per event acted on: (`provider` (`mock`, `manual`, `stripe`), `event_id`) primary key, `type`, `received_at`, `account_id` (set null when the account goes; indexed), `outcome` (`applied`, `recorded`, `conflict`, `unknown_account`; 327 added `stale`). **Owner-only**: RLS on, no policy, no privilege for `water_app`; only `app_billing_apply` writes it. Indexed on `received_at`, which the tick's purge reads: rows received more than 90 days ago are deleted (327 `app_purge_billing_events`, worker context only, never under 4 days, past Stripe's 3-day redelivery window) |
+| `billing_event` | One row per event acted on: (`provider` (`mock`, `manual`, `stripe`), `event_id`) primary key, `type`, `received_at`, `account_id` (set null when the account goes; indexed), `outcome` (`applied`, `recorded`, `conflict`, `unknown_account`; 327 added `stale`; 352 `orphan_pending` and `orphan_refunded`). **Owner-only**: RLS on, no policy, no privilege for `water_app`; only `app_billing_apply` and 352's orphan functions write it. Indexed on `received_at`, which the tick's purge reads: rows received more than 90 days ago are deleted (327 `app_purge_billing_events`, worker context only, never under 4 days, past Stripe's 3-day redelivery window) |
 | `subscription.billing_interval` (332) | How often the subscription bills (`month`, `year`), from the payload's `interval`: absent keeps the stored value, `null` clears it, anything else is `invalid`. The plan page works out the subscription's total from it ([billing.md § Billing interval and editor count](./billing.md#billing-interval-and-editor-count)) |
 | `subscription.last_event_at` (327) | The provider's time (`eventCreated`) of the newest event applied to the subscription; null before 327, for the staff grant, and while no event carried a time. Bookkeeping for ordering, not in "Download my data" |
 
@@ -4020,6 +4020,21 @@ cancelAtPeriodEnd, externalRef, interval?, eventCreated? }` (`interval`: `month`
   delete is never stale. A malformed time is `invalid`.
 - `conflict`, `unknown_account` and `stale` are recorded, so a replay is `duplicate`.
 - Tested in `src/billing/apply.db.test.ts`.
+
+An orphan (352, [billing.md § The route](./billing.md#the-route)): a
+subscription for an account that is gone. Two functions, SECURITY DEFINER,
+pinned `search_path`, granted to `water_app`, `42501` inside a user's or an
+API key's transaction, as `app_billing_apply`:
+
+- `app_billing_orphan_claim(provider, event_id, first boolean) → boolean`.
+  With `first` (the route calls it in `app_billing_apply`'s transaction, after
+  this delivery inserted the row), an `unknown_account` row or a
+  `checkout.completed` row `recorded` with no account becomes
+  `orphan_pending`, answering true. Without it (a redelivery), true only for
+  a row already `orphan_pending`.
+- `app_billing_orphan_done(provider, event_id) → boolean`: `orphan_pending`
+  becomes `orphan_refunded` once the provider has cancelled and refunded.
+- Tested in `src/billing/orphan.db.test.ts`.
 
 ### Two-step sign-in (150_mfa.sql, 206_mfa_email_code.sql)
 

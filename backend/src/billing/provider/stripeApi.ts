@@ -32,6 +32,14 @@
 //   GET    /v1/subscriptions?customer=…           the customer's subscriptions not yet canceled
 //   DELETE /v1/subscriptions/:id                  cancel one now: invoice_now=false, prorate=false
 //
+// and, for a subscription whose account is gone (orphanCancelAndRefund; docs/billing.md § Deleting an account):
+//
+//   GET    /v1/subscriptions/:id                  its status
+//   DELETE /v1/subscriptions/:id                  cancel it now, as above
+//   GET    /v1/invoices?subscription=…&status=paid           its paid invoices
+//   GET    /v1/invoice_payments?invoice=…&status=paid        each one's payments
+//   POST   /v1/refunds                            refund each payment whole, one idempotency key per payment
+//
 // Each change sends proration_behavior=create_prorations (Stripe's default, written
 // out so a change of default never changes ours) and an idempotency key.
 //
@@ -344,6 +352,93 @@ export async function expireCheckoutSession(o: StripeClientOptions, sessionId: s
 }
 
 const INVOICE_ID = /^in_[A-Za-z0-9]{1,250}$/;
+const PAYMENT_INTENT_ID = /^pi_[A-Za-z0-9]{1,250}$/;
+const CHARGE_ID = /^(ch|py)_[A-Za-z0-9]{1,250}$/;
+
+/** What cancelling and refunding an orphaned subscription did (orphanCancelAndRefund). */
+export interface OrphanResult {
+	/** Whether this call cancelled it (false: Stripe had it ended already, or doesn't have it). */
+	cancelled: boolean;
+	/** Refunds this call made (an idempotent replay of an earlier one counts again; an already refunded payment doesn't). */
+	refunds: number;
+	/** Their total, in the currency's minor units. */
+	refundedMinor: number;
+}
+
+/** Refund errors that mean there is nothing left to refund: refunded already, or charged back (the dispute returns it). */
+const NOTHING_TO_REFUND = new Set(['charge_already_refunded', 'charge_disputed', 'refund_disputed_payment']);
+
+/**
+ * A subscription whose account is gone (a checkout paid after the account was
+ * deleted; docs/billing.md § Deleting an account): cancel it now and refund
+ * every payment made for it. Each step is safe to repeat, so a redelivered
+ * webhook (or two events for the same subscription) refunds once:
+ *
+ *   GET    /v1/subscriptions/:id                          its status: an ended one isn't cancelled again
+ *   DELETE /v1/subscriptions/:id                          cancel now (cancelSubscription: no final invoice, no proration)
+ *   GET    /v1/invoices?subscription=…&status=paid        its paid invoices (a fresh checkout's first one, as a rule)
+ *   GET    /v1/invoice_payments?invoice=…&status=paid     each one's payments (API 2025-03-31.basil moved them off the invoice)
+ *   POST   /v1/refunds                                    the whole of each payment, Idempotency-Key wm-orphan-refund-<payment>
+ *
+ * A payment refunded already (charge_already_refunded, past the key's 24 hours)
+ * or charged back is skipped. A trial (nothing paid) is only cancelled. Any
+ * other failure throws, so the webhook answers non-2xx and Stripe retries.
+ * Refunds carry `reason=requested_by_customer` and metadata naming why and the
+ * billing account's random id, never an address.
+ */
+export async function orphanCancelAndRefund(o: StripeClientOptions, subscriptionId: string, accountId: string): Promise<OrphanResult> {
+	if (!SUBSCRIPTION_ID.test(subscriptionId)) throw new StripeApiError(400, 'invalid_request', 'subscription');
+	let cancelled = false;
+	let live = true;
+	try {
+		const sub = await send(o, 'GET', `/v1/subscriptions/${subscriptionId}`, {});
+		live = !ENDED_STATUSES.has(String(sub.status));
+	} catch (e) {
+		if (!(e instanceof StripeApiError && e.status === 404 && e.code === 'resource_missing')) throw e;
+		live = false;
+	}
+	if (live) {
+		await cancelSubscription(o, subscriptionId);
+		cancelled = true;
+	}
+	const invoices = await send(o, 'GET', '/v1/invoices', { subscription: subscriptionId, status: 'paid', limit: 100 });
+	if (!Array.isArray(invoices.data) || invoices.has_more === true) throw new StripeApiError(502, 'unexpected_response', 'data');
+	let refunds = 0;
+	let refundedMinor = 0;
+	for (const inv of invoices.data as Record<string, unknown>[]) {
+		const invoiceId = field(inv, 'id', INVOICE_ID);
+		if (typeof inv.amount_paid === 'number' && inv.amount_paid <= 0) continue;
+		const payments = await send(o, 'GET', '/v1/invoice_payments', { invoice: invoiceId, status: 'paid', limit: 100 });
+		if (!Array.isArray(payments.data) || payments.has_more === true) throw new StripeApiError(502, 'unexpected_response', 'data');
+		for (const p of payments.data as Record<string, unknown>[]) {
+			const payment = typeof p.payment === 'object' && p.payment !== null ? (p.payment as Record<string, unknown>) : {};
+			const target =
+				payment.type === 'payment_intent'
+					? { payment_intent: field(payment, 'payment_intent', PAYMENT_INTENT_ID) }
+					: payment.type === 'charge'
+						? { charge: field(payment, 'charge', CHARGE_ID) }
+						: null;
+			if (!target) throw new StripeApiError(502, 'unexpected_response', 'payment');
+			const ref = 'payment_intent' in target ? target.payment_intent : target.charge;
+			try {
+				const refund = await post(
+					o,
+					'/v1/refunds',
+					{ ...target, reason: 'requested_by_customer', metadata: { wm_reason: 'account_deleted', billing_account_id: accountId } },
+					`wm-orphan-refund-${ref}`
+				);
+				if (refund.status === 'failed' || refund.status === 'canceled') throw new StripeApiError(502, 'unexpected_response', 'status');
+				refunds += 1;
+				if (typeof refund.amount === 'number') refundedMinor += refund.amount;
+			} catch (e) {
+				if (e instanceof StripeApiError && e.code !== null && NOTHING_TO_REFUND.has(e.code)) continue;
+				throw e;
+			}
+		}
+	}
+	return { cancelled, refunds, refundedMinor };
+}
+
 /** Days a B2B invoice gives the customer to pay (net 30; issue #641 Phase 5). */
 export const INVOICE_DAYS_UNTIL_DUE = 30;
 /** The custom field the PO number goes in, printed on the invoice and its PDF (Stripe: up to 4 fields, name ≤ 40, value ≤ 140). */

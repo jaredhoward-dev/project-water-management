@@ -226,3 +226,41 @@ describe('cancelSubscriptions (deleting an account)', () => {
 		});
 	});
 });
+
+describe('cancelOrphan (a subscription whose account is gone)', () => {
+	const ACCT = '55555555-5555-4555-8555-555555555555';
+	it('the mock answers it cancelled with nothing refunded, and makes no network call', async () => {
+		const f = vi.fn(async () => new Response('{}'));
+		const mock = billingProvider({ BILLING_PROVIDER: 'mock', BILLING_WEBHOOK_SECRET: SECRET }, { fetch: f as unknown as typeof fetch })!;
+		expect(await mock.cancelOrphan({ accountId: ACCT, subscriptionRef: 'sub_mock_1' })).toEqual({ cancelled: true, refunds: 0, refundedMinor: 0 });
+		expect(f).not.toHaveBeenCalled();
+	});
+
+	it('stripe cancels and refunds through its API, and answers a failure or no key as the coded 503', async () => {
+		const calls: string[] = [];
+		const f = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+			const path = new URL(String(url)).pathname;
+			calls.push(`${init?.method} ${path}`);
+			const body =
+				path === '/v1/invoices'
+					? { data: [{ id: 'in_A1', amount_paid: 100 }] }
+					: path === '/v1/invoice_payments'
+						? { data: [{ payment: { type: 'payment_intent', payment_intent: 'pi_A1' } }] }
+						: path === '/v1/refunds'
+							? { amount: 100, status: 'succeeded' }
+							: { status: init?.method === 'DELETE' ? 'canceled' : 'active' };
+			return new Response(JSON.stringify(body), { status: 200 });
+		});
+		const p = billingProvider({ BILLING_PROVIDER: 'stripe', BILLING_WEBHOOK_SECRET: SECRET, STRIPE_SECRET_KEY: 'test-only-key' }, { fetch: f as unknown as typeof fetch })!;
+		expect(await p.cancelOrphan({ accountId: ACCT, subscriptionRef: 'sub_Orph1' })).toEqual({ cancelled: true, refunds: 1, refundedMinor: 100 });
+		expect(calls).toEqual(['GET /v1/subscriptions/sub_Orph1', 'DELETE /v1/subscriptions/sub_Orph1', 'GET /v1/invoices', 'GET /v1/invoice_payments', 'POST /v1/refunds']);
+
+		const failing = billingProvider(
+			{ BILLING_PROVIDER: 'stripe', BILLING_WEBHOOK_SECRET: SECRET, STRIPE_SECRET_KEY: 'test-only-key' },
+			{ fetch: (async () => new Response('{}', { status: 500 })) as unknown as typeof fetch }
+		)!;
+		await expect(failing.cancelOrphan({ accountId: ACCT, subscriptionRef: 'sub_Orph1' })).rejects.toMatchObject({ status: 503, code: 'billing_provider_error' });
+		const keyless = billingProvider({ BILLING_PROVIDER: 'stripe', BILLING_WEBHOOK_SECRET: SECRET })!;
+		await expect(keyless.cancelOrphan({ accountId: ACCT, subscriptionRef: 'sub_Orph1' })).rejects.toMatchObject({ code: 'billing_provider_error' });
+	});
+});

@@ -2007,7 +2007,10 @@ In short:
   `app_billing_apply` (326), the provider webhook's function, which runs
   with no user and refuses (`42501`) inside a user's or an API key's
   transaction; `billing_event`, its de-duplication, is owner-only
-  (`apply.db.test.ts`). The billing write routes follow the same rule: a
+  (`apply.db.test.ts`), and 352's `app_billing_orphan_claim` and
+  `app_billing_orphan_done`, which mark a subscription for a deleted account
+  pending and then cancelled and refunded, refuse a user the same way
+  (`orphan.db.test.ts`). The billing write routes follow the same rule: a
   team's `POST /teams/:id/plan/checkout`, `/portal`, `/seats` and
   `/assistant-share` answer `404` to anyone but a team admin before any
   provider call or body read (`app_team_set_assistant_share`, 339, answers

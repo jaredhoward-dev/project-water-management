@@ -429,11 +429,30 @@ How each result of `app_billing_apply` is answered:
 | `applied`, `recorded`, `duplicate`, `stale` | `200 { received: true, result }` | info |
 | `conflict`, `unknown_account` | `200` (a retry wouldn't change them) | warn, for the operator to read |
 | `invalid` | `400` (326 doesn't record it, so a corrected retry under the same id still applies) | warn |
+| an orphan, cancelled and refunded | `200 { received: true, result: 'orphan_refunded' }` | warn, with `cancelled`, `refunds`, `refundedMinor` |
+| an orphan whose cancel or refund failed | `503 { error }` (the event stays `orphan_pending`; Stripe redelivers it) | error, `result: 'orphan_failed'` |
 
 A database error is the app's generic `500`, which Stripe retries. Each answer
 logs one line (`billing_webhook` or `billing_webhook_rejected`) with the
 provider, type, event id and result or reason. It never logs the payload, the
 account or the secret.
+
+**An orphan** (352) is a subscription made for an account that no longer
+exists: a checkout paid after the account was deleted ([§ Deleting an
+account](#deleting-an-account)). It is a live `subscription.updated`
+(`trialing`, `active`, `past_due`) that `app_billing_apply` answers
+`unknown_account`, or a `checkout.completed` it records with no account. In
+the same transaction, `app_billing_orphan_claim` marks the event row
+`orphan_pending`. The provider's `cancelOrphan` then cancels the
+subscription now and refunds what was paid for it, and
+`app_billing_orphan_done` marks the row `orphan_refunded`. A redelivery is a
+`duplicate` to `app_billing_apply`, but the claim still finds a pending row
+and tries again; a finished one is a plain `duplicate`. Only a row that was
+unknown when its own first delivery applied can become pending, so a
+redelivered event whose account was deleted afterwards (and whose plan the
+delete already cancelled) is never refunded. An unknown account's
+`subscription.deleted`, an ended status, an `invoice.*` event and a
+`subscription.pending` stay `unknown_account` or `recorded`, as before.
 
 ### Event order
 
@@ -485,6 +504,11 @@ The fixtures are `checkout-completed`, `subscription-created` (trialing),
 - `config/production.security.test.ts`: production refuses the mock.
 - `billing/webhook.db.test.ts`: the route against 326. A signed event applies,
   a replay or a forgery changes nothing, and an unknown account is a `200`.
+- `billing/orphan.db.test.ts`: an orphan against 352, with the mock's
+  `cancelOrphan` watched: cancelled and refunded once across redeliveries, a
+  failure answers `503` and the redelivery finishes it, a completed checkout
+  counts, an ended subscription doesn't, a known account applies as before,
+  and an event redelivered after its account went is a plain `duplicate`.
 - `billing/apply.db.test.ts`: `app_billing_apply` itself (326, 327) as
   `water_app` with no user: once only, the status moves, conflicts, unknown
   accounts and invalid payloads, stale updates by `eventCreated`, and the
@@ -1709,12 +1733,33 @@ payment provider. So the route cancels the plan there first
   by customer finds them all. A session Stripe refuses to expire because it
   is no longer open (it completed or expired in between) is fine: a
   completed one's subscription is in the subscription list read next, and
-  cancelled. Left open: a checkout *started* in the moment between the
-  cancel and the delete (a second tab), whose subscription would arrive
-  after the account is gone. The window is the length of the delete
-  transaction, and the durable fix is for the webhook to cancel at Stripe
-  a subscription whose account no longer exists (tracked in
-  [followups.md](./followups.md)).
+  cancelled. A checkout *started* in the moment between the cancel and
+  the delete (a second tab) and paid after the delete commits still makes a
+  subscription for an account that is gone; the webhook catches that one
+  (next item).
+- **A subscription that arrives after the account is gone** (352) is
+  cancelled and refunded by the webhook ([§ The route](#the-route), "An
+  orphan"). Under Stripe (`provider/stripeApi.ts` `orphanCancelAndRefund`):
+  `GET /v1/subscriptions/:id` for its status, `DELETE
+  /v1/subscriptions/:id` (now, no final invoice, no proration) unless it has
+  ended already, `GET /v1/invoices?subscription=…&status=paid`, each paid
+  invoice's `GET /v1/invoice_payments?invoice=…&status=paid` (API
+  2025-03-31.basil moved the payment off the invoice), and `POST
+  /v1/refunds` for the whole of each payment (by its `payment_intent`, or
+  `charge`), `reason=requested_by_customer`, metadata
+  `wm_reason=account_deleted` and the billing account's random id, under
+  the `Idempotency-Key` `wm-orphan-refund-<payment>`. A payment refunded
+  already (`charge_already_refunded`, after the key's 24 hours) or charged
+  back (`charge_disputed`, `refund_disputed_payment`) is skipped, and a
+  trial (nothing paid) is only cancelled. So the session's and the
+  subscription's events, and every redelivery, refund once. Any other
+  failure answers `503` and Stripe retries (for up to 3 days); past that
+  the row stays `orphan_pending` for the operator to finish in the
+  dashboard. The mock has nothing to cancel or refund and answers at once,
+  with no network. Endpoints checked against Stripe's API reference on
+  2026-11-24 (cancel a subscription, list invoices, list invoice payments,
+  create a refund, error codes). This refund is not the Terms' refund
+  question (counsel's item 13 below): the person never had the plan.
 - **What is cancelled.** Every live (`trialing`, `active`, `past_due`)
   subscription a provider holds (not a `manual` grant or the reverse trial,
   which nothing charges for), and, under Stripe, every other open
@@ -1769,7 +1814,8 @@ payment provider. So the route cancels the plan there first
   own records either way) waits for counsel
   ([legal/billing-terms-draft.md](./legal/billing-terms-draft.md) § 6
   item 9). Stripe's `customer.subscription.deleted` for a deleted account
-  answers `unknown_account` (logged, never retried).
+  answers `unknown_account` (logged, never retried), and so does the
+  delete of an orphan we cancelled.
 - **The operator's path** (`DELETE FROM app_user` as the schema owner)
   can't reach Stripe, so its runbook cancels the subscription in Stripe's
   dashboard first ([deployment.md § Runbooks](./deployment.md#runbooks),
@@ -1785,7 +1831,11 @@ checkout landing during the cancel refuses with nothing deleted, a team
 admin's deletion leaves the team's plan) and `teams/teams.db.test.ts` (the
 team's own deletion, the same race, and no cancel asked for by a
 non-admin); `e2e/tests/account-delete.spec.ts` (the dialog's words for
-`account_plan_not_cancelled`, still signed in).
+`account_plan_not_cancelled`, still signed in). The orphan:
+`provider/stripeApi.test.ts` (faked HTTP: the calls in order, the refund's
+key and metadata, an ended or missing subscription, already refunded,
+failures), `provider.test.ts` (the mock makes no call), `webhook.test.ts`
+(claim, cancel, done; a redelivery; the `503`) and `orphan.db.test.ts`.
 
 ## Later phases
 

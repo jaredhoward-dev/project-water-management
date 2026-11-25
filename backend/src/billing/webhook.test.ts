@@ -9,7 +9,7 @@ import { signPayload } from './provider/signature.js';
 
 const { calls, answer, logs } = vi.hoisted(() => ({
 	calls: [] as { user: string | null; sql: string; params: unknown[] }[],
-	answer: { result: 'applied' as unknown, error: null as Error | null },
+	answer: { result: 'applied' as unknown, error: null as Error | null, claimed: false },
 	logs: [] as { level: string; fields: Record<string, unknown> }[]
 }));
 
@@ -23,6 +23,8 @@ vi.mock('../db/tx.js', async (orig) => ({
 			query: async (sql: string, params: unknown[] = []) => {
 				calls.push({ user: null, sql, params });
 				if (answer.error) throw answer.error;
+				if (sql.includes('app_billing_orphan_claim')) return { rows: [{ claimed: answer.claimed }] };
+				if (sql.includes('app_billing_orphan_done')) return { rows: [{ app_billing_orphan_done: true }] };
 				return { rows: [{ result: answer.result }] };
 			}
 		})
@@ -54,7 +56,9 @@ afterEach(() => {
 	logs.length = 0;
 	answer.result = 'applied';
 	answer.error = null;
+	answer.claimed = false;
 	vi.unstubAllEnvs();
+	vi.unstubAllGlobals();
 });
 
 describe('POST /billing/webhook/:provider', () => {
@@ -174,5 +178,100 @@ describe('POST /billing/webhook/:provider', () => {
 		const text = JSON.stringify(logs);
 		expect(logs.some((l) => l.fields.event === 'billing_webhook' && l.fields.eventId === 'evt_synthetic_sub_updated_0001' && l.fields.type === 'subscription.updated')).toBe(true);
 		for (const leak of [SECRET, '00000000-0000-4000-8000-000000000641', 'sub_synthetic_0001', 'plan_code']) expect(text).not.toContain(leak);
+	});
+
+	describe('an orphan: a live subscription or a completed checkout whose account is gone (352)', () => {
+		/** Stripe answering the orphan's cancel and refund (stripeApi.ts orphanCancelAndRefund), or failing every call with `failStatus`. */
+		/** A fixture with a Stripe-shaped subscription id (letters and digits after sub_; the synthetic one's underscores aren't). */
+		const orphanFixture = (name: string) => fixture(name).replaceAll('sub_synthetic_0001', 'sub_Synthetic0001');
+		function stripe(failStatus?: number) {
+			const seen: string[] = [];
+			vi.stubEnv('STRIPE_SECRET_KEY', 'test-only-not-a-stripe-key');
+			vi.stubGlobal('fetch', async (url: string | URL | Request, init?: RequestInit) => {
+				const path = new URL(String(url)).pathname;
+				seen.push(`${init?.method} ${path}`);
+				if (failStatus) return new Response(JSON.stringify({ error: { type: 'api_error' } }), { status: failStatus });
+				const body =
+					path === '/v1/invoices'
+						? { data: [{ id: 'in_Orph1', amount_paid: 4900 }] }
+						: path === '/v1/invoice_payments'
+							? { data: [{ payment: { type: 'payment_intent', payment_intent: 'pi_Orph1' } }] }
+							: path === '/v1/refunds'
+								? { amount: 4900, status: 'succeeded' }
+								: { status: init?.method === 'DELETE' ? 'canceled' : 'active' };
+				return new Response(JSON.stringify(body), { status: 200 });
+			});
+			return seen;
+		}
+
+		it('claims the event in the apply transaction, cancels and refunds at Stripe, marks it done and answers 200 orphan_refunded', async () => {
+			const seen = stripe();
+			answer.result = 'unknown_account';
+			answer.claimed = true;
+			const res = await post('stripe', orphanFixture('subscription-updated'));
+			expect(res.status).toBe(200);
+			expect(await res.json()).toEqual({ received: true, result: 'orphan_refunded' });
+			expect(calls.map((c) => c.sql.match(/app_billing_\w+/)![0])).toEqual(['app_billing_apply', 'app_billing_orphan_claim', 'app_billing_orphan_done']);
+			// First delivery: the claim may turn the row pending.
+			expect(calls[1]!.params).toEqual(['stripe', 'evt_synthetic_sub_updated_0001', true]);
+			expect(seen).toEqual(['GET /v1/subscriptions/sub_Synthetic0001', 'DELETE /v1/subscriptions/sub_Synthetic0001', 'GET /v1/invoices', 'GET /v1/invoice_payments', 'POST /v1/refunds']);
+			const line = logs.find((l) => l.fields.result === 'orphan_refunded')!;
+			expect(line.level).toBe('warn');
+			expect(line.fields).toMatchObject({ event: 'billing_webhook', eventId: 'evt_synthetic_sub_updated_0001', cancelled: true, refunds: 1, refundedMinor: 4900 });
+			for (const leak of ['00000000-0000-4000-8000-000000000641', 'sub_Synthetic0001', '@']) expect(JSON.stringify(logs)).not.toContain(leak);
+		});
+
+		it('a redelivery (duplicate) asks whether the row is still pending, never claiming it afresh', async () => {
+			stripe();
+			answer.result = 'duplicate';
+			answer.claimed = true;
+			expect(await (await post('stripe', orphanFixture('subscription-updated'))).json()).toEqual({ received: true, result: 'orphan_refunded' });
+			expect(calls[1]!.params).toEqual(['stripe', 'evt_synthetic_sub_updated_0001', false]);
+			calls.length = 0;
+			answer.claimed = false; // done already: a plain duplicate, nothing asked of Stripe
+			const seen = stripe();
+			expect(await (await post('stripe', orphanFixture('subscription-updated'))).json()).toEqual({ received: true, result: 'duplicate' });
+			expect(seen).toEqual([]);
+		});
+
+		it('a completed checkout recorded with no account is an orphan too; one for a known account is not', async () => {
+			const seen = stripe();
+			answer.result = 'recorded';
+			answer.claimed = true;
+			expect(await (await post('stripe', orphanFixture('checkout-completed'))).json()).toEqual({ received: true, result: 'orphan_refunded' });
+			expect(seen[0]).toMatch(/^GET \/v1\/subscriptions\/sub_/);
+			calls.length = 0;
+			seen.length = 0;
+			answer.claimed = false; // the SQL found the account (positive control)
+			expect(await (await post('stripe', orphanFixture('checkout-completed'))).json()).toEqual({ received: true, result: 'recorded' });
+			expect(seen).toEqual([]);
+		});
+
+		it('asks nothing for an ended subscription, an unknown account’s delete, or a known account’s applied update', async () => {
+			const seen = stripe();
+			answer.result = 'unknown_account';
+			answer.claimed = true;
+			for (const name of ['subscription-deleted']) {
+				expect(await (await post('stripe', orphanFixture(name))).json()).toEqual({ received: true, result: 'unknown_account' });
+			}
+			answer.result = 'applied';
+			expect(await (await post('stripe', orphanFixture('subscription-updated'))).json()).toEqual({ received: true, result: 'applied' });
+			expect(calls.every((c) => c.sql.includes('app_billing_apply'))).toBe(true);
+			expect(seen).toEqual([]);
+		});
+
+		it('answers 503 (so Stripe retries) and leaves the row pending when the cancel or refund fails, or Stripe has no key', async () => {
+			stripe(500);
+			answer.result = 'unknown_account';
+			answer.claimed = true;
+			let res = await post('stripe', orphanFixture('subscription-updated'));
+			expect(res.status).toBe(503);
+			expect(await res.text()).not.toMatch(/api_error|Stripe answered/);
+			expect(calls.some((c) => c.sql.includes('app_billing_orphan_done'))).toBe(false);
+			expect(logs.find((l) => l.fields.result === 'orphan_failed')?.level).toBe('error');
+			vi.stubEnv('STRIPE_SECRET_KEY', '');
+			res = await post('stripe', orphanFixture('subscription-updated'));
+			expect(res.status).toBe(503);
+		});
 	});
 });

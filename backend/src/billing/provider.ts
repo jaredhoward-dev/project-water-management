@@ -28,7 +28,7 @@ import { SIGNATURE_HEADER, verifySignature } from './provider/signature.js';
 import { normaliseStripeEvent } from './provider/stripe.js';
 import { MOCK_SESSION_TTL_SECONDS, seatsChangedEvent, signMockSession } from './provider/mock.js';
 import { createHash } from 'node:crypto';
-import { cancelSubscription, changeSeatItem, createCheckoutSession, createCustomer, createInvoice as createStripeInvoice, createPortalSession, ensureExtraSeatProduct, expireCheckoutSession, getSubscriptionItems, listOpenCheckoutSessions, listOpenSubscriptions, StripeApiError, type InvoiceLine } from './provider/stripeApi.js';
+import { cancelSubscription, changeSeatItem, createCheckoutSession, createCustomer, createInvoice as createStripeInvoice, createPortalSession, ensureExtraSeatProduct, expireCheckoutSession, getSubscriptionItems, listOpenCheckoutSessions, listOpenSubscriptions, orphanCancelAndRefund, StripeApiError, type InvoiceLine, type OrphanResult } from './provider/stripeApi.js';
 
 export const BILLING_PROVIDERS = ['mock', 'manual', 'stripe'] as const;
 export type BillingProviderName = (typeof BILLING_PROVIDERS)[number];
@@ -267,7 +267,21 @@ export interface BillingProvider {
 	 * nothing (docs/billing.md § Deleting an account).
 	 */
 	cancelSubscriptions(req: CancelRequest): Promise<string[]>;
+	/**
+	 * A live subscription whose account can't be found (a checkout paid after the account was
+	 * deleted; billing/webhook.ts): cancel it now and refund what was paid for it, safe to repeat
+	 * (a redelivered event refunds once). Throws when either fails, so the webhook answers
+	 * non-2xx and the provider retries (docs/billing.md § Deleting an account).
+	 */
+	cancelOrphan(req: OrphanRequest): Promise<OrphanResult>;
 }
+
+/** The orphaned subscription: the account id its metadata names (gone) and the provider's ref. */
+export interface OrphanRequest {
+	accountId: string;
+	subscriptionRef: string;
+}
+export type { OrphanResult };
 
 /** BILLING_PROVIDER as one of ours (unset is the mock, the code default), or null for a value that names none. */
 export function billingProviderName(env: NodeJS.ProcessEnv = process.env): BillingProviderName | null {
@@ -353,6 +367,11 @@ function mockProvider(secret: string | undefined, now: () => number): BillingPro
 		// with the account (323's cascade). No event is posted: the account's deletion follows at once.
 		async cancelSubscriptions(req) {
 			return [...req.subscriptionRefs];
+		},
+		// The same answer as Stripe's for a subscription it cancelled, with no network: a mock subscription for an
+		// account that is gone has no row (323's cascade) and nothing charged a card, so nothing is refunded.
+		async cancelOrphan() {
+			return { cancelled: true, refunds: 0, refundedMinor: 0 };
 		}
 	};
 }
@@ -477,6 +496,10 @@ function stripeProvider(webhookSecret: string | undefined, secretKey: string | u
 				// A recorded ref the customer's list left out has already ended at Stripe (its webhook may not have landed).
 				return [...new Set([...refs, ...req.subscriptionRefs])];
 			});
+		},
+		async cancelOrphan(req) {
+			const o = client();
+			return call(() => orphanCancelAndRefund(o, req.subscriptionRef, req.accountId));
 		}
 	};
 }
@@ -500,6 +523,10 @@ const manual: BillingProvider = {
 	},
 	// A grant has nothing at a provider; a provider subscription can't be cancelled from here (auth/deleteAccount.ts refuses).
 	cancelSubscriptions: async () => {
+		throw new BillingUnavailableError();
+	},
+	// manual takes no webhooks, so no orphan reaches it.
+	cancelOrphan: async () => {
 		throw new BillingUnavailableError();
 	}
 };
