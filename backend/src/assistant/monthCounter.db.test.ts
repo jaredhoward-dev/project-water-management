@@ -7,6 +7,7 @@
 //   - assistant_dollars_spent equals 336's statement (REFERENCE below, verbatim) for this month and today, the
 //     month before, and yesterday's SAST day, for each account and person here and for the pool alone.
 // The workspace runs under a skewed TZ (CLAUDE.md rule 7); every day and month is worked out by Postgres.
+import pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { asOwner, signUp } from '../__tests__/helpers.js';
 import { withUser } from '../db/tx.js';
@@ -162,11 +163,19 @@ describe('the counters equal a fresh sum, and the read equals 336’s', () => {
 		await expectExact();
 	});
 
-	it('the counters are owner only: water_app reads none of them', async () => {
-		for (const t of ['assistant_month_counter', 'assistant_pool_counter', 'assistant_pool_member']) {
-			const [r] = await asOwner(`SELECT has_table_privilege('water_app', $1, 'SELECT') AS ok`, [`public.${t}`]);
-			expect([t, r!.ok]).toEqual([t, false]);
+	it('the counters are owner only: water_app holds no privilege on them, and RLS is on', async () => {
+		const tables = ['assistant_month_counter', 'assistant_pool_counter', 'assistant_pool_member'];
+		for (const t of tables) {
+			const [r] = await asOwner(
+				`SELECT has_table_privilege('water_app', $1, 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER') AS any,
+					(SELECT relrowsecurity FROM pg_class WHERE oid = $1::regclass) AS rls`,
+				[`public.${t}`]
+			);
+			expect([t, r!.any, r!.rls]).toEqual([t, false, true]);
 		}
+		// Positive control: the same check finds water_app's privilege on a table it does write.
+		const [ok] = await asOwner(`SELECT has_table_privilege('water_app', 'public.assistant_day_usage', 'SELECT, INSERT, UPDATE, DELETE') AS any`);
+		expect(ok!.any).toBe(true);
 	});
 
 	it('begin, then charge: the reservation’s dollars move onto the usage and day rows', async () => {
@@ -255,5 +264,59 @@ describe('the counters equal a fresh sum, and the read equals 336’s', () => {
 		await expect(
 			asOwner('UPDATE assistant_day_usage SET day = day - 1 WHERE billing_account_id = $1 AND user_id = $2', [account, owner.id])
 		).rejects.toThrow(/never moves/);
+	});
+});
+
+describe('concurrent writers never deadlock on the shared pool counter', () => {
+	/** An owner connection with a transaction open. */
+	const open = async () => {
+		const c = new pg.Client({ connectionString: process.env.TEST_MIGRATION_DATABASE_URL });
+		await c.connect();
+		await c.query('BEGIN');
+		return c;
+	};
+	const spendOn = (c: pg.Client, u: User, pid: string, usd: number, month: string) =>
+		c.query(
+			`INSERT INTO assistant_usage (project_id, user_id, month, cost_usd_micros) VALUES ($1, $2, $3, $4)
+			 ON CONFLICT (project_id, month, user_id) DO UPDATE SET cost_usd_micros = assistant_usage.cost_usd_micros + EXCLUDED.cost_usd_micros`,
+			[pid, u.id, month, usd]
+		);
+	/** Whether the connection's backend is waiting on a lock. */
+	const waiting = async (c: pg.Client) => {
+		const pid = (c as unknown as { processID: number }).processID;
+		for (let i = 0; i < 200; i++) {
+			const [r] = await asOwner(`SELECT wait_event_type FROM pg_stat_activity WHERE pid = $1`, [pid]);
+			if (r?.wait_event_type === 'Lock') return true;
+			await new Promise((res) => setTimeout(res, 25));
+		}
+		return false;
+	};
+
+	it('two pool accounts writing this month and last in opposite orders both commit, exactly (positive control: both are in the pool)', async () => {
+		const [now, prev] = [await utcMonth(), await utcMonth(-1)];
+		const a = await open();
+		const b = await open();
+		try {
+			// A: this month, then last. B: last month, then this. Under per-account locks alone, each would
+			// hold one shared pool row and wait for the other's: a deadlock Postgres breaks by failing one.
+			await spendOn(a, owner, projectId, 1_000, now);
+			const bFirst = spendOn(b, other, otherProject, 2_000, prev);
+			// B waits for A's counter lock before it touches any pool row.
+			expect(await waiting(b)).toBe(true);
+			await spendOn(a, owner, projectId, 3_000, prev);
+			await a.query('COMMIT');
+			await bFirst;
+			await spendOn(b, other, otherProject, 4_000, now);
+			await b.query('COMMIT');
+		} finally {
+			await a.query('ROLLBACK').catch(() => {});
+			await b.query('ROLLBACK').catch(() => {});
+			await Promise.all([a.end(), b.end()]);
+		}
+		const members = await asOwner('SELECT billing_account_id::text AS a FROM assistant_pool_member WHERE billing_account_id = ANY($1)', [[account, otherAccount]]);
+		expect(members.map((m) => m.a).sort()).toEqual([account, otherAccount].sort());
+		expect(await monthCounter(account)).toBe(1_000);
+		expect(await monthCounter(otherAccount)).toBe(4_000);
+		await expectExact();
 	});
 });

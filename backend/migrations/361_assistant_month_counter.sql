@@ -35,14 +35,21 @@
 -- so the counters and the reservations are read from one snapshot, and a
 -- charge (reservation deleted, usage and day rows and counters written) is
 -- one transaction: a begin sees all of it or none, as it saw the rows. Every
--- trigger takes a per-account advisory lock (assistant_counter_lock) before
--- it reads or writes that account's counters, so a charge and a subscription
--- change on the same account can't both miss each other's delta; the pool
--- counter rows themselves are updated with `+ delta` under their row lock.
--- 264's assistant_usage:all lock is unchanged: begins stay serialised, since
--- the caps still read, then reserve. The pool counter's two rows (this month,
--- today) are a hot spot for charges of pool accounts: each holds the row
--- until it commits, a short transaction.
+-- trigger takes one deployment-wide advisory lock (assistant_counter_lock)
+-- before it reads or writes any counter, held to commit, so a charge and a
+-- subscription change can't both miss each other's delta, and no two
+-- transactions ever hold counter rows at once: the pool counter's rows are
+-- shared by every pool account, and a writer touching several of them (a
+-- charge: the month, then the day; a subscription change: every retained
+-- month and day; the expiry sweep, the purge and a project moving account:
+-- several accounts' rows in data order) under per-account locks alone could
+-- take them in a different order from another and deadlock. One lock has no
+-- order to get wrong. The cost: counter writes are serialised, as charges of
+-- pool accounts already were on the pool's two hot rows (this month, today);
+-- each is a short transaction that commits straight after its write. Where
+-- one statement writes several pool rows it still writes them in (period,
+-- start) order. 264's assistant_usage:all lock is unchanged: begins stay
+-- serialised, since the caps still read, then reserve.
 --
 -- A usage row moved to another project or month is counted where it lands. A
 -- trigger refuses an UPDATE that moves a day row with a cost to another
@@ -98,11 +105,13 @@ REVOKE ALL ON assistant_month_counter, assistant_pool_counter, assistant_pool_me
 -- Helpers (internal: run as the definer triggers that call them)
 -- ---------------------------------------------------------------------------
 
--- One account's counters are written by one transaction at a time.
-CREATE FUNCTION assistant_counter_lock(p_account uuid) RETURNS void
+-- The counters are written by one transaction at a time (see the header: a
+-- per-account lock would let two writers take the shared pool rows in
+-- opposite orders).
+CREATE FUNCTION assistant_counter_lock() RETURNS void
 	LANGUAGE sql VOLATILE SET search_path = public
-	AS $$ SELECT pg_advisory_xact_lock(hashtext('assistant_counter:' || p_account::text)) $$;
-REVOKE ALL ON FUNCTION assistant_counter_lock(uuid) FROM PUBLIC;
+	AS $$ SELECT pg_advisory_xact_lock(hashtext('assistant_counter:all')) $$;
+REVOKE ALL ON FUNCTION assistant_counter_lock() FROM PUBLIC;
 
 CREATE FUNCTION assistant_pool_bump(p_period text, p_start date, p_delta bigint) RETURNS void
 	LANGUAGE sql VOLATILE SET search_path = public
@@ -116,19 +125,21 @@ REVOKE ALL ON FUNCTION assistant_pool_bump(text, date, bigint) FROM PUBLIC;
 CREATE FUNCTION assistant_pool_add(p_account uuid, p_sign integer) RETURNS void
 	LANGUAGE sql VOLATILE SET search_path = public
 	AS $$
+		-- One statement, its rows in (period, start) order: months, then days, as a charge writes them.
 		INSERT INTO assistant_pool_counter (period, start, cost_usd_micros)
-			SELECT 'month', c.month, p_sign * c.cost_usd_micros FROM assistant_month_counter c
-			WHERE c.billing_account_id = p_account AND c.cost_usd_micros <> 0
-		ON CONFLICT (period, start) DO UPDATE SET cost_usd_micros = assistant_pool_counter.cost_usd_micros + EXCLUDED.cost_usd_micros;
-		INSERT INTO assistant_pool_counter (period, start, cost_usd_micros)
-			SELECT 'day', d.day, p_sign * sum(d.cost_usd_micros) FROM assistant_day_usage d
-			WHERE d.billing_account_id = p_account GROUP BY d.day HAVING sum(d.cost_usd_micros) <> 0
+			SELECT x.period, x.start, x.usd FROM (
+				SELECT 'month' AS period, c.month AS start, p_sign * c.cost_usd_micros AS usd FROM assistant_month_counter c
+				WHERE c.billing_account_id = p_account AND c.cost_usd_micros <> 0
+				UNION ALL
+				SELECT 'day', d.day, p_sign * sum(d.cost_usd_micros) FROM assistant_day_usage d
+				WHERE d.billing_account_id = p_account GROUP BY d.day HAVING sum(d.cost_usd_micros) <> 0
+			) x ORDER BY x.period = 'day', x.start
 		ON CONFLICT (period, start) DO UPDATE SET cost_usd_micros = assistant_pool_counter.cost_usd_micros + EXCLUDED.cost_usd_micros;
 	$$;
 REVOKE ALL ON FUNCTION assistant_pool_add(uuid, integer) FROM PUBLIC;
 
 -- Bring an account's pool membership in step with assistant_pool_account
--- (a deleted account is in no pool). The caller holds the account's lock and
+-- (a deleted account is in no pool). The caller holds the counter lock and
 -- has already written its own change to the counted tables, so 'added' means
 -- the pool counter now includes it; only 'in' asks the caller to add its delta.
 CREATE FUNCTION assistant_pool_sync(p_account uuid) RETURNS text
@@ -162,7 +173,7 @@ CREATE FUNCTION assistant_month_count(p_account uuid, p_month date, p_delta bigi
 		IF p_account IS NULL OR coalesce(p_delta, 0) = 0 THEN
 			RETURN;
 		END IF;
-		PERFORM assistant_counter_lock(p_account);
+		PERFORM assistant_counter_lock();
 		IF NOT EXISTS (SELECT 1 FROM billing_account WHERE id = p_account) THEN
 			RETURN;
 		END IF;
@@ -183,7 +194,7 @@ CREATE FUNCTION assistant_day_count(p_account uuid, p_day date, p_delta bigint) 
 		IF p_account IS NULL OR coalesce(p_delta, 0) = 0 THEN
 			RETURN;
 		END IF;
-		PERFORM assistant_counter_lock(p_account);
+		PERFORM assistant_counter_lock();
 		IF assistant_pool_sync(p_account) = 'in' THEN
 			PERFORM assistant_pool_bump('day', p_day, p_delta);
 		END IF;
@@ -269,11 +280,11 @@ CREATE FUNCTION assistant_project_counted() RETURNS trigger
 		v_row record;
 	BEGIN
 		IF v_old IS DISTINCT FROM v_new THEN
-			-- Both accounts' locks, in one order.
-			PERFORM assistant_counter_lock(a) FROM unnest(ARRAY[v_old, v_new]) a WHERE a IS NOT NULL ORDER BY a;
+			PERFORM assistant_counter_lock();
 			FOR v_row IN
 				SELECT u.month, sum(u.cost_usd_micros)::bigint AS usd FROM assistant_usage u
 				WHERE u.project_id = OLD.id GROUP BY u.month HAVING sum(u.cost_usd_micros) <> 0
+				ORDER BY u.month
 			LOOP
 				PERFORM assistant_month_count(v_old, v_row.month, -v_row.usd);
 				PERFORM assistant_month_count(v_new, v_row.month, v_row.usd);
@@ -296,13 +307,13 @@ CREATE FUNCTION assistant_subscription_counted() RETURNS trigger
 	DECLARE
 		v_account uuid;
 	BEGIN
+		PERFORM assistant_counter_lock();
 		FOR v_account IN
 			SELECT DISTINCT a FROM unnest(ARRAY[
 				CASE WHEN TG_OP <> 'INSERT' THEN OLD.billing_account_id END,
 				CASE WHEN TG_OP <> 'DELETE' THEN NEW.billing_account_id END]) a
 			WHERE a IS NOT NULL ORDER BY a
 		LOOP
-			PERFORM assistant_counter_lock(v_account);
 			PERFORM assistant_pool_sync(v_account);
 		END LOOP;
 		RETURN NULL;
@@ -320,7 +331,7 @@ CREATE FUNCTION assistant_account_counted() RETURNS trigger
 	LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
 	AS $$
 	BEGIN
-		PERFORM assistant_counter_lock(OLD.id);
+		PERFORM assistant_counter_lock();
 		IF EXISTS (SELECT 1 FROM assistant_pool_member WHERE billing_account_id = OLD.id) THEN
 			PERFORM assistant_pool_add(OLD.id, -1);
 			DELETE FROM assistant_pool_member WHERE billing_account_id = OLD.id;

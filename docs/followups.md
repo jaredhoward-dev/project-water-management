@@ -1081,7 +1081,9 @@ are #641's checklist. Open items from building it:
       a few hundred active Free accounts. Done (2026-11-25, 361): per-account
       month and pool month/day counters kept by triggers on the counted
       tables, read in one statement with the reservations in flight; the
-      deployment lock unchanged, a per-account lock for exactness
+      deployment lock unchanged, one counter lock for exactness (not
+      per-account: two writers could take the shared pool rows in opposite
+      orders and deadlock)
       (billing.md § The counters; `monthCounter.db.test.ts`,
       `begin.db.perf.test.ts`).
 - [x] **Webhook events apply in arrival order.** `app_billing_apply` (326)

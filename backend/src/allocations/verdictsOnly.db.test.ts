@@ -43,14 +43,14 @@ beforeAll(async () => {
 	});
 	// The published ladder run ran in cap mode (before 213); its outlook's base is that run.
 	await markMode(ctx.runId, 'cap');
-	// A later compare-only run, for the history once a publication supersedes the cap one.
+	// A later compare-only run, published to supersede the cap one.
 	later = (await ctx.owner.call('POST', `${at}/runs`, { label: 'Compare only' })).body.run.id as string;
 }, 300_000);
 afterAll(() => clearLadderJobs(ctx));
 
 describe('the farm view of a published cap or full-allocation run (#523 I)', () => {
 	it('is refused to a viewer kept from the volumes previewing a farm, with the reason, on every farm route', async () => {
-		for (const path of ['', '/series?key=supplied', '/export.csv', '/history', '/map']) {
+		for (const path of ['', '/export.csv', '/map']) {
 			const r = await ctx.viewer.call('GET', `${at}/farm/${ctx.otherFarmId}${path}`);
 			expect([path, r.status, r.body?.code]).toEqual([path, 403, 'allocation_series_withheld']);
 		}
@@ -83,15 +83,21 @@ describe('the farm view of a published cap or full-allocation run (#523 I)', () 
 		expect(editor.figuresWithheld).toBe(false);
 	});
 
-	it('once a compare-only run is published: the preview opens, without the cap publication in its history or the cap-based outlook', async () => {
+	it('once a compare-only run is published: the preview opens on that publication, without the cap-based outlook', async () => {
 		expect((await ctx.owner.call('POST', `${at}/publication`, { runId: later })).status).toBe(201);
+		// The farm's per-publication history route is gone (2026-11-25): the farm view shows only the current
+		// publication, so the cap one reaches that viewer nowhere once superseded.
+		const [current] = await asOwner(`SELECT published_at FROM run_publication WHERE project_id = $1 AND run_id = $2 AND superseded_at IS NULL`, [ctx.projectId, later]);
+		expect(current).toBeDefined();
 		const view = await ctx.viewer.call('GET', `${at}/farm/${ctx.otherFarmId}`);
 		expect(view.status).toBe(200);
+		expect(view.body.publication.publishedAt).toBe((current.published_at as Date).toISOString());
 		expect(view.body.outlook).toBeNull();
-		const history = (await ctx.viewer.call('GET', `${at}/farm/${ctx.otherFarmId}/history`)).body.publications as unknown[];
-		const editors = (await ctx.editor.call('GET', `${at}/farm/${ctx.otherFarmId}/history`)).body.publications as unknown[];
-		expect([history.length, editors.length]).toEqual([1, 2]);
-		expect((await ctx.editor.call('GET', `${at}/farm/${ctx.otherFarmId}`)).body.outlook).not.toBeNull();
+		expect((await ctx.viewer.call('GET', `${at}/farm/${ctx.otherFarmId}/map`)).status).toBe(200);
+		// Positive control: the editor reads the same publication, and the cap-based outlook.
+		const editors = await ctx.editor.call('GET', `${at}/farm/${ctx.otherFarmId}`);
+		expect(editors.body.publication.publishedAt).toBe(view.body.publication.publishedAt);
+		expect(editors.body.outlook).not.toBeNull();
 	});
 
 });
