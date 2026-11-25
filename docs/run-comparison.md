@@ -196,8 +196,26 @@ bottom:
    from before engine 1.0.0, which removed it; audit H1): it doesn't conserve
    water at the event scale, so the comparison is a workbook comparison
    only, not evidence.
+   **Download the comparison (CSV)** (issue #830, `compare/csv.ts`
+   `comparisonCsv`) saves this pair as a file, one table after another with
+   a blank line between: the two runs (label, project, period, engine), the
+   headline outcomes with their unrounded numbers (a share as a per cent),
+   each hydrological unit's demand, supply, deficit and share supplied, and
+   every input difference as the list below words it (area, kind, subject,
+   change). Cells a spreadsheet would read as a formula are defused, as in
+   every CSV export ([security.md](./security.md)).
 2. **Inputs that differ** ("What changed" until issue #466). Every difference in the inputs, grouped by network, crops,
-   transfers, settings and time series. **Who changed it and when** (issue
+   transfers, settings and time series. **The size of a change** (issue
+   #830, engine ≥ 1.120.0): a monthly table changed in one to three months
+   lists them with their values ("Pragmatic EWR: Oct 10 → 0 m³/day"); one
+   changed in four or more states its total before and after with the
+   signed change and the month that moved most ("changed in 12 months:
+   total 31 500 → 0 m³/day (−31 500), most in Jun 5 000 → 0 m³/day"), so
+   zeroing a table never reads like halving it. A changed number never
+   reads the same on both sides: when its usual rounding would show
+   "400 000 → 400 000", the line takes as many more decimals as it needs
+   ("400 000 → 400 000.4 m³"; `compare.ts` `fmtChange`).
+   **Who changed it and when** (issue
    #42): for two runs of one project, the earlier as the baseline, and
    neither a scenario run, a line over the list counts the saved model and
    settings changes between the runs and names who made them ("2 saved
@@ -244,7 +262,7 @@ bottom:
    and a change of kind is "A → B". Between two monthly rows the line names
    the months that changed and the annual totals ("monthly PE Oct 110 →
    120 mm (1,105 → 1,115 mm/yr)"), or "changed in N months" when more than
-   three did. A reworded source is listed too ("source "…" → "…""), since it
+   three did (with the size of the change, below). A reworded source is listed too ("source "…" → "…""), since it
    is part of the run's record. A run saved before 0.31.0 has no `pe` and
    compares as pan coefficient × A-pan. A changed pan-coefficient source
    note (`panCoefficientSource`, engine ≥ 0.31.1) is its own line, **Pan
@@ -817,7 +835,7 @@ pack's engine version, so its text moves only with an `ENGINE_VERSION` bump. Set
 | `compareRuns`, `diffInputs`, types | `packages/engine/src/compare.ts` (pure, unit-tested in `compare.test.ts`) |
 | `GET /compare/runs` | `backend/src/compare/routes.ts`, contract in [api.md § Compare runs](./api.md#compare-runs) |
 | Page | `frontend/src/routes/compare/+page.svelte` (heading, back link, URL) and the workspace's `compare` tab, both showing `lib/components/compare/CompareView.svelte` (the pickers and the comparison; the host passes the pair and builds URLs through `hrefFor`) |
-| Components + pure helpers | `frontend/src/lib/components/compare/` (`delta.ts` formatting, sorting and the farm feature columns, `picker.ts` URL state and defaults, `chirpsFit.ts` the CHIRPS factors note, `overlay.ts` the daily series overlay's node matching, zero-filled feature series, B − A and read-out, exported for reuse by scenario comparison, issue #18) |
+| Components + pure helpers | `frontend/src/lib/components/compare/` (`delta.ts` formatting, sorting and the farm feature columns, `picker.ts` URL state and defaults, `chirpsFit.ts` the CHIRPS factors note, `overlay.ts` the daily series overlay's node matching, zero-filled feature series, B − A and read-out, exported for reuse by scenario comparison, issue #18; `csv.ts` the comparison's CSV download, issue #830) |
 | Uncertainty and paired bands | `packages/engine/src/uncertainty/paired.ts`; `frontend/src/lib/components/uncertainty/PairedUncertaintyPanel.svelte` |
 
 Access follows the usual rules. You need at least **viewer** on both projects.

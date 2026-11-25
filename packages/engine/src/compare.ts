@@ -622,7 +622,10 @@ export function fmtValue(v: unknown, digits = 3): string {
 	return s === '-0' ? '0' : s;
 }
 
-const pct = (v: unknown) => (typeof v === 'number' ? `${fmtValue(v * 100, 2)}%` : fmtValue(v));
+/** A value formatter; `extra` decimals beyond its own are asked for by fmtChange() when two different numbers would read the same. */
+export type ValueFmt = (v: unknown, extra?: number) => string;
+const plain: ValueFmt = (v, extra = 0) => fmtValue(v, 3 + extra);
+const pct: ValueFmt = (v, extra = 0) => (typeof v === 'number' ? `${fmtValue(v * 100, 2 + extra)}%` : fmtValue(v));
 
 /** Calendar months 1–12 → "Oct–Mar" style (water-year order). */
 export function describeCalendarMonths(months: readonly number[]): string {
@@ -646,19 +649,66 @@ const same = (x: unknown, y: unknown) => JSON.stringify(x) === JSON.stringify(y)
 const monthSet = (v: unknown) => [...new Set(Array.isArray(v) ? v : [])].sort((p, q) => Number(p) - Number(q));
 
 /**
+ * "a → b" through a formatter, with more decimals until two different numbers
+ * never read the same on both sides (issue #830: 400 000.4 → 400 000 m³ read
+ * "400 000 → 400 000"). `fmt` takes the extra decimals as its second argument.
+ */
+export function fmtChange(fmt: ValueFmt, a: unknown, b: unknown): string {
+	let sa = fmt(a);
+	let sb = fmt(b);
+	if (sa === sb && typeof a === 'number' && typeof b === 'number' && Number.isFinite(a) && Number.isFinite(b) && a !== b) {
+		for (let extra = 1; extra <= 15 && sa === sb; extra++) {
+			sa = fmt(a, extra);
+			sb = fmt(b, extra);
+		}
+	}
+	return `${sa} → ${sb}`;
+}
+
+/** A signed change: "+12", "−1 200" (a true minus), "0". */
+function signed(d: number, fmt: ValueFmt = plain): string {
+	const s = fmt(Math.abs(d));
+	return d > 0 ? `+${s}` : d < 0 ? `−${s}` : s;
+}
+
+/**
  * Describe a changed 12-value water-year table: the months that changed with
- * their values when there are a few, otherwise how many.
+ * their values when there are a few; otherwise how many, with the size of the
+ * change (issue #830: zeroing a table and halving it must not read alike):
+ * the table's total before and after with its signed change, and the month
+ * that moved most.
  */
 function monthlyChange(a: unknown, b: unknown, unit: string): string | null {
 	const xa = Array.isArray(a) ? a : [];
 	const xb = Array.isArray(b) ? b : [];
+	const u = unit ? ` ${unit}` : '';
 	const changed: string[] = [];
+	let biggest: { i: number; d: number } | null = null; // i: its line in `changed`
+	let ta = 0;
+	let tb = 0;
+	let numeric = true;
 	for (let i = 0; i < Math.max(12, xa.length, xb.length); i++) {
-		if (!same(xa[i], xb[i])) changed.push(`${WY_MONTHS[i] ?? `#${i + 1}`} ${fmtValue(xa[i])} → ${fmtValue(xb[i])}`);
+		const va = xa[i] ?? null;
+		const vb = xb[i] ?? null;
+		const na = typeof va === 'number' && Number.isFinite(va);
+		const nb = typeof vb === 'number' && Number.isFinite(vb);
+		if (na) ta += va;
+		else if (va !== null) numeric = false;
+		if (nb) tb += vb;
+		else if (vb !== null) numeric = false;
+		if (same(xa[i], xb[i])) continue;
+		changed.push(`${WY_MONTHS[i] ?? `#${i + 1}`} ${fmtChange(plain, xa[i], xb[i])}`);
+		const d = (nb ? vb : 0) - (na ? va : 0);
+		if (!biggest || Math.abs(d) > Math.abs(biggest.d)) biggest = { i: changed.length - 1, d };
 	}
 	if (changed.length === 0) return null;
-	if (changed.length <= 3) return changed.join(', ') + (unit ? ` ${unit}` : '');
-	return `changed in ${changed.length} months`;
+	if (changed.length <= 3) return changed.join(', ') + u;
+	const size: string[] = [];
+	// Rounded to 12 significant digits, so float noise in a sum neither reads as a change nor shows as one.
+	const tidy = (v: number) => Number(v.toPrecision(12));
+	if (numeric) size.push(`total ${fmtChange(plain, tidy(ta), tidy(tb))}${u} (${signed(tidy(tb - ta))})`);
+	if (biggest) size.push(`most in ${changed[biggest.i]}${u}`);
+	return `changed in ${changed.length} months${size.length ? `: ${size.join(', ')}` : ''}`;
 }
 
 /** A monthly row that may be absent (null = off): set or cleared reads as the whole row, Oct–Sep; otherwise as monthlyChange. */
@@ -865,13 +915,14 @@ function rainStationChanges(
 	return out;
 }
 
-type Fmt = (v: unknown) => string;
-const withUnit = (unit: string, digits = 3): Fmt => (v) => (v === null || v === undefined ? 'none' : `${fmtValue(v, digits)} ${unit}`);
-const plain: Fmt = (v) => fmtValue(v);
+const withUnit =
+	(unit: string, digits = 3): ValueFmt =>
+	(v, extra = 0) =>
+		v === null || v === undefined ? 'none' : `${fmtValue(v, digits + extra)} ${unit}`;
 
 interface ScalarField {
 	label: string;
-	fmt: Fmt;
+	fmt: ValueFmt;
 }
 
 const EWR_SPLIT_FIELD = 'EWR split between units by';
@@ -879,9 +930,9 @@ const FLOW_SHARE_FIELD = 'Flow-share method';
 const HI_LO_FIELD = 'Hi/lo MAP split';
 /** The engine version that retired settings.flowShareMethod, settings.hiLoSplit and the nodes' high-, low-MAP and specific shares (issue #616). */
 export const FLOW_SHARE_RETIRED_IN = EWR_SPLIT_RETIRED_IN;
-const flowShareText: Fmt = (v) => (v === 'hiLo' ? 'Hi/Lo MAP' : v === 'manual' ? 'specific shares' : v === 'area' || v === undefined ? 'area' : String(v));
+const flowShareText: ValueFmt = (v) => (v === 'hiLo' ? 'Hi/Lo MAP' : v === 'manual' ? 'specific shares' : v === 'area' || v === undefined ? 'area' : String(v));
 const flowShareGone = `removed in engine ${FLOW_SHARE_RETIRED_IN} (the flow is split by ${EWR_SPLIT_LABEL.naturalMar})`;
-const ewrSplitText: Fmt = (v) => (v === 'naturalMar' ? EWR_SPLIT_LABEL.naturalMar : v === 'flowShare' || v === undefined ? EWR_SPLIT_LABEL.flowShare : String(v));
+const ewrSplitText: ValueFmt = (v) => (v === 'naturalMar' ? EWR_SPLIT_LABEL.naturalMar : v === 'flowShare' || v === undefined ? EWR_SPLIT_LABEL.flowShare : String(v));
 
 /** The settings calibrationLocationChanges words (issue #659), not the generic loop. */
 const LOCATION_KEYS = new Set(['calibrationSiteNodeId', 'calibrationZones', 'calibrateAtOutlet', 'calibrationRest', 'unitParamsFrom']);
@@ -1254,7 +1305,7 @@ function calibrationZoneChanges(ra: unknown, rb: unknown, name: (id: string) => 
 		if (!x.gr4j || !y.gr4j) {
 			if (!!x.gr4j !== !!y.gr4j) parts.push(`${zoneParamsText(x.gr4j)} → ${zoneParamsText(y.gr4j)}`);
 		} else {
-			for (const k of ZONE_PARAMS) if (!same(x.gr4j[k], y.gr4j[k])) parts.push(`${k.toUpperCase()} ${fmtValue(x.gr4j[k])} → ${fmtValue(y.gr4j[k])}`);
+			for (const k of ZONE_PARAMS) if (!same(x.gr4j[k], y.gr4j[k])) parts.push(`${k.toUpperCase()} ${fmtChange(plain, x.gr4j[k], y.gr4j[k])}`);
 		}
 		if ((x.calibrationStart ?? null) !== (y.calibrationStart ?? null) || (x.calibrationEnd ?? null) !== (y.calibrationEnd ?? null)) parts.push(`window ${zoneWindowText(x)} → ${zoneWindowText(y)}`);
 		if ((x.calibrationFlowKind ?? null) !== (y.calibrationFlowKind ?? null)) {
@@ -1343,7 +1394,7 @@ function diffSettings(
 		if (k === 'ewrSplit' || k === 'flowShareMethod') continue;
 		// The locations, the headline, the rest rule and each unit's Parameters from (calibrationLocationChanges, below).
 		if (LOCATION_KEYS.has(k)) continue;
-		if (!same(a[k], b[k])) push(f.label, `${f.label}: ${f.fmt(a[k])} → ${f.fmt(b[k])}`);
+		if (!same(a[k], b[k])) push(f.label, `${f.label}: ${fmtChange(f.fmt, a[k], b[k])}`);
 	}
 	for (const c of calibrationLocationChanges(a, b, siteName)) out.push({ area: 'settings', ...c });
 	const split = ewrSplitChange(ra, rb);
@@ -1371,13 +1422,13 @@ function diffSettings(
 	const qa = a.dataQuality as Record<string, unknown>;
 	const qb = b.dataQuality as Record<string, unknown>;
 	for (const [k, f] of Object.entries(DATA_QUALITY_FIELDS)) {
-		if (!same(qa[k], qb[k])) push(`Data quality ${f.label}`, `Data quality ${f.label}: ${f.fmt(qa[k])} → ${f.fmt(qb[k])}`);
+		if (!same(qa[k], qb[k])) push(`Data quality ${f.label}`, `Data quality ${f.label}: ${fmtChange(f.fmt, qa[k], qb[k])}`);
 	}
 
 	const ga = a.gr4j as Record<string, unknown>;
 	const gb = b.gr4j as Record<string, unknown>;
 	for (const [k, f] of Object.entries(GR4J_FIELDS)) {
-		if (!same(ga[k], gb[k])) push(`GR4J ${f.label}`, `GR4J ${f.label}: ${f.fmt(ga[k])} → ${f.fmt(gb[k])}`);
+		if (!same(ga[k], gb[k])) push(`GR4J ${f.label}`, `GR4J ${f.label}: ${fmtChange(f.fmt, ga[k], gb[k])}`);
 	}
 
 	const ka = a.calibration as Record<string, unknown>;
@@ -1389,7 +1440,7 @@ function diffSettings(
 	const retired = new Set<string>(RETIRED_CALIBRATION_KEYS);
 	const counts = (k: string) => bothLegacy || !retired.has(k);
 	for (const [k, f] of Object.entries(CALIBRATION_FIELDS)) {
-		if (counts(k) && !same(ka[k], kb[k])) push(`Calibration ${f.label}`, `Calibration ${f.label}: ${f.fmt(ka[k])} → ${f.fmt(kb[k])}`);
+		if (counts(k) && !same(ka[k], kb[k])) push(`Calibration ${f.label}`, `Calibration ${f.label}: ${fmtChange(f.fmt, ka[k], kb[k])}`);
 	}
 	if (bothLegacy && !same(monthSet(ka.summerMonths), monthSet(kb.summerMonths))) {
 		push(
@@ -1524,7 +1575,7 @@ function diffWr2012(a: Partial<Wr2012Settings> | undefined, b: Partial<Wr2012Set
 		const x = ra as unknown as Record<string, unknown>;
 		const y = rb as unknown as Record<string, unknown>;
 		for (const [k, f] of Object.entries(WR2012_REFERENCE_FIELDS)) {
-			if (!same(x[k] ?? null, y[k] ?? null)) push('changed', `WR2012 ${f.label}`, `WR2012 ${f.label}: ${f.fmt(x[k])} → ${f.fmt(y[k])}`);
+			if (!same(x[k] ?? null, y[k] ?? null)) push('changed', `WR2012 ${f.label}`, `WR2012 ${f.label}: ${fmtChange(f.fmt, x[k], y[k])}`);
 		}
 		const c = monthlyChange(ra.monthlyMm3, rb.monthlyMm3, 'Mm³');
 		if (c) push('changed', 'WR2012 monthly means', `WR2012 monthly means: ${c}`);
@@ -1548,7 +1599,7 @@ function diffWr2012(a: Partial<Wr2012Settings> | undefined, b: Partial<Wr2012Set
 		push('changed', 'WR2012 calibration penalty', `WR2012 calibration penalty: ${pa?.enabled ? 'on' : 'off'} → ${pb?.enabled ? 'on' : 'off'}`);
 	}
 	if (!same(pa?.weight, pb?.weight)) {
-		push('changed', 'WR2012 calibration penalty weight', `WR2012 calibration penalty weight: ${fmtValue(pa?.weight)} → ${fmtValue(pb?.weight)}`);
+		push('changed', 'WR2012 calibration penalty weight', `WR2012 calibration penalty weight: ${fmtChange(plain, pa?.weight, pb?.weight)}`);
 	}
 	const band = (p: typeof pa) => (p?.marLowMm3 != null && p?.marHighMm3 != null ? `${fmtValue(p.marLowMm3)} – ${fmtValue(p.marHighMm3)} Mm³/a` : 'none (single target)');
 	if (!same(pa?.marLowMm3 ?? null, pb?.marLowMm3 ?? null) || !same(pa?.marHighMm3 ?? null, pb?.marHighMm3 ?? null)) {
@@ -1589,7 +1640,7 @@ function diffEwrRules(ra: unknown, rb: unknown, siteName: (id: string | null) =>
 		const xr = x as unknown as Record<string, unknown>;
 		const yr = y as unknown as Record<string, unknown>;
 		for (const [k, f] of Object.entries(RULE_FIELDS)) {
-			if (!same(xr[k] ?? null, yr[k] ?? null)) out.push({ area: 'settings', kind: 'changed', subject: `${subject(id)} ${f.label}`, text: `${subject(id)}: ${f.label} ${f.fmt(xr[k])} → ${f.fmt(yr[k])}` });
+			if (!same(xr[k] ?? null, yr[k] ?? null)) out.push({ area: 'settings', kind: 'changed', subject: `${subject(id)} ${f.label}`, text: `${subject(id)}: ${f.label} ${fmtChange(f.fmt, xr[k], yr[k])}` });
 		}
 		const months = (g: unknown, h: unknown) => WY_MONTHS.filter((_, m) => !same((g as unknown[] | null)?.[m] ?? null, (h as unknown[] | null)?.[m] ?? null));
 		const ew = months(x.ewr, y.ewr);
@@ -1687,7 +1738,7 @@ function diffFitRecord(ra: unknown, rb: unknown): InputChange[] {
  * snapshots' raw nodes, since upgradeLegacyModel drops them. Both have one: a change of value, as before. Only A has a
  * value that did something (an area above 0, a specific share): the later B has none, so it is named as removed.
  */
-const RETIRED_NODE_FIELDS_COMPARED: [string, string, Fmt, (v: unknown) => boolean][] = [
+const RETIRED_NODE_FIELDS_COMPARED: [string, string, ValueFmt, (v: unknown) => boolean][] = [
 	['areaHiKm2', 'high-MAP area', withUnit('km²'), (v) => typeof v === 'number' && v > 0],
 	['areaLoKm2', 'low-MAP area', withUnit('km²'), (v) => typeof v === 'number' && v > 0],
 	['flowShareManual', 'manual flow share', (v) => (v === null || v === undefined ? 'none' : pct(v)), (v) => typeof v === 'number']
@@ -1701,13 +1752,13 @@ function retiredNodeChanges(x: unknown, y: unknown): string[] {
 		const hx = Object.hasOwn(rx, k);
 		const hy = Object.hasOwn(ry, k);
 		if (hx && hy) {
-			if (!same(rx[k], ry[k])) out.push(`${label} ${fmt(rx[k])} → ${fmt(ry[k])}`);
+			if (!same(rx[k], ry[k])) out.push(`${label} ${fmtChange(fmt, rx[k], ry[k])}`);
 		} else if (hx && set(rx[k])) out.push(`${label} ${fmt(rx[k])} → ${flowShareGone}`);
 	}
 	return out;
 }
 
-const NODE_FIELDS: [keyof NetworkNode, string, Fmt][] = [
+const NODE_FIELDS: [keyof NetworkNode, string, ValueFmt][] = [
 	['kind', 'kind', plain],
 	['areaKm2', 'area', withUnit('km²')],
 	['pctUpstreamToDam', 'upstream inflow to dam', pct],
@@ -1847,7 +1898,7 @@ function diffModel(ma: ProjectModel | undefined, mb: ProjectModel | undefined): 
 		if (x.name !== y.name) parts.push(`renamed from "${x.name}"`);
 		for (const [k, label, fmt] of NODE_FIELDS) {
 			// A one value its monthly row replaces on both sides (engine 1.116.0) is read by neither run: said so.
-			if (!same(x[k], y[k])) parts.push(`${label} ${fmt(x[k])} → ${fmt(y[k])}${replacedByMonth(x, k) && replacedByMonth(y, k) ? ' (no effect: set by month)' : ''}`);
+			if (!same(x[k], y[k])) parts.push(`${label} ${fmtChange(fmt, x[k], y[k])}${replacedByMonth(x, k) && replacedByMonth(y, k) ? ' (no effect: set by month)' : ''}`);
 		}
 		parts.push(...retiredNodeChanges(rawA.get(x.id), rawB.get(y.id)));
 		// The unit's MAP and its source (engine ≥ 1.78.0, docs/model.md §2.4h); absent = none.
@@ -2183,15 +2234,15 @@ function diffModel(ma: ProjectModel | undefined, mb: ProjectModel | undefined): 
 		if (hasMonthlyRates(x) || hasMonthlyRates(y)) {
 			const rx = transferRatesM3s(x);
 			const ry = transferRatesM3s(y);
-			const changed = WY_MONTHS.flatMap((m, k) => (rx[k] !== ry[k] ? [`${m} ${fmtValue(rx[k])} → ${fmtValue(ry[k])}`] : []));
+			const changed = WY_MONTHS.flatMap((m, k) => (rx[k] !== ry[k] ? [`${m} ${fmtChange(plain, rx[k], ry[k])}`] : []));
 			if (changed.length) parts.push(`max rate by month ${changed.join(', ')} m³/s (0 = off)`);
 		} else {
 			if (!same(monthSet(x.months), monthSet(y.months))) parts.push(`months ${describeCalendarMonths(x.months)} → ${describeCalendarMonths(y.months)}`);
-			if (x.maxRateM3s !== y.maxRateM3s) parts.push(`max rate ${fmtValue(x.maxRateM3s)} → ${fmtValue(y.maxRateM3s)} m³/s`);
+			if (x.maxRateM3s !== y.maxRateM3s) parts.push(`max rate ${fmtChange(plain, x.maxRateM3s, y.maxRateM3s)} m³/s`);
 		}
 		if (x.dailyCapM3 !== y.dailyCapM3) parts.push(`daily cap ${withUnit('m³', 0)(x.dailyCapM3)} → ${withUnit('m³', 0)(y.dailyCapM3)}`);
 		if (x.minStoragePct !== y.minStoragePct) parts.push(`minimum source storage ${pct(x.minStoragePct)} → ${pct(y.minStoragePct)}`);
-		if (x.priority !== y.priority) parts.push(`priority ${fmtValue(x.priority)} → ${fmtValue(y.priority)}`);
+		if (x.priority !== y.priority) parts.push(`priority ${fmtChange(plain, x.priority, y.priority)}`);
 		parts.push(...offtakeParts(x, y));
 		for (const p of parts) out.push({ area: 'transfers', kind: 'changed', subject: r, text: `Transfer ${r}: ${p}` });
 	}
