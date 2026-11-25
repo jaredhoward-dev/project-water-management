@@ -279,6 +279,7 @@ test('a reverse trial: the day meter estimates questions left, and its day cap h
 	await page.goto(`/projects/${project.id}`);
 	const sheet = await openAssistant(page);
 	// The estimate, worded as one, above the month's budget.
+	// clock-free: "today" is the meter's fixed wording for the SAST day, not a date the clock moves.
 	await expect(sheet.getByTestId('assistant-day-meter')).toHaveText('About 6 questions left today on your trial, at what your questions usually cost (an estimate).');
 	await expect(sheet.getByTestId('assistant-budget')).toBeVisible();
 	const box = sheet.getByRole('textbox', { name: 'Your question' });

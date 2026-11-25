@@ -130,6 +130,12 @@
 		align-items: center;
 		gap: 0.3rem 0.75rem;
 	}
+	/* A check's link (re-run the WR2012 lookup) is a 24px target, as .link's buttons are (WCAG 2.5.8). */
+	.acts a {
+		display: inline-flex;
+		align-items: center;
+		min-height: 24px;
+	}
 	.link {
 		background: none;
 		border: none;

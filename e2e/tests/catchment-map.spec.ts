@@ -287,7 +287,7 @@ test('a WR2012 reference looked up at the boundary is flagged in the Checks once
 	const saved = await (await page.request.get(`${API_URL}/projects/${project.id}`)).json();
 	const map = await (await page.request.get(`${API_URL}/projects/${project.id}/map/features`)).json();
 	const b = map.features.find((f: { kind: string }) => f.kind === 'catchment_boundary');
-	expect(saved.settings.wr2012.reference.lookup).toMatchObject({ code: 'Z01B', feature: { id: b.id, kind: 'catchment_boundary', updatedAt: b.updatedAt } });
+	expect(saved.project.settings.wr2012.reference.lookup).toMatchObject({ code: 'Z01B', feature: { id: b.id, kind: 'catchment_boundary', updatedAt: b.updatedAt } });
 
 	// Unchanged: no warning. Redrawn larger: the Checks flag the reference and link back to the lookup.
 	await openMap(page, project.id, '&checks=1');
