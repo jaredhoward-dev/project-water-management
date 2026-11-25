@@ -2291,7 +2291,10 @@ In short:
   operator deleting `app_user` rows among them; its re-read needs READ
   COMMITTED, the level every write runs at. Tests:
   `projects/last-owner-race.db.test.ts` (forced interleavings through the
-  routes and straight at the triggers).
+  routes and straight at the triggers: two leaving, two demoting each other,
+  and for a team also two removing each other, where the second finds
+  itself out of the team and gets `404`, and one demoting the other as that
+  one leaves).
 - **Runs are immutable by privilege.** `water_app` may `UPDATE` only
   `model_run.notes` (a column-level grant, 007_run_notes), so no API bug can
   rewrite a run's inputs, outputs or label after the fact; who last changed

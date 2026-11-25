@@ -138,6 +138,51 @@ describe('the last admin of a team, two at once', () => {
 		expect(results.find((r) => r.status === 409)!.body.error).toBe('a team must keep at least one owner');
 		expect(await admins(tid)).toHaveLength(1);
 	});
+
+	it('two admins demoting each other at the same moment: one change lands, the other gets the 409, and an admin remains', async () => {
+		const { a, b, tid } = await coAdminedTeam('AdmDemote');
+		const results = await race(HOLD_ADMINS, [tid], () => [
+			a.call('PATCH', `/teams/${tid}/members/${b.id}`, { role: 'member' }),
+			b.call('PATCH', `/teams/${tid}/members/${a.id}`, { role: 'member' })
+		]);
+		// The second waits for the first, then counts what it committed: its target is now the only admin.
+		expect(results.map((r) => r.status).sort()).toEqual([200, 409]);
+		expect(results.find((r) => r.status === 409)!.body.error).toBe('a team must keep at least one owner');
+		const left = await admins(tid);
+		expect(left).toHaveLength(1);
+		// The one left is whoever the change that landed didn't demote.
+		const landed = results.findIndex((r) => r.status === 200);
+		expect(left).toEqual([landed === 0 ? a.id : b.id]);
+	});
+
+	it('two admins removing each other at the same moment: one goes, the other is no longer in the team (404), and an admin remains', async () => {
+		const { a, b, tid } = await coAdminedTeam('AdmRemove');
+		const results = await race(HOLD_ADMINS, [tid], () => [
+			a.call('DELETE', `/teams/${tid}/members/${b.id}`),
+			b.call('DELETE', `/teams/${tid}/members/${a.id}`)
+		]);
+		// The second waits for the first, which took its caller out of the team: to them the member is gone (404).
+		expect(results.map((r) => r.status).sort()).toEqual([204, 404]);
+		const landed = results.findIndex((r) => r.status === 204);
+		expect(await admins(tid)).toEqual([landed === 0 ? a.id : b.id]);
+		// The removed one is out of the team altogether, not just demoted.
+		const members = await asOwner(`SELECT user_id FROM team_member WHERE team_id = $1`, [tid]);
+		expect(members.map((r) => r.user_id)).toEqual([landed === 0 ? a.id : b.id]);
+	});
+
+	it('one admin demoting the other while that one leaves: whichever lands first, an admin remains', async () => {
+		const { a, b, tid } = await coAdminedTeam('AdmMixed');
+		const results = await race(HOLD_ADMINS, [tid], () => [
+			a.call('PATCH', `/teams/${tid}/members/${b.id}`, { role: 'member' }),
+			b.call('DELETE', `/teams/${tid}/members/${b.id}`)
+		]);
+		// Both are allowed in either order (a stays an admin throughout), save that a demotion of someone who has
+		// already left finds nobody (404); nothing may leave the team without an admin.
+		const [demote, leave] = results;
+		expect(leave.status).toBe(204);
+		expect([200, 404]).toContain(demote.status);
+		expect(await admins(tid)).toEqual([a.id]);
+	});
 });
 
 describe('the keep-owner and keep-admin triggers, two deletions at once (the operator path)', () => {
