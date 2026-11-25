@@ -850,8 +850,8 @@ red **Baseline assumptions changed** callout shows whenever any op is
 | `cropArea.set`, `landCover.add` | on an owned node | baseline |
 | `crop.add` | always | |
 | `crop.set`, `crop.remove` | the crop is one the scenario itself added (`classifyScenario` passes them; `classifyOp`'s fourth argument) | baseline: a crop's factors and efficiency are agronomic data that apply on every farm growing it, farms the applicant may not see among them, so a change to one isn't theirs to propose (and classing by who grows it would tell an applicant whether a hidden farm does). Stopping a crop on their own farm is `cropArea.set` to 0, a proposal |
-| `transfer.add` | both ends owned (a rule out of the catchment, engine ≥ 1.86.0: its source owned) | baseline |
-| `transfer.set`, `transfer.remove` | both ends owned, and a new end owned too (needs `input`; out of the catchment needs no owner) | baseline |
+| `transfer.add` | both ends owned (a rule out of the catchment, engine ≥ 1.86.0: its source owned), every destination of a split, and the unit an off-take's seepage rejoins below (`lossReturnNodeId`, which is credited that water) | baseline |
+| `transfer.set`, `transfer.remove` | as `transfer.add`, every unit the rule reaches owned (its seepage unit included: less seepage, or none, below another party's unit is theirs, not the proposal's), and a new end owned too (needs `input`; out of the catchment needs no owner) | baseline |
 | `landCover.remove`, `landCover.set` | the patch is on an owned node (needs `input`) | baseline |
 | `borehole.add` | on an owned node | baseline |
 | `borehole.remove` | the borehole is on an owned node (needs `input`) | baseline |

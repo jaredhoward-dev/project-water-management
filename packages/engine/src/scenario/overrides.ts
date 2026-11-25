@@ -1311,6 +1311,11 @@ export function classifyOp(op: ScenarioOp, ownedNodeIds: Iterable<string>, input
 	const owned = ownedNodeIds instanceof Set ? (ownedNodeIds as Set<string>) : new Set(ownedNodeIds);
 	const mine = (id: string | undefined | null) => typeof id === 'string' && owned.has(id);
 	const ok = (x: boolean): OpClass => (x ? 'proposal' : 'baseline');
+	// Every unit a rule reaches: its source, each destination (out of the catchment reaches none) and the unit its
+	// seepage rejoins below (engine ≥ 1.42.0), which is credited that water. As transfer.add asks of a new rule, so a
+	// change to or the removal of an existing one: else less seepage, or none, below another party's unit read as the proposal.
+	const allEndsMine = (t: Transfer) =>
+		mine(t.fromNodeId) && transferDestinations(t).every((x) => x.nodeId === null || mine(x.nodeId)) && (!t.lossReturnNodeId || mine(t.lossReturnNodeId));
 	switch (op.op) {
 		case 'settings.set':
 		case 'series.scale':
@@ -1362,7 +1367,7 @@ export function classifyOp(op: ScenarioOp, ownedNodeIds: Iterable<string>, input
 			// The unit its seepage rejoins below (engine ≥ 1.42.0) is credited that water, so it must be the proposal's too.
 			// Out of the catchment (engine ≥ 1.86.0, toNodeId null): no other unit is reached.
 			// Every destination of a split rule (engine ≥ 1.114.0) must be the proposal's, as its one is.
-			return ok(mine(op.transfer.fromNodeId) && transferDestinations(op.transfer).every((x) => x.nodeId === null || mine(x.nodeId)) && (!op.transfer.lossReturnNodeId || mine(op.transfer.lossReturnNodeId)));
+			return ok(allEndsMine(op.transfer));
 		case 'transfer.set': {
 			const t = input?.model.transfers.find((x) => x.id === op.transferId);
 			const newEnd =
@@ -1371,11 +1376,11 @@ export function classifyOp(op: ScenarioOp, ownedNodeIds: Iterable<string>, input
 					: op.field === 'destinations' && Array.isArray(op.value)
 						? (op.value as { nodeId: string | null }[]).every((x) => x.nodeId === null || mine(x.nodeId))
 						: true;
-			return ok(!!t && mine(t.fromNodeId) && transferDestinations(t).every((x) => x.nodeId === null || mine(x.nodeId)) && newEnd);
+			return ok(!!t && allEndsMine(t) && newEnd);
 		}
 		case 'transfer.remove': {
 			const t = input?.model.transfers.find((x) => x.id === op.transferId);
-			return ok(!!t && mine(t.fromNodeId) && transferDestinations(t).every((x) => x.nodeId === null || mine(x.nodeId)));
+			return ok(!!t && allEndsMine(t));
 		}
 		case 'landCover.add':
 			return ok(mine(op.patch.nodeId));

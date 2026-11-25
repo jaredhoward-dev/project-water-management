@@ -2147,6 +2147,28 @@ describe('classifyOp', () => {
 		expect(classifyOp({ op: 'transfer.set', transferId: 't1', field: 'fromNodeId', value: 'B' }, ['A', 'C'], b)).toBe('baseline');
 	});
 
+	it('an off-take whose seepage rejoins below another party’s unit: changing or removing it is baseline, as adding it is', () => {
+		// r1 takes water from the river at C for B, both the applicant's; its canal seepage rejoins the river below A, another party's.
+		const b = base();
+		b.model.transfers = [{ id: 'r1', fromNodeId: 'C', toNodeId: 'B', months: [1], maxRateM3s: 0.01, dailyCapM3: null, minStoragePct: 0, enabled: true, priority: 0, source: 'river', lossPct: 0.2, lossReturnPct: 0.5, lossReturnNodeId: 'A' }];
+		expect(applyScenario(b, []).problems).toEqual([]);
+		const mine = ['B', 'C'];
+		// transfer.add of the same rule is baseline: the unit the seepage rejoins below is credited that water.
+		expect(classifyOp({ op: 'transfer.add', transfer: { ...b.model.transfers[0]!, id: 'r2' } }, mine, b)).toBe('baseline');
+		// So is taking that water from A: less seepage, the seepage moved off A, the rule off, or the rule removed.
+		expect(classifyOp({ op: 'transfer.set', transferId: 'r1', field: 'lossReturnPct', value: 0 }, mine, b)).toBe('baseline');
+		expect(classifyOp({ op: 'transfer.set', transferId: 'r1', field: 'lossReturnNodeId', value: null }, mine, b)).toBe('baseline');
+		expect(classifyOp({ op: 'transfer.set', transferId: 'r1', field: 'enabled', value: false }, mine, b)).toBe('baseline');
+		expect(classifyOp({ op: 'transfer.remove', transferId: 'r1' }, mine, b)).toBe('baseline');
+		// Positive controls: the seepage below an owned unit, or back at the source, and the same ops are the proposal.
+		expect(classifyOp({ op: 'transfer.set', transferId: 'r1', field: 'lossReturnPct', value: 0 }, [...mine, 'A'], b)).toBe('proposal');
+		expect(classifyOp({ op: 'transfer.remove', transferId: 'r1' }, [...mine, 'A'], b)).toBe('proposal');
+		const atSource = base();
+		atSource.model.transfers = [{ ...b.model.transfers[0]!, lossReturnNodeId: null }];
+		expect(classifyOp({ op: 'transfer.set', transferId: 'r1', field: 'lossReturnPct', value: 0 }, mine, atSource)).toBe('proposal');
+		expect(classifyOp({ op: 'transfer.remove', transferId: 'r1' }, mine, atSource)).toBe('proposal');
+	});
+
 	it('new nodes: a pump or dam without land is a proposal, a gauge or new land is baseline', () => {
 		const pump = node('N', { downstreamNodeId: 'A', areaKm2: 0 });
 		expect(cls({ op: 'node.add', node: pump })).toBe('proposal');
