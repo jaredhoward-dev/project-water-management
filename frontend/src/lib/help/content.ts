@@ -7,7 +7,8 @@
 //                articles-data.ts the same for the "Input data" topic (its own chunk);
 //                articles-licensing.ts for "Scenarios and licensing" and
 //                articles-ewr.ts for the EWR topic, articles-results.ts for
-//                "Run results" and articles-fit.ts for "Goodness of fit"
+//                "Run results", articles-fit.ts for "Goodness of fit" and
+//                articles-flow.ts for "Natural flow and calibration"
 //                (each its own chunk).
 //   farmer.ts    the farm view's words, whole (/farm/words loads only those).
 //
@@ -15,6 +16,7 @@
 // so the /help pages get every entry; nothing outside /help imports it.
 
 import { ARTICLES as TOPIC_ARTICLES } from './articles';
+import { FLOW_ARTICLES } from './articles-flow';
 import { DATA_ARTICLES } from './articles-data';
 import { EWR_ARTICLES } from './articles-ewr';
 import { FIT_ARTICLES } from './articles-fit';
@@ -43,7 +45,7 @@ export const CATEGORY_TITLES: Record<HelpCategory, string> = {
 };
 
 /** Every article by id: articles.ts, the "Input data" topic's (articles-data.ts), the EWR topic's (articles-ewr.ts), "Scenarios and licensing"'s (articles-licensing.ts), "Run results"' (articles-results.ts) and "Goodness of fit"'s (articles-fit.ts). */
-export const ARTICLES = { ...TOPIC_ARTICLES, ...DATA_ARTICLES, ...EWR_ARTICLES, ...LICENSING_ARTICLES, ...RESULTS_ARTICLES, ...FIT_ARTICLES };
+export const ARTICLES = { ...TOPIC_ARTICLES, ...DATA_ARTICLES, ...EWR_ARTICLES, ...LICENSING_ARTICLES, ...RESULTS_ARTICLES, ...FIT_ARTICLES, ...FLOW_ARTICLES };
 
 const regions = new Intl.DisplayNames(['en'], { type: 'region' });
 

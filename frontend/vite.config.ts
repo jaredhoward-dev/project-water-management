@@ -257,20 +257,15 @@ export function svelteRuntimeChunk(id: string): string | undefined {
  * fourth, the EWR topic (articles-ewr.ts, 2026-10-03), and "Run results"
  * (articles-results.ts) and "Goodness of fit" (articles-fit.ts, 2026-10-08,
  * when the help for every screen's choices took articles.ts to 63 KB) are
- * their own chunks for the same reason.
+ * their own chunks for the same reason, as are the guides' text modules
+ * (guides-*.ts; lib/help/guides.ts says why).
  */
 export function helpArticlesChunk(id: string): string | undefined {
-	if (/\/src\/lib\/help\/articles-data\.ts$/.test(id)) return 'help-articles-data';
-	// "Scenarios and licensing" (2026-10-02): articles.ts had grown past the ceiling again.
-	if (/\/src\/lib\/help\/articles-licensing\.ts$/.test(id)) return 'help-articles-licensing';
-	// The EWR topic (2026-10-03): articles.ts passed the ceiling once more.
-	if (/\/src\/lib\/help\/articles-ewr\.ts$/.test(id)) return 'help-articles-ewr';
-	// "Run results" and "Goodness of fit" (2026-10-08): the help for every screen's choices.
-	if (/\/src\/lib\/help\/articles-results\.ts$/.test(id)) return 'help-articles-results';
-	if (/\/src\/lib\/help\/articles-fit\.ts$/.test(id)) return 'help-articles-fit';
-	// The "Pages, one by one" guides (2026-10-13): guides.ts passed the per-chunk ceiling with the help's new guides.
-	if (/\/src\/lib\/help\/guides-pages\.ts$/.test(id)) return 'help-guides-pages';
-	return undefined;
+	// Every articles-<topic>.ts and guides-<group>.ts module of src/lib/help is a chunk named after it (2026-11-25:
+	// one rule, so a new module splits off with no edit here). The guides' text moved out of guides.ts into
+	// guides-start, -howto, -use and -concept then, when its chunk sat 2 bytes under the per-chunk ceiling.
+	const m = /\/src\/lib\/help\/((?:articles|guides)-[a-z]+(?:-[a-z]+)*)\.ts$/.exec(id);
+	return m ? `help-${m[1]}` : undefined;
 }
 
 export default defineConfig({
