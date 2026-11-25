@@ -13033,7 +13033,10 @@ closing, and **Discard edits** puts it back. **Edits to record**
   2026-11-09, couldn't find a scenario's run on the EWR page). Only the
   assessors see this section; an applicant gets a note instead
   ([§ Applications](#applications-wp-33)). A note says when the changes were
-  edited since that run. Under the headline results, **EWR months met: base
+  edited since that run, or, for a run of the licence's terms in force (the
+  background run a decision on other terms queues, 293), that it is of
+  those terms, not the changes applied for (`licence.ts` `runTerms`; before,
+  that run read as an edited scenario). Under the headline results, **EWR months met: base
   against a run** (`ScenarioEwrMonths.svelte`, the operator's ask of
   2026-11-09, for presenting a scenario): the EWR page's months-met panel for
   the daily EWR in use (`ewr/EwrDailyMonthsPanel.svelte` in its `compact`

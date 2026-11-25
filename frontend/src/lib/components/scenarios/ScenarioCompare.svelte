@@ -16,6 +16,7 @@
 	import { untrack } from 'svelte';
 	import { api, ApiError, type RunCompareResponse, type RunMeta, type Scenario } from '#lib/api/index.js';
 	import ScenarioEwrMonths from './ScenarioEwrMonths.svelte';
+	import { runTerms } from './licence';
 	import Lazy from '#lib/components/common/Lazy.svelte';
 	import LoadState from '#lib/components/common/LoadState.svelte';
 	import AssuranceDeltaTable from '#lib/components/compare/AssuranceDeltaTable.svelte';
@@ -79,8 +80,12 @@
 		});
 	});
 
-	/** The scenario's ops changed since this run: its results are of the older list. */
-	const stale = $derived(!!data?.b.scenario && data.b.scenario.opsSha256 !== scenario.opsSha256);
+	/**
+	 * Which ops this run applied (licence.ts runTerms): a run of the licence's terms in force (the background run a
+	 * decision queues, 293) is said as that, not as an edited scenario; `stale`, the ops changed since this run.
+	 */
+	const terms = $derived(data?.b.scenario ? runTerms(data.b.scenario.opsSha256, scenario) : null);
+	const stale = $derived(terms === 'stale');
 	const compareHref = $derived(data ? compareTabHref({ projectId, runId: data.a.run.id }, { projectId, runId: data.b.run.id }) : '');
 </script>
 
@@ -110,6 +115,10 @@
 				{#if stale}
 					<div class="alert alert-info" role="status" data-testid="scenario-stale">
 						The scenario's changes have been edited since this run. Run it again to see their effect.
+					</div>
+				{:else if terms === 'licensed'}
+					<div class="alert alert-info" role="status" data-testid="scenario-licensed-run">
+						This run is of the licence's terms in force, not the changes applied for.
 					</div>
 				{/if}
 				{#if data.a.run.id !== scenario.baseRunId}
