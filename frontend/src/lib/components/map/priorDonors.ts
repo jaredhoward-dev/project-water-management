@@ -98,9 +98,31 @@ export function donorsData(v: DonorView | null | undefined) {
 	};
 }
 
-/** The Layers box's summary line: how many donors, from which set, measured from where. */
-export function donorSummary(v: Extract<DonorView, { kind: 'donors' }>): string {
+/** Closest the map zooms when it frames the donors (frameBox's maxZoom): the target and every donor in view, never street level. */
+export const DONOR_FRAME_MAX_ZOOM = 10;
+/** Closest the map zooms when one donor's row frames its outlet. */
+export const DONOR_PICK_MAX_ZOOM = 11;
+
+/** The box (west, south, east, north) round the target and every donor: what the map frames when the layer first draws them. */
+export function donorBbox(v: Extract<DonorView, { kind: 'donors' }>): [number, number, number, number] {
+	const lons = [v.target.lon, ...v.donors.map((d) => d.lon)];
+	const lats = [v.target.lat, ...v.donors.map((d) => d.lat)];
+	return [Math.min(...lons), Math.min(...lats), Math.max(...lons), Math.max(...lats)];
+}
+
+/**
+ * The target the layer drew the donors for, as its summary names it: null for the headline (the catchment, or
+ * the headline location), "the outlet's own zone", or "the zone at <its gauge's name>" (`priorZone=` in the URL).
+ */
+export function donorTargetName(zone: string | null, nodeName: (id: string) => string | null | undefined): string | null {
+	if (!zone) return null;
+	if (zone === 'outlet') return 'the outlet’s own zone';
+	return `the zone at ${nodeName(zone) ?? 'its gauge'}`;
+}
+
+/** The Layers box's summary line: how many donors, for which target (`targetName`, donorTargetName; null: the headline), from which set, measured from where. */
+export function donorSummary(v: Extract<DonorView, { kind: 'donors' }>, targetName: string | null = null): string {
 	const n = v.donors.length;
-	const from = v.target.from === 'gauge' ? 'the calibration gauge' : 'the catchment boundary’s centre';
-	return `${n} donor ${n === 1 ? 'basin' : 'basins'} the regional prior kept, from “${v.dataset}” (${v.version}), each joined to ${from}; a bigger dot weighs more.`;
+	const from = v.target.from === 'gauge' ? (targetName ? 'the zone’s gauge' : 'the calibration gauge') : 'the catchment boundary’s centre';
+	return `${n} donor ${n === 1 ? 'basin' : 'basins'} the regional prior kept${targetName ? ` for ${targetName}` : ''}, from “${v.dataset}” (${v.version}), each joined to ${from}; a bigger dot weighs more.`;
 }

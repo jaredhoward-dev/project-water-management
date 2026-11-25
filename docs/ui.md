@@ -5246,12 +5246,15 @@ map" card) stays the schematic; this is the geography.
   ([maps.md § Hydrological units layer, § MAP grid, § CHIRPS
   grid](./maps.md#map-grid)). Without glyphs the outlines and dots are drawn
   and the box says the names or values aren't written on the map.
-  **Prior donors** (`layers=donors`, a dashed magenta swatch; off by
+  **Prior donors** (`layers=donors`, a dashed olive swatch; off by
   default, linked on from the Regional prior panel's donors fold): on, the
-  regional GR4J prior's kept donor outlets for the headline target, each a
+  regional GR4J prior's kept donor outlets for the target `priorZone=`
+  names (the panel's **For**; absent, the headline target), each a
   dot sized by its weight with its weight beside it ("23 %"), joined to the
-  target by a dashed line, and listed in the box (id, weight, distance,
-  area) with a link back to the panel; with no prior it says why (the
+  target (a ring) by a dashed line, all three keyed in the Key, framed on
+  the first answer, and listed in the box (id, weight, distance,
+  area; each row a button that frames its donor) with a link back to the
+  panel on the same zone; with no prior it says why (the
   route's own problem, `map-donors-none`), and a real GRDC-Caravan set is
   credited on the map while drawn ([maps.md § Prior
   donors](./maps.md#prior-donors)).
@@ -9686,14 +9689,17 @@ calibration's line points at *How the shown run fits* for NSE and PBIAS.
   too few donors, and a **No skill** badge at 0 or below), the **Skill
   (flow)** line (the donor set's flow-space leave-one-out: median KGE′ of
   the prior's medians on each held-out donor against their own fits, "Not
-  scored" for a set without one; migration 362), one line of what the
+  scored" for a set without one, and a **No skill** badge at or below the
+  mean-flow benchmark, KGE′ −0.41; migration 362), how many of the kept
+  donors' fits ended at a typical bound (per parameter and side, on its own
+  line under the two skills; left out for a set that didn't record it), one line of what the
   donors were compared on (area, MAP over n water years, aridity, distance
   from the zone's gauge or the boundary's centre), the soil relation's
-  state and how many of the kept donors' fits ended at a typical bound (per
-  parameter and side; left out for a set that didn't record it), a
+  state, a
   fold with **The n donors** (weight, distance, area, own KGE′, X1, X3,
   X4) and a link that opens the Map with its **Prior donors** layer on
-  (the headline location's donors under calibration zones), the synthetic-data warning over the invented set, and the donor and
+  for the same target (`priorZone=`, the zone in **For**; the map's link
+  back opens **For** on it), the synthetic-data warning over the invented set, and the donor and
   soil datasets' credits with a link to `/data-sources`. Editors get **Start
   from the prior** in the heading's row, marked *Saves now*: it asks first,
   then writes the medians into the target's parameters as one settings

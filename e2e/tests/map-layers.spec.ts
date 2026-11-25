@@ -16,7 +16,9 @@
 // rivers (the terrain channels drawn outside Delineate): on by default for an
 // editor, `layers=-channels` turns them off and `layers=channels` on again.
 // Prior donors (issue #622): the regional GR4J prior's kept donors listed
-// with their weights, off until toggled, the synthetic set never credited. Axe
+// with their weights, each row a button, keyed while drawn, off until toggled,
+// the synthetic set never credited, axe-clean at desktop and phone widths; and
+// a project with no boundary told why there are none. Axe
 // with the layers on and while measuring, light and dark.
 import { readFile } from 'node:fs/promises';
 import type { Page } from '@playwright/test';
@@ -448,11 +450,34 @@ test('the prior donors: off until toggled, the kept donors listed with their wei
 	await expect(page.getByTestId('map-donors-summary')).toContainText(/^7 donor basins the regional prior kept, from “synthetic” \(.+\), each joined to the catchment boundary’s centre; a bigger dot weighs more\. Invented donors, never real basins\./);
 	const rows = page.getByTestId('map-donors-list').getByRole('listitem');
 	await expect(rows).toHaveCount(7);
-	await expect(rows.first()).toHaveText(/^.+: weight \d+ %, [\d\s,.]+ km away, [\d\s,]+ km²$/);
+	await expect(rows.first()).toHaveText(/^.+: weight \d+ %, [\d\s,.]+ km away, [\d\s,]+ km²; show it on the map$/);
+	await expect(page.getByTestId('map-donors-list').getByRole('button', { name: /; show it on the map$/ })).toHaveCount(7);
 	await expect(layers(page).getByRole('status')).toContainText('7 prior donors shown.');
 	await expect(page.locator('.maplibregl-ctrl-attrib')).not.toContainText('GRDC-Caravan');
+	await expect(page.getByTestId('map-donors-back')).toHaveAttribute('href', '?tab=calibration#set-prior');
+	await expectNoViolations(page);
+	// The Key names the layer's marks while it draws them.
+	await openKey(page);
+	const key = page.getByTestId('map-key');
+	for (const k of ['link to the target', 'prior donor', 'prior target']) await expect(key.locator(`[data-key-item="${k}"]`)).toHaveCount(1);
+	// On a phone too.
+	await page.setViewportSize({ width: 390, height: 844 });
+	await openLayers(page);
+	await expect(page.getByTestId('map-donors-summary')).toBeVisible();
+	await expectNoViolations(page);
 	await page.goBack();
 	await expect(page.getByTestId('map-donors')).toHaveCount(0);
+});
+
+test('the prior donors with no boundary: why there are none', async ({ page, owner }) => {
+	void owner;
+	await loadSyntheticPrior();
+	const project = await seedRunnableProject(page.request, 'Map prior donors, no boundary');
+	await openMap(page, project.id, '&layers=donors');
+	await openLayers(page);
+	await expect(page.getByTestId('map-donors-none')).toContainText('There is no catchment boundary on the map');
+	await expect(page.getByTestId('map-donors-list')).toHaveCount(0);
+	await expect(layers(page).getByRole('status')).toContainText('No prior donors to show.');
 });
 
 test('the DEM rivers: the terrain channels drawn outside Delineate, on by default, a toggle in the URL', async ({ page, owner }) => {

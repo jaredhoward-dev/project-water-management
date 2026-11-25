@@ -19,6 +19,7 @@ import {
 } from '@water-management/engine';
 import type { Gr4jLooFlow, Gr4jPrior, Gr4jPriorDonor } from '#lib/api/types.js';
 import { fmtNum } from '#lib/format/number.js';
+import { MEAN_FLOW_KGE } from '#lib/components/calibration/metrics.js';
 
 /** How a fit uses the prior: not at all, as a penalty, as its search box, or both. */
 export type PriorUse = 'off' | 'penalty' | 'bounds' | 'both';
@@ -90,9 +91,11 @@ export function skillText(skill: number | null | undefined, n: number | null | u
  * medians run on each held-out donor, beside the same donors' own fits on the same days. Unknown, not "no skill",
  * when the set has none (loaded before 362, or too few donors).
  */
-export function flowSkillText(loo: Gr4jLooFlow | null | undefined): string {
-	if (!loo) return 'Not scored: the donor set has no flow-space leave-one-out score';
-	return `KGE′ ${fmtNum(loo.kge, 2)} from the prior’s medians on each held-out donor, against ${fmtNum(loo.kgeFit, 2)} from their own fits (medians over ${loo.n} donors)`;
+export function flowSkillText(loo: Gr4jLooFlow | null | undefined): { text: string; noSkill: boolean } {
+	if (!loo) return { text: 'Not scored: the donor set has no flow-space leave-one-out score', noSkill: false };
+	const text = `KGE′ ${fmtNum(loo.kge, 2)} from the prior’s medians on each held-out donor, against ${fmtNum(loo.kgeFit, 2)} from their own fits (medians over ${loo.n} donors)`;
+	// Below the mean-flow benchmark (KGE′ 1 − √2 ≈ −0.41, metrics.ts MEAN_FLOW_KGE): the medians' flows are no better than each donor's own mean flow.
+	return loo.kge <= MEAN_FLOW_KGE ? { text: `${text}: no better than each donor’s mean flow (${fmtNum(MEAN_FLOW_KGE, 2)})`, noSkill: true } : { text, noSkill: false };
 }
 
 const BOUND_LABEL: Record<string, string> = { low: 'lower', high: 'upper' };
@@ -107,7 +110,8 @@ export function atBoundLine(donors: readonly Pick<Gr4jPriorDonor, 'atBound'>[]):
 	if (!known.length) return null;
 	const hit = known.filter((d) => d.atBound!.length > 0);
 	const of = known.length === donors.length ? `${donors.length}` : `${known.length} recorded`;
-	if (!hit.length) return `None of the ${of} donors kept ended at a typical bound.`;
+	const one = known.length === 1;
+	if (!hit.length) return one ? `The ${known.length === donors.length ? 'one donor' : 'one recorded donor'} kept didn’t end at a typical bound.` : `None of the ${of} donors kept ended at a typical bound.`;
 	const counts = new Map<string, number>();
 	for (const d of hit) for (const b of d.atBound!) counts.set(b, (counts.get(b) ?? 0) + 1);
 	const parts = [...counts]
@@ -116,7 +120,8 @@ export function atBoundLine(donors: readonly Pick<Gr4jPriorDonor, 'atBound'>[]):
 			const [key, side] = b.split(':');
 			return `${key!.toUpperCase()} ${BOUND_LABEL[side!] ?? side} ${n}`;
 		});
-	return `${hit.length} of the ${of} donors kept ended at a typical bound (${parts.join(', ')}): there the fit’s box, not the record, set the parameter.`;
+	const who = one ? `The ${known.length === donors.length ? 'one donor' : 'one recorded donor'} kept` : `${hit.length} of the ${of} donors kept`;
+	return `${who} ended at a typical bound (${parts.join(', ')}): there the fit’s box, not the record, set the parameter.`;
 }
 
 export interface RangeRow {
