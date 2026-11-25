@@ -186,6 +186,13 @@ export const KNOWN_LIMITATIONS: readonly Limitation[] = [
 		"status": "Provisional (operator 2026-11-03); Needs hydrologist"
 	},
 	{
+		"id": "RD1",
+		"source": "finding",
+		"severity": "Medium (evidence packs whose application changes a unit with a dam on the river; engine 1.121.0)",
+		"title": "The evidence pack's check that an application leaves the EWR in the river (protectsEwr) judges an applicant's dam on the river on calls the hydrologist hasn't confirmed",
+		"status": "Built, provisional, pending the hydrologist"
+	},
+	{
 		"id": "Q3",
 		"source": "quirk",
 		"severity": null,
