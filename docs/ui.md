@@ -14302,7 +14302,9 @@ March") is kept against what it is about.
 
 `/projects/:id/report?run=<runId>` (`routes/projects/[id]/report/+page.svelte`,
 WP-2.15 Phase A, issue #19): a meeting-ready catchment report of one run, for
-anyone who can view the project. Without `?run=` it reports the latest run. It
+anyone who can view the project. Without `?run=` it reports the latest run of the model
+(never a newer scenario or forecast run, unless the project has no other;
+`runs/scenarioRun.ts latestModelRun`, the run a scheduled PDF prints). It
 reads the project, the run with its settings and model snapshot (one
 exception: the lede and headline cards follow the project's current Model
 settings → EWR the results are judged by, `settings.ewrHeadline`, issue #444, which runs don't

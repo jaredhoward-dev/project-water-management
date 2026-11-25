@@ -25,6 +25,7 @@ import { downloadUrl, REPORT_RETENTION_DAYS, reportFileName } from './storage.js
 import { DEFAULT_TIME_ZONE, localDate } from '../projects/timeZone.js';
 import { createReport, membersAmong, recentReportCount, reportByJob, REPORTS_PER_HOUR } from './store.js';
 import { consumeRenderToken } from './tokens.js';
+import { latestRunId } from '../runs/read.js';
 
 const Uuid = z.string().uuid();
 
@@ -149,13 +150,11 @@ export const reportRoutes = new Hono<AuthEnv>()
 			if ((await recentReportCount(db, id)) >= REPORTS_PER_HOUR) {
 				throw new ApiError(429, `at most ${REPORTS_PER_HOUR} PDFs an hour per project: try again later`);
 			}
-			const { rows } = await db.query<{ id: string }>(
-				body.runId
-					? 'SELECT id FROM model_run WHERE project_id = $1 AND id = $2'
-					: 'SELECT id FROM model_run WHERE project_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1',
-				body.runId ? [id, body.runId] : [id]
-			);
-			const run = rows[0];
+			// Without a runId, the project's latest run (runs/read.ts latestRunId): the newest run of the model, never a newer scenario's what-if or forecast.
+			const runId = body.runId
+				? (await db.query<{ id: string }>('SELECT id FROM model_run WHERE project_id = $1 AND id = $2', [id, body.runId])).rows[0]?.id
+				: await latestRunId(db, id);
+			const run = runId ? { id: runId } : null;
 			if (!run) throw new ApiError(body.runId ? 404 : 409, body.runId ? 'no such run in this project' : 'the project has no runs to report on');
 			let againstRunId: string | undefined;
 			if (body.against !== undefined) {
