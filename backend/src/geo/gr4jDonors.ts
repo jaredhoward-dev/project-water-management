@@ -7,7 +7,8 @@
 //    "version", "method", "attribution", "engineVersion", "donors": [{ "id",
 //    "lon", "lat", "areaKm2", "attributes": { aridity, mapMm, slopeDeg,
 //    clayPct, sandPct, forestPct }, "dorPct", "pawcMm", "flowYears",
-//    "params": { x1, x2, x3, x4 }, "kgeFit", "kgeValidation" }, …] }`); a
+//    "params": { x1, x2, x3, x4 }, "kgeFit", "kgeValidation", "atBound" }, …],
+//    "looFlow": { "kge", "kgeFit", "n" } }`, the last two optional, 362); a
 //    production load reads the same file (geo/referenceLoad.ts);
 //  - the load: the replace of a dataset, in one transaction, as the schema
 //    owner, recording the set's SHA-256 (of engine donorSetCanonical);
@@ -36,6 +37,22 @@ export const GR4J_DONORS = {
 		'Donor flow records: GRDC-Caravan (Färber et al. 2025, Zenodo 10.5281/zenodo.15349031), CC BY 4.0, from data held by the Global Runoff Data Centre (GRDC); South Africa’s and Namibia’s records © their departments of water. Basin attributes: HydroATLAS v1.0 (BasinATLAS; Linke et al. 2019, Lehner et al. 2022), CC BY 4.0.'
 } as const;
 
+/** A free parameter a fit left within 1 % of a typical bound, and on which side (362). */
+export const AT_BOUND_VALUES = ['x1:low', 'x1:high', 'x2:low', 'x2:high', 'x3:low', 'x3:high', 'x4:low', 'x4:high'] as const;
+export type AtBound = (typeof AT_BOUND_VALUES)[number];
+
+/**
+ * The flow-space leave-one-out score (362; fit-donors.ts flowLeaveOneOut):
+ * the median KGE′ of the prior's p50s run on each held-out donor's own
+ * forcing, the median KGE′ of the same donors' own fits on the same days, and
+ * how many were scored.
+ */
+export interface LooFlowScore {
+	kge: number;
+	kgeFit: number;
+	n: number;
+}
+
 export interface DonorRecord {
 	id: string;
 	lon: number;
@@ -48,6 +65,8 @@ export interface DonorRecord {
 	params: Gr4jParams;
 	kgeFit: number;
 	kgeValidation: number | null;
+	/** The free parameters its fit left at a typical bound (sorted; [] none); null when the file didn't record it (362). */
+	atBound: AtBound[] | null;
 }
 
 export interface DonorSetMeta {
@@ -58,6 +77,8 @@ export interface DonorSetMeta {
 	attribution: string;
 	/** The engine that fitted them (ENGINE_VERSION). */
 	engineVersion: string;
+	/** The flow-space leave-one-out score; absent or null when the file has none (362). */
+	looFlow?: LooFlowScore | null;
 }
 
 /** The engine's donor shape. */
@@ -118,7 +139,22 @@ export function donorFromJson(raw: unknown): DonorRecord | string {
 	if (!(kgeFit !== null && kgeFit <= 1)) return `${id}: no kgeFit of at most 1`;
 	const kgeValidation = r.kgeValidation === null || r.kgeValidation === undefined ? null : num(r.kgeValidation);
 	if (r.kgeValidation !== null && r.kgeValidation !== undefined && !(kgeValidation !== null && kgeValidation <= 1)) return `${id}: kgeValidation is not at most 1`;
-	return { id, lon, lat, areaKm2, attributes, dorPct, pawcMm, flowYears, params, kgeFit, kgeValidation };
+	let atBound: AtBound[] | null = null;
+	if (r.atBound !== null && r.atBound !== undefined) {
+		if (!Array.isArray(r.atBound) || !r.atBound.every((b) => (AT_BOUND_VALUES as readonly unknown[]).includes(b))) return `${id}: atBound is not a list of x1:low, x4:high and the like`;
+		atBound = [...new Set(r.atBound as AtBound[])].sort();
+	}
+	return { id, lon, lat, areaKm2, attributes, dorPct, pawcMm, flowYears, params, kgeFit, kgeValidation, atBound };
+}
+
+/** The file's flow-space leave-one-out score; null when absent or not a valid one. */
+export function looFlowFromJson(raw: unknown): LooFlowScore | null {
+	const r = raw as Record<string, unknown> | null | undefined;
+	if (!r || typeof r !== 'object') return null;
+	const kge = num(r.kge);
+	const kgeFit = num(r.kgeFit);
+	const n = num(r.n);
+	return kge !== null && kge <= 1 && kgeFit !== null && kgeFit <= 1 && n !== null && Number.isInteger(n) && n >= 3 ? { kge, kgeFit, n } : null;
 }
 
 /** The donor file, or why it isn't one. A bad donor is a problem, never stored; a repeated id too. */
@@ -132,7 +168,8 @@ export function donorsFromJson(doc: unknown): { meta: Partial<Omit<DonorSetMeta,
 		version: text(d.version, 100),
 		method: text(d.method, 1000),
 		attribution: text(d.attribution, 500),
-		engineVersion: ver && /^\d+\.\d+\.\d+$/.test(ver) ? ver : undefined
+		engineVersion: ver && /^\d+\.\d+\.\d+$/.test(ver) ? ver : undefined,
+		looFlow: looFlowFromJson(d.looFlow)
 	};
 	const donors: DonorRecord[] = [];
 	const problems: string[] = [];
@@ -161,19 +198,25 @@ export async function replaceDonorDataset(client: pg.ClientBase, meta: DonorSetM
 	try {
 		await client.query('DELETE FROM gr4j_donor_dataset WHERE dataset = $1', [meta.dataset]);
 		await client.query(
-			`INSERT INTO gr4j_donor_dataset (dataset, source, version, method, attribution, engine_version, donor_set_sha256)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-			[meta.dataset, meta.source, meta.version, meta.method, meta.attribution, meta.engineVersion, donorSetSha256(donors)]
+			`INSERT INTO gr4j_donor_dataset (dataset, source, version, method, attribution, engine_version, donor_set_sha256, loo_flow_kge, loo_flow_kge_fit, loo_flow_n)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+			[meta.dataset, meta.source, meta.version, meta.method, meta.attribution, meta.engineVersion, donorSetSha256(donors), meta.looFlow?.kge ?? null, meta.looFlow?.kgeFit ?? null, meta.looFlow?.n ?? null]
 		);
 		for (let i = 0; i < donors.length; i += BATCH) {
 			const part = donors.slice(i, i + BATCH);
 			const col = <T>(f: (d: DonorRecord) => T) => part.map(f);
 			await client.query(
 				`INSERT INTO gr4j_donor (dataset, basin_id, lon, lat, area_km2, aridity, map_mm, slope_deg, clay_pct, sand_pct, forest_pct,
-				   dor_pct, pawc_mm, flow_years, x1, x2, x3, x4, kge_fit, kge_validation)
-				 SELECT $1, t.* FROM unnest($2::text[], $3::float8[], $4::float8[], $5::float8[], $6::float8[], $7::float8[], $8::float8[], $9::float8[],
+				   dor_pct, pawc_mm, flow_years, x1, x2, x3, x4, kge_fit, kge_validation, at_bound)
+				 SELECT $1, t.basin_id, t.lon, t.lat, t.area_km2, t.aridity, t.map_mm, t.slope_deg, t.clay_pct, t.sand_pct, t.forest_pct, t.dor_pct, t.pawc_mm,
+				   t.flow_years, t.x1, t.x2, t.x3, t.x4, t.kge_fit, t.kge_validation,
+				   -- unnest can't carry an array per row: at_bound travels as JSON text (null: not recorded).
+				   CASE WHEN t.at_bound IS NULL THEN NULL ELSE ARRAY(SELECT jsonb_array_elements_text(t.at_bound::jsonb)) END
+				 FROM unnest($2::text[], $3::float8[], $4::float8[], $5::float8[], $6::float8[], $7::float8[], $8::float8[], $9::float8[],
 				   $10::float8[], $11::float8[], $12::float8[], $13::float8[], $14::float8[], $15::float8[], $16::float8[], $17::float8[], $18::float8[],
-				   $19::float8[], $20::float8[]) AS t`,
+				   $19::float8[], $20::float8[], $21::text[])
+				   AS t(basin_id, lon, lat, area_km2, aridity, map_mm, slope_deg, clay_pct, sand_pct, forest_pct, dor_pct, pawc_mm, flow_years,
+				        x1, x2, x3, x4, kge_fit, kge_validation, at_bound)`,
 				[
 					meta.dataset,
 					col((d) => d.id),
@@ -194,7 +237,8 @@ export async function replaceDonorDataset(client: pg.ClientBase, meta: DonorSetM
 					col((d) => d.params.x3),
 					col((d) => d.params.x4),
 					col((d) => d.kgeFit),
-					col((d) => d.kgeValidation)
+					col((d) => d.kgeValidation),
+					col((d) => (d.atBound === null ? null : JSON.stringify(d.atBound)))
 				]
 			);
 		}
@@ -208,6 +252,7 @@ export async function replaceDonorDataset(client: pg.ClientBase, meta: DonorSetM
 }
 
 export interface DonorDataset extends DonorSetMeta {
+	looFlow: LooFlowScore | null;
 	donorSetSha256: string;
 	donors: number;
 	loadedAt: string;
@@ -226,8 +271,12 @@ export async function donorDatasets(db: Db | pg.ClientBase): Promise<DonorDatase
 		donor_set_sha256: string;
 		loaded_at: Date;
 		donors: number;
+		loo_flow_kge: number | null;
+		loo_flow_kge_fit: number | null;
+		loo_flow_n: number | null;
 	}>(
 		`SELECT d.dataset, d.source, d.version, d.method, d.attribution, d.engine_version, d.donor_set_sha256, d.loaded_at,
+		        d.loo_flow_kge, d.loo_flow_kge_fit, d.loo_flow_n,
 		        (SELECT count(*)::int FROM gr4j_donor g WHERE g.dataset = d.dataset) AS donors
 		 FROM gr4j_donor_dataset d ORDER BY d.dataset = $1, d.loaded_at DESC, d.dataset`,
 		[SYNTHETIC_DONOR_DATASET]
@@ -239,6 +288,7 @@ export async function donorDatasets(db: Db | pg.ClientBase): Promise<DonorDatase
 		method: r.method,
 		attribution: r.attribution,
 		engineVersion: r.engine_version,
+		looFlow: r.loo_flow_kge !== null && r.loo_flow_kge_fit !== null && r.loo_flow_n !== null ? { kge: r.loo_flow_kge, kgeFit: r.loo_flow_kge_fit, n: r.loo_flow_n } : null,
 		donorSetSha256: r.donor_set_sha256,
 		donors: r.donors,
 		loadedAt: r.loaded_at.toISOString(),
@@ -248,9 +298,9 @@ export async function donorDatasets(db: Db | pg.ClientBase): Promise<DonorDatase
 
 /** One dataset's donors, by id. */
 export async function readDonors(db: Db | pg.ClientBase, dataset: string): Promise<DonorRecord[]> {
-	const { rows } = await db.query<Record<string, number | string | null>>(
+	const { rows } = await db.query<Record<string, number | string | string[] | null>>(
 		`SELECT basin_id, lon, lat, area_km2, aridity, map_mm, slope_deg, clay_pct, sand_pct, forest_pct, dor_pct, pawc_mm, flow_years,
-		        x1, x2, x3, x4, kge_fit, kge_validation
+		        x1, x2, x3, x4, kge_fit, kge_validation, at_bound
 		 FROM gr4j_donor WHERE dataset = $1 ORDER BY basin_id COLLATE "C"`,
 		[dataset]
 	);
@@ -272,6 +322,7 @@ export async function readDonors(db: Db | pg.ClientBase, dataset: string): Promi
 		flowYears: r.flow_years as number,
 		params: { x1: r.x1 as number, x2: r.x2 as number, x3: r.x3 as number, x4: r.x4 as number },
 		kgeFit: r.kge_fit as number,
-		kgeValidation: r.kge_validation as number | null
+		kgeValidation: r.kge_validation as number | null,
+		atBound: r.at_bound as AtBound[] | null
 	}));
 }

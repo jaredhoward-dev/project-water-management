@@ -87,6 +87,9 @@ describe('the catchment’s prior', () => {
 		expect(b.prior.ok).toBe(true);
 		expect(b.donors).toHaveLength(7);
 		expect(b.donors[0]).toHaveProperty('kgeFit');
+		// 362: each kept donor's at-bound record (the synthetic ones: none at a bound) and the set's flow-space score.
+		expect(b.donors.map((d: { atBound: unknown }) => d.atBound)).toEqual(Array(7).fill([]));
+		expect(b.dataset.looFlow).toEqual({ kge: 0.58, kgeFit: 0.74, n: 14 });
 		expect(b.provenance).toMatchObject({ dataset: 'synthetic', donorSetSha256: b.dataset.donorSetSha256, donorCount: 14, k: 7, target: { zoneNodeId: null, units: null }, referenceLoad: null });
 		expect(b.provenance.donors.map((d: { id: string }) => d.id)).toEqual(b.donors.map((d: { id: string }) => d.id));
 		// The synthetic donors' soil relation has skill and the target a PAWC: x1 is the soil's.

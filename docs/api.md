@@ -4900,8 +4900,11 @@ and "Start from the prior".
 | POST | `/projects/:id/gr4j-prior/start` | `{ zone?: <gauge node id> \| 'outlet' \| null, dataset?: <label> }` (`'outlet'` = the outlet's location; absent or `null` = the headline's, which is what `null`, "the calibration site's own zone", started before engine 1.110.0) | `200 { params: { x1, x2, x3, x4 }, record: PriorStartRecord, revisionId }` | editor |
 
 - `dataset`: the donor set read (`{ dataset, version, source, method,
-  attribution, synthetic, donorSetSha256, donors }`), `null` with none
-  loaded; `datasets` every loaded set; `soil` the soil grid read (`{
+  attribution, synthetic, donorSetSha256, donors, looFlow }`; `looFlow` the
+  set's flow-space leave-one-out score `{ kge, kgeFit, n }`, the median KGE′
+  of the prior's p50s on each held-out donor and of the same donors' own
+  fits on the same days, or `null` when the set has none, migration 362),
+  `null` with none loaded; `datasets` every loaded set; `soil` the soil grid read (`{
   dataset, version, attribution, synthetic }`) or `null`.
 - `target`: `{ zoneNodeId (the location resolved: a gauge's node id, or
   `null` for the outlet's location or the catchment), units (its group,
@@ -4918,8 +4921,10 @@ and "Start from the prior".
   engine's `PriorProvenance` (the donor set and its SHA-256, the donors kept
   with their weights, the LOO skill, the reference load, the target), which
   a fit passes to `calibrate()` with the ranges. `donors` the kept donors
-  with their position, area, weight, distance, similarity, own KGE′ and
-  parameters. `problem` says why there is no prior to use (no donors loaded,
+  with their position, area, weight, distance, similarity, own KGE′,
+  parameters and `atBound` (the free parameters their fit left within 1 % of
+  a typical bound, with the side, `'x4:high'`; `[]` none; `null` when the
+  set didn't record it, 362). `problem` says why there is no prior to use (no donors loaded,
   no boundary, the engine's reason), else `null`. `started` the target's
   start record while its parameters still hold what it wrote, else `null`.
 - `400` for an unknown dataset, or a gauge (or the outlet) that isn't a

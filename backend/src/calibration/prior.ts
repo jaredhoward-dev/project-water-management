@@ -99,10 +99,13 @@ export interface PriorDonorView {
 	kgeFit: number;
 	kgeValidation: number | null;
 	params: DonorRecord['params'];
+	/** The free parameters its fit left at a typical bound ('x4:high'); null when the set didn't record it (362). */
+	atBound: DonorRecord['atBound'];
 }
 
 export interface PriorResponse {
-	dataset: Pick<DonorDataset, 'dataset' | 'version' | 'source' | 'method' | 'attribution' | 'synthetic' | 'donorSetSha256' | 'donors'> | null;
+	/** `looFlow`: the set's flow-space leave-one-out score (362), null when the set has none. */
+	dataset: Pick<DonorDataset, 'dataset' | 'version' | 'source' | 'method' | 'attribution' | 'synthetic' | 'donorSetSha256' | 'donors' | 'looFlow'> | null;
 	datasets: { dataset: string; version: string; synthetic: boolean; donors: number }[];
 	soil: Pick<SoilDataset, 'dataset' | 'version' | 'attribution' | 'synthetic'> | null;
 	target: PriorTargetView | null;
@@ -208,7 +211,8 @@ export function computePrior(l: Loaded, zone: PriorZone): PriorResponse {
 					attribution: l.dataset.attribution,
 					synthetic: l.dataset.synthetic,
 					donorSetSha256: l.dataset.donorSetSha256,
-					donors: l.dataset.donors
+					donors: l.dataset.donors,
+					looFlow: l.dataset.looFlow
 				}
 			: null,
 		datasets: l.datasets.map((d) => ({ dataset: d.dataset, version: d.version, synthetic: d.synthetic, donors: d.donors })),
@@ -274,7 +278,7 @@ export function computePrior(l: Loaded, zone: PriorZone): PriorResponse {
 		provenance,
 		donors: prior.donors.map((u) => {
 			const d = byId.get(u.id)!;
-			return { id: d.id, lon: d.lon, lat: d.lat, areaKm2: d.areaKm2, weight: u.weight, distanceKm: u.distanceKm, similarity: u.similarity, kgeFit: d.kgeFit, kgeValidation: d.kgeValidation, params: d.params };
+			return { id: d.id, lon: d.lon, lat: d.lat, areaKm2: d.areaKm2, weight: u.weight, distanceKm: u.distanceKm, similarity: u.similarity, kgeFit: d.kgeFit, kgeValidation: d.kgeValidation, params: d.params, atBound: d.atBound };
 		})
 	};
 }

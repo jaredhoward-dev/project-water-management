@@ -2528,7 +2528,15 @@ is left for PostGIS when Step 4 needs cross-catchment spatial queries).
   (nullable). Every number is double precision, so the donors read back are
   the values the SHA-256 was taken of. No flow is stored. Global reference
   data, read and written as the soil grid is (`pnpm import:gr4j-donors`,
-  kind `gr4j-donors`).
+  kind `gr4j-donors`). `362_gr4j_donor_diagnostics.sql` adds two
+  diagnostics `fit-donors.ts` computes, both nullable so earlier loads stay
+  valid, and neither in the SHA-256: on the dataset, the flow-space
+  leave-one-out score, `loo_flow_kge` (median KGE′ of the prior's p50s on
+  each held-out donor), `loo_flow_kge_fit` (median KGE′ of the same donors'
+  own fits on the same days) and `loo_flow_n` (at least 3), all set or all
+  null (a check); on the donor, `at_bound` (`text[]` of `x1:low` …
+  `x4:high`, a check holds the values: the free parameters its fit left
+  within 1 % of a typical bound; `'{}'` none, null not recorded).
 - **`evaporation_accepted`** (`181_evaporation_accepted.sql`): where an
   evaporation row accepted from the map came from. Primary key
   `(project_id, target)`, `target` `pe` (GR4J's monthly PE) or `apan` (the

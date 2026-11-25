@@ -9672,11 +9672,16 @@ calibration's line points at *How the shown run fits* for NSE and PBIAS.
   zones, for the zone picked in **For** (each zone's own units, or the
   calibration site's own zone). A table of each parameter's p10, p50 and
   p90 beside its value in the form now ("below p10", "above p90"; X1 "from
-  soil water capacity" when the soil relation has skill), the **Skill**
-  line (the leave-one-out skill and its n, "Not scored" with too few donors,
-  and a **No skill** badge at 0 or below), one line of what the donors were
-  compared on (area, MAP over n water years, aridity, distance from the
-  zone's gauge or the boundary's centre) and the soil relation's state, a
+  soil water capacity" when the soil relation has skill), the **Skill
+  (parameters)** line (the leave-one-out skill and its n, "Not scored" with
+  too few donors, and a **No skill** badge at 0 or below), the **Skill
+  (flow)** line (the donor set's flow-space leave-one-out: median KGE′ of
+  the prior's medians on each held-out donor against their own fits, "Not
+  scored" for a set without one; migration 362), one line of what the
+  donors were compared on (area, MAP over n water years, aridity, distance
+  from the zone's gauge or the boundary's centre), the soil relation's
+  state and how many of the kept donors' fits ended at a typical bound (per
+  parameter and side; left out for a set that didn't record it), a
   fold with **The n donors** (weight, distance, area, own KGE′, X1, X3,
   X4), the synthetic-data warning over the invented set, and the donor and
   soil datasets' credits with a link to `/data-sources`. Editors get **Start

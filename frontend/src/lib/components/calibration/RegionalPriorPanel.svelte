@@ -5,7 +5,9 @@
 	catchment or, under calibration zones, one zone's own land units: each
 	parameter's p10–p50–p90 beside its value now, the donors kept (distance,
 	weight, their own fit), the method's leave-one-out skill with "No skill"
-	when it has none, and the soil relation's state. "Start from the prior"
+	when it has none, beside the set's flow-space score (KGE′ of the medians on
+	each held-out donor, 362), how many kept donors' fits ended at a typical
+	bound, and the soil relation's state. "Start from the prior"
 	(editors, in the heading's row, marked "Saves now") writes the medians into
 	that target's parameters as one settings revision naming the donors; it
 	waits while the form has unsaved changes. Fit automatically (below) uses the
@@ -19,7 +21,7 @@
 	import ProposalPanel from '#lib/components/proposals/ProposalPanel.svelte';
 	import ProposalSynthetic from '#lib/components/proposals/ProposalSynthetic.svelte';
 	import { fmtNum } from '#lib/format/number.js';
-	import { donorLine, rangeRows, skillText } from '#lib/calibration/prior.js';
+	import { atBoundLine, donorLine, flowSkillText, rangeRows, skillText } from '#lib/calibration/prior.js';
 
 	let {
 		projectId,
@@ -81,6 +83,7 @@
 	const ok = $derived(data?.prior?.ok && data.ranges && data.provenance ? data : null);
 	const rows = $derived(ok ? rangeRows(ok.ranges!, currentParams(zone)) : []);
 	const skill = $derived(ok?.prior?.ok ? skillText(ok.prior.leaveOneOut?.skill, ok.prior.leaveOneOut?.n) : null);
+	const boundLine = $derived(ok ? atBoundLine(ok.donors) : null);
 	const soil = $derived(ok?.prior?.ok ? ok.prior.soil : null);
 	const targetName = $derived(zone === null ? (zones.length ? 'the outlet’s own zone' : 'the catchment') : `the zone at ${zones.find((z) => z.nodeId === zone)?.name ?? 'its gauge'}`);
 	const km = (v: number) => fmtNum(v, v >= 10 ? 0 : 1);
@@ -158,9 +161,13 @@
 			<p class="small" data-testid="prior-started">The parameters of {targetName} were started from this prior and haven’t been changed since: the donors’ medians, not a fit.</p>
 		{/if}
 		<p class="small" data-testid="prior-skill">
-			<strong>Skill:</strong>
+			<strong>Skill (parameters):</strong>
 			{skill?.text}{#if skill?.noSkill}
 				<span class="badge badge-warn" data-testid="prior-no-skill">No skill</span>{/if}
+		</p>
+		<p class="small" data-testid="prior-flow-skill">
+			<strong>Skill (flow):</strong>
+			{flowSkillText(ok.dataset?.looFlow)}
 		</p>
 		<div class="table-wrap">
 			<table class="data compact" data-testid="prior-ranges">
@@ -185,6 +192,7 @@
 			{donorLine(ok.provenance!)}, compared on {[ok.target?.attributes.areaKm2 != null ? `area (${fmtNum(ok.target.attributes.areaKm2, 0)} km²)` : null, ok.target?.attributes.mapMm != null ? `mean annual rain (${fmtNum(ok.target.attributes.mapMm, 0)} mm over ${ok.target.climateYears} water years)` : null, ok.target?.attributes.aridity != null ? `aridity (${fmtNum(ok.target.attributes.aridity, 2)})` : null].filter(Boolean).join(', ') || 'distance alone'} and distance from the {ok.target?.positionFrom === 'gauge' ? 'zone’s gauge' : 'catchment boundary’s centre'}.
 			{soil?.status === 'used' ? `X1’s range is from the soil water capacity relation (leave-one-out R² ${fmtNum(soil.looR2, 2)}) at ${fmtNum(ok.target?.pawcMm ?? 0, 0)} mm.` : soil ? `The soil relation for X1 isn’t used: ${soil.reason}.` : ''}
 			{ok.target?.soilProblem ? `No soil water capacity: ${ok.target.soilProblem}.` : ''}
+			{#if boundLine}<span data-testid="prior-at-bound">{boundLine}</span>{/if}
 		</p>
 		<details class="donors">
 			<summary>The {ok.donors.length} donors</summary>

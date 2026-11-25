@@ -1,10 +1,11 @@
 // The regional prior on the Calibration page (issue #622 step 5): how a fit
 // uses it, the prior calibrate() is given, the skill words ("No skill" only
 // when the skill is 0 or below; a missing score is unknown, not none), the
-// range rows beside the parameters now, and the fit record's line.
+// range rows beside the parameters now, the fit record's line, and the set's
+// flow-space score and at-bound count (362).
 import { describe, expect, it } from 'vitest';
 import type { ParamPriors, PriorProvenance } from '@water-management/engine';
-import { calibrationPriorOf, donorLine, fitBoundsOf, priorKey, priorRecordLine, priorUnavailable, priorUseOfRecord, priorWeightError, rangeRows, skillText } from './prior';
+import { atBoundLine, calibrationPriorOf, donorLine, fitBoundsOf, flowSkillText, priorKey, priorRecordLine, priorUnavailable, priorUseOfRecord, priorWeightError, rangeRows, skillText } from './prior';
 
 const RANGES: ParamPriors = {
 	x1: { p10: 200, p50: 300, p90: 500 },
@@ -88,6 +89,24 @@ describe('what the panel shows', () => {
 		expect(priorRecordLine({ weight: 0.1, bounded: true, provenance: PROV })).toBe(
 			'Regional prior: penalty weight 0.10, searched its p10–p90 box; 7 of 14 donors from “synthetic” (invented donors), SHA-256 cdcdcdcdcdcd…; skill 0.42 (leave-one-out over 14 donors).'
 		);
+	});
+});
+
+describe('the donor set’s diagnostics (362)', () => {
+	it('words the flow-space score beside the donors’ own fits, and an absent one as not scored', () => {
+		expect(flowSkillText({ kge: 0.58, kgeFit: 0.74, n: 14 })).toBe('KGE′ 0.58 from the prior’s medians on each held-out donor, against 0.74 from their own fits (medians over 14 donors)');
+		expect(flowSkillText(null)).toBe('Not scored: the donor set has no flow-space leave-one-out score');
+		expect(flowSkillText(undefined)).toBe('Not scored: the donor set has no flow-space leave-one-out score');
+	});
+
+	it('counts the kept donors at a typical bound per parameter and side; nothing when none recorded it', () => {
+		expect(atBoundLine([{ atBound: ['x4:high'] }, { atBound: ['x1:low', 'x4:high'] }, { atBound: [] }])).toBe(
+			'2 of the 3 donors kept ended at a typical bound (X1 lower 1, X4 upper 2): there the fit’s box, not the record, set the parameter.'
+		);
+		expect(atBoundLine([{ atBound: [] }, { atBound: [] }])).toBe('None of the 2 donors kept ended at a typical bound.');
+		expect(atBoundLine([{ atBound: [] }, { atBound: null }])).toBe('None of the 1 recorded donors kept ended at a typical bound.');
+		expect(atBoundLine([{ atBound: null }, {}])).toBeNull();
+		expect(atBoundLine([])).toBeNull();
 	});
 });
 

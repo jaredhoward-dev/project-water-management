@@ -11800,11 +11800,15 @@ whose outlet is in region D1, with:
   little. This one is proposed, for the hydrologist to confirm.
 
 A basin with a day of no rain inside the copy's run is refused rather than
-run dry that day. The fit prints how many donors ended within 1 % of a
-typical bound, per parameter. Such a value was set by the search box, not
-the record, so stacked bounds narrow the prior's p10–p90 and flatter its
-leave-one-out score; whether donors should be fitted on the wide bounds
-instead is open (followups.md).
+run dry that day. Each donor records which free parameters its fit left
+within 1 % (of the box's width) of a typical bound, and on which side
+(`atBound`, `'x4:high'`; migration 362's `gr4j_donor.at_bound`), and the fit
+prints the count per parameter and side; the Regional prior panel says how
+many of the kept donors are at one. Such a value was set by the search box,
+not the record, so stacked bounds narrow the prior's p10–p90 and flatter its
+leave-one-out score. What to do about them (fit the donors on the wide
+bounds, or leave a bound-hit donor out of that parameter's quantiles) is the
+hydrologist's to decide (followups.md); only the recording is built.
 
 Each donor is **recalibrated on the app's own forcing**, never on Caravan's
 ERA5-Land, because parameters absorb forcing bias (x1 above all). The
@@ -11839,8 +11843,8 @@ donors, opts)`). After Oudin et al. (2008, *Water Resour. Res.* 44, W03413),
 who compared physical similarity and spatial proximity and found combining
 them best. The blend, the weighting and the parameter quantiles below are
 this model's own. Oudin et al. preferred averaging the donors' simulated
-flows to averaging their parameters, which the flow-space score still to
-come will test. Distances are between gauge outlets, so a target gives its
+flows to averaging their parameters, which the flow-space score (below)
+tests. Distances are between gauge outlets, so a target gives its
 outlet too:
 
 1. Standardise each attribute over the donors: z = (a − mean) / sd, the
@@ -11880,9 +11884,30 @@ w. For each parameter that varies among the donors:
 - coverage is the share of held-out donors inside their p10–p90.
 
 The overall skill pools x1, x3 and x4. It needs at least 3 donors. This
-score is in parameter space. A flow-space score (KGE′ of the prior's p50 on
-each held-out donor) needs the donors' forcing, so it belongs to the
-offline fit; that is to come.
+score is in parameter space, computed by the engine each time a prior is
+built.
+
+**Leave-one-out in flow space** (`fit-donors.ts` `flowLeaveOneOut`,
+migration 362). Parameter error is not what the hydrologist judges: flow
+is. So after the fits, with the forcing it already holds, the offline fit
+makes each donor in turn the target of `regionalPrior` over the others
+(its outlet, all its HydroATLAS attributes, its PAWC; the default k and w),
+takes the ranges a start would use (x1 from the soil relation when it has
+skill) and runs their p50s (`priorStartParams`) on the donor's own rain and
+PE. KGE′ (the engine's `kgePrime`) of that run against the donor's observed
+flow is set beside KGE′ of the donor's own fitted parameters, both over
+the days `prepareCalibration` scores on its record (the whole record, not
+the split-sample half its fit was judged on). The set stores the medians of
+both and how many donors were scored (`looFlow { kge, kgeFit, n }`, at
+least 3; `gr4j_donor_dataset.loo_flow_*`), and the fit prints each donor's
+pair. It is one number for the set, not per target: a target is compared
+on area, MAP and aridity only, while a held-out donor brings all seven
+attributes, so it states the method's skill on donors at best. The
+Regional prior panel shows it beside the parameter-space skill ("Skill
+(flow)"); a set loaded before 362 has none, shown as not scored. No
+threshold turns it into a "no skill" badge yet: that is the hydrologist's
+call once a real set is scored. The synthetic set holds an invented score
+(it has no flow).
 
 **The soil x1 prior** (`soilX1Relation`). Fitted on the donors, not
 asserted: ln x1 = a + b ln PAWC by least squares over the donors with a
@@ -12009,12 +12034,13 @@ gives the donor set, its SHA-256 and the leave-one-out skill, and says when
 the prior has no skill, or that its skill is unknown with too few donors.
 
 **Built vs to come.** Built (engine 1.106.0): the prior, its LOO score and
-soil relation; the soil grid (migration 268) and the donor table (269); the
+soil relation; the soil grid (migration 268) and the donor table (269),
+with the flow-space LOO score and the per-donor at-bound record (362); the
 wiring into `calibrate()`, the stepwise fit and the fit record; the target's
 own climate; Start from the prior; the Calibration page's panel and fit
 choices; the evidence line; the data credits. Synthetic grid and donors
 stand in for dev and CI. To come (followups.md § Regional GR4J prior): a
-target's HydroATLAS attributes, a flow-space LOO score, the donors on the
+target's HydroATLAS attributes, the donors on the
 Map, the ensemble sampling the prior's box, the prior in automated
 calibration's rules, and per-unit x1 scaled by PAWC (step 6, which would
 change `runModel` and needs its own `ENGINE_VERSION`, the `verify/` mirror

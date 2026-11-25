@@ -25,8 +25,13 @@
 // --min-kge (default 0.5) on its own record. Each is fitted with the engine's
 // own calibrate() (KGE′, the typical bounds, x2 fixed at 0, the split-sample
 // test run) on the forcing below; a basin with a day of no rain inside the
-// copy's run is refused rather than run dry that day. How many donors ended at
-// a typical bound, per parameter, is printed:
+// copy's run is refused rather than run dry that day. Which free parameters
+// each donor's fit left at a typical bound is recorded on the donor (atBound,
+// 362) and the count per parameter printed. After the fits, the flow-space
+// leave-one-out score (flowLeaveOneOut, 362): each donor in turn is the
+// target of a prior built from the others, and the prior's p50s are run on
+// its own forcing, scored by KGE′ against its flow beside its own fit's; the
+// medians go into the file (looFlow). The forcing:
 //
 //  - rain: the area-weighted mean of the CHIRPS v3 cells the polygon covers
 //    (each 0.05° cell by its area × the share inside, geo/gridShares.ts),
@@ -52,7 +57,13 @@ import {
 	ENGINE_VERSION,
 	fromEpochDay,
 	GR4J_PARAMS,
+	kgePrime,
+	PRIOR_LOO_MIN_DONORS,
+	prepareCalibration,
+	priorStartParams,
+	regionalPrior,
 	toEpochDay,
+	type CalibrationProblem,
 	type CalibrationReport,
 	type Gr4jParams,
 	type ModelInput,
@@ -63,7 +74,8 @@ import { chcCell, decodeCellValue, type GridCell } from '../src/feeds/cellCache.
 import { CHIRPS_CELL_DEG } from '../src/feeds/config.js';
 import { evaporationDatasets, summariseEvaporation } from '../src/geo/evaporation.js';
 import type { Geometry } from '../src/geo/geojson.js';
-import { DONOR_MAX_DOR_PCT, DONOR_MIN_FLOW_YEARS, donorsToJson, GR4J_DONORS, type DonorRecord } from '../src/geo/gr4jDonors.js';
+import { priorRanges } from '../src/calibration/prior.js';
+import { DONOR_MAX_DOR_PCT, DONOR_MIN_FLOW_YEARS, donorsToJson, GR4J_DONORS, toEngineDonor, type AtBound, type DonorRecord, type LooFlowScore } from '../src/geo/gr4jDonors.js';
 import { cellAreaM2, gridShares } from '../src/geo/gridShares.js';
 import { soilDatasets, summariseSoil } from '../src/geo/soilGrid.js';
 import { MIRROR_REGION, type Region } from '../src/mirror/grid.js';
@@ -321,15 +333,87 @@ export function fitDonor(input: ModelInput, opts: FitOptions = {}): { params: Gr
 /** Below this KGE′ on its own record a fit's parameters mean little, so the basin is no donor (the ensemble's behavioural threshold, §2.10e; the hydrologist's to confirm). */
 export const DEFAULT_MIN_KGE = 0.5;
 
-/** The free parameters that ended within 1 % (of the box's width) of a typical bound: there the search, not the record, set them. */
-export function atBounds(params: Gr4jParams): string[] {
-	return GR4J_PARAMS.filter((p) => !p.fixedByDefault)
-		.filter((p) => {
-			const [lo, hi] = p.typical;
-			const tol = 0.01 * (hi - lo);
-			return params[p.key] <= lo + tol || params[p.key] >= hi - tol;
-		})
-		.map((p) => p.key);
+/**
+ * The free parameters that ended within 1 % (of the box's width) of a typical
+ * bound, with the side ('x4:high'), sorted: there the search, not the record,
+ * set them. What a donor records as atBound (362).
+ */
+export function boundSides(params: Gr4jParams): AtBound[] {
+	const out: AtBound[] = [];
+	for (const p of GR4J_PARAMS) {
+		if (p.fixedByDefault) continue;
+		const [lo, hi] = p.typical;
+		const tol = 0.01 * (hi - lo);
+		if (params[p.key] <= lo + tol) out.push(`${p.key}:low` as AtBound);
+		else if (params[p.key] >= hi - tol) out.push(`${p.key}:high` as AtBound);
+	}
+	return out.sort();
+}
+
+/** The free parameters that ended at a typical bound, either side (the counts the run prints). */
+export const atBounds = (params: Gr4jParams): string[] => boundSides(params).map((b) => b.split(':')[0]!);
+
+/**
+ * KGE′ of `params` on a calibration problem's scored days (its observed flow
+ * against the simulated, the engine's own kgePrime); null with too few days.
+ * Both scores of the flow-space leave-one-out come from here, so the p50s and
+ * the donor's own fit are judged on the same days.
+ */
+export function kgeOn(pb: Pick<CalibrationProblem, 'simulate' | 'observed' | 'scoredDays'>, params: Gr4jParams): number | null {
+	const sim = pb.simulate({ ...params });
+	const o: number[] = [];
+	const s: number[] = [];
+	for (const t of pb.scoredDays) {
+		const v = pb.observed[t]!;
+		if (!Number.isFinite(v)) continue;
+		o.push(v);
+		s.push(sim[t]!);
+	}
+	return kgePrime(o, s);
+}
+
+const median = (xs: number[]): number => {
+	const a = [...xs].sort((x, y) => x - y);
+	const m = a.length >> 1;
+	return a.length % 2 ? a[m]! : (a[m - 1]! + a[m]!) / 2;
+};
+
+export interface FlowLooDonor {
+	id: string;
+	/** KGE′ of the prior's p50s (built from the others) on this donor's record, and of its own fit on the same days. */
+	kgePrior: number | null;
+	kgeFit: number | null;
+}
+
+/**
+ * The flow-space leave-one-out score of the regional prior on `donors`
+ * (docs/model.md §2.10m): each donor in turn is the target (its outlet, its
+ * attributes, its PAWC) of regionalPrior over the others with the default k
+ * and similarity weight; the ranges a start would use (priorRanges: x1 from
+ * the soil relation when it has skill) give its p50s (priorStartParams), which
+ * are run on the donor's own forcing (`inputs`, the ModelInput it was fitted
+ * on) and scored by KGE′ beside its own fitted parameters. The score is the
+ * median over the donors both could be scored on; null with fewer than
+ * PRIOR_LOO_MIN_DONORS of them.
+ */
+export function flowLeaveOneOut(donors: readonly DonorRecord[], inputs: ReadonlyMap<string, ModelInput>): { score: LooFlowScore | null; perDonor: FlowLooDonor[] } {
+	const perDonor: FlowLooDonor[] = [];
+	if (donors.length < PRIOR_LOO_MIN_DONORS) return { score: null, perDonor };
+	for (const held of donors) {
+		const input = inputs.get(held.id);
+		if (!input) continue;
+		const others = donors.filter((d) => d !== held).map(toEngineDonor);
+		const prior = regionalPrior({ lon: held.lon, lat: held.lat, attributes: { ...held.attributes, areaKm2: held.areaKm2 }, pawcMm: held.pawcMm }, others, { leaveOneOut: false });
+		if (!prior.ok) {
+			perDonor.push({ id: held.id, kgePrior: null, kgeFit: null });
+			continue;
+		}
+		const pb = prepareCalibration(input);
+		perDonor.push({ id: held.id, kgePrior: kgeOn(pb, priorStartParams(priorRanges(prior).ranges)), kgeFit: kgeOn(pb, held.params) });
+	}
+	const both = perDonor.filter((d): d is FlowLooDonor & { kgePrior: number; kgeFit: number } => d.kgePrior !== null && d.kgeFit !== null);
+	if (both.length < PRIOR_LOO_MIN_DONORS) return { score: null, perDonor };
+	return { score: { kge: median(both.map((d) => d.kgePrior)), kgeFit: median(both.map((d) => d.kgeFit)), n: both.length }, perDonor };
 }
 
 /** The fit's method in words, stored with the set. */
@@ -462,6 +546,8 @@ async function run(args: FitDonorsArgs, url: string): Promise<void> {
 		if (args.soils && !soil) throw new Error(`no soil grid "${args.soils}" is loaded`);
 		const to = args.to ?? fromEpochDay(Math.floor(Date.now() / 86_400_000));
 		const donors: DonorRecord[] = [];
+		// Each donor's forcing and flow, kept for the flow-space leave-one-out after the fits.
+		const inputs = new Map<string, ModelInput>();
 		const boundHits = new Map<string, number>();
 		for (const [i, b] of kept.entries()) {
 			const say = (m: string) => console.error(`[${i + 1}/${kept.length}] ${b.id}: ${m}`);
@@ -489,7 +575,8 @@ async function run(args: FitDonorsArgs, url: string): Promise<void> {
 			}
 			const pawc = soil ? await summariseSoil(client, soil, g) : null;
 			say(`fitting on ${years.toFixed(1)} years`);
-			const fit = fitDonor(donorInput({ startDate: rain.startDate, rainMm: rain.rainMm, flowMmPerDay: q, peMonthlyMm: pe.monthlyMm, areaKm2: b.areaKm2, peSource: evap.source }), args);
+			const input = donorInput({ startDate: rain.startDate, rainMm: rain.rainMm, flowMmPerDay: q, peMonthlyMm: pe.monthlyMm, areaKm2: b.areaKm2, peSource: evap.source });
+			const fit = fitDonor(input, args);
 			if (fit.kgeFit === null) {
 				refused.push({ id: b.id, reason: 'the fit has no KGE′ (too few scored days)' });
 				continue;
@@ -498,7 +585,9 @@ async function run(args: FitDonorsArgs, url: string): Promise<void> {
 				refused.push({ id: b.id, reason: `KGE′ ${fit.kgeFit.toFixed(2)} on its own record, under --min-kge ${args.minKge}: its parameters say little` });
 				continue;
 			}
-			for (const p of atBounds(fit.params)) boundHits.set(p, (boundHits.get(p) ?? 0) + 1);
+			const atBound = boundSides(fit.params);
+			for (const b of atBound) boundHits.set(b, (boundHits.get(b) ?? 0) + 1);
+			inputs.set(b.id, input);
 			donors.push({
 				id: b.id,
 				lon: b.lon,
@@ -510,23 +599,33 @@ async function run(args: FitDonorsArgs, url: string): Promise<void> {
 				flowYears: Math.round(years * 100) / 100,
 				params: fit.params,
 				kgeFit: fit.kgeFit,
-				kgeValidation: fit.kgeValidation
+				kgeValidation: fit.kgeValidation,
+				atBound
 			});
 			say(`x1 ${fit.params.x1.toFixed(0)}, x3 ${fit.params.x3.toFixed(0)}, x4 ${fit.params.x4.toFixed(2)}, KGE′ ${fit.kgeFit.toFixed(2)}`);
 		}
+		console.error(`flow-space leave-one-out over ${donors.length} donor(s)…`);
+		const loo = flowLeaveOneOut(donors, inputs);
 		const meta = {
 			source: `GRDC-Caravan v0.6 daily streamflow (Zenodo 10.5281/zenodo.15349031) and HydroATLAS v1.0 attributes; GR4J fitted on CHIRPS v3 (${args.product}, our copy) and ${evap.dataset} PE`,
 			version: `GRDC-Caravan 0.6; HydroATLAS 1.0; engine ${ENGINE_VERSION}`,
 			method: fitMethod({ product: args.product, from: args.from, to, evaporation: evap.dataset, budget: args.budget, starts: args.starts, seed: args.seed, maxAreaKm2: args.maxAreaKm2, minKge: args.minKge }),
 			attribution: GR4J_DONORS.attribution,
-			engineVersion: ENGINE_VERSION
+			engineVersion: ENGINE_VERSION,
+			looFlow: loo.score
 		};
 		const json = donorsToJson(meta, donors);
 		writeFileSync(args.out, /\.gz$/i.test(args.out) ? gzipSync(json) : json);
 		for (const r of refused) console.log(`refused ${r.id}: ${r.reason}`);
 		console.log(`${donors.length} donor(s) written to ${args.out}; ${refused.length} basin(s) in the region refused`);
 		// A parameter stacked at a typical bound can't leave the box, which narrows the prior's p10–p90 (model.md §2.10m).
-		for (const [p, n] of boundHits) console.log(`${p}: ${n} donor(s) ended within 1 % of a typical bound`);
+		for (const [p, n] of [...boundHits].sort()) console.log(`${p}: ${n} donor(s) ended within 1 % of that typical bound`);
+		for (const d of loo.perDonor) console.log(`leave-one-out ${d.id}: KGE′ ${d.kgePrior?.toFixed(2) ?? '–'} from the prior's p50s, ${d.kgeFit?.toFixed(2) ?? '–'} its own fit`);
+		console.log(
+			loo.score
+				? `flow-space leave-one-out: median KGE′ ${loo.score.kge.toFixed(2)} from the prior's p50s against ${loo.score.kgeFit.toFixed(2)} from the donors' own fits (${loo.score.n} donors)`
+				: `flow-space leave-one-out: not scored (fewer than ${PRIOR_LOO_MIN_DONORS} donors could be)`
+		);
 	} finally {
 		await client.end();
 	}

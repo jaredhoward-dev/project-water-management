@@ -573,7 +573,7 @@ step 5. What's done and what's open:
       box choice, the fit record's line, the evidence pack's § 3 line
       (`evidence-22`), the four sources' credits on `/data-sources`, and
       `regional-prior.spec.ts`.
-- [ ] **A flow-space leave-one-out score.** Missing: the LOO score is in
+- [x] **A flow-space leave-one-out score.** Missing: the LOO score is in
       parameter space (log error of the p50 against the plain median), and
       the panel now shows it as the prior's skill. Flow space is what the
       hydrologist judges: KGE′ of the prior's p50 run on each held-out
@@ -582,7 +582,15 @@ step 5. What's done and what's open:
       `gr4j_donor_dataset` (a new column, a forward migration); the panel
       shows both. Trigger: the first real donor fit, before the prior is
       used for a real catchment.
-- [ ] **Donors at a typical bound.** Broken (maybe): donors are fitted on
+      Done (2026-11-25, 362): `fit-donors.ts` `flowLeaveOneOut` runs each
+      held-out donor's prior p50s (regionalPrior over the others, the ranges
+      a start uses) on its own forcing and scores KGE′ beside its own fit on
+      the same days; the medians and n go in the file (`looFlow`) and on
+      `gr4j_donor_dataset` (`loo_flow_kge`, `loo_flow_kge_fit`,
+      `loo_flow_n`); the panel shows "Skill (parameters)" and "Skill (flow)"
+      (model.md §2.10m). Open for the hydrologist: what flow-space KGE′, or
+      drop from the donors' own, counts as "no skill" (no badge yet).
+- [x] **Donors at a typical bound.** Broken (maybe): donors are fitted on
       Perrin's typical bounds, so x4 of a large basin or x1 of a semi-arid
       one can stack at a bound, and the prior's p10–p90 can never leave the
       box. `fit-donors.ts` prints the count per parameter; nothing records
@@ -590,6 +598,15 @@ step 5. What's done and what's open:
       migration), then with the hydrologist either fit donors on the wide
       bounds or leave a bound-hit donor out of that parameter's quantiles.
       Trigger: the first real fit's counts.
+      Done (2026-11-25, 362): the recording. Each donor's file entry and
+      `gr4j_donor.at_bound` hold the free parameters its fit left within
+      1 % of a typical bound, with the side (`x4:high`); the fit prints the
+      count per parameter and side, and the panel says how many kept donors
+      are at one. Open question for the hydrologist, once a real fit's
+      counts are in: refit the donors on the wide bounds, or leave a
+      bound-hit donor out of that parameter's quantiles (or neither, if the
+      counts are small). Nothing decides it yet; the prior still uses every
+      donor as fitted.
 - [ ] **The prior's forcing against the target's.** Donors are fitted on
       uncorrected CHIRPS v3 finals; a target's MAP and aridity come from its
       own forcing (station or CHIRPS rain, GR4J's PE), and the donors' from
