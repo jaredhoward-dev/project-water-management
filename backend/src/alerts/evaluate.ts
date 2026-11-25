@@ -37,7 +37,8 @@
 //   feed_failing           the enabled data feeds' failures in a row.
 //   job_dead               the project's jobs that died in the last 24 hours.
 //   restriction_published  the current publication's restriction and notice:
-//                          any change is one event (a lift too).
+//                          any change is one event (a lift too: a restriction
+//                          ending; new words under none are a notice).
 //
 // "Today" (a forecast still current, a feed's days overdue) and a forecast's
 // madeOn are the calendar day in the project's time zone (project.time_zone,
@@ -400,19 +401,22 @@ export async function evaluateAlerts(db: Db, projectId: string, { now = new Date
 				.map((code) => `${code}:${md5(pub.notice[code]!)}`)
 				.join(',');
 			const signature = `${pub.restriction_level}|${pct ?? ''}|${words}`;
-			const { rows: last } = await db.query<{ signature: string | null }>(
-				`SELECT detail->>'signature' AS signature FROM alert_event WHERE rule_id = $1 ORDER BY opened_at DESC, id DESC LIMIT 1`,
+			const { rows: last } = await db.query<{ signature: string | null; level: string | null }>(
+				`SELECT detail->>'signature' AS signature, detail->>'level' AS level FROM alert_event WHERE rule_id = $1 ORDER BY opened_at DESC, id DESC LIMIT 1`,
 				[r.id]
 			);
 			if (last[0]?.signature === signature) continue;
-			// Nothing to announce on a project that never had a restriction.
-			if (!last[0] && pub.restriction_level === 'none') continue;
+			// Nothing to announce on a project that never had a restriction or a notice.
+			if (!last[0] && pub.restriction_level === 'none' && !words) continue;
 			if (r.event_id) await clear(r.event_id);
-			const lifted = pub.restriction_level === 'none';
+			// A lift is a restriction ending: the last event's level wasn't 'none'. New words under no
+			// restriction (or the first notice of all) are a notice, mailed with its words, not a second
+			// "Restriction lifted" that drops them.
+			const lifted = pub.restriction_level === 'none' && last[0] !== undefined && last[0].level !== 'none';
 			await open(
 				r,
 				{ value: pct, detail: { publicationId: pub.id, level: pub.restriction_level, pct, lifted, signature, publishedAt: pub.published_at.toISOString() }, runId: pub.run_id },
-				lifted ? 'cleared' : 'firing'
+				pub.restriction_level === 'none' ? 'cleared' : 'firing'
 			);
 			continue;
 		}
