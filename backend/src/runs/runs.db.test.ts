@@ -51,9 +51,9 @@ describe('POST /projects/:id/runs', () => {
 		const model = (await u.call('GET', `/projects/${projectId}/model`)).body as { nodes: Record<string, unknown>[] };
 		model.nodes.push({ ...node('Lower', outlet.id), sortOrder: 2 });
 		expect((await u.call('PUT', `/projects/${projectId}/model`, model)).status).toBe(200);
-		// Test state only: the rows as engines up to 1.104.x stored them, two farms at 75 % (150 %, which those runs refused).
+		// Test state only: the settings as engines up to 1.104.x stored them (the nodes' manual shares, two farms at 75 %,
+		// lived in columns migration 366 dropped).
 		await asOwner(`UPDATE project SET settings = settings || '{"flowShareMethod": "manual", "hiLoSplit": {"hi": 0.6, "lo": 0.4}}' WHERE id = $1`, [projectId]);
-		await asOwner(`UPDATE node SET flow_share_manual = 0.75, area_hi_km2 = 3 WHERE project_id = $1 AND kind = 'farm'`, [projectId]);
 		const res = await u.call('POST', `/projects/${projectId}/runs`, { label: 'shares by natural MAR' });
 		expect(res.status).toBe(201);
 		const [{ inputs, summary }] = (await asOwner('SELECT inputs, summary FROM model_run WHERE id = $1', [res.body.run.id])) as [
