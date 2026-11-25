@@ -75,9 +75,9 @@ const numOrNull = (v: string | null): number | null => (v === null ? null : Numb
 
 /**
  * Today's assistant for the caller on the project's billing account, for the panel's "questions left today" meter
- * (350_assistant_day_meter, docs/billing.md § Assistant dollar caps): null unless billing is enforced and the account
- * is capped by the day (Free, or a reverse trial). Read in the caller's transaction (withUser); the function answers
- * nothing to anyone below a viewer.
+ * (350_assistant_day_meter, its median the caller's own since 351; docs/billing.md § Assistant dollar caps): null
+ * unless billing is enforced and the account is capped by the day (Free, or a reverse trial). Read in the caller's
+ * transaction (withUser); the function answers nothing to anyone below a viewer.
  */
 export async function dayMeter(
 	db: Db,

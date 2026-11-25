@@ -14012,10 +14012,10 @@ with read-only tools over the project's data. It never changes anything.
   left today (`data-testid="assistant-day-meter"`, `chat.svelte.ts`
   `dayMeterText`, from the status's `day`, api.md § Assistant): what's left
   of the SAST day (and of the trial's whole allowance, when that's less) ÷
-  the account's median question, "About 6 questions left today, at what your
-  questions usually cost (an estimate)." ("… today on your trial" on a
-  trial). Free never shows more than its messages left, which is a count, so
-  it says "Up to 3 questions left today."; with no median yet Free says its
+  the person's own median question (never another member's), "About 6
+  questions left today, at what your questions usually cost (an
+  estimate)." ("… today on your trial" on a trial). Free never shows more than its messages left, which is a count, so
+  it says "Up to 3 questions left today."; with no median of their own yet Free says its
   messages left and a trial the share of its day left; "No questions left
   today." once either is spent. The status is read again after each turn,
   so the line counts down (a failed read keeps the line). Paid plans and

@@ -137,8 +137,9 @@ export type AssistantStatus =
 
 /**
  * What the caller has left of today's assistant (the SAST day, 00:00 to 24:00 South African time), in micro-USD
- * (docs/billing.md § Assistant dollar caps). `medianTurnUsdMicros` is the account's median cost of a question over its
- * last 30 days (null with none yet), which the panel turns into an estimate of questions left.
+ * (docs/billing.md § Assistant dollar caps). `medianTurnUsdMicros` is the caller's own median cost of a question on the
+ * account over its last 30 days (351: never another member's; null with none of their own yet), which the panel turns
+ * into an estimate of questions left.
  */
 export interface AssistantDayMeter {
 	kind: 'free' | 'trial';

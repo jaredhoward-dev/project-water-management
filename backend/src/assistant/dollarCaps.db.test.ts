@@ -10,8 +10,8 @@
 //   - through the route, each refusal is 429 with its code, the issue's words, Retry-After, params.seconds and
 //     params.resetsAt (Retry-After from now); a pool account's turn logs `assistant_free_pool` at 50% and 80% of the
 //     pool's month, and not below;
-//   - the day meter (350_assistant_day_meter): what a Free person has left today, and the account's median question,
-//     only enforced, only to a member, only on a capped account.
+//   - the day meter (350_assistant_day_meter, 351's own median): what a Free person has left today, and the median
+//     of their own questions (never another member's), only enforced, only to a member, only on a capped account.
 // The workspace runs under a skewed TZ (CLAUDE.md rule 7); the Free day is the SAST day (00:00 SAST, 22:00 UTC) and
 // every month is UTC, so the days and months are worked out by Postgres, and a row of yesterday or last month is
 // shown not to count.
@@ -380,7 +380,7 @@ describe('the day meter (350): what a capped person has left today', () => {
 		});
 	});
 
-	it('counts today’s spend, messages and running turns; the median is the account’s last 30 days, no one else’s', async () => {
+	it('counts today’s spend, messages and running turns; the median is the caller’s own last 30 days on the account', async () => {
 		enforce();
 		await dayRow(owner, account, await sastDay(), 4, 80_000); // 20 000 a question
 		await dayRow(owner, account, await sastDay(-1), 2, 60_000); // 30 000
@@ -389,12 +389,29 @@ describe('the day meter (350): what a capped person has left today', () => {
 		await dayRow(owner, account, await sastDay(-2), 3, 0); // unpriced: not a cost
 		await dayRow(other, otherAccount, await sastDay(), 1, 290_000); // another account
 		const m = await meter(owner, projectId);
-		expect(m).toMatchObject({ kind: 'free', usdMicrosLeft: DAY_USD - 80_000, messagesLeft: DAY_MSGS - 4, medianTurnUsdMicros: 20_000 });
+		// The median of 20 000 and 30 000: the editor's 10 000 would have made it 20 000 (351).
+		expect(m).toMatchObject({ kind: 'free', usdMicrosLeft: DAY_USD - 80_000, messagesLeft: DAY_MSGS - 4, medianTurnUsdMicros: 25_000 });
 		// A running turn's reservation counts as spent, as the begin counts it: the begin cut it to what was left.
 		expect((await begin(owner, projectId)).outcome).toBe('ok');
 		expect(await meter(owner, projectId)).toMatchObject({ usdMicrosLeft: 0, messagesLeft: DAY_MSGS - 5 });
 		// Yesterday's spend doesn't count against today.
 		expect((await meter(editor, projectId))?.usdMicrosLeft).toBe(DAY_USD);
+	});
+
+	it('the median is the caller’s own questions: another member’s costlier days never move it, their own do (351)', async () => {
+		enforce();
+		// Another member's dear days on the same account: the owner, with no priced day of their own, has no median.
+		for (const d of [-1, -2, -3]) await dayRow(editor, account, await sastDay(d), 1, 250_000);
+		await dayRow(owner, account, await sastDay(-4), 5, 0); // the owner's questions, unpriced: still no cost to take
+		expect((await meter(owner, projectId))?.medianTurnUsdMicros).toBeNull();
+		// Positive control: the editor's own history is theirs to read.
+		expect((await meter(editor, projectId))?.medianTurnUsdMicros).toBe(250_000);
+		// The owner's own priced days move theirs, and the editor's still don't.
+		await dayRow(owner, account, await sastDay(-1), 3, 30_000); // 10 000 a question
+		expect((await meter(owner, projectId))?.medianTurnUsdMicros).toBe(10_000);
+		await dayRow(owner, account, await sastDay(-2), 1, 40_001); // 40 001: the median of the two, rounded up
+		expect((await meter(owner, projectId))?.medianTurnUsdMicros).toBe(25_001);
+		expect((await meter(editor, projectId))?.medianTurnUsdMicros).toBe(250_000);
 	});
 
 	it('is null on a paid plan and for a stranger, but answers each member of a Free project', async () => {
