@@ -84,6 +84,12 @@ describe('step 2: did the river keep flowing?', () => {
 		expect(s.beyondShare).toBeNull();
 	});
 
+	it('calls an outlet the API left unnamed "the catchment outlet" (it may be a neighbour’s farm)', () => {
+		const s = step2(farm((f) => ((f.river.sites[0]!.name = ''), (f.river.sites[0]!.daysOnlyNatural = 5))));
+		expect(txt(s.sites)).toBe('The river was below its reserve at the catchment outlet on 52 days and at Melkhout Gauge on 44 days.');
+		expect(sp(s.reason)).toContain('on 5 days at the catchment outlet it was only because of low rain');
+	});
+
 	it('splits out the days that were only low rain', () => {
 		const s = step2(farm((f) => (f.river.sites[1]!.daysOnlyNatural = 10)));
 		expect(sp(s.reason)).toBe('Water taken upstream was part of the reason on the other days; on 10 days at Melkhout Gauge it was only because of low rain.');

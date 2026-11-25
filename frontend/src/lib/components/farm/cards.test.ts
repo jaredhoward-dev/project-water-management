@@ -201,6 +201,13 @@ describe('Water you received this season', () => {
 		expect(txt(outletLine(v, '2024-01-10'))).toBe('River at Outlet: kept its reserve on every one of the 30 days to 10 Jan 2024.');
 	});
 
+	it('calls an outlet the API left unnamed "the catchment outlet" (it may be a neighbour’s farm)', () => {
+		const v = vaalbankFixture();
+		v.outlet30 = { name: '', daysNotMet: 12, days: 30 };
+		expect(txt(outletLine(v))).toBe('River at the catchment outlet: below its reserve on 12 of the last 30 days.');
+		expect(txt(outletLine(v, '2024-01-10'))).toBe('River at the catchment outlet: below its reserve on 12 of the 30 days to 10 Jan 2024.');
+	});
+
 	it('names the SABI 2021 irrigation system nearest the efficiency (the table the node form sets)', () => {
 		expect(systemName(0.9)).toBe('drip');
 		expect(systemName(0.95)).toBe('drip');
