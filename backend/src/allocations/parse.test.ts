@@ -217,6 +217,14 @@ describe('parseAllocationTable', () => {
 		expect(t.rows[0]).toMatchObject({ holder: '=HYPERLINK("x")', reference: '@cmd', errors: [] });
 	});
 
+	it('refuses a row with more cells than the header: an unquoted 1,500 would shift every later column', () => {
+		// 1,500 unquoted in a comma file: the volume would read as 1 and the storage as 500, a valid row 1 500 times too small.
+		const text = [TEMPLATE, 'R1,,Farm A,,licence,irrigation,surface,1,500,,,,,,,,,', 'R2,,Farm A,,licence,irrigation,surface,"1,500",,,,,,,,,'].join('\n');
+		const [shifted, quoted] = parseAllocationTable(text, 'csv').rows;
+		expect(shifted!.errors.join('; ')).toMatch(/18 cells but the header has 17.*quote/);
+		expect(quoted).toMatchObject({ volumeM3PerYear: 1500, storageM3: null, errors: [] });
+	});
+
 	it('lists columns it does not read', () => {
 		expect(parseAllocationTable(`${TEMPLATE},Catchment\n`, 'csv').ignoredColumns).toEqual(['Catchment']);
 	});
