@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
+import { projectToday } from '#lib/components/projects/freshness.js';
 import type { Allocation } from '#lib/api/types.js';
 import { NOT_MATCHED, registeredUsers, registeredUsersCsv, unitSubtotals } from './registeredUsers';
 
@@ -120,5 +121,22 @@ describe('registeredUsers', () => {
 		const anon = registeredUsersCsv(registeredUsers(list, nodes, DAY, false), false);
 		expect(anon.split('\r\n')[0]).not.toContain('registered_user');
 		expect(anon).not.toContain('invented');
+	});
+});
+
+describe('in force today: the project’s day, not the device’s (as the API counts it)', () => {
+	const tz = process.env.TZ;
+	afterEach(() => {
+		process.env.TZ = tz;
+	});
+	it('counts a take that starts today in South Africa for a consultant whose device is still on yesterday', () => {
+		process.env.TZ = 'Pacific/Pago_Pago'; // UTC−11: still the 5th on the device
+		const now = new Date('2026-11-05T23:30:00Z'); // 01:30 on the 6th in Africa/Johannesburg
+		const list = [alloc({ propertyRef: '5/1', holder: 'Starts (invented)', volumeM3PerYear: 7_000, validFrom: '2026-11-06' })];
+		const project = registeredUsers(list, nodes, projectToday('Africa/Johannesburg', now));
+		expect(project.notInForce).toBe(0);
+		expect(project.total.volumeM3).toBe(7_000);
+		// Control: the device's own date leaves it out, the bug this fixes.
+		expect(registeredUsers(list, nodes, projectToday(undefined, now)).notInForce).toBe(1);
 	});
 });
