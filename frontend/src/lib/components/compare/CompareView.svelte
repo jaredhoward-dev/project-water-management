@@ -413,6 +413,23 @@
 		})
 	);
 
+	// The comparison as .xlsx (issue #843): the writer loads on the first click, so it stays out of this page's chunk.
+	let xlsxBusy = $state(false);
+	let xlsxError = $state<string | null>(null);
+	async function downloadXlsx(d: RunCompareResponse) {
+		xlsxBusy = true;
+		xlsxError = null;
+		try {
+			const { comparisonXlsx } = await import('#lib/components/compare/xlsx.js');
+			const bytes = await comparisonXlsx(d);
+			saveBlob(new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), comparisonCsvName(d, 'xlsx'));
+		} catch (e) {
+			xlsxError = `Couldn't write the spreadsheet: ${e instanceof Error ? e.message : String(e)}`;
+		} finally {
+			xlsxBusy = false;
+		}
+	}
+
 	// Export impact report with two what-ifs is a menu (Escape and a click outside close it, as the Network's Tables).
 	let exportEl: HTMLDetailsElement | undefined = $state();
 	let exportOpen = $state(false);
@@ -657,8 +674,10 @@
 							</dd>
 						</div>
 					</dl>
-					<!-- The whole comparison as a file (issue #830): the outcomes unrounded, each unit, every input difference. -->
-					<p class="csv-row"><button type="button" class="btn btn-sm" data-testid="compare-csv" onclick={() => data && saveBlob(new Blob([comparisonCsv(data)], { type: 'text/csv;charset=utf-8' }), comparisonCsvName(data))}>Download the comparison (CSV)</button></p>
+					<!-- The whole comparison as a file (issue #830; .xlsx, issue #843): the outcomes unrounded, each unit, every input difference. -->
+					<p class="csv-row"><button type="button" class="btn btn-sm" data-testid="compare-csv" onclick={() => data && saveBlob(new Blob([comparisonCsv(data)], { type: 'text/csv;charset=utf-8' }), comparisonCsvName(data))}>Download the comparison (CSV)</button>
+						<button type="button" class="btn btn-sm" data-testid="compare-xlsx" disabled={xlsxBusy} onclick={() => data && downloadXlsx(data)}>Download the comparison (.xlsx)</button></p>
+					{#if xlsxError}<div class="alert alert-error" role="alert">{xlsxError}</div>{/if}
 					{#if sameRun}
 						<div class="alert alert-info" role="status">Both sides are the same run, so nothing has changed. Pick a different run for the baseline or the what-if.</div>
 					{/if}
@@ -1048,6 +1067,9 @@
 		margin-bottom: 0;
 	}
 	.csv-row {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.4rem;
 		margin: 0 0 0.5rem;
 	}
 	.sides {

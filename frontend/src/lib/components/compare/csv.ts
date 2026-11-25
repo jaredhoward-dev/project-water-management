@@ -7,13 +7,17 @@ import type { RunCompareResponse } from '#lib/api/types.js';
 import { toCsv } from '#lib/spreadsheet/paste/grid.js';
 import { compareDamStorage, outcomeRows } from './summary';
 
-type Cell = string | number | null;
+export type Cell = string | number | null;
 
 /** A fraction outcome (0–1) is written as a percentage, as its unit says ("% of days"). */
 const scaled = (v: number | null, fraction: boolean): number | null => (v === null ? null : fraction ? v * 100 : v);
 
-/** The comparison of baseline A against what-if B, one table after another with a blank line between. */
-export function comparisonCsv(d: RunCompareResponse): string {
+/**
+ * The comparison of baseline A against what-if B as rows, one table after
+ * another with an empty row between: the CSV and the .xlsx (./xlsx.ts, issue
+ * #843) write these same cells.
+ */
+export function comparisonRows(d: RunCompareResponse): Cell[][] {
 	const side = (name: string, s: RunCompareResponse['a']): Cell[] => [name, s.run.label || 'Untitled run', s.project.name, s.run.startDate, s.run.endDate, s.run.engineVersion];
 	const table: Cell[][] = [['Run', 'Label', 'Project', 'Start', 'End', 'Engine'], side('Baseline (A)', d.a), side('What-if (B)', d.b)];
 
@@ -40,11 +44,14 @@ export function comparisonCsv(d: RunCompareResponse): string {
 
 	table.push([], ['Area', 'Kind', 'Subject', 'Change']);
 	for (const c of d.changes) table.push([c.area, c.kind, c.subject, c.text]);
-	return toCsv(table);
+	return table;
 }
 
-/** The file name: both runs' labels, stripped to safe characters. */
-export function comparisonCsvName(d: RunCompareResponse): string {
+/** The comparison as CSV text. */
+export const comparisonCsv = (d: RunCompareResponse): string => toCsv(comparisonRows(d));
+
+/** The file name (`.csv`, or `.xlsx` for the workbook): both runs' labels, stripped to safe characters. */
+export function comparisonCsvName(d: RunCompareResponse, ext: 'csv' | 'xlsx' = 'csv'): string {
 	const safe = (s: string) => s.replace(/[^\w -]+/g, '').trim() || 'run';
-	return `${safe(d.a.run.label || 'Untitled run')} vs ${safe(d.b.run.label || 'Untitled run')} - comparison.csv`;
+	return `${safe(d.a.run.label || 'Untitled run')} vs ${safe(d.b.run.label || 'Untitled run')} - comparison.${ext}`;
 }
