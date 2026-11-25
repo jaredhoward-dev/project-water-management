@@ -452,7 +452,7 @@ export function storageYieldCapacities(capacityM3: number, n = STORAGE_YIELD_DEF
 /**
  * Yield at each capacity from 0 to 2 × the dam's own, or to `maxCapacityM3`
  * (`points` of them). A unit with no dam sizes a proposed one: its dams start
- * empty, with no dead storage and, having no area–volume relation to scale,
+ * half full (YIELD_START_FULL_SHARE), with no dead storage and, having no area–volume relation to scale,
  * no surface to evaporate from or catch rain on (docs/model.md §2.13).
  */
 export function storageYieldCurve(

@@ -172,14 +172,20 @@ export function noInflowText(name: string, inflow: YieldOptions['inflow'] | null
 
 /**
  * A scenario's stored yield worked out on other changes than the scenario has
- * now: its recorded ops hash differs (320), or, for one from before the app
- * recorded it, the scenario has been changed since. Null otherwise, and for a
- * yield on a run (a run's input never changes).
+ * now: its recorded ops hash differs (320), or it ran on another base run
+ * (371: a rebase keeps the ops and their hash), or, for one from before the
+ * app recorded the ops, the scenario has been changed since. Null otherwise,
+ * and for a yield on a run (a run's input never changes).
  */
-export function staleNote(result: Pick<YieldResult, 'scenarioId' | 'opsSha256' | 'createdAt'>, scenario: { opsSha256: string; updatedAt: string } | null): string | null {
+export function staleNote(
+	result: Pick<YieldResult, 'scenarioId' | 'opsSha256' | 'baseRunId' | 'createdAt'>,
+	scenario: { opsSha256: string; updatedAt: string; baseRunId?: string } | null
+): string | null {
 	// A stored yield result's scenario, not a run's (a run's goes through runs/scenarioRun.ts isScenarioRun).
 	if (!result.scenarioId || !scenario) return null;
-	if (result.opsSha256) return result.opsSha256 === scenario.opsSha256 ? null : "Worked out before the scenario's latest changes: work it out again.";
+	if (result.opsSha256 && result.opsSha256 !== scenario.opsSha256) return "Worked out before the scenario's latest changes: work it out again.";
+	if (result.baseRunId && scenario.baseRunId && result.baseRunId !== scenario.baseRunId) return 'Worked out on another base run than the scenario has now: work it out again.';
+	if (result.opsSha256) return null;
 	return Date.parse(result.createdAt) < Date.parse(scenario.updatedAt) ? 'Worked out before the scenario was last changed, possibly on other changes: work it out again to be sure.' : null;
 }
 

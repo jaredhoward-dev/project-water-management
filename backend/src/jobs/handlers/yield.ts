@@ -26,7 +26,7 @@ export const yieldHandler = defineHandler({
 	async run({ db, job, payload, progress }) {
 		const role = await requireRole(db, job.projectId, 'contributor');
 		// Also refuses a run or scenario changed since the request was checked (a node removed): the user's to fix.
-		const { input, opsSha256 } = await yieldInputFor(db, job.projectId, role, job.actingUserId, payload);
+		const { input, opsSha256, baseRunId } = await yieldInputFor(db, job.projectId, role, job.actingUserId, payload);
 		const { pattern, patternNodeId, assurance, tolerance, points: n, maxCapacityM3 } = payload.params;
 		let problem: YieldProblem;
 		try {
@@ -64,9 +64,9 @@ export const yieldHandler = defineHandler({
 		const patternNodeName = patternNodeId === undefined ? undefined : input.model.nodes.find((x) => x.id === patternNodeId)?.name;
 		const params = patternNodeName === undefined ? payload.params : { ...payload.params, patternNodeName };
 		await db.query(
-			`INSERT INTO yield_result (project_id, ${target.col}, node_id, job_id, kind, params, points, engine_version, allocation_mode, ops_sha256)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-			[job.projectId, target.id, payload.nodeId, job.id, payload.kind, JSON.stringify(params), JSON.stringify(points), ENGINE_VERSION, allocationMode, opsSha256]
+			`INSERT INTO yield_result (project_id, ${target.col}, node_id, job_id, kind, params, points, engine_version, allocation_mode, ops_sha256, base_run_id)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+			[job.projectId, target.id, payload.nodeId, job.id, payload.kind, JSON.stringify(params), JSON.stringify(points), ENGINE_VERSION, allocationMode, opsSha256, baseRunId]
 		);
 		await db.query(
 			`DELETE FROM yield_result WHERE id IN (

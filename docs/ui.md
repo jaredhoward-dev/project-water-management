@@ -4389,7 +4389,11 @@ background `yield` job ([api.md § Yield](./api.md#yield), [model.md §2.13](./m
   the scenario's now says "Worked out before the scenario's latest changes:
   work it out again." (one from before 320: "Worked out before the scenario
   was last changed, possibly on other changes …" when it predates the
-  scenario's last change; `staleNote`).
+  scenario's last change; `staleNote`). It records the scenario's base run
+  too (371): a rebase keeps the ops and their hash, so a result worked out
+  on the old base run says "Worked out on another base run than the
+  scenario has now: work it out again." (one from before 371 is judged by
+  its ops alone).
 - **Preview** (a dashed box, "Not stored"; issue #73, WP-3.6 through
   WP-1.17's preview worker): the firm yield for the pattern and assurance
   picked, worked out at once in the browser, off the main thread

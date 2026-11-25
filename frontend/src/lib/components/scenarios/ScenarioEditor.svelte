@@ -759,7 +759,7 @@
 						scenario={isApplication || applicant ? null : { baseRunId: s.baseRunId, ops: s.ops, opsSha256: s.opsSha256 }}
 						canEdit={canYield}
 						hasDam={yieldNode.damCapacityM3 > 0}
-						scenarioState={{ opsSha256: s.opsSha256, updatedAt: s.updatedAt }}
+						scenarioState={{ opsSha256: s.opsSha256, updatedAt: s.updatedAt, baseRunId: s.baseRunId }}
 						onsetfield={editable ? setYieldField : null}
 					/>
 				{/snippet}
