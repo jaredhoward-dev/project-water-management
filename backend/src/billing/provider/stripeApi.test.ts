@@ -2,7 +2,7 @@
 // live call. What each request sends (path, headers, form body) and how each
 // answer is read or refused.
 import { describe, expect, it, vi } from 'vitest';
-import { cancelSubscription, createCheckoutSession, createCustomer, listOpenSubscriptions, createInvoice, createPortalSession, formEncode, STRIPE_API_VERSION, StripeApiError } from './stripeApi.js';
+import { cancelSubscription, createCheckoutSession, createCustomer, expireCheckoutSession, listOpenCheckoutSessions, listOpenSubscriptions, createInvoice, createPortalSession, formEncode, STRIPE_API_VERSION, StripeApiError } from './stripeApi.js';
 
 const KEY = 'test-only-not-a-stripe-key';
 const ACCOUNT = '22222222-2222-4222-8222-222222222222';
@@ -313,6 +313,44 @@ describe('listOpenSubscriptions and cancelSubscription (deleting an account)', (
 		await expect(cancelSubscription({ secretKey: KEY, fetch: fakeFetch(500, { error: { type: 'api_error' } }).f }, 'sub_Open1')).rejects.toBeInstanceOf(StripeApiError);
 		const { f, calls } = fakeFetch(200, {});
 		await expect(cancelSubscription({ secretKey: KEY, fetch: f }, 'sub_mock_1/../x')).rejects.toBeInstanceOf(StripeApiError);
+		expect(calls).toEqual([]);
+	});
+});
+
+describe('listOpenCheckoutSessions and expireCheckoutSession (deleting an account)', () => {
+	it('lists the customer’s open Checkout sessions in the query', async () => {
+		const { f, calls } = fakeFetch(200, { object: 'list', has_more: false, data: [{ id: 'cs_test_Open1', status: 'open' }, { id: 'cs_live_Open2', status: 'open' }] });
+		expect(await listOpenCheckoutSessions({ secretKey: KEY, fetch: f }, 'cus_Test123')).toEqual(['cs_test_Open1', 'cs_live_Open2']);
+		expect(calls[0]!.init.method).toBe('GET');
+		expect(calls[0]!.url).toBe('https://api.stripe.com/v1/checkout/sessions?customer=cus_Test123&status=open&limit=100');
+		expect(headers(calls[0]!.init)['Stripe-Version']).toBe(STRIPE_API_VERSION);
+	});
+
+	it('refuses a list with more pages, a malformed id and a bad customer id, rather than expire some', async () => {
+		await expect(listOpenCheckoutSessions({ secretKey: KEY, fetch: fakeFetch(200, { data: [], has_more: true }).f }, 'cus_Test123')).rejects.toBeInstanceOf(StripeApiError);
+		await expect(listOpenCheckoutSessions({ secretKey: KEY, fetch: fakeFetch(200, { data: [{ id: 'cs_../x' }] }).f }, 'cus_Test123')).rejects.toBeInstanceOf(StripeApiError);
+		const { f, calls } = fakeFetch(200, { data: [] });
+		await expect(listOpenCheckoutSessions({ secretKey: KEY, fetch: f }, 'cus_../x')).rejects.toBeInstanceOf(StripeApiError);
+		expect(calls).toEqual([]);
+	});
+
+	it('expires a session with a POST and checks the answer says expired', async () => {
+		const { f, calls } = fakeFetch(200, { id: 'cs_test_Open1', status: 'expired' });
+		await expireCheckoutSession({ secretKey: KEY, fetch: f }, 'cs_test_Open1');
+		expect(calls[0]!.init.method).toBe('POST');
+		expect(calls[0]!.url).toBe('https://api.stripe.com/v1/checkout/sessions/cs_test_Open1/expire');
+		await expect(expireCheckoutSession({ secretKey: KEY, fetch: fakeFetch(200, { id: 'cs_test_Open1', status: 'open' }).f }, 'cs_test_Open1')).rejects.toBeInstanceOf(StripeApiError);
+	});
+
+	it('takes a session no longer open (completed or expired meanwhile) or missing as done, and throws any other failure', async () => {
+		await expect(expireCheckoutSession({ secretKey: KEY, fetch: fakeFetch(400, { error: { type: 'invalid_request_error' } }).f }, 'cs_test_Done')).resolves.toBeUndefined();
+		await expect(
+			expireCheckoutSession({ secretKey: KEY, fetch: fakeFetch(404, { error: { type: 'invalid_request_error', code: 'resource_missing' } }).f }, 'cs_test_Gone')
+		).resolves.toBeUndefined();
+		await expect(expireCheckoutSession({ secretKey: KEY, fetch: fakeFetch(401, { error: { type: 'invalid_request_error' } }).f }, 'cs_test_Open1')).rejects.toBeInstanceOf(StripeApiError);
+		await expect(expireCheckoutSession({ secretKey: KEY, fetch: fakeFetch(500, { error: { type: 'api_error' } }).f }, 'cs_test_Open1')).rejects.toBeInstanceOf(StripeApiError);
+		const { f, calls } = fakeFetch(200, {});
+		await expect(expireCheckoutSession({ secretKey: KEY, fetch: f }, 'cs_test/../x')).rejects.toBeInstanceOf(StripeApiError);
 		expect(calls).toEqual([]);
 	});
 });

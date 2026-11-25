@@ -28,7 +28,7 @@ import { SIGNATURE_HEADER, verifySignature } from './provider/signature.js';
 import { normaliseStripeEvent } from './provider/stripe.js';
 import { MOCK_SESSION_TTL_SECONDS, seatsChangedEvent, signMockSession } from './provider/mock.js';
 import { createHash } from 'node:crypto';
-import { cancelSubscription, changeSeatItem, createCheckoutSession, createCustomer, createInvoice as createStripeInvoice, createPortalSession, ensureExtraSeatProduct, getSubscriptionItems, listOpenSubscriptions, StripeApiError, type InvoiceLine } from './provider/stripeApi.js';
+import { cancelSubscription, changeSeatItem, createCheckoutSession, createCustomer, createInvoice as createStripeInvoice, createPortalSession, ensureExtraSeatProduct, expireCheckoutSession, getSubscriptionItems, listOpenCheckoutSessions, listOpenSubscriptions, StripeApiError, type InvoiceLine } from './provider/stripeApi.js';
 
 export const BILLING_PROVIDERS = ['mock', 'manual', 'stripe'] as const;
 export type BillingProviderName = (typeof BILLING_PROVIDERS)[number];
@@ -463,11 +463,14 @@ function stripeProvider(webhookSecret: string | undefined, secretKey: string | u
 				return made ? { ...out, newCustomerRef: made } : out;
 			});
 		},
-		// The customer's open subscriptions (one we never recorded included: a checkout whose webhook hasn't landed)
-		// and any recorded one the list didn't name (no customer stored), each cancelled now with no proration.
+		// First the customer's open Checkout sessions are expired, so none can start a subscription for an account that
+		// is about to go (Stripe would charge the card and our webhook would ignore the unknown account). Then the
+		// customer's open subscriptions (one we never recorded included: a checkout completed meanwhile, or whose webhook
+		// hasn't landed) and any recorded one the list didn't name (no customer stored), each cancelled now with no proration.
 		async cancelSubscriptions(req) {
 			const o = client();
 			return call(async () => {
+				if (req.customerRef) for (const id of await listOpenCheckoutSessions(o, req.customerRef)) await expireCheckoutSession(o, id);
 				const open = req.customerRef ? await listOpenSubscriptions(o, req.customerRef) : [];
 				const refs = [...new Set([...open, ...(req.customerRef ? [] : req.subscriptionRefs)])];
 				for (const ref of refs) await cancelSubscription(o, ref);

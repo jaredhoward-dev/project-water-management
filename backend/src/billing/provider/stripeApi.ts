@@ -27,6 +27,8 @@
 //
 // and, before an account is deleted (docs/billing.md § Deleting an account):
 //
+//   GET    /v1/checkout/sessions?customer=…&status=open   the customer's Checkout sessions still payable
+//   POST   /v1/checkout/sessions/:id/expire       expire one, so it can no longer start a subscription
 //   GET    /v1/subscriptions?customer=…           the customer's subscriptions not yet canceled
 //   DELETE /v1/subscriptions/:id                  cancel one now: invoice_now=false, prorate=false
 //
@@ -303,6 +305,40 @@ export async function cancelSubscription(o: StripeClientOptions, subscriptionId:
 		if (sub.status !== 'canceled') throw new StripeApiError(502, 'unexpected_response', 'status');
 	} catch (e) {
 		if (e instanceof StripeApiError && e.status === 404 && e.code === 'resource_missing') return;
+		throw e;
+	}
+}
+
+const CHECKOUT_SESSION_ID = /^cs_[A-Za-z0-9_]{1,250}$/;
+
+/**
+ * The customer's Checkout sessions still open (status=open): each could still
+ * be paid and start a subscription after the account is gone. Every session we
+ * make names the customer (createCheckoutSession), so listing by customer finds
+ * them all. One page of 100; more is refused, as for subscriptions.
+ */
+export async function listOpenCheckoutSessions(o: StripeClientOptions, customer: string): Promise<string[]> {
+	if (!CUSTOMER_ID.test(customer)) throw new StripeApiError(400, 'invalid_request', 'customer');
+	const list = await send(o, 'GET', '/v1/checkout/sessions', { customer, status: 'open', limit: 100 });
+	if (!Array.isArray(list.data) || list.has_more === true) throw new StripeApiError(502, 'unexpected_response', 'data');
+	return (list.data as Record<string, unknown>[]).map((s) => field(s, 'id', CHECKOUT_SESSION_ID));
+}
+
+/**
+ * Expire an open Checkout session, so it can no longer be paid. Stripe refuses
+ * (400 invalid_request_error) a session that is no longer open: one that
+ * expired meanwhile, or was completed in the moment between the list and this
+ * call. Either is fine here: a completed one's subscription already exists, and
+ * the subscription list read after the expiries (cancelSubscriptions in
+ * provider.ts) cancels it. A missing session is as good as expired.
+ */
+export async function expireCheckoutSession(o: StripeClientOptions, sessionId: string): Promise<void> {
+	if (!CHECKOUT_SESSION_ID.test(sessionId)) throw new StripeApiError(400, 'invalid_request', 'session');
+	try {
+		const s = await post(o, `/v1/checkout/sessions/${sessionId}/expire`, {});
+		if (s.status !== 'expired') throw new StripeApiError(502, 'unexpected_response', 'status');
+	} catch (e) {
+		if (e instanceof StripeApiError && (e.status === 400 || e.status === 404) && e.type === 'invalid_request_error') return;
 		throw e;
 	}
 }
