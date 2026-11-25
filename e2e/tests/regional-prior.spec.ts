@@ -13,7 +13,7 @@
 // Invented data only.
 import type { Page } from '@playwright/test';
 import { expectNoViolations } from '../support/a11y.ts';
-import { addMember, createProject, node, putModel, putSeries, sampleModel, seedRunnableProject, syntheticRain, updateSettings } from '../support/api.ts';
+import { addMember, createProject, node, putModel, putSeries, sampleModel, seedRunnableProject, syntheticFlow, syntheticRain, updateSettings } from '../support/api.ts';
 import { answerConfirm } from '../support/confirm.ts';
 import { API_URL, WEB_URL } from '../support/env.ts';
 import { expect, test } from '../support/fixtures.ts';
@@ -144,6 +144,11 @@ test('under calibration zones, the Map link carries the zone picked in For, and 
 	const top = node('Top farm', 'farm', weir.id, 3, { areaKm2: 12, ...quiet });
 	const low = node('Low farm', 'farm', outlet.id, 4, { areaKm2: 8, ...quiet });
 	await putModel(page.request, project.id, { nodes: [outlet, weir, top, low], crops: [], cropAreas: [], transfers: [] });
+	// A calibration location's gauge needs its own observed flow record (checkCalibrationSite), so attach one to the weir.
+	await putSeries(page.request, project.id, { kind: 'flow_observed_m3s', name: 'Weir record', unit: 'm³/s', startDate: '2019-10-01', values: syntheticFlow(731) });
+	const series = (await (await page.request.get(`${API_URL}/projects/${project.id}/series`)).json()).series as { id: string; name: string }[];
+	const attach = await page.request.patch(`${API_URL}/projects/${project.id}/series/${series.find((s) => s.name === 'Weir record')!.id}`, { data: { siteNodeId: weir.id } });
+	expect(attach.status(), await attach.text()).toBe(200);
 	await updateSettings(page.request, project.id, {
 		runoffModel: 'gr4j',
 		apanMm: [150, 180, 220, 230, 190, 160, 110, 80, 60, 60, 80, 110],
