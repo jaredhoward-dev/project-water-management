@@ -6993,7 +6993,11 @@ kind changes. Readings a whole day holds is 1 440 minutes over the file's
 most common interval (24 for hourly, 96 for 15-minute). A first or last day
 the file covers only in part (a logger started or stopped partway through
 the window) is left out, not stored as a short total or a part-day average,
-and the summary names it; a file with no whole day is refused. The summary
+and the summary names it; a file with no whole day is refused. An edge day is
+judged by the span its readings cover, not their count (issue #840): it is
+part-way when the logger's interval would have put a reading inside the day
+before its first or after its last, so a missed reading inside the first or
+last day keeps the day and counts it among those short of whole. The summary
 says how many readings, how many a day, the days left out and how many kept
 days are short of whole. Each
 timestamp closes its interval. A time is HH:MM (seconds optional) or a
