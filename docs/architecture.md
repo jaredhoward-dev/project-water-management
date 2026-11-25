@@ -1196,7 +1196,7 @@ row names a source, where to read it and the series it merges into:
     ≥ 1.119.0) is every day from the one after the last reading read through
     the next reading's when the logger sent nothing at all for a whole rain
     day between them (readings 12 on the 1st and 20 on the 3rd: the 2nd and
-    the 3rd are gaps, never 0 and 8 mm), unless the total didn't change
+    the 3rd are gaps, never 0 and 9 mm), unless the total didn't change
     across the silence (no rain fell, so the silent days follow
     `noReadingsMeans`). A day of missing readings is never 0 mm, whatever
     `noReadingsMeans` says. `{end}`
