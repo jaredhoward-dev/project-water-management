@@ -28,8 +28,9 @@
 	(`layers=chirps`, § CHIRPS grid) draws CHIRPS v3's 0.05° cells and their
 	centres, where its daily rainfall values sit; Prior donors
 	(`layers=donors`, § Prior donors) draws the regional GR4J prior's kept
-	donor outlets for the headline target, sized and labelled by weight, and
-	lists them here, or says why there is no prior.
+	donor outlets for the target the URL names (`priorZone=`, else the
+	headline), sized and labelled by weight, and lists them here, each row a
+	button that frames its donor, or says why there is no prior.
 -->
 <script lang="ts">
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
@@ -70,7 +71,8 @@
 	import type { RiverLayer } from './riverLayer.svelte';
 	import type { ChannelLayer } from './channelLayer.svelte';
 	import type { PriorDonorLayer } from './priorDonorLayer.svelte';
-	import { donorSummary } from './priorDonors';
+	import { donorSummary, type DonorMarker } from './priorDonors';
+	import { priorPanelHref } from '#lib/calibration/priorLinks.js';
 
 	let {
 		quaternaries,
@@ -88,6 +90,8 @@
 		demGrid = null,
 		demRivers = null,
 		priorDonors = null,
+		donorTarget = null,
+		onframedonor,
 		areaFill = null
 	}: {
 		quaternaries: QuaternaryLayer;
@@ -121,6 +125,10 @@
 		demRivers?: { on: boolean; announce?: boolean; layer: Pick<ChannelLayer, 'noView' | 'zoomIn' | 'error' | 'loading' | 'tileCount' | 'retry' | 'paused'> } | null;
 		/** The Prior donors layer's state (priorDonorLayer.svelte.ts). Null: no toggle. */
 		priorDonors?: Pick<PriorDonorLayer, 'on' | 'view' | 'error' | 'retry'> | null;
+		/** The prior's target the URL names (`priorZone=`; null: the headline) and its words (priorDonors.ts donorTargetName). */
+		donorTarget?: { zone: string | null; name: string | null } | null;
+		/** Frame one donor's outlet on the map (its row in the list). */
+		onframedonor?: (d: DonorMarker) => void;
 		/** The Area fill slider's state (areaFill.svelte.ts): how strongly the polygons are filled. Null: no slider. */
 		areaFill?: AreaFill | null;
 	} = $props();
@@ -494,14 +502,18 @@
 					<p class="muted" data-testid="map-donors-none">{dv.text}</p>
 				{:else}
 					<p class="muted" data-testid="map-donors-summary">
-						{donorSummary(dv)}{#if dv.synthetic}{' '}<strong>Invented donors, never real basins.</strong>{/if}{labels ? '' : ' The map has no fonts for labels here, so it shows the dots without their weights.'}
+						{donorSummary(dv, donorTarget?.name ?? null)}{#if dv.synthetic}{' '}<strong>Invented donors, never real basins.</strong>{/if}{labels ? '' : ' The map has no fonts for labels here, so it shows the dots without their weights.'}
 					</p>
 					<ol class="donor-list" data-testid="map-donors-list">
 						{#each dv.donors as d (d.id)}
-							<li><span class="donor-id">{d.id}</span>: weight {d.label}, {km(d.distanceKm)} km away, {fmtNum(d.areaKm2, 0)} km²</li>
+							<li>
+								<button type="button" class="donor-pick" onclick={() => onframedonor?.(d)} data-testid="map-donor-pick"
+									><span class="donor-id">{d.id}</span>: weight {d.label}, {km(d.distanceKm)} km away, {fmtNum(d.areaKm2, 0)} km²<span class="visually-hidden">; show it on the map</span></button
+								>
+							</li>
 						{/each}
 					</ol>
-					<p class="muted"><a href="?tab=calibration#set-prior">The regional prior on the Calibration page</a>: its ranges and each donor’s fit.</p>
+					<p class="muted"><a href={priorPanelHref(donorTarget?.zone ?? null)} data-testid="map-donors-back">The regional prior on the Calibration page</a>: its ranges and each donor’s fit.</p>
 				{/if}
 			</div>
 		{/if}
@@ -609,13 +621,30 @@
 	.chirps-swatch {
 		border-top: 2px dashed var(--ch);
 	}
-	/* A donor as the map draws it: a dot in its magenta, joined by a dashed line. */
+	/* A donor as the map draws it: a dot in its olive, joined by a dashed line. */
 	.donors-swatch {
 		border-top: 2px dashed var(--dn);
 	}
 	.donor-list {
 		margin: 0.25rem 0;
 		padding-left: 1.4rem;
+	}
+	/* Each donor's row frames it on the map, as a search result does (MapSearch.svelte .hit). */
+	.donor-pick {
+		min-height: 1.5rem;
+		padding: 0.1rem 0.25rem;
+		margin-left: -0.25rem;
+		border: 0;
+		border-radius: 4px;
+		background: none;
+		color: var(--text);
+		font: inherit;
+		text-align: left;
+		cursor: pointer;
+	}
+	.donor-pick:hover,
+	.donor-pick:focus-visible {
+		background: var(--accent-soft);
 	}
 	.donor-id {
 		font-variant-numeric: tabular-nums;

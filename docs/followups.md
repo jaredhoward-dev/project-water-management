@@ -626,8 +626,8 @@ step 5. What's done and what's open:
       operator's real donor load.
 - [x] **The donors on the Map.** Done (2026-11-25): the Map tab's
       **Prior donors** layer (`layers=donors`, off by default, linked on
-      from the Regional prior panel's donors fold) draws the headline
-      target's kept donor outlets from the GET's `donors`, sized and
+      from the Regional prior panel's donors fold) draws the kept donor
+      outlets for the panel's target (`priorZone=`) from the GET's `donors`, sized and
       labelled by weight and joined to the target, lists them in the
       Layers box, says why when there is no prior, and credits a real
       GRDC-Caravan set while drawn (maps.md § Prior donors).

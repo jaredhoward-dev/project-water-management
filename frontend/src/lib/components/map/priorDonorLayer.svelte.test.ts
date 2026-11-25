@@ -30,13 +30,13 @@ afterEach(() => {
 	cleanup = null;
 });
 
-type Load = (id: string) => Promise<Gr4jPrior>;
+type Load = (id: string, zone: string | null) => Promise<Gr4jPrior>;
 
 function setup(load: Load) {
-	const deps = $state({ on: false, features: [withEdit(square('b', 20, -34), 't1')] as MapFeature[], projectId: 'p1' });
+	const deps = $state({ on: false, features: [withEdit(square('b', 20, -34), 't1')] as MapFeature[], projectId: 'p1', zone: null as string | null });
 	let layer!: PriorDonorLayer;
 	cleanup = $effect.root(() => {
-		layer = new PriorDonorLayer({ projectId: () => deps.projectId, on: () => deps.on, features: () => deps.features, load });
+		layer = new PriorDonorLayer({ projectId: () => deps.projectId, on: () => deps.on, features: () => deps.features, zone: () => deps.zone, load });
 	});
 	flushSync();
 	return { deps, layer };
@@ -59,7 +59,7 @@ describe('PriorDonorLayer', () => {
 		expect(layer.loading).toBe(true);
 		await vi.waitFor(() => expect(layer.view?.kind).toBe('donors'));
 		expect(load).toHaveBeenCalledTimes(1);
-		expect(load).toHaveBeenCalledWith('p1');
+		expect(load).toHaveBeenCalledWith('p1', null);
 		expect(layer.loading).toBe(false);
 		// Off and on again: the same target, no second request.
 		deps.on = false;
@@ -85,6 +85,21 @@ describe('PriorDonorLayer', () => {
 		first.resolve(answer(['old']));
 		await Promise.resolve();
 		expect(layer.view?.kind === 'donors' && layer.view.donors[0]!.id).toBe('new');
+	});
+
+	it('asks for the target the URL names, and again when it changes', async () => {
+		const load = vi.fn<Load>(async () => answer());
+		const { deps, layer } = setup(load);
+		deps.zone = 'n7';
+		deps.on = true;
+		flushSync();
+		await vi.waitFor(() => expect(layer.view?.kind).toBe('donors'));
+		expect(load).toHaveBeenLastCalledWith('p1', 'n7');
+		const asked = layer.asked;
+		deps.zone = 'outlet';
+		flushSync();
+		expect(load).toHaveBeenLastCalledWith('p1', 'outlet');
+		expect(layer.asked).not.toBe(asked);
 	});
 
 	it('keeps an error until Try again, which asks again', async () => {

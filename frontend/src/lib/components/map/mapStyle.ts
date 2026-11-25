@@ -911,12 +911,16 @@ export function chirpsLayers(dark: boolean): Layer[] {
 // The regional GR4J prior's donors (docs/maps.md § Prior donors; data from
 // priorDonors.ts donorsData): a thin dashed line from the target to each kept
 // donor's outlet, the donor as a dot sized by its weight, its weight beside
-// it, and the target as a ringed square-ish dot. Its own source, empty while
+// it, and the target as a ring (a shape no feature uses). Its own source, empty while
 // the layer is off.
 // ---------------------------------------------------------------------------
 
-/** The donors' colour: a magenta apart from the water blues, the parcels' green, the quaternaries' purple and the CHIRPS orange. */
-export const donorColour = (dark: boolean) => (dark ? '#ff7ac2' : '#b0186a');
+/**
+ * The donors' colour: an olive (light) or yellow-green (dark), apart from the selection's magenta, the boundary's
+ * brown and gold, the water blues, the parcels' green, the quaternaries' purple, the CHIRPS orange, the terrain
+ * channels' red and the proposals' teal (ΔE ≥ 25 from each, 3:1 on the basemap; mapStyle.test.ts).
+ */
+export const donorColour = (dark: boolean) => (dark ? '#c3e33a' : '#5c6b00');
 
 /** The Prior donors layer: the links under, the donors' dots and the target over; their weights as labels when there are glyphs. */
 export function donorLayers(dark: boolean, labels: boolean): { over: Layer[]; labels: Layer[] } {

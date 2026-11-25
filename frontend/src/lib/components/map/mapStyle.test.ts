@@ -781,7 +781,7 @@ describe('the prior’s donors (docs/maps.md § Prior donors)', () => {
 			const b = basemapColours(dark);
 			for (const g of [b.bg, b.earth, b.water, b.green]) expect(contrast(donorColour(dark), g), `donors on ${g}`).toBeGreaterThanOrEqual(3);
 			const c = overlayColours(dark);
-			for (const s of [c.boundary, c.parcel, c.water, c.other, quaternaryColour(dark), riverNetworkColour(dark), chirpsColour(dark)])
+			for (const s of [c.boundary, c.parcel, c.water, c.other, c.selected, quaternaryColour(dark), riverNetworkColour(dark), chirpsColour(dark), channelColour(dark), proposalColour(dark)])
 				expect(deltaE(donorColour(dark), s), `donors vs ${s}, ${dark ? 'dark' : 'light'}`).toBeGreaterThanOrEqual(25);
 		}
 	});

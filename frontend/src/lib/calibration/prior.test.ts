@@ -94,9 +94,15 @@ describe('what the panel shows', () => {
 
 describe('the donor set’s diagnostics (362)', () => {
 	it('words the flow-space score beside the donors’ own fits, and an absent one as not scored', () => {
-		expect(flowSkillText({ kge: 0.58, kgeFit: 0.74, n: 14 })).toBe('KGE′ 0.58 from the prior’s medians on each held-out donor, against 0.74 from their own fits (medians over 14 donors)');
-		expect(flowSkillText(null)).toBe('Not scored: the donor set has no flow-space leave-one-out score');
-		expect(flowSkillText(undefined)).toBe('Not scored: the donor set has no flow-space leave-one-out score');
+		expect(flowSkillText({ kge: 0.58, kgeFit: 0.74, n: 14 })).toEqual({ text: 'KGE′ 0.58 from the prior’s medians on each held-out donor, against 0.74 from their own fits (medians over 14 donors)', noSkill: false });
+		expect(flowSkillText(null)).toEqual({ text: 'Not scored: the donor set has no flow-space leave-one-out score', noSkill: false });
+		expect(flowSkillText(undefined)).toEqual({ text: 'Not scored: the donor set has no flow-space leave-one-out score', noSkill: false });
+		// At or below the mean-flow benchmark (1 − √2): no skill, said so.
+		expect(flowSkillText({ kge: -0.5, kgeFit: 0.6, n: 9 })).toEqual({
+			text: 'KGE′ −0.50 from the prior’s medians on each held-out donor, against 0.60 from their own fits (medians over 9 donors): no better than each donor’s mean flow (−0.41)',
+			noSkill: true
+		});
+		expect(flowSkillText({ kge: -0.4, kgeFit: 0.6, n: 9 }).noSkill).toBe(false);
 	});
 
 	it('counts the kept donors at a typical bound per parameter and side; nothing when none recorded it', () => {
@@ -104,7 +110,9 @@ describe('the donor set’s diagnostics (362)', () => {
 			'2 of the 3 donors kept ended at a typical bound (X1 lower 1, X4 upper 2): there the fit’s box, not the record, set the parameter.'
 		);
 		expect(atBoundLine([{ atBound: [] }, { atBound: [] }])).toBe('None of the 2 donors kept ended at a typical bound.');
-		expect(atBoundLine([{ atBound: [] }, { atBound: null }])).toBe('None of the 1 recorded donors kept ended at a typical bound.');
+		expect(atBoundLine([{ atBound: [] }, { atBound: null }])).toBe('The one recorded donor kept didn’t end at a typical bound.');
+		expect(atBoundLine([{ atBound: [] }])).toBe('The one donor kept didn’t end at a typical bound.');
+		expect(atBoundLine([{ atBound: ['x1:low'] }, { atBound: null }])).toBe('The one recorded donor kept ended at a typical bound (X1 lower 1): there the fit’s box, not the record, set the parameter.');
 		expect(atBoundLine([{ atBound: null }, {}])).toBeNull();
 		expect(atBoundLine([])).toBeNull();
 	});

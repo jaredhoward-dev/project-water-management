@@ -4,7 +4,7 @@
 // and when GRDC-Caravan is credited.
 import { describe, expect, it } from 'vitest';
 import type { Gr4jPrior, Gr4jPriorDonor } from '#lib/api/types.js';
-import { caravanCredited, DONOR_RADIUS, donorRadius, donorsData, donorSummary, donorView, NO_PRIOR, weightLabel } from './priorDonors';
+import { caravanCredited, DONOR_RADIUS, donorBbox, donorRadius, donorsData, donorSummary, donorTargetName, donorView, NO_PRIOR, weightLabel } from './priorDonors';
 
 const donor = (id: string, weight: number, lon = 19, lat = -33): Gr4jPriorDonor => ({
 	id,
@@ -116,5 +116,26 @@ describe('donorSummary', () => {
 		const v = donorView(prior({ target: target(20, -34, 'gauge') }));
 		if (v.kind !== 'donors') throw new Error('no donors');
 		expect(donorSummary(v)).toBe('2 donor basins the regional prior kept, from “synthetic” (v1), each joined to the calibration gauge; a bigger dot weighs more.');
+	});
+
+	it('names the zone the URL asked for (priorZone=)', () => {
+		const v = donorView(prior({ target: target(20, -34, 'gauge') }));
+		if (v.kind !== 'donors') throw new Error('no donors');
+		const names = (id: string) => (id === 'n1' ? 'Weir A' : null);
+		expect(donorTargetName(null, names)).toBeNull();
+		expect(donorTargetName('outlet', names)).toBe('the outlet’s own zone');
+		expect(donorTargetName('n1', names)).toBe('the zone at Weir A');
+		expect(donorTargetName('gone', names)).toBe('the zone at its gauge');
+		expect(donorSummary(v, 'the zone at Weir A')).toBe('2 donor basins the regional prior kept for the zone at Weir A, from “synthetic” (v1), each joined to the zone’s gauge; a bigger dot weighs more.');
+	});
+});
+
+describe('donorBbox', () => {
+	it('boxes the target and every donor, for the map to frame', () => {
+		const v = donorView(prior({ target: target(20, -34, 'boundary') }));
+		if (v.kind !== 'donors') throw new Error('no donors');
+		const lons = [20, ...v.donors.map((d) => d.lon)];
+		const lats = [-34, ...v.donors.map((d) => d.lat)];
+		expect(donorBbox(v)).toEqual([Math.min(...lons), Math.min(...lats), Math.max(...lons), Math.max(...lats)]);
 	});
 });

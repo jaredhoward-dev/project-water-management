@@ -4016,31 +4016,45 @@ point every ~320 m; the Relief layer is the same data drawn as shading.
 
 The Map tab's **Prior donors** layer (`layers=donors`, issue #622) draws
 the regional GR4J prior's kept donors ([model.md
-§2.10m](./model.md#210m-regional-gr4j-prior-engine-11060-issue-622)) for the headline target: the catchment, or under
-calibration locations the headline location (the route's answer without
-`zone`). It reads the Calibration page's own route, `GET
+§2.10m](./model.md#210m-regional-gr4j-prior-engine-11060-issue-622)) for the target the URL names in
+`priorZone=` (`frontend/src/lib/calibration/priorLinks.ts`): a calibration
+zone's node id or `outlet` for the outlet's own zone, passed as the route's
+`zone`; absent, the headline target (the catchment, or under calibration
+locations the headline location: the route's answer without `zone`). The
+Regional prior panel's link carries the zone picked in its **For**, so the
+map draws the donors the panel listed, and the box's summary names it ("for
+the zone at Middle weir"). It reads the Calibration page's own route, `GET
 /projects/:id/gr4j-prior` ([api.md § Regional GR4J
 prior](./api.md#regional-gr4j-prior)), viewer and up, so no route of its own.
 
 - **What it draws** (`priorDonors.ts`, its MapLibre layers in `mapStyle.ts`
-  `donorLayers`, in a magenta apart from the other overlays, 3:1 on the
+  `donorLayers`, in an olive (light) or yellow-green (dark) at ΔE ≥ 25 from
+  every other overlay, the selection's magenta included, and 3:1 on the
   basemap light and dark): each kept donor's outlet as a dot whose area
   goes with its weight (√-scaled radius, 5 to 13 px, the heaviest at 13),
   its weight beside it in whole percent as the panel writes it ("23 %";
   only with glyphs), a thin dashed line from the target's position (the
   location's gauge, else the boundary's centre, as the prior measures
-  distance) to each, and the target as a ringed dot.
+  distance) to each, and the target as a ring (a shape no feature uses).
+  The Key lists the three in the layer's colour while it draws them
+  ("link to the target", "prior donor: bigger = more weight", "prior
+  target: gauge or boundary centre"; `mapList.ts` `keyGroups`).
+- **Framed on arrival**: the first answer after the layer turns on (and
+  each new target) frames the target and every donor (`donorBbox`, no
+  closer than zoom 10).
 - **The box lists them**, heaviest first: id, weight, distance and area,
   with how many and from which donor set, so the map is never the only
-  place to read them, and a link to the panel (`?tab=calibration#set-prior`)
-  for the ranges and each donor's fit. The invented set says so.
+  place to read them; each row is a button that frames its donor (zoom 11),
+  as a search result does; and a link to the panel
+  (`?tab=calibration&priorZone=…#set-prior`, so its **For** opens on the
+  same zone) for the ranges and each donor's fit. The invented set says so.
 - **No prior, said plainly**: no donor set loaded, no boundary or gauge to
   place the target, or a prior that can't be built each show the route's own
   `problem` line; a failed request is an alert with **Try again**.
 - **Off by default.** The answer builds the prior on the server (the
   target's climate takes a run's preparation), and it matters only while
-  calibrating: so it is asked only while the layer is on, once per project
-  and per redraw of the boundary or a gauge (`priorDonorLayer.svelte.ts`
+  calibrating: so it is asked only while the layer is on, once per project,
+  per target and per redraw of the boundary or a gauge (`priorDonorLayer.svelte.ts`
   `placingKey`), and the entry point is the Regional prior panel's donors
   fold, whose link opens the Map with it on. A settings change that moves
   the target (a calibration location ticked) shows after a reload.
