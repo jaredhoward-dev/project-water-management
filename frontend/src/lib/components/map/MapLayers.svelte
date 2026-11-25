@@ -26,7 +26,10 @@
 	one loaded A-pan grid the same way, the year's total or a month picked
 	here, said to be modelled where it is; the CHIRPS grid
 	(`layers=chirps`, § CHIRPS grid) draws CHIRPS v3's 0.05° cells and their
-	centres, where its daily rainfall values sit.
+	centres, where its daily rainfall values sit; Prior donors
+	(`layers=donors`, § Prior donors) draws the regional GR4J prior's kept
+	donor outlets for the headline target, sized and labelled by weight, and
+	lists them here, or says why there is no prior.
 -->
 <script lang="ts">
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
@@ -57,7 +60,7 @@
 		demRiversLine,
 		HYDRORIVERS_LAYER_LABEL
 	} from './mapLayers';
-	import { channelColour, chirpsColour, DEM_RAMP, MAP_RAMP, overlayColours, quaternaryColour, riverNetworkColour } from './mapStyle';
+	import { channelColour, chirpsColour, donorColour, DEM_RAMP, MAP_RAMP, overlayColours, quaternaryColour, riverNetworkColour } from './mapStyle';
 	import type { MapGridLayer } from './mapGridLayer.svelte';
 	import type { MapGridDataset } from '#lib/api/types.js';
 	import type { EvaporationGrids } from './EvaporationGridToggles.svelte';
@@ -66,6 +69,8 @@
 	import type { QuaternaryLayer } from './quaternaryLayer.svelte';
 	import type { RiverLayer } from './riverLayer.svelte';
 	import type { ChannelLayer } from './channelLayer.svelte';
+	import type { PriorDonorLayer } from './priorDonorLayer.svelte';
+	import { donorSummary } from './priorDonors';
 
 	let {
 		quaternaries,
@@ -82,6 +87,7 @@
 		labels = true,
 		demGrid = null,
 		demRivers = null,
+		priorDonors = null,
 		areaFill = null
 	}: {
 		quaternaries: QuaternaryLayer;
@@ -113,6 +119,8 @@
 		 * too). Null: no toggle (a viewer, or no elevation model).
 		 */
 		demRivers?: { on: boolean; announce?: boolean; layer: Pick<ChannelLayer, 'noView' | 'zoomIn' | 'error' | 'loading' | 'tileCount' | 'retry' | 'paused'> } | null;
+		/** The Prior donors layer's state (priorDonorLayer.svelte.ts). Null: no toggle. */
+		priorDonors?: Pick<PriorDonorLayer, 'on' | 'view' | 'error' | 'retry'> | null;
 		/** The Area fill slider's state (areaFill.svelte.ts): how strongly the polygons are filled. Null: no slider. */
 		areaFill?: AreaFill | null;
 	} = $props();
@@ -170,6 +178,8 @@
 	const dg = $derived(demGrid?.answer ?? null);
 	const drLine = $derived(demRivers?.on ? demRiversLine(demRivers.layer) : null);
 	const dgRange = $derived(demGrid?.range ?? null);
+	const dv = $derived(priorDonors?.view ?? null);
+	const km = (v: number) => fmtNum(v, v >= 10 ? 0 : 1);
 
 	const status = $derived(
 		layersStatus(
@@ -197,6 +207,13 @@
 							? 'Too many DEM grid points in view: zoom in.'
 							: `${dg.points.length} DEM grid ${dg.points.length === 1 ? 'point' : 'points'} shown.`
 						: 'Loading the DEM grid…'
+					: null,
+				priorDonors?.on && !priorDonors.error
+					? !dv
+						? 'Loading the prior’s donors…'
+						: dv.kind === 'donors'
+							? `${dv.donors.length} prior ${dv.donors.length === 1 ? 'donor' : 'donors'} shown.`
+							: 'No prior donors to show.'
 					: null
 			]
 		)
@@ -461,6 +478,34 @@
 			</div>
 		{/if}
 	{/if}
+	{#if priorDonors}
+		<label class="check">
+			<input type="checkbox" checked={priorDonors.on} onchange={(e) => toggle('donors', e.currentTarget.checked)} data-testid="map-layer-donors" />
+			<span class="swatch donors-swatch" style:--dn={donorColour(dark)} aria-hidden="true"></span>
+			Prior donors
+		</label>
+		{#if priorDonors.on}
+			<div class="qt small" data-testid="map-donors">
+				{#if priorDonors.error}
+					<p class="err" role="alert">The prior’s donors couldn’t be loaded: {priorDonors.error} <button type="button" class="btn btn-sm" data-retry onclick={(e) => retryLayer(e, priorDonors!, 'map-layer-donors')}>Try again</button></p>
+				{:else if !dv}
+					<p class="muted" data-loading>Loading the prior’s donors…</p>
+				{:else if dv.kind === 'none'}
+					<p class="muted" data-testid="map-donors-none">{dv.text}</p>
+				{:else}
+					<p class="muted" data-testid="map-donors-summary">
+						{donorSummary(dv)}{#if dv.synthetic}{' '}<strong>Invented donors, never real basins.</strong>{/if}{labels ? '' : ' The map has no fonts for labels here, so it shows the dots without their weights.'}
+					</p>
+					<ol class="donor-list" data-testid="map-donors-list">
+						{#each dv.donors as d (d.id)}
+							<li><span class="donor-id">{d.id}</span>: weight {d.label}, {km(d.distanceKm)} km away, {fmtNum(d.areaKm2, 0)} km²</li>
+						{/each}
+					</ol>
+					<p class="muted"><a href="?tab=calibration#set-prior">The regional prior on the Calibration page</a>: its ranges and each donor’s fit.</p>
+				{/if}
+			</div>
+		{/if}
+	{/if}
 	{#if relief}
 		<div class="tip-row">
 			<label class="check">
@@ -563,6 +608,18 @@
 	/* A CHIRPS cell: dashed, in its orange. */
 	.chirps-swatch {
 		border-top: 2px dashed var(--ch);
+	}
+	/* A donor as the map draws it: a dot in its magenta, joined by a dashed line. */
+	.donors-swatch {
+		border-top: 2px dashed var(--dn);
+	}
+	.donor-list {
+		margin: 0.25rem 0;
+		padding-left: 1.4rem;
+	}
+	.donor-id {
+		font-variant-numeric: tabular-nums;
+		font-weight: 600;
 	}
 	/* A light-to-dark ramp: the shading the relief draws. */
 	.relief-swatch {

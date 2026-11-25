@@ -624,11 +624,13 @@ step 5. What's done and what's open:
       reference kind, and area-weight them over the boundary (and a zone's
       units, once units have polygons), as the soil grid is. Trigger: the
       operator's real donor load.
-- [ ] **The donors on the Map.** Missing: the panel lists each donor's
-      distance and position, but the Map draws none. Durable fix: a Map
-      layer of the kept donors' outlets for the target, from the GET's
-      `donors`, with their weights. Trigger: the hydrologist reviewing a
-      real prior.
+- [x] **The donors on the Map.** Done (2026-11-25): the Map tab's
+      **Prior donors** layer (`layers=donors`, off by default, linked on
+      from the Regional prior panel's donors fold) draws the headline
+      target's kept donor outlets from the GET's `donors`, sized and
+      labelled by weight and joined to the target, lists them in the
+      Layers box, says why when there is no prior, and credits a real
+      GRDC-Caravan set while drawn (maps.md § Prior donors).
 - [ ] **The ensemble in the prior's box (CR-1).** Missing: after a fit in
       the prior's box the uncertainty ensemble samples Perrin's typical box
       instead, with a note (`resolveEnsembleOptions`). Durable fix: sample

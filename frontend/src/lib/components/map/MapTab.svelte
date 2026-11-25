@@ -101,6 +101,7 @@
 	import { AreaFill } from './areaFill.svelte';
 	import MapLayers from './MapLayers.svelte';
 	import { QuaternaryLayer } from './quaternaryLayer.svelte';
+	import { PriorDonorLayer } from './priorDonorLayer.svelte';
 	import { RiverLayer } from './riverLayer.svelte';
 	import { MeasureDraft } from './measure/measureDraft.svelte';
 	import MapKeyRow from './MapKeyRow.svelte';
@@ -975,6 +976,13 @@
 			evaporationGrids = { grids, Toggles: m.default };
 		});
 	});
+	// The regional GR4J prior's donors (docs/maps.md § Prior donors): off unless `layers=donors` (the Regional prior panel links it on).
+	const priorDonors = new PriorDonorLayer({
+		projectId: () => projectId,
+		on: () => layersOn(params).has('donors'),
+		features: () => features,
+		load: (id) => api.gr4jPrior.get(id)
+	});
 	const chirpsOn = $derived(layersOn(params).has('chirps'));
 	const chirpsInView = $derived(chirpsOn ? chirpsCells(mapView) : null);
 	const demGrid = new DemGridLayer({
@@ -1497,6 +1505,7 @@
 		chirps={{ on: chirpsOn, cells: chirpsInView }}
 		labels={!!glyphs}
 		demGrid={demGridOffered ? demGrid : null}
+		{priorDonors}
 		demRivers={demRiversShown ? { on: layersOn(params).has('channels'), announce: layerAsked(params, 'channels'), layer: channels } : null}
 		{areaFill}
 	/>
@@ -1687,6 +1696,7 @@
 									apanGrid={evaporationGrids?.grids[0]?.draw ?? null}
 									chirps={chirpsInView}
 									demGrid={demGrid.points}
+									donors={priorDonors.view}
 									fillScale={areaFill.scale}
 								/>
 							{/snippet}
