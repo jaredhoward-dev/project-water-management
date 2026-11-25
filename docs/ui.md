@@ -5246,6 +5246,15 @@ map" card) stays the schematic; this is the geography.
   ([maps.md § Hydrological units layer, § MAP grid, § CHIRPS
   grid](./maps.md#map-grid)). Without glyphs the outlines and dots are drawn
   and the box says the names or values aren't written on the map.
+  **Prior donors** (`layers=donors`, a dashed magenta swatch; off by
+  default, linked on from the Regional prior panel's donors fold): on, the
+  regional GR4J prior's kept donor outlets for the headline target, each a
+  dot sized by its weight with its weight beside it ("23 %"), joined to the
+  target by a dashed line, and listed in the box (id, weight, distance,
+  area) with a link back to the panel; with no prior it says why (the
+  route's own problem, `map-donors-none`), and a real GRDC-Caravan set is
+  credited on the map while drawn ([maps.md § Prior
+  donors](./maps.md#prior-donors)).
 - **Features** (the side column's Features tab): every feature grouped by kind, parcels
   first, then dams, gauges, rivers, other and the boundary, each group
   largest first, then by name (`mapList.ts` `groupFeatures`). A row is a
@@ -9678,7 +9687,8 @@ calibration's line points at *How the shown run fits* for NSE and PBIAS.
   compared on (area, MAP over n water years, aridity, distance from the
   zone's gauge or the boundary's centre) and the soil relation's state, a
   fold with **The n donors** (weight, distance, area, own KGE′, X1, X3,
-  X4), the synthetic-data warning over the invented set, and the donor and
+  X4) and a link that opens the Map with its **Prior donors** layer on
+  (the headline location's donors under calibration zones), the synthetic-data warning over the invented set, and the donor and
   soil datasets' credits with a link to `/data-sources`. Editors get **Start
   from the prior** in the heading's row, marked *Saves now*: it asks first,
   then writes the medians into the target's parameters as one settings

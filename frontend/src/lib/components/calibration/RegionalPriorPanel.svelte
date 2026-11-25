@@ -215,6 +215,7 @@
 					</tbody>
 				</table>
 			</div>
+			<p class="small"><a href="?tab=map&layers=donors" data-testid="prior-map-link">{zones.length ? 'Show the headline location’s donors on the Map' : 'Show the donors on the Map'}</a>: each outlet sized by its weight.</p>
 		</details>
 		<p class="small muted" data-testid="prior-credits">
 			{ok.dataset?.attribution}{ok.soil && ok.provenance?.x1From === 'soil' ? ` ${ok.soil.attribution}` : ''} Donor set {ok.dataset?.version}, SHA-256 {ok.dataset?.donorSetSha256.slice(0, 12)}…; <a href="/data-sources#grdc-caravan">data sources</a>.

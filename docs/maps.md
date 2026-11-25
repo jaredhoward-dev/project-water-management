@@ -4012,6 +4012,43 @@ point every ~320 m; the Relief layer is the same data drawn as shading.
   none. Locally: `pnpm dev:tiles:terrain`, then `DEM_URL` in
   `backend/.env.development.local` ([§ Delineation](#delineation)).
 
+## Prior donors
+
+The Map tab's **Prior donors** layer (`layers=donors`, issue #622) draws
+the regional GR4J prior's kept donors ([model.md
+§2.10m](./model.md#210m-regional-gr4j-prior-engine-11060-issue-622)) for the headline target: the catchment, or under
+calibration locations the headline location (the route's answer without
+`zone`). It reads the Calibration page's own route, `GET
+/projects/:id/gr4j-prior` ([api.md § Regional GR4J
+prior](./api.md#regional-gr4j-prior)), viewer and up, so no route of its own.
+
+- **What it draws** (`priorDonors.ts`, its MapLibre layers in `mapStyle.ts`
+  `donorLayers`, in a magenta apart from the other overlays, 3:1 on the
+  basemap light and dark): each kept donor's outlet as a dot whose area
+  goes with its weight (√-scaled radius, 5 to 13 px, the heaviest at 13),
+  its weight beside it in whole percent as the panel writes it ("23 %";
+  only with glyphs), a thin dashed line from the target's position (the
+  location's gauge, else the boundary's centre, as the prior measures
+  distance) to each, and the target as a ringed dot.
+- **The box lists them**, heaviest first: id, weight, distance and area,
+  with how many and from which donor set, so the map is never the only
+  place to read them, and a link to the panel (`?tab=calibration#set-prior`)
+  for the ranges and each donor's fit. The invented set says so.
+- **No prior, said plainly**: no donor set loaded, no boundary or gauge to
+  place the target, or a prior that can't be built each show the route's own
+  `problem` line; a failed request is an alert with **Try again**.
+- **Off by default.** The answer builds the prior on the server (the
+  target's climate takes a run's preparation), and it matters only while
+  calibrating: so it is asked only while the layer is on, once per project
+  and per redraw of the boundary or a gauge (`priorDonorLayer.svelte.ts`
+  `placingKey`), and the entry point is the Regional prior panel's donors
+  fold, whose link opens the Map with it on. A settings change that moves
+  the target (a calibration location ticked) shows after a reload.
+- **Credited while drawn**: a real GRDC-Caravan donor set (not synthetic,
+  its dataset, source or attribution naming GRDC or Caravan,
+  `caravanCredited`) adds "Prior donors: GRDC-Caravan, CC BY 4.0" to the
+  attribution control ([§ Credits on the map](#credits-on-the-map)).
+
 ## Sources
 
 Every dataset or asset the map serves or loads, with its licence, checked on
@@ -4095,7 +4132,7 @@ reading, not the deployment's version.
 
 ### Soil water capacity
 
-The regional GR4J prior ([model.md §2.10m](./model.md)) relates x1, GR4J's
+The regional GR4J prior ([model.md §2.10m](./model.md#210m-regional-gr4j-prior-engine-11060-issue-622)) relates x1, GR4J's
 production store, to the soil's root-zone plant-available water capacity
 (PAWC, mm). The grid is built offline from two CC BY 4.0 sources (issue
 #622 step 2):
@@ -4143,6 +4180,7 @@ also its section on the **Data sources and credits** page:
 | `jrc-water` | an outline traced from JRC Global Surface Water is drawn (`jrcCreditedFeature`: its description carries the archive's "Source: EC JRC/Google", which tracing writes, [§ Assisted drawing](#assisted-drawing); a trace from the synthetic raster names no source and is credited nothing) | "Dam outline: traced from JRC Global Surface Water (Source: EC JRC/Google), modified": JRC's attribution for a published map, and that the data was modified (Copernicus Delegated Regulation 1159/2013 Art. 8(1) and (3)) |
 | `waas-map` | a MAP grid layer (the WAAS 2007 MAP) draws points of a grid whose attribution is the Southwestern Cape surface's credit line (`mapCredits`' `mapGridAttributions`, each MAP grid layer's drawn grid's, from its dataset row; [§ MAP grid](#map-grid)) | "MAP grid: WAAS (2007), Beuster Clarke & Associates": the study and its authors, short, linking to their credit line whole on the data sources page ("Mean annual rainfall surface for the Southwestern Cape. Prepared for the WAAS project by Beuster Clarke & Associates. March 2007, Version 1.1."; terms not stated, the operator's decision, [legal/map-data-licences.md § 3.3b](./legal/map-data-licences.md#33b-the-southwestern-cape-map-surface-waas-the-operators-decision-added-2026-10-23)). The whole line wrapped along the map's foot under its Show everything and Key buttons, at 1280 px as on a phone (PR #570) |
 | `lynch-map` | a MAP grid layer (the CCWR MAP) draws points of a grid whose attribution is the Lynch (2004) grid's citation (`mapGridAttributions`, as above; with the WAAS 2007 MAP drawing too, both credits show) | "MAP grid: Lynch (2004), WRC Atlas", linking to the Atlas's citation whole on the data sources page ("Schulze, R.E. and Lynch, S.D. 2007. Annual Precipitation. In: Schulze, R.E. (Ed). South African Atlas of Climatology and Agrohydrology. WRC Report 1489/1/06, Section 6.2"; the operator's decision, [legal/map-data-licences.md § 3.3e](./legal/map-data-licences.md#33e-the-wrc-atlass-map-and-a-pan-grids-the-operators-decision-added-2026-11-08)) |
+| `grdc-caravan` | the Prior donors layer draws a real GRDC-Caravan donor set's outlets (`mapCredits`' `donorsCredited`, `priorDonors.ts` `caravanCredited`; [§ Prior donors](#prior-donors)) | "Prior donors: GRDC-Caravan, CC BY 4.0", linking to `/data-sources#grdc-caravan` (CC BY 4.0 asks for the credit wherever its data is shown) |
 | `atlas-apan` | the A-pan grid layer draws points of a grid whose attribution is the WRC Atlas A-pan grid's citation (`mapCredits`' `evaporationAttributions`; [§ A-pan grid](#a-pan-grid)) | "A-pan grid: WRC Atlas (modelled)", linking to the citation whole on `/data-sources#atlas-apan` ("Schulze, R.E. and Maharaj, M. 2007. A-Pan Equivalent Reference Potential Evaporation. …"; the operator's decision, [legal/map-data-licences.md § 3.3e](./legal/map-data-licences.md#33e-the-wrc-atlass-map-and-a-pan-grids-the-operators-decision-added-2026-11-08)) |
 
 On the Map tab each is its own empty source with an invisible layer, so the

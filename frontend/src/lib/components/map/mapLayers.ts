@@ -11,6 +11,7 @@ import { fmtNum } from '#lib/format/number.js';
 import {
 	ATLAS_APAN_MAP_ATTRIBUTION,
 	ATLAS_APAN_STATEMENT,
+	CARAVAN_MAP_ATTRIBUTION,
 	HYDRORIVERS_MAP_ATTRIBUTION,
 	JRC_WATER_MAP_ATTRIBUTION,
 	JRC_WATER_STATEMENT,
@@ -30,7 +31,7 @@ import type { ReadonlyURLSearchParams } from '$app/state';
  * `channels`, came beside it; `mapgrid` "WAAS 2007 MAP" since the CCWR MAP,
  * `ccwrgrid`, came beside it).
  */
-export const MAP_LAYERS = ['quaternaries', 'rivers', 'channels', 'relief', 'units', 'mapgrid', 'ccwrgrid', 'apangrid', 'chirps', 'demgrid'] as const;
+export const MAP_LAYERS = ['quaternaries', 'rivers', 'channels', 'relief', 'units', 'mapgrid', 'ccwrgrid', 'apangrid', 'chirps', 'demgrid', 'donors'] as const;
 export type MapLayer = (typeof MAP_LAYERS)[number];
 
 /** The HydroRIVERS layer's toggle (`rivers`): mapped rivers, for reference. */
@@ -221,7 +222,7 @@ export const jrcCreditedFeature = (f: Pick<MapFeature, 'properties'>) => {
 };
 
 /** A licensed source the map credits while its data is drawn; its id is also its section on the data sources page (`/data-sources#<id>`). */
-export type MapCredit = 'hydrorivers' | 'jrc-water' | 'waas-map' | 'lynch-map' | 'atlas-apan';
+export type MapCredit = 'hydrorivers' | 'jrc-water' | 'waas-map' | 'lynch-map' | 'atlas-apan' | 'grdc-caravan';
 
 /** Each credit's line on the map's attribution control (English: the workspace's map; the farm map words its own, farmMap.ts). */
 export const MAP_CREDIT_TEXT: Readonly<Record<MapCredit, string>> = {
@@ -229,7 +230,8 @@ export const MAP_CREDIT_TEXT: Readonly<Record<MapCredit, string>> = {
 	'jrc-water': JRC_WATER_MAP_ATTRIBUTION,
 	'waas-map': WAAS_MAP_MAP_ATTRIBUTION,
 	'lynch-map': LYNCH_MAP_MAP_ATTRIBUTION,
-	'atlas-apan': ATLAS_APAN_MAP_ATTRIBUTION
+	'atlas-apan': ATLAS_APAN_MAP_ATTRIBUTION,
+	'grdc-caravan': CARAVAN_MAP_ATTRIBUTION
 };
 
 /**
@@ -243,14 +245,16 @@ export const MAP_CREDIT_TEXT: Readonly<Record<MapCredit, string>> = {
  * the WAAS 2007 MAP and the CCWR MAP are on), then the WRC Atlas's A-pan grid while
  * the A-pan grid layer draws points of a grid stored with that
  * credit line (`evaporationAttributions`: each drawn evaporation grid's
- * attribution). Empty when nothing drawn is licensed data. The basemap's and
+ * attribution), then GRDC-Caravan while the Prior donors layer draws a real
+ * donor set's outlets (`donorsCredited`, priorDonors.ts caravanCredited). Empty when nothing drawn is licensed data. The basemap's and
  * the relief's credits are their own sources' and are not listed here.
  */
 export function mapCredits(
 	features: readonly Pick<MapFeature, 'kind' | 'properties'>[],
 	riversDrawn = false,
 	mapGridAttributions: readonly (string | null)[] = [],
-	evaporationAttributions: readonly (string | null)[] = []
+	evaporationAttributions: readonly (string | null)[] = [],
+	donorsCredited = false
 ): MapCredit[] {
 	const out: MapCredit[] = [];
 	if (riversDrawn || features.some(creditedFeature)) out.push('hydrorivers');
@@ -258,6 +262,7 @@ export function mapCredits(
 	if (mapGridAttributions.includes(WAAS_MAP_STATEMENT)) out.push('waas-map');
 	if (mapGridAttributions.includes(LYNCH_MAP_STATEMENT)) out.push('lynch-map');
 	if (evaporationAttributions.includes(ATLAS_APAN_STATEMENT)) out.push('atlas-apan');
+	if (donorsCredited) out.push('grdc-caravan');
 	return out;
 }
 
