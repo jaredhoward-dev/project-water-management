@@ -12,7 +12,7 @@ const SOURCE = readFileSync(fileURLToPath(new URL('./ImportProjectDialog.svelte'
 describe('ImportProjectDialog’s done state (autoRunsOff)', () => {
 	it('shows the auto-runs-off line, for the new project’s team, only when the answer says so', () => {
 		const done = SOURCE.slice(SOURCE.indexOf("{:else if step === 'done' && result}"), SOURCE.indexOf("{:else if step === 'failed' && failure}"));
-		expect(done).toContain('{#if startedAutoRunsOff(result)}<AutoRunsOffNotice teamId={result.project.team?.id} />{/if}');
+		expect(done).toContain('{#if startedAutoRunsOff(result)}<AutoRunsOffNotice team={result.project.team} />{/if}');
 	});
 
 	it('imports the shared notice and test, not its own copy of the words', () => {

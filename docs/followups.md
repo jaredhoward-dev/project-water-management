@@ -1143,6 +1143,17 @@ are #641's checklist. Open items from building it:
       an example* ignores it~~ (round 2: the card holds with the same line
       and *Open the example*, `opensStraightAway` in `projects/example.ts`;
       ui.md § Project list). Nothing left.
+- [x] **Compare plans sent a team catchment's non-admins to a plan page
+      they can't open** (2026-11-24 round 2). Round 1 pointed every *Compare
+      plans* link at `/teams/:id/plan` for a team catchment, but only a team
+      admin reads it (`app_billing_account_readable`; 404 to a member, a
+      viewer and a direct member outside the team). Done: the full project
+      payload's `team.role` (the caller's `app_team_role`, null outside the
+      team) and `billing/planLink.ts` `planLink`: a team admin gets the
+      team's plan, anyone else in a team catchment the public price list
+      with "This catchment is on *team*'s plan: ask a team admin to change
+      it." (billing.md § Who the plan belongs to). Not their own plan: the
+      catchment bills to the team, so it wouldn't help.
 - [ ] **Free's verified-email gate: what 343 left** (issue #641 round 9,
       2026-11-24). `343_free_email_gate` refuses the assistant and switching
       a feed on, on Free, to an unverified or disposable-domain address when

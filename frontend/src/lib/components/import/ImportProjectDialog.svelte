@@ -370,7 +370,7 @@
 				{#if result.runId}Its first run is ready on the Runs tab.{/if}
 			</div>
 			<!-- Free's live limit made it with automatic runs off (338): say why, with Compare plans for the plan that bills it. -->
-			{#if startedAutoRunsOff(result)}<AutoRunsOffNotice teamId={result.project.team?.id} />{/if}
+			{#if startedAutoRunsOff(result)}<AutoRunsOffNotice team={result.project.team} />{/if}
 			{#if result.runError}
 				<div class="alert alert-warning" role="alert">
 					The project was imported, but the model didn't run: {result.runError}. Fix the input, then run it from the Runs tab.

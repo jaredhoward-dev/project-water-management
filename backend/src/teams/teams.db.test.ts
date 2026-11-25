@@ -19,7 +19,7 @@ describe('teams', () => {
 		for (const name of ['Place A', 'Place B', 'Place C']) {
 			const r = await admin.call('POST', '/projects', { name, teamId });
 			expect(r.status).toBe(201);
-			expect(r.body.project.team).toEqual({ id: teamId, name: 'Catchment Consultants' });
+			expect(r.body.project.team).toEqual({ id: teamId, name: 'Catchment Consultants', role: 'admin' });
 			ids.push(r.body.project.id);
 		}
 		await admin.call('POST', '/projects', { name: 'Admin private' });
@@ -253,7 +253,7 @@ describe('team viewer', () => {
 		expect((await admin.call('POST', `/projects/${projectId}/members`, { email: outsider.email, role: 'editor' })).status).toBe(201);
 		const o = await outsider.call('PATCH', `/projects/${projectId}`, { name: 'Edited from outside the team' });
 		expect(o.status).toBe(200);
-		expect(o.body.project.team).toEqual({ id: teamId, name: null });
+		expect(o.body.project.team).toEqual({ id: teamId, name: null, role: null });
 	});
 
 	it('admins change roles to and from viewer; other roles are rejected; the last admin stays', async () => {

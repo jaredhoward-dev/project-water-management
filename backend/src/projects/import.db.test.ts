@@ -197,7 +197,7 @@ describe('POST /projects/import', () => {
 		// Positive control: a team member's import lands in the team, and the admin sees it.
 		const ok = await importFile(member, syntheticDoc('Team import'), `?teamId=${teamId}`);
 		expect(ok.status).toBe(201);
-		expect(ok.body.project.team).toEqual({ id: teamId, name: 'Import Team' });
+		expect(ok.body.project.team).toEqual({ id: teamId, name: 'Import Team', role: 'member' });
 		expect(await projectNames(admin)).toContain('Team import');
 
 		const denied = await importFile(outsider, syntheticDoc('Sneaky import'), `?teamId=${teamId}`);

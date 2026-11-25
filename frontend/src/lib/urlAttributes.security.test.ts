@@ -32,7 +32,7 @@ import { calibrationHref } from './components/calibration/links';
 import { warningParts, warningPlaceHref } from './components/runs/warningText';
 import { runHref } from './components/overview/attention';
 import { curtailmentHref } from './components/portfolio/portfolio';
-import { planHref } from './components/billing/planLink';
+import { planHref, planLink } from './components/billing/planLink';
 import { riverHref } from './components/river/links';
 import { mapNodeHref } from './workspace/mapLinks';
 import { supplyHref } from './components/supply/links';
@@ -82,9 +82,10 @@ const REVIEWED: Record<string, { why: string; in: string[] }> = {
 	bundleUrl: { why: 'pack page: api.packs.bundleUrl (PUBLIC_API_URL + the encoded project and pack ids), never from a response', in: ['routes/projects/[id]/packs/[packId]/+page.svelte'] },
 	manifestUrl: { why: 'pack page: URL.createObjectURL of the manifest JSON it builds, a blob: URL for the download', in: ['routes/projects/[id]/packs/[packId]/+page.svelte'] },
 	curtailmentHref: { why: 'BUILDER: "<base>/projects/…" (portfolio.ts; the team page wraps it under the same name)', in: ['routes/teams/[id]/+page.svelte', 'lib/components/projects/ProjectTable.svelte'] },
-	planHref: { why: 'BUILDER: Compare plans (billing/planLink.ts): basePath() + "/teams/" + the encoded team id + "/plan" (the team that bills the catchment, from project.team), or basePath() + "/account/plan" (#641)', in: ['lib/components/billing/LiveLimitNotice.svelte', 'lib/components/billing/AutoRunsOffNotice.svelte', 'lib/components/assistant/AssistantPanel.svelte'] },
-	'trial.href': { why: 'the workspace’s trial-ending notice: billing/planPause.ts trialNotice → billing/planLink.ts planHref (BUILDER), basePath() + "/teams/" + the encoded team id + "/plan", or basePath() + "/account/plan" (#641, 349)', in: ['routes/projects/[id]/+page.svelte'] },
-	'paused.href': { why: 'the workspace’s paused notice: billing/planPause.ts pausedNotice → billing/planLink.ts planHref (BUILDER), basePath() + "/teams/" + the encoded team id + "/plan", or basePath() + "/account/plan" (#641, 341)', in: ['routes/projects/[id]/+page.svelte'] },
+	planLink: { why: 'BUILDER: Compare plans (billing/planLink.ts): basePath() + "/teams/" + the encoded team id + "/plan" for a team admin (project.team.role), the literal basePath() + "/welcome/pricing" for anyone else in a team catchment, or basePath() + "/account/plan" (#641)', in: ['lib/components/assistant/AssistantPanel.svelte'] },
+	'link.href': { why: 'LiveLimitNotice/AutoRunsOffNotice: billing/planLink.ts planLink (BUILDER) of the workspace\'s billing team or the team prop: "<base>/teams/" + encoded id + "/plan", "<base>/welcome/pricing" or "<base>/account/plan" (#641)', in: ['lib/components/billing/LiveLimitNotice.svelte', 'lib/components/billing/AutoRunsOffNotice.svelte'] },
+	'trial.href': { why: 'the workspace’s trial-ending notice: billing/planPause.ts trialNotice → billing/planLink.ts planLink (BUILDER), basePath() + "/teams/" + the encoded team id + "/plan", basePath() + "/welcome/pricing", or basePath() + "/account/plan" (#641, 349)', in: ['routes/projects/[id]/+page.svelte'] },
+	'paused.href': { why: 'the workspace’s paused notice: billing/planPause.ts pausedNotice → billing/planLink.ts planLink (BUILDER), basePath() + "/teams/" + the encoded team id + "/plan", basePath() + "/welcome/pricing", or basePath() + "/account/plan" (#641, 341)', in: ['routes/projects/[id]/+page.svelte'] },
 	historyHref: { why: 'BUILDER: compare/attribution.ts "/projects/" + encoded project id + "?tab=history"', in: ['lib/components/compare/CompareView.svelte'] },
 	// Local builders and constants in the component itself: a literal "?" or "#" head, or resolve() of a literal path.
 	tabHref: { why: 'routes/projects/[id]: "?tab=<TabId>" (&run=<encoded run id> on a run tab, workspace/tabLinks.ts) or the current pathname', in: ['routes/projects/[id]/+page.svelte'] },
@@ -631,6 +632,8 @@ describe('URL attributes', () => {
 				curtailmentHref({ id, sourceRunId: id }),
 				planHref(id),
 				planHref(id, '/app'),
+				planLink({ id, name: id, role: 'admin' }, '/app').href,
+				planLink({ id, name: id, role: 'member' }).href,
 				fieldHistoryHref({ filter: id }, id),
 				noteHref({ target: 'node', nodeId: id, runId: null, settingKey: null }) ?? '',
 				noteHref({ target: 'run', nodeId: null, runId: id, settingKey: null }) ?? '',
