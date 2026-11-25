@@ -4306,6 +4306,7 @@ No job table of its own: `job` holds status, progress and errors.
 | `engine_version`, `created_by`, `created_at` | `created_by` and `created_at` are stamped by the insert trigger |
 | `allocation_mode` | The `settings.allocationMode` of the input the yield ran on (`none`, `cap`, `fullAllocation`; 221, #523 G1c), written by the job. A viewer kept from the volumes gets a `cap` or `fullAllocation` result without its points; NULL = a result from before 221, judged on a run by the run's own mode and withheld on a scenario (`yield/store.ts` `yieldsOnCapOrFull`) |
 | `ops_sha256` | On a scenario, its `ops_sha256` when the job ran (320; CHECK 64 hex), so the Yield panel flags a result worked out before the scenario's latest changes. NULL on a run (its input never changes) and for a scenario's result from before 320 |
+| `base_run_id` | On a scenario, its `base_run_id` when the job ran (371; no foreign key, a record that outlives the run; CHECK only with `scenario_id`), so the Yield panel flags a result worked out on another base run: a rebase keeps the ops and their `ops_sha256`. NULL on a run and for a scenario's result from before 371 |
 
 - **RLS**: SELECT for viewers (farmers read nothing: listed in the catalogue
   guard's `FARMERS_NEVER_READ`), INSERT and DELETE for editors. No UPDATE
