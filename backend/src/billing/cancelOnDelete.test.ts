@@ -81,7 +81,13 @@ describe('cancelPlanAtProvider', () => {
 		});
 		const err = await cancelPlanAtProvider(billing({ live: [{ provider: 'stripe', externalRef: 'sub_Team' }] }), p, () => new TeamPlanNotCancelledError()).catch((e: unknown) => e);
 		expect(err).toBeInstanceOf(TeamPlanNotCancelledError);
-		expect(err).toMatchObject({ status: 503, code: 'billing_provider_error' });
+		expect(err).toMatchObject({ status: 503, code: 'team_plan_not_cancelled' });
+		// What happened and what to do, since the team page shows the message as it is.
+		expect((err as Error).message).toMatch(/team’s paid plan couldn’t be ended at the payment provider, so nothing was deleted; try again/);
+		expect((err as Error).message).toMatch(/may already have ended/);
+		// No usable provider refuses with the same words.
+		const manual = await cancelPlanAtProvider(billing({ live: [{ provider: 'stripe', externalRef: 'sub_Team' }] }), null, () => new TeamPlanNotCancelledError()).catch((e: unknown) => e);
+		expect(manual).toMatchObject({ status: 503, code: 'team_plan_not_cancelled' });
 	});
 
 	it('the mock cancels what it is given, with no network', async () => {

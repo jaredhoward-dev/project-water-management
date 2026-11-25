@@ -314,7 +314,7 @@ describe('DELETE /teams/:id: the team’s paid plan is cancelled at the provider
 	};
 	const teamExists = async (id: string) => (await asOwner('SELECT 1 FROM team WHERE id = $1', [id])).length === 1;
 
-	it('refuses with 503 and deletes nothing when the provider can’t cancel it', async () => {
+	it('refuses with 503 team_plan_not_cancelled and deletes nothing when the provider can’t cancel it', async () => {
 		const ref = `sub_TeamStuck${crypto.randomUUID().replace(/-/g, '').slice(0, 10)}`;
 		const { admin, teamId } = await teamWithPlan('TeamPlanStuck', 'stripe', ref);
 		const saved = { p: process.env.BILLING_PROVIDER, k: process.env.STRIPE_SECRET_KEY };
@@ -323,7 +323,11 @@ describe('DELETE /teams/:id: the team’s paid plan is cancelled at the provider
 		try {
 			const res = await admin.call('DELETE', `/teams/${teamId}`);
 			expect(res.status).toBe(503);
-			expect(res.body.code).toBe('billing_provider_error');
+			expect(res.body.code).toBe('team_plan_not_cancelled');
+			// The team page shows the message as it is: what happened and what to do, never the provider's text.
+			expect(res.body.error).toBe(
+				'the team’s paid plan couldn’t be ended at the payment provider, so nothing was deleted; try again in a few minutes (the plan may already have ended, and then deleting the team goes through)'
+			);
 		} finally {
 			if (saved.p === undefined) delete process.env.BILLING_PROVIDER;
 			else process.env.BILLING_PROVIDER = saved.p;
@@ -331,6 +335,27 @@ describe('DELETE /teams/:id: the team’s paid plan is cancelled at the provider
 		}
 		expect(await teamExists(teamId)).toBe(true);
 		expect(await asOwner('SELECT status FROM subscription WHERE external_ref = $1', [ref])).toEqual([{ status: 'active' }]);
+		await asOwner('DELETE FROM subscription WHERE external_ref = $1', [ref]);
+	});
+
+	it('refuses with 503 team_plan_not_cancelled when no provider that can cancel is set up (manual, or another provider’s subscription)', async () => {
+		const ref = `sub_TeamOther${crypto.randomUUID().replace(/-/g, '').slice(0, 10)}`;
+		const { admin, teamId } = await teamWithPlan('TeamPlanNoProvider', 'stripe', ref);
+		const saved = process.env.BILLING_PROVIDER;
+		try {
+			for (const provider of ['manual', 'mock']) {
+				process.env.BILLING_PROVIDER = provider;
+				const res = await admin.call('DELETE', `/teams/${teamId}`);
+				expect(res.status, provider).toBe(503);
+				expect(res.body.code, provider).toBe('team_plan_not_cancelled');
+			}
+		} finally {
+			if (saved === undefined) delete process.env.BILLING_PROVIDER;
+			else process.env.BILLING_PROVIDER = saved;
+		}
+		expect(await teamExists(teamId)).toBe(true);
+		expect(await asOwner('SELECT status FROM subscription WHERE external_ref = $1', [ref])).toEqual([{ status: 'active' }]);
+		expect(await asOwner(`SELECT 1 FROM audit_event WHERE kind = 'team.deleted' AND subject->>'teamId' = $1`, [teamId])).toEqual([]);
 		await asOwner('DELETE FROM subscription WHERE external_ref = $1', [ref]);
 	});
 
@@ -342,7 +367,7 @@ describe('DELETE /teams/:id: the team’s paid plan is cancelled at the provider
 		expect(await asOwner('SELECT 1 FROM subscription WHERE external_ref = $1', [ref])).toEqual([]);
 	});
 
-	it('refuses with 503 when a checkout completes while the plan is being cancelled, so its subscription is never orphaned', async () => {
+	it('refuses with 503 team_plan_not_cancelled when a checkout completes while the plan is being cancelled, so its subscription is never orphaned', async () => {
 		const ref = `sub_mock_teamrace${crypto.randomUUID().replace(/-/g, '')}`;
 		const late = `sub_mock_teamlate${crypto.randomUUID().replace(/-/g, '')}`;
 		const { admin, teamId } = await teamWithPlan('TeamPlanRace', 'mock', ref);
@@ -360,7 +385,7 @@ describe('DELETE /teams/:id: the team’s paid plan is cancelled at the provider
 		try {
 			const res = await admin.call('DELETE', `/teams/${teamId}`);
 			expect(res.status).toBe(503);
-			expect(res.body.code).toBe('billing_provider_error');
+			expect(res.body.code).toBe('team_plan_not_cancelled');
 		} finally {
 			race.onCancel = null;
 		}

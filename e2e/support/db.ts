@@ -704,3 +704,26 @@ export async function plantEtObservations(
 		if (!r[0]?.applied) throw new Error(`the ET loader refused unit ${nodeId} (no farm parcel?)`);
 	});
 }
+
+/**
+ * A live Team subscription held by another provider (`stripe`) than the e2e
+ * API's (`mock`), as after switching providers: deleting the team then can't
+ * end it, so DELETE /teams/:id refuses with 503 team_plan_not_cancelled
+ * (docs/billing.md § Deleting an account). Answers the subscription's ref.
+ */
+export async function plantForeignTeamSubscription(teamId: string): Promise<string> {
+	const ref = `sub_E2eTeam${randomBytes(6).toString('hex')}`;
+	await withDb(async (db) => {
+		await db.query(
+			`INSERT INTO subscription (billing_account_id, plan_code, status, provider, external_ref, period_start, period_end)
+			 VALUES (billing_account_ensure('team', $1), 'team', 'active', 'stripe', $2, now() - interval '1 day', now() + interval '29 days')`,
+			[teamId, ref]
+		);
+	});
+	return ref;
+}
+
+/** End a planted subscription, as its provider's webhook would once the plan ends. */
+export async function endSubscription(ref: string): Promise<void> {
+	await withDb((db) => db.query(`UPDATE subscription SET status = 'canceled' WHERE external_ref = $1`, [ref]));
+}
