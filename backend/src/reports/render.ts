@@ -40,6 +40,27 @@ export class RenderError extends Error {
 	}
 }
 
+/**
+ * A render token dies 5 minutes after it is issued (render_token_issue), and
+ * the worker issues it just before it queues the request. A request that has
+ * waited on `render-requests` longer than this (a burst of renders, two at a
+ * time) would present a dead token, which the API refuses as final
+ * (`render_token_refused`). The renderer answers it as a retryable failure
+ * instead, without launching a browser, so the worker asks again with a
+ * fresh token. A minute short of the token's life: the browser's launch
+ * comes before the exchange.
+ */
+export const RENDER_REQUEST_MAX_AGE_MS = 4 * 60_000;
+
+/** The stored error for such a request. */
+export const STALE_REQUEST_ERROR = 'the request waited too long in the queue: its render token expired';
+
+/** Whether a request SQS first had at `sentTimestamp` (epoch ms, as a string; SentTimestamp) is too old to render. No time: not stale. */
+export function staleRenderRequest(sentTimestamp: string | undefined, now = Date.now()): boolean {
+	const sent = Number(sentTimestamp);
+	return sentTimestamp !== undefined && Number.isFinite(sent) && now - sent > RENDER_REQUEST_MAX_AGE_MS;
+}
+
 /** A run's report: the report route, /projects/:id/report?run=…. */
 export interface ReportTarget {
 	projectId: string;
