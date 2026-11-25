@@ -131,6 +131,11 @@ const BOUNDARY_MINUTES: Record<DayBoundary, number> = { '00:00': 0, '08:00': 480
  * 08:00 on the 5th → 08:00 on the 6th, booked to the 5th, the day it starts
  * (the manual-gauge convention); with '00:00', midnight closes the day before.
  */
+/** The instant (minutes since the epoch) a booked day's window opens; the window is (start, start + 1440]. */
+function windowStart(day: number, boundary: DayBoundary): number {
+	return day * 1440 + BOUNDARY_MINUTES[boundary];
+}
+
 export function bookedDay(date: string, minutes: number, boundary: DayBoundary): number {
 	const instant = toEpochDay(date) * 1440 + minutes;
 	return Math.floor((instant - BOUNDARY_MINUTES[boundary] - 1e-6) / 1440);
@@ -348,7 +353,7 @@ export function denseDays(byDay: Map<number, number | null>): Pick<ParsedSeries,
  * sub-daily (hourly, 10-minute…): each row's date and time say when its
  * interval ended, and the values make days in that window (bookedDay):
  * added up for a depth, averaged for a flow (`aggregate`, issue #829). A first
- * or last day the file covers only in part is left out (`partialEdges`). Without it, one row per day; a file with several timed rows a
+ * or last day the file covers only in part (by the span of its readings, issue #840) is left out (`partialEdges`). Without it, one row per day; a file with several timed rows a
  * day throws a CsvError marked `subDaily`, so the form can ask for a boundary.
  */
 export function parseSeriesCsv(text: string, opts: ParseOptions = {}): ParsedSeries {
@@ -372,8 +377,8 @@ export function parseSeriesCsv(text: string, opts: ParseOptions = {}): ParsedSer
 	const decimal = detectDecimal(valueCells, delim);
 	const byDay = new Map<number, number | null>();
 	const readingsOn = new Map<number, number>();
-	// Sub-daily: every timed row's day (blank or not, it shows the logger was running) and instant (minutes).
-	const rowsOn = new Map<number, number>();
+	// Sub-daily: every timed row's instant (minutes), and each day's first and last (blank or not, it shows the logger was running).
+	const spanOn = new Map<number, { first: number; last: number }>();
 	const instants: number[] = [];
 	let timed = false;
 	let readings = 0;
@@ -407,8 +412,14 @@ export function parseSeriesCsv(text: string, opts: ParseOptions = {}): ParsedSer
 		if (opts.dayBoundary) {
 			if (minutes === null) throw new CsvError(`"${cells[0]}" has no time: every row of a sub-daily file needs one (YYYY-MM-DD HH:MM)`, i + 1);
 			const day = bookedDay(date, minutes, opts.dayBoundary);
-			rowsOn.set(day, (rowsOn.get(day) ?? 0) + 1);
-			instants.push(toEpochDay(date) * 1440 + minutes);
+			const at = toEpochDay(date) * 1440 + minutes;
+			instants.push(at);
+			const span = spanOn.get(day);
+			if (!span) spanOn.set(day, { first: at, last: at });
+			else {
+				if (at < span.first) span.first = at;
+				if (at > span.last) span.last = at;
+			}
 			if (!byDay.has(day)) byDay.set(day, null);
 			if (value !== null) {
 				byDay.set(day, (byDay.get(day) ?? 0) + value);
@@ -431,9 +442,16 @@ export function parseSeriesCsv(text: string, opts: ParseOptions = {}): ParsedSer
 		// A first or last day the file covers only in part: left out, never a short total or a part-day average.
 		const partialEdges: { first?: string; last?: string } = {};
 		const days = [...byDay.keys()].sort((a, b) => a - b);
-		const whole = (day: number) => (rowsOn.get(day) ?? 0) >= perDay;
-		if (days.length > 0 && !whole(days[0]!)) partialEdges.first = fromEpochDay(days[0]!);
-		if (days.length > 1 && !whole(days.at(-1)!)) partialEdges.last = fromEpochDay(days.at(-1)!);
+		// Judged by the span the readings cover, not their count (issue #840): a missed reading inside an edge day
+		// keeps it (counted in incompleteDays); the day is part-way only when the logger's grid has a slot inside
+		// the day's window (start, end] before its first reading or after its last.
+		const step = 1440 / perDay;
+		const opensWhole = (day: number) => spanOn.get(day)!.first - step <= windowStart(day, opts.dayBoundary) + 1e-6;
+		const closesWhole = (day: number) => spanOn.get(day)!.last + step > windowStart(day, opts.dayBoundary) + 1440 + 1e-6;
+		if (days.length > 0 && !opensWhole(days[0]!)) partialEdges.first = fromEpochDay(days[0]!);
+		if (days.length > 1 && !closesWhole(days.at(-1)!)) partialEdges.last = fromEpochDay(days.at(-1)!);
+		// A one-day file must also close: its single day is both edges.
+		if (days.length === 1 && !partialEdges.first && !closesWhole(days[0]!)) partialEdges.first = fromEpochDay(days[0]!);
 		if (partialEdges.first && (days.length === 1 || (days.length === 2 && partialEdges.last))) {
 			throw new CsvError(
 				`no whole day: the readings ${days.length === 1 ? `cover only part of ${partialEdges.first}` : `cover only parts of ${partialEdges.first} and ${partialEdges.last}`} (${opts.dayBoundary}–${opts.dayBoundary}), and a part day isn't stored`

@@ -272,6 +272,36 @@ describe('sub-daily flow and rain (issue #829)', () => {
 		expect(parseSeriesCsv(logger(60, 2, () => 2), flow).subDaily).not.toHaveProperty('partialEdges');
 	});
 
+	it('keeps a first and last day with a missed reading inside them, judged by the span they cover (issue #840)', () => {
+		// 15-minute flow over three midnight days; one reading missing (no row at all) inside the first and the last day.
+		const rows = logger(15, 3, () => 1.5).split('\n');
+		const text = rows.filter((_, i) => i !== 40 && i !== 250).join('\n');
+		const r = parseSeriesCsv(text, flow);
+		expect([r.startDate, r.endDate, r.values]).toEqual(['2021-06-01', '2021-06-03', [1.5, 1.5, 1.5]]);
+		expect(r.subDaily).not.toHaveProperty('partialEdges');
+		expect(r.subDaily!.readingsPerDay).toBe(96);
+		expect(r.subDaily!.incompleteDays).toBe(2);
+		// The same for a depth: the day is kept, its total is short, and the summary says so.
+		const sum = parseSeriesCsv(text, rain);
+		expect(sum.values).toEqual([95 * 1.5, 96 * 1.5, 95 * 1.5]);
+		expect(sum.subDaily!.incompleteDays).toBe(2);
+	});
+
+	it('still leaves out an edge day that starts or ends one reading part-way (issue #840)', () => {
+		// The logger starts at 00:30 (the 00:15 reading's interval was never logged) and stops at 23:45 on the 3rd.
+		const rows = logger(15, 3, () => 1.5).split('\n');
+		const text = [rows[0], ...rows.slice(2, 288)].join('\n');
+		const r = parseSeriesCsv(text, flow);
+		expect([r.startDate, r.endDate, r.values]).toEqual(['2021-06-02', '2021-06-02', [1.5]]);
+		expect(r.subDaily!.partialEdges).toEqual({ first: '2021-06-01', last: '2021-06-03' });
+		expect(r.subDaily!.incompleteDays).toBe(0);
+		// One day that starts on time but stops early is a part day too, not stored.
+		const one = logger(60, 1, () => 1).split('\n');
+		expect(() => parseSeriesCsv(one.slice(0, 24).join('\n'), flow)).toThrow(/no whole day: the readings cover only part of 2021-06-01/);
+		// Positive control: the whole single day is kept.
+		expect(parseSeriesCsv(one.join('\n'), flow).values).toEqual([1]);
+	});
+
 	it('refuses a file with no whole day rather than storing a part day', () => {
 		expect(() => parseSeriesCsv('2021-06-01 10:00,1\n2021-06-01 11:00,1', flow)).toThrow(/no whole day: the readings cover only part of 2021-06-01/);
 		expect(() => parseSeriesCsv('2021-06-01 23:00,1\n2021-06-02 00:00,1\n2021-06-02 01:00,1', rain)).toThrow(/cover only parts of 2021-06-01 and 2021-06-02/);
