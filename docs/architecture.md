@@ -1188,7 +1188,10 @@ row names a source, where to read it and the series it merges into:
     disagreeing about one reading fail the fetch) and summed into days over
     the whole window, and only days that have ended are written. A running
     total's day whose first reading has nothing before it to rise from is a
-    gap, so a re-read never writes a short total over a stored day. `{end}`
+    gap, so a re-read never writes a short total over a stored day; so is
+    every day from a missing reading to the next reading read when they fall
+    in different days (the rise holds rain no reading split), and a day of
+    missing readings is never 0 mm, whatever `noReadingsMeans` says. `{end}`
     written as a time runs an hour past the window's last rain day (an API
     that reads its end as exclusive would otherwise drop the reading stamped
     there); readings past the window are ignored.

@@ -22,7 +22,9 @@
 //   even then an answer with no readings at all writes nothing.
 // - A running total's day whose first reading has nothing before it to rise
 //   from (the answer starts inside the day) is a gap: its rain up to that
-//   reading is unknown.
+//   reading is unknown. So is every day from a missing reading to the next
+//   one read when they fall in different days: the rise between them holds
+//   rain no reading split.
 // - A day is written only once it has ended (its rain day's end has passed),
 //   so today's running total never lands as a day's rain.
 // - The rain day: from dayStartHour (08:00 in South African practice, SAWS)
@@ -462,17 +464,35 @@ export function stationDays(r: StationReadings, f: StationFormat, from: string, 
 		}
 	} else if (f.valueKind === 'cumulative') {
 		let prev: number | null = null;
+		// The rain day of the first missing reading since the last one read (null when none is missing). A rise across
+		// missing readings is still the rain between the two it spans, so it stands when they fall in the day it ends
+		// in; when one falls in an earlier day, the rise holds rain of a day boundary no reading split, and every day
+		// from that one to the rise's own is a gap (never the whole rise on the later day, nor 0 on a day of missing
+		// readings for a logger whose silence means none fell).
+		let missingFrom: number | null = null;
+		let missingTo = 0;
+		const breakDays = (from: number, to: number) => {
+			for (let d = Math.max(from, a); d <= Math.min(to, a + n - 1); d++) broken[d - a] = true;
+		};
 		for (const x of r.readings) {
-			if (x.value === null) continue;
-			if (x.value < 0) {
-				prev = null;
-				const i = rainDay(x.at, f, tz) - a;
-				if (i >= 0 && i < n) broken[i] = true;
+			const day = rainDay(x.at, f, tz);
+			if (x.value === null) {
+				missingFrom ??= day;
+				missingTo = day;
 				continue;
 			}
-			const rise = prev === null ? null : x.value >= prev ? x.value - prev : x.value;
+			if (x.value < 0) {
+				prev = null;
+				breakDays(missingFrom ?? day, day);
+				missingFrom = null;
+				continue;
+			}
+			const lost = missingFrom !== null && missingFrom < day;
+			if (lost) breakDays(missingFrom!, day);
+			const rise = prev === null || lost ? null : x.value >= prev ? x.value - prev : x.value;
 			prev = x.value;
-			const i = rainDay(x.at, f, tz) - a;
+			missingFrom = null;
+			const i = day - a;
 			if (i < 0 || i >= n) continue;
 			counts[i]!++;
 			// No reading before it to rise from (the answer starts inside this day, e.g. 3-hourly readings and the hour
@@ -484,6 +504,8 @@ export function stationDays(r: StationReadings, f: StationFormat, from: string, 
 			}
 			sums[i]! += rise;
 		}
+		// Missing readings with no reading after them: their days' rain is unknown.
+		if (missingFrom !== null) breakDays(missingFrom, missingTo);
 	} else {
 		for (const x of r.readings) {
 			const i = rainDay(x.at, f, tz) - a;
