@@ -89,7 +89,7 @@ Every job that fetches from an upstream:
 | [deafrica-wofs-scenes](#deafrica-wofs-scenes) | DE Africa WOfS (`wofs_ls`, per Landsat scene) and its STAC search, summed inside our own dam outlines (built R5-C) | built; runs in the fetcher's `dams-weekly` mode, off in production until `dam_observations_enabled` | `explorer.digitalearth.africa`, `deafrica-services.s3.af-south-1.amazonaws.com` | – | `backend/src/dams/observed/wofs/` (`pass.ts`, `stac.ts`, `sum.ts`), `backend/src/raster/` (`cog.ts`, `mask.ts`, `utm.ts`) |
 | [deafrica-sentinel-2-c1](#deafrica-sentinel-2-c1) | DE Africa Sentinel-2 L2A Collection 1 (`s2_l2a_c1`), our own water classification inside traced dam outlines (issue #624) | built, off by default (#624 step 4: the pass, behind `DAM_OBSERVATIONS_S2` / `dam_s2_enabled`; not shown on a screen yet) | `deafrica-sentinel-2-l2a-c1.s3.af-south-1.amazonaws.com`, `explorer.digitalearth.africa` | – | `backend/src/dams/observed/sentinel/` (`s2.ts`, `pass.ts`); `wofs/stac.ts` (`assetUrl`, `s2_l2a_c1`) |
 | [deafrica-sentinel-1](#deafrica-sentinel-1) | DE Africa Sentinel-1 RTC (`s1_rtc`), radar water as a secondary dam observation (issue #624) | built, off by default (#624 step 5: the pass and the S1/S2 agreement report, behind `DAM_OBSERVATIONS_S1` / `dam_s1_mode`: `measure` runs it with no radar shown, `on` also loads radar for the dams whose own agreement passes) | `deafrica-sentinel-1.s3.af-south-1.amazonaws.com`, `explorer.digitalearth.africa` | – | `backend/src/dams/observed/sentinel/` (`s1.ts`, `pass.ts`, `agreement.ts`); `wofs/stac.ts` (`assetUrl`, `s1_rtc`) |
-| [swot-lakesp](#swot-lakesp) | SWOT LakeSP Version D (`SWOT_L2_HR_LakeSP_D`): per-pass lake water-surface elevation and area by Prior Lake Database lake, for measured dam curves (issue #625) | planned (trial, #625): a one-off operator-run script, no production path; nothing fetches it yet | `cmr.earthdata.nasa.gov`, `archive.swot.podaac.earthdata.nasa.gov` (Earthdata Login bearer token) | – | #625 step 2 `ingest/swot_trial.py` (not built) |
+| [swot-lakesp](#swot-lakesp) | SWOT LakeSP Version D (`SWOT_L2_HR_LakeSP_D`): per-pass lake water-surface elevation and area by Prior Lake Database lake, for measured dam curves (issue #625) | planned (trial, #625): a one-off operator-run script, no production path; nothing fetches it yet | `cmr.earthdata.nasa.gov`, `archive.swot.podaac.earthdata.nasa.gov` (Earthdata Login bearer token) | – | #625 step 2 `ingest/swot_trial.py` (built; the operator run is step 3) |
 | [wapor-aeti](#wapor-aeti) | FAO WaPOR v3 `L2-AETI-D`, dekadal actual ET and interception at 100 m (a unit's observed water use, issue #623) | built, off (`et_observations_enabled`); blocked in production until FAO's reply is recorded on #618 (step 8a) | `storage.googleapis.com` (bucket `fao-gismgr-wapor-3-data` only) | – | `backend/src/water-use/observed/` (`wapor.ts`, `pass.ts`; the comparison is #623 step 5) |
 | [ssebop-eta](#ssebop-eta) | USGS FEWS NET SSEBop v6.1 global dekadal actual ET at 1 km (WaPOR's fallback, issue #623) | planned (#623 step 6: a bounded whole-file pass, decided; built only if FAO declines or as a second opinion) | `edcintl.cr.usgs.gov` (the `…/global/dekadal/etav61/` tree only) | – | `backend/src/water-use/observed/upstream.ts` |
 | [dynamical](#dynamical) | dynamical.org's copy of CHIRPS v3 | planned R3-E (verification only) | `s3://dynamical-ucsb-chc-chirps` (us-west-2) | – | R3 `ingest/verify_copy.py` |
@@ -722,7 +722,7 @@ for the WOfS backfill's pace only: each key keeps its own cadence below.
 - **Contact:** PO.DAAC user services (podaac@podaac.jpl.nasa.gov) and the
   Earthdata forum; Earthdata Login support (earthdata-support@nasa.gov).
 - **Access pattern (the trial):** run once, by the operator, never by the
-  app: `ingest/swot_trial.py` (#625 step 2) searches CMR for the `Prior`
+  app: `ingest/swot_trial.py` (#625 step 2, `ingest/dev.sh swot`) searches CMR for the `Prior`
   granules over the dams' bounding box from 2023-07 on, downloads each zip
   over HTTPS with the operator's Earthdata Login bearer token (the same
   token kind as [imerg](#imerg); the operator exports it in their own
@@ -744,8 +744,9 @@ for the WOfS backfill's pace only: each key keeps its own cadence below.
   curve from capacity (model.md §2.7a) and a farmer's or DWS survey curve.
 - **Offline:** the trial's unit tests read synthetic LakeSP fixtures; a
   graduated pass would follow R5 (fixtures and off by default).
-- **Owner:** the operator; code #625 step 2 (`ingest/swot_trial.py`, not
-  built).
+- **Owner:** the operator; code #625 step 2 (`ingest/swot_trial.py`,
+  [ingest/README.md § The SWOT lake height trial](../ingest/README.md#the-swot-lake-height-trial));
+  the operator run (step 3) is still to do.
 
 ## Observed actual evapotranspiration
 

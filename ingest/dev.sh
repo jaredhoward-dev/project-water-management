@@ -21,9 +21,14 @@
 #                                   --mirror, the synthetic tree (--source fixtures) into
 #                                   MIRROR_URL, default file://<repo>/ingest/.mirror; the
 #                                   operator's live run is docs/deployment.md § NEX-GDDP-CMIP6
+#   ingest/dev.sh swot --dams <csv> [swot_trial.py args]
+#                                   the one-off SWOT lake height trial (issue #625), the
+#                                   operator's, with EARTHDATA_TOKEN in their own shell
+#                                   (ingest/README.md § The SWOT lake height trial)
 #
-# run and test use ingest/.venv (gitignored), created on first use from the
-# hash-pinned requirements.txt and refreshed whenever that file changes;
+# run, test and swot use ingest/.venv (gitignored), created on first use from the
+# hash-pinned requirements.txt and requirements-trial.txt and refreshed whenever
+# either changes;
 # verify uses ingest/.venv-verify from requirements-verify.txt the same way.
 # Needs Python 3.14 (PYTHON=<interpreter> to pick another). Optional tooling,
 # like gen:help-art: pnpm dev, CI's other jobs and e2e never need Python.
@@ -33,17 +38,27 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 venv="$here/.venv"
 py="${PYTHON:-python3.14}"
 
+# ensure_venv [venv] [requirements file…]: the default is ingest/.venv from
+# requirements.txt plus requirements-trial.txt (pyshp, which only
+# swot_trial.py and its tests import; never in the Lambda image).
 ensure_venv() {
-	local venv="${1:-$venv}" req="${2:-$here/requirements.txt}"
-	if [ -x "$venv/bin/python" ] && cmp -s "$req" "$venv/.requirements.txt"; then return; fi
+	local venv="${1:-$venv}"
+	shift || true
+	local reqs=("$@")
+	if [ ${#reqs[@]} -eq 0 ]; then reqs=("$here/requirements.txt" "$here/requirements-trial.txt"); fi
+	local stamp
+	stamp="$(cat "${reqs[@]}")"
+	if [ -x "$venv/bin/python" ] && [ -f "$venv/.requirements.txt" ] && [ "$stamp" == "$(cat "$venv/.requirements.txt")" ]; then return; fi
 	if ! command -v "$py" >/dev/null; then
 		echo "ingest: $py not found; install Python 3.14 or set PYTHON=<interpreter>" >&2
 		exit 1
 	fi
-	echo "ingest: installing $req into $venv" >&2
+	echo "ingest: installing ${reqs[*]} into $venv" >&2
 	"$py" -m venv "$venv"
-	"$venv/bin/python" -m pip install --quiet --require-hashes -r "$req"
-	cp "$req" "$venv/.requirements.txt"
+	local args=()
+	for r in "${reqs[@]}"; do args+=(-r "$r"); done
+	"$venv/bin/python" -m pip install --quiet --require-hashes "${args[@]}"
+	printf '%s' "$stamp" >"$venv/.requirements.txt"
 }
 
 case "${1:-}" in
@@ -84,6 +99,11 @@ verify)
 	ensure_venv "$here/.venv-verify" "$here/requirements-verify.txt"
 	exec "$here/.venv-verify/bin/python" "$here/verify_copy.py" "$@"
 	;;
+swot)
+	shift
+	ensure_venv
+	exec "$venv/bin/python" "$here/swot_trial.py" "$@"
+	;;
 cmip6)
 	shift
 	ensure_venv
@@ -100,7 +120,7 @@ cmip6)
 	exec "$venv/bin/python" "$here/cmip6_delta.py" "${args[@]}"
 	;;
 *)
-	echo "usage: ingest/dev.sh run [rnl|sat|era5l|imerg_late|ecmwf|agera5_et0|power_et0|c3s] | test | verify [verify_copy.py args] | cmip6 plan|copy [cmip6_delta.py args]" >&2
+	echo "usage: ingest/dev.sh run [rnl|sat|era5l|imerg_late|ecmwf|agera5_et0|power_et0|c3s] | test | verify [verify_copy.py args] | cmip6 plan|copy [cmip6_delta.py args] | swot [swot_trial.py args]" >&2
 	exit 2
 	;;
 esac

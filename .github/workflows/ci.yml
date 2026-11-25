@@ -723,8 +723,9 @@ jobs:
         with:
           python-version: '3.14'
 
+      # requirements-trial.txt: pyshp, for swot_trial.py's reader tests (#625).
       - name: Install the pinned dependencies
-        run: python -m pip install --require-hashes -r ingest/requirements.txt
+        run: python -m pip install --require-hashes -r ingest/requirements.txt -r ingest/requirements-trial.txt
 
       - name: unittest
         env:

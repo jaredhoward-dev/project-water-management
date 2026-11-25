@@ -57,6 +57,9 @@ not in the image and never scheduled.
 | `verify_copy.py` | The operator's check of a backfilled copy before the cutover: coverage, CHC's daily files bit for bit, dynamical.org's copy within 0.2% (§ Verify the copy). Not in the image. |
 | `tiffread.py` | A stdlib GeoTIFF strip reader: one pixel of a CHC daily file through range requests, for `verify_copy.py`. Not in the image. |
 | `requirements-verify.txt` | `verify_copy.py`'s hash-pinned packages (the image's plus icechunk), for `ingest/.venv-verify` only. |
+| `swot_trial.py` | The one-off SWOT lake height trial (issue #625; § The SWOT lake height trial): CMR search for LakeSP Prior granules, token downloads from PO.DAAC's SWOT archive, dams matched to PLD lakes, quality filtering, A(h) and V(h) fits, the acceptance criteria by size band. Operator-run once; not in the image. |
+| `requirements-trial.txt` | `swot_trial.py`'s one extra package (pyshp), hash-pinned; `ingest/.venv` and CI's ingest job install it beside `requirements.txt`, the image never does. |
+| `fixtures/swot/make_swot_fixture.py` | Writes the trial's synthetic fixtures (`fixtures/swot/`: invented dams at sea, their passes, observed areas and a survey curve). |
 | `fixtures/make_chc_fixture.py` | Writes `fixtures/chc/chirps-v3.0.2024.02.days_p05.nc`, the reader's synthetic fixture. |
 | `fixtures/era5land/make_era5land_fixture.py` | Writes a synthetic ERA5-Land month in the CDS's NetCDF layout; `fakecds.py` calls it for each download, so nothing binary is committed. |
 | `ecmwf_forecast.py` | The ECMWF ENS forecast job (below): index-based range reads of `tp`, decoding with eccodes, the region on the 0.1° grid, daily totals, the ensemble statistics, `ecmwf/<issue>` and its index, resumed across runs. |
@@ -70,7 +73,7 @@ not in the image and never scheduled.
 | `fixtures/imerg/make_imerg_fixture.py` | The synthetic IMERG Late daily field and file writer, in GPM_3IMERGDL V07's real layout (a global file from the command line). |
 | `tests/roundtrip.ts` | The Node half of the cross-language round trip (`test_roundtrip.py`). |
 | `Dockerfile` | The Lambda image (build context `ingest/`). |
-| `dev.sh` | `pnpm dev:ingest:run`, `pnpm test:ingest`, `ingest/dev.sh verify` and `ingest/dev.sh cmip6`. |
+| `dev.sh` | `pnpm dev:ingest:run`, `pnpm test:ingest`, `ingest/dev.sh verify`, `ingest/dev.sh cmip6` and `ingest/dev.sh swot`. |
 
 ## The event and the environment
 
@@ -787,12 +790,81 @@ predictor, WGS 84 degrees) and refuses anything else. CHC's files are LZW
 with one row per strip and the IFD at the end, so the image directory and
 the strip table come in one 64 KiB read.
 
+## The SWOT lake height trial
+
+`swot_trial.py` measures whether SWOT's lake heights work on our dams before
+anything is built for them (issue #625, step 2; the source is
+[docs/data-sources.md § swot-lakesp](../docs/data-sources.md#swot-lakesp)).
+The operator runs it once, by hand. It is not in the image, never scheduled,
+and the app never calls it.
+
+1. **Search** CMR (no sign-in) for `SWOT_L2_HR_LakeSP_D` **Prior** granules
+   over the dams' bounding box (padded 0.01°), from 2023-07-01 by default.
+2. **Download** each zip from `archive.swot.podaac.earthdata.nasa.gov` with
+   the operator's Earthdata Login token, sent as a bearer header to that host
+   only and never on a redirect (`imerg.EarthdataOpener` with its `hosts`).
+   Every request goes through `polite.PoliteClient`: the ingest User-Agent
+   with `INGEST_CONTACT`, one request a second, one at a time. A 401 or 403
+   stops the run with no retry. Zips are cached under the output directory,
+   so a rerun asks only for passes it lacks.
+3. **Match** each dam outline to the PLD lake whose observed polygon covers
+   the largest share of it (at least `--min-overlap`, 0.3). A dam with none
+   is recorded as unmatched with its size band. A PLD lake SWOT never saw in
+   the period has no polygon, so it counts as unmatched too.
+4. **Filter** passes on the quality flags: `quality_f` 0, `partial_f` 0, both
+   ice flags 0, `xovr_cal_q` at most 1, with a time and a height. A pass in
+   two granules counts once.
+5. **Pair** each height with an area. `--area prefer-observed` (the default)
+   takes the nearest observed area (WOfS or Sentinel-2) within ±3 days, else
+   SWOT's `area_total`. `observed` and `swot` use only one source.
+6. **Fit** a monotone A(h) by pool-adjacent-violators (a height more than 1 m
+   from the median of two or more passes at the same area, within 5 %, is
+   dropped first as a roll error), and **integrate** it
+   (exact for the piecewise-linear fit) to V(h) = capacity − ∫ A dh from h to
+   the level where A reaches the outline's area. That level is extrapolated
+   along the top segment when no pass reached full, and the result says so.
+7. **Score** by the outline's size band (< 1, 1–6.25, > 6.25 ha): the share
+   in the PLD, valid passes a year, and σ of the height on stable levels. A
+   stable level is two valid passes within 5 days whose areas differ by less
+   than 5 %: σ = √(mean d² / 2), and a difference over 1 m counts as a roll
+   error instead. With `--survey`, it compares fitted with surveyed volume at
+   50 % and 100 % of the full area. Each band gets the graduation bar's
+   verdict (pass, fail, or no data).
+
+The inputs are CSVs with opaque dam keys and lat/lon only:
+
+- `--dams`: `dam,lat,lon[,capacity_m3]`, one row per outline vertex in ring
+  order. Without a capacity, a dam gets no V(h).
+- `--observed-areas`: `dam,date,area_m2`.
+- `--survey`: `dam,area_m2,volume_m3`, the points of a surveyed curve.
+
+Outputs go to `--out` (default `data/swot-trial/`). The script refuses any
+directory outside the repo's gitignored `data/`. `dams.json` holds the
+per-dam results: the lake matched, pass counts, σ, the pairs and the fitted
+curve as `levelM`, `areaM2` and `volumeM3`. `summary.md` holds aggregates
+by band only, with no dam key, name, coordinate or lake id. It is what step 3
+copies into `docs/spikes/604-swot-trial.md`.
+
+Run it from your own shell, with the token exported there (never in a file in
+the repo):
+
+```sh
+INGEST_CONTACT=<your email> ingest/dev.sh swot --dams data/swot-trial/dams.csv --observed-areas data/swot-trial/areas.csv --survey data/swot-trial/survey.csv
+```
+
+The token is read from `EARTHDATA_TOKEN` (a bare Earthdata Login user token
+from the Earthdata Login profile page, not a username and password). `ingest/dev.sh swot` uses
+`ingest/.venv`, which also installs `requirements-trial.txt` (pyshp, to read
+the shapefiles). The tests run all of this offline: synthetic dams in the
+open sea (`fixtures/swot/`), Prior zips written by the test with pyshp, and a
+fake CMR and archive.
+
 ## Run it locally
 
 Optional, like `gen:help-art`: `pnpm dev`, e2e and the other CI jobs never
 need Python. Each command creates `ingest/.venv` (gitignored) from the
-hash-pinned `requirements.txt` the first time it runs, and again whenever that
-file changes.
+hash-pinned `requirements.txt` and `requirements-trial.txt` the first time it
+runs, and again whenever either file changes.
 
 ```sh
 pnpm dev:ingest:run          # rnl into ingest/.mirror (gitignored); `pnpm dev:ingest:run sat` for sat
@@ -840,6 +912,7 @@ They cover:
 - **The ECMWF job** (`test_ecmwf_forecast.py`): the index filter (only the members' `tp`, sorted, the ranges being the messages), refusals (another run or step, a member twice, the wrong field), the corner mean at 0.1° on a structured field (and one wet point shared by its four cells), longitudes that wrap, de-accumulation to daily mm (round-off, a drop, over 2000 mm, a gap), the statistics, a fixtures run end to end (the array, its metadata, the manifest, the index, the request count), the time budget and the resumed run, keeping 7 and archiving the rest as their mean, a 403 that stops with no retry, writes the marker and silences the day, the lease, the metric on every exit, a partial issue never listed, the sweep, the S3 path, the handler's routing, the image's COPY lines and the committed fixture against its generator.
 - **The fit** (`test_ecmwf_qm_fit.py`, synthetic data only): a doubled forecast mapped back, identity, the rule beyond the pairs (the same vectors as the Node side's `applyQm`), seasons, and a fit from a small synthetic copy with its provenance.
 - **Module names** (`test_module_names.py`): no module of ours (ingest/, the fixture helpers) shares a name with an installed requirement's top-level package or with the stdlib, and laid out flat as the image lays them out, `import ecmwf` is not ours and `from ecmwf.datastores import Client` resolves (with a control: an `ecmwf.py` beside them breaks it). The ECMWF job was once `ecmwf.py` and shadowed ecmwf-datastores-client's `ecmwf` package in the image, so every CDS-backed run failed in production while fixtures-mode tests, which never build the real client, passed.
+- **The SWOT trial** (`test_swot_trial.py`): a LakeSP-shaped Prior zip read back (heights, `area_total` in km², times, fill values, an unseen lake with no polygon, the box filter), polygon areas and size bands, point-in-polygon with a hole, the overlap share, dams matched to their lakes and a small one to none, a neighbour under the threshold; each quality flag failing a pass and a pass in two granules counted once; observed areas within ±3 days preferred, the nearest winning; PAVA pooling, the exact integral, V(h) anchored at capacity at the full area (extrapolated and not), too few levels and no anchor; σ on stable pairs and a roll outlier; the synthetic dam's curve recovered against its survey, SWOT's high areas showing in the fit, and a summary with no keys, ids or coordinates; the network against a fake CMR and archive (no token to CMR, the token to the archive only, one request a second, the cache, a 401 or 403 stopping after one request, a link off the archive refused, Obs granules skipped, the token from the environment and never echoed); outputs refused outside `data/`, a run end to end, and the committed fixtures against their generator.
 - **The reader:** a value outside 0–2000 mm fails the read and writes nothing.
 - **The fixture:** it still matches its generator.
 - **The copy's verification** (`test_verify_copy.py`): `tiffread.py` against synthetic GeoTIFFs written by the test (LZW in TIFF's early-change variant, deflate and none; one and several rows per strip; both byte orders; every pixel, no data included), with the formats it refuses. Sampling is seeded and stratified across products and years. The CHC check runs against a fake CHC serving TIFFs of a `zarrstore`-written copy: a pass at one request a second, a one-ulp mismatch failing with both values, a 404 and a 403 that stops after one request. The CHC check holds CHC's request slot (`verify:` holder) from before its first request until after its last, released after a 403 too; a busy slot means no request and a failure naming the holder (our reservation withdrawn), a slot freed while waiting is taken, and `--checks coverage,dynamical` takes none. `lease.hold_host_renewed` renews its expiry while held, notices when it was taken over (and the check stops), releases on Ctrl+C, takes over an expired slot and respects a waiting backfill's reservation. The dynamical.org comparison runs on synthetic arrays: the units, the row flip, the mask, the tolerance and dry cells, with `main` reading the region from the copy against a fake store. The coverage check covers a gap, the first month, `finalThrough` and the lag, plus the committed fixture copy offline. Nothing touches CHC or dynamical.org.
