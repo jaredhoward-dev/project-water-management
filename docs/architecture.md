@@ -3112,8 +3112,14 @@ sequenceDiagram
   the project's **latest run** as the schedule's acting user (the editor who
   last saved it) with the dedupe key `report_schedule:<id>:<time>`. A time
   that finds no runs, or an acting user who is no longer an editor, queues
-  nothing and says why on the schedule. A missed week is sent once, late;
-  older misses aren't replayed.
+  nothing and says why on the schedule. Each schedule is handled on its own:
+  if queuing its report throws, that schedule's transaction rolls back (no
+  job without its report row), the error is logged
+  (`report_schedule_failed`, name and code only), the schedule shows a fixed
+  reason (`SCHEDULE_FAILED`, never the database's text), and the tick goes on
+  to the other schedules and the rest of its work. The claimed time stays
+  claimed, so that one time is lost and the next scheduled time tries again.
+  A missed week is sent once, late; older misses aren't replayed.
 - **Retention:** PDFs 7 days (the bucket's lifecycle in production); the
   tick deletes report rows after 8 days (`app_purge_reports`), and locally
   their MinIO objects too.
