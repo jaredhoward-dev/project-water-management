@@ -173,7 +173,7 @@ export function noInflowText(name: string, inflow: YieldOptions['inflow'] | null
 /**
  * A scenario's stored yield worked out on other changes than the scenario has
  * now: its recorded ops hash differs (320), or it ran on another base run
- * (371: a rebase keeps the ops and their hash), or, for one from before the
+ * (367: a rebase keeps the ops and their hash), or, for one from before the
  * app recorded the ops, the scenario has been changed since. Null otherwise,
  * and for a yield on a run (a run's input never changes).
  */

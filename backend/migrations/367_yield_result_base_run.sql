@@ -1,4 +1,4 @@
--- 371_yield_result_base_run — a scenario's yield records the base run it ran on.
+-- 367_yield_result_base_run — a scenario's yield records the base run it ran on.
 --
 -- 320 recorded the scenario's ops_sha256 so the Yield panel could say a
 -- stored yield was worked out on other changes. A rebase (POST
@@ -22,4 +22,4 @@ ALTER TABLE yield_result ADD COLUMN base_run_id uuid;
 ALTER TABLE yield_result ADD CONSTRAINT yield_result_base_run_scenario
 	CHECK (base_run_id IS NULL OR scenario_id IS NOT NULL);
 COMMENT ON COLUMN yield_result.base_run_id IS
-	'A scenario''s yield: the scenario''s base_run_id when its job ran (371). NULL = a yield on a run, or a scenario''s from before 371.';
+	'A scenario''s yield: the scenario''s base_run_id when its job ran (367). NULL = a yield on a run, or a scenario''s from before 367.';

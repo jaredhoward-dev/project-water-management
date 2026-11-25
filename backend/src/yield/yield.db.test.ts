@@ -352,7 +352,7 @@ describe('a dam that receives no water (the hydrologist, 2026-11-09): refused, t
 	});
 });
 
-describe("a scenario's yield records the base run it ran on (371): a rebase keeps the ops and their hash", () => {
+describe("a scenario's yield records the base run it ran on (367): a rebase keeps the ops and their hash", () => {
 	it('stores the base run; after a rebase the scenario names another while the ops hash is unchanged', async () => {
 		const owner = await signUp('YieldRebase');
 		const c = await catchment(owner);

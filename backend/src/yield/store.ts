@@ -286,7 +286,7 @@ export interface YieldResultRow {
 	engineVersion: string;
 	/** A scenario's yield: the scenario's ops_sha256 when the job ran (320); null on a run, or before 320. */
 	opsSha256: string | null;
-	/** A scenario's yield: the scenario's base run when the job ran (371; a rebase keeps the ops hash); null on a run, or before 371. */
+	/** A scenario's yield: the scenario's base run when the job ran (367; a rebase keeps the ops hash); null on a run, or before 367. */
 	baseRunId: string | null;
 	createdBy: string | null;
 	createdAt: string;

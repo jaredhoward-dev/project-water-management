@@ -212,13 +212,13 @@ describe('a unit with no dam, and sizing a proposed one', () => {
 		expect(staleNote({ ...r, opsSha256: 'a'.repeat(64) }, null)).toBeNull();
 	});
 
-	it('flags a scenario\'s stored yield worked out on another base run: a rebase keeps the ops and their hash (371)', () => {
+	it('flags a scenario\'s stored yield worked out on another base run: a rebase keeps the ops and their hash (367)', () => {
 		const ops = 'b'.repeat(64);
 		const sc = { opsSha256: ops, updatedAt: '2026-11-09T10:00:00Z', baseRunId: 'run-2' };
 		const r = { scenarioId: 's', createdAt: '2026-11-09T11:00:00Z', opsSha256: ops };
 		expect(staleNote({ ...r, baseRunId: 'run-1' }, sc)).toBe("Worked out on another base run than the scenario has now: work it out again.");
 		expect(staleNote({ ...r, baseRunId: 'run-2' }, sc)).toBeNull();
-		// From before 371 the base run isn't known: judged by the ops alone, as before.
+		// From before 367 the base run isn't known: judged by the ops alone, as before.
 		expect(staleNote({ ...r, baseRunId: null }, sc)).toBeNull();
 		// Other ops win the message: both are stale, the ops are the change the user made.
 		expect(staleNote({ ...r, opsSha256: 'a'.repeat(64), baseRunId: 'run-1' }, sc)).toBe("Worked out before the scenario's latest changes: work it out again.");
