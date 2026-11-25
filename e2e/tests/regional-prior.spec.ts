@@ -68,7 +68,7 @@ test('an editor starts an ungauged project’s GR4J from the regional prior; His
 	await expect(ranges.getByRole('rowheader').first()).toContainText('from soil water capacity');
 	await expect(panel(page)).toContainText('7 of 14 donors from “synthetic” (invented donors)');
 	await expect(panel(page)).toContainText('distance from the catchment boundary’s centre');
-	await panel(page).getByText('The 7 donors').click();
+	await panel(page).getByText('The 7 donors', { exact: true }).click();
 	await expect(panel(page).getByTestId('prior-donors').getByRole('row')).toHaveCount(8);
 	await expect(panel(page).getByTestId('prior-credits')).toContainText('Synthetic test data (this repository) ');
 	// Fit automatically has no record to fit to here: the prior is the start.
@@ -112,7 +112,7 @@ test('the Map link draws the catchment’s donors, and the map’s link comes ba
 	void owner;
 	const project = await ungauged(page, 'Regional prior map link');
 	await openPanel(page, project.id);
-	await panel(page).getByText('The 7 donors').click();
+	await panel(page).getByText('The 7 donors', { exact: true }).click();
 	const link = panel(page).getByTestId('prior-map-link');
 	await expect(link).toHaveText('Show the donors on the Map');
 	await expect(link).toHaveAttribute('href', '?tab=map&layers=donors');
