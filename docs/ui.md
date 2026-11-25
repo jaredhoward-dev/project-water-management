@@ -15134,8 +15134,14 @@ Account, Sign out) is a signed-in frame, and the two pages already carried most 
 `/help/guides/<id>` link in the app's source names a guide (and section) that exists, and every settings path
 the help or the app names (“Model settings → Rain gaps → Flagged rain”, “Calibration → Calibration record”) resolves to a panel
 on that page and its headings (a Model settings path to one of Calibration's panels fails).
-The guides are `lib/help/guides.ts`, with the *Pages, one by one* guides in `lib/help/guides-pages.ts`, a chunk of
-their own (`vite.config.ts` `helpArticlesChunk`), so neither passes check:bundle's per-chunk ceiling.
+`lib/help/guides.ts` holds the guides' types, lookup, markup and search, and `GUIDES` joins their text from one module
+per contents group, in order: `guides-start.ts`, `guides-howto.ts`, `guides-use.ts`, `guides-concept.ts` and
+`guides-pages.ts` (*Pages, one by one*). The glossary's long text is split the same way (`articles.ts` and one
+`articles-<category>.ts` per topic, joined by `content.ts`). `vite.config.ts` `helpArticlesChunk` makes every
+`guides-<group>.ts` and `articles-<topic>.ts` a chunk of its own by its file name, so no chunk of help text nears
+check:bundle's per-chunk ceiling (the guides' chunk sat 2 bytes under it until 2026-11-25). When a module grows towards
+it, move a group or topic into a new such file: it splits off with no config edit. Every /help page still loads all of
+them, in parallel (search, the contents and `[[guide:…]]` labels need every guide).
 
 Each subpage (a guide, the glossary, search) heads its text the same way: a
 breadcrumb (`help/HelpCrumbs.svelte`: *Help › How to › Add a transfer*,

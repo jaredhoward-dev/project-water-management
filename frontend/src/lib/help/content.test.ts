@@ -20,6 +20,7 @@ import { ARTICLES } from './articles';
 import { DATA_ARTICLES } from './articles-data';
 import { EWR_ARTICLES } from './articles-ewr';
 import { FIT_ARTICLES } from './articles-fit';
+import { FLOW_ARTICLES } from './articles-flow';
 import { LICENSING_ARTICLES } from './articles-licensing';
 import { RESULTS_ARTICLES } from './articles-results';
 import { CATEGORY_TITLES, countryNames, HELP, helpFieldKeys, helpFor, searchHelp } from './content';
@@ -348,16 +349,18 @@ describe('the help text split', () => {
 	it('gives every tip an article and every article a tip, in the same order', () => {
 		// Each module in the tips' order; articles-data.ts holds exactly the "Input data" topic and
 		// articles-licensing.ts exactly "Scenarios and licensing", articles-ewr.ts exactly the EWR topic,
-		// articles-results.ts exactly "Run results" and articles-fit.ts exactly "Goodness of fit".
+		// articles-results.ts exactly "Run results", articles-fit.ts exactly "Goodness of fit" and
+		// articles-flow.ts exactly "Natural flow and calibration".
 		const ids = TIPS.map((t) => t.id);
 		const cat = (id: string) => TIPS.find((t) => t.id === id)!.category;
-		const own = ['data', 'licensing', 'ewr', 'results', 'fit'];
+		const own = ['data', 'licensing', 'ewr', 'results', 'fit', 'flow'];
 		expect(Object.keys(ARTICLES)).toEqual(ids.filter((id) => !own.includes(cat(id))));
 		expect(Object.keys(DATA_ARTICLES)).toEqual(ids.filter((id) => cat(id) === 'data'));
 		expect(Object.keys(LICENSING_ARTICLES)).toEqual(ids.filter((id) => cat(id) === 'licensing'));
 		expect(Object.keys(EWR_ARTICLES)).toEqual(ids.filter((id) => cat(id) === 'ewr'));
 		expect(Object.keys(RESULTS_ARTICLES)).toEqual(ids.filter((id) => cat(id) === 'results'));
 		expect(Object.keys(FIT_ARTICLES)).toEqual(ids.filter((id) => cat(id) === 'fit'));
+		expect(Object.keys(FLOW_ARTICLES)).toEqual(ids.filter((id) => cat(id) === 'flow'));
 	});
 
 	it('keeps the farm words whole in farmer.ts, with no field keys (no HelpTip shows them)', () => {
