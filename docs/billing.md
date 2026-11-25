@@ -1653,6 +1653,73 @@ plan table's price, the stored customer, the refusals, the script and its
 a failed payment, a team's extra seats, each refusal with its positive
 control, a card subscription and an open-ended grant left alone, a renewal).
 
+## Deleting an account
+
+Deleting a person's account or a team cascades away its `billing_account`
+and `subscription` rows (323), but nothing in the database reaches the
+payment provider. So the route cancels the plan there first
+(`backend/src/billing/cancelOnDelete.ts`):
+
+- **Whose plan.** `DELETE /auth/me` cancels the person's **own** account's
+  (kind `user`) only. A team's plan is the team's: deleting a team admin's
+  account asks the provider nothing about it, and the team keeps paying.
+  A team never loses its last admin this way: the only admin of a team is
+  refused (`409 account_sole_holder`) until they make someone else admin,
+  so the team's plan always has an admin to manage it. `DELETE /teams/:id`
+  (an admin deleting the team) cancels the team's plan the same way.
+- **What is cancelled.** Every live (`trialing`, `active`, `past_due`)
+  subscription a provider holds (not a `manual` grant or the reverse trial,
+  which nothing charges for), and, under Stripe, every other open
+  subscription of the account's customer (`GET /v1/subscriptions?customer=`;
+  canceled and `incomplete_expired` are over), so one whose webhook hasn't
+  landed is caught too. Each is cancelled **now** (`DELETE
+  /v1/subscriptions/:id` with `invoice_now=false`, `prorate=false`): no
+  final invoice and **no automatic refund** for the rest of the period
+  paid (the provider interface has no refund, and billing.md decides none
+  elsewhere). A refund the Terms owe (the proposed 8.7's 7 days after a
+  first payment, 8.6's unused months of a person's yearly plan) is made by
+  hand in Stripe's dashboard, as every refund is today; whether deleting
+  the account should itself trigger 8.6's refund is a question for counsel
+  (billing-terms-draft.md § 6 item 13). A subscription Stripe no longer has (`resource_missing`) counts
+  as cancelled. The mock has nothing outside the database to cancel.
+- **When it fails.** A provider error, no provider that can cancel
+  (`manual`, none configured, no Stripe key), or a live subscription
+  another provider holds (a mock one after switching to Stripe) refuses the
+  deletion with `503 account_plan_not_cancelled` (a team: `503
+  billing_provider_error`), and nothing is deleted. Logged as
+  `account_delete_plan_not_cancelled` with the account's random id.
+- **Order.** Self-service checks what the person alone holds first (no
+  cancel for a deletion that would be refused anyway), cancels outside the
+  deleting transaction (no row locks held over Stripe's round trip), then
+  deletes; a live subscription that appeared in between (a checkout that
+  completed) refuses the deletion rather than orphan it. If the deletion is
+  refused after the cancel (a co-owner left at the same moment), the plan
+  stays cancelled: Stripe's `customer.subscription.deleted` ends it here
+  too, and the person is on Free. Deleting a team cancels inside its
+  transaction.
+- **The customer is kept.** The Stripe customer (`cus_…`) and its invoices
+  stay at Stripe as the record of the sale, which tax law requires keeping
+  (5 years under the Tax Administration Act s29 once registered; the US
+  period otherwise). Our only link to it, `external_customer_ref`, goes
+  with the account, and the customer we create carries only the billing
+  account's random id. Deleting the customer instead (Stripe keeps its
+  own records either way) waits for counsel
+  ([legal/billing-terms-draft.md](./legal/billing-terms-draft.md) § 6
+  item 9). Stripe's `customer.subscription.deleted` for a deleted account
+  answers `unknown_account` (logged, never retried).
+- **The operator's path** (`DELETE FROM app_user` as the schema owner)
+  can't reach Stripe, so its runbook cancels the subscription in Stripe's
+  dashboard first ([deployment.md § Runbooks](./deployment.md#runbooks),
+  item 7).
+
+Tests: `billing/cancelOnDelete.test.ts` (fake providers: cancel asked,
+failure refuses, nothing asked with nothing to cancel, another provider's
+subscription refused), `provider.test.ts` and `provider/stripeApi.test.ts`
+(the list and cancel calls), `auth/delete-me.db.test.ts` (a mock plan
+deleted with the account, a failing provider refuses with nothing deleted,
+a team admin's deletion leaves the team's plan) and `teams/teams.db.test.ts`
+(the team's own deletion).
+
 ## Later phases
 
 Pointers to [issue #641](https://github.com/jaredhoward-dev/project-water-management/issues/641);

@@ -28,7 +28,7 @@ import { SIGNATURE_HEADER, verifySignature } from './provider/signature.js';
 import { normaliseStripeEvent } from './provider/stripe.js';
 import { MOCK_SESSION_TTL_SECONDS, seatsChangedEvent, signMockSession } from './provider/mock.js';
 import { createHash } from 'node:crypto';
-import { changeSeatItem, createCheckoutSession, createCustomer, createInvoice as createStripeInvoice, createPortalSession, ensureExtraSeatProduct, getSubscriptionItems, StripeApiError, type InvoiceLine } from './provider/stripeApi.js';
+import { cancelSubscription, changeSeatItem, createCheckoutSession, createCustomer, createInvoice as createStripeInvoice, createPortalSession, ensureExtraSeatProduct, getSubscriptionItems, listOpenSubscriptions, StripeApiError, type InvoiceLine } from './provider/stripeApi.js';
 
 export const BILLING_PROVIDERS = ['mock', 'manual', 'stripe'] as const;
 export type BillingProviderName = (typeof BILLING_PROVIDERS)[number];
@@ -234,6 +234,15 @@ export interface InvoiceResult {
 	newCustomerRef?: string;
 }
 
+/** A person's account about to be deleted (auth/deleteAccount.ts): its customer at the provider and its live subscriptions there. */
+export interface CancelRequest {
+	accountId: string;
+	/** The provider's customer (328), or null when the account never checked out with it. */
+	customerRef: string | null;
+	/** The external refs of the account's live subscriptions this provider holds, as our database has them. */
+	subscriptionRefs: string[];
+}
+
 export interface BillingProvider {
 	name: BillingProviderName;
 	/** Whether POST /billing/webhook/<name> exists at all (404 when not). */
@@ -251,6 +260,13 @@ export interface BillingProvider {
 	changeSeats(change: SeatChange): Promise<void>;
 	/** Issue a B2B invoice (net 30, the PO number on it) and send it to the customer, once per key. */
 	createInvoice(req: InvoiceRequest): Promise<InvoiceResult>;
+	/**
+	 * Cancel, now and with no refund, every subscription of the account that can still
+	 * charge: the ones named and, where the provider can list them, any other its customer
+	 * has. Answers the refs cancelled. Throws when any can't be, so the caller deletes
+	 * nothing (docs/billing.md § Deleting an account).
+	 */
+	cancelSubscriptions(req: CancelRequest): Promise<string[]>;
 }
 
 /** BILLING_PROVIDER as one of ours (unset is the mock, the code default), or null for a value that names none. */
@@ -332,6 +348,11 @@ function mockProvider(secret: string | undefined, now: () => number): BillingPro
 			const totalMinor = req.lines.reduce((a, l) => a + l.amountMinor, 0);
 			const dueAt = new Date(now() + 30 * 86_400_000).toISOString();
 			return { invoiceId: id, number: `MOCK-${id.slice(8, 16).toUpperCase()}`, status: 'open', totalMinor, dueAt, reused: false };
+		},
+		// Nothing outside this database charges for a mock subscription, so there is nothing to cancel: the row goes
+		// with the account (323's cascade). No event is posted: the account's deletion follows at once.
+		async cancelSubscriptions(req) {
+			return [...req.subscriptionRefs];
 		}
 	};
 }
@@ -441,6 +462,18 @@ function stripeProvider(webhookSecret: string | undefined, secretKey: string | u
 				};
 				return made ? { ...out, newCustomerRef: made } : out;
 			});
+		},
+		// The customer's open subscriptions (one we never recorded included: a checkout whose webhook hasn't landed)
+		// and any recorded one the list didn't name (no customer stored), each cancelled now with no proration.
+		async cancelSubscriptions(req) {
+			const o = client();
+			return call(async () => {
+				const open = req.customerRef ? await listOpenSubscriptions(o, req.customerRef) : [];
+				const refs = [...new Set([...open, ...(req.customerRef ? [] : req.subscriptionRefs)])];
+				for (const ref of refs) await cancelSubscription(o, ref);
+				// A recorded ref the customer's list left out has already ended at Stripe (its webhook may not have landed).
+				return [...new Set([...refs, ...req.subscriptionRefs])];
+			});
 		}
 	};
 }
@@ -460,6 +493,10 @@ const manual: BillingProvider = {
 	},
 	// manual is "the operator records it by hand": the invoice is sent from Stripe's dashboard (docs/billing.md § Staff grants).
 	createInvoice: async () => {
+		throw new BillingUnavailableError();
+	},
+	// A grant has nothing at a provider; a provider subscription can't be cancelled from here (auth/deleteAccount.ts refuses).
+	cancelSubscriptions: async () => {
 		throw new BillingUnavailableError();
 	}
 };

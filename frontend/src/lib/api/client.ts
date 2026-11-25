@@ -570,7 +570,9 @@ export function createApi(baseUrl: string, fetchFn: FetchFn = (...a) => fetch(..
 			 * once the account is gone and this browser's cookies are cleared.
 			 * ApiError 403 = wrong password, 429 = locked (the sign-in lockout),
 			 * 409 `account_sole_holder` = the only owner or admin of what `details`
-			 * names (SoleHoldings; account/deleteAccount.ts soleHoldingsOf reads it).
+			 * names (SoleHoldings; account/deleteAccount.ts soleHoldingsOf reads it),
+			 * 503 `account_plan_not_cancelled` = their paid plan couldn't be cancelled
+			 * at the payment provider, so nothing was deleted.
 			 */
 			deleteMe: (password: string) => request<void>('DELETE', '/auth/me', { password })
 		},

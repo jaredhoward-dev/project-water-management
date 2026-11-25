@@ -155,3 +155,47 @@ describe('checkout and the portal (Phase 3)', () => {
 		}
 	});
 });
+
+describe('cancelSubscriptions (deleting an account)', () => {
+	const ACCT = '44444444-4444-4444-8444-444444444444';
+	/** A Stripe that lists `open` for the customer and answers every cancel as canceled. */
+	function stripeWith(open: string[]) {
+		const calls: { method: string; url: string }[] = [];
+		const f = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+			calls.push({ method: String(init?.method), url: String(url) });
+			const body = init?.method === 'GET' ? { object: 'list', has_more: false, data: open.map((id) => ({ id, status: 'active' })) } : { status: 'canceled' };
+			return new Response(JSON.stringify(body), { status: 200 });
+		});
+		const p = billingProvider({ BILLING_PROVIDER: 'stripe', BILLING_WEBHOOK_SECRET: SECRET, STRIPE_SECRET_KEY: 'test-only-key' }, { fetch: f as unknown as typeof fetch })!;
+		return { p, calls };
+	}
+
+	it('stripe cancels every open subscription of the customer, one we never recorded included, and answers the recorded ones as settled', async () => {
+		const { p, calls } = stripeWith(['sub_Rec1', 'sub_Unrec']);
+		const out = await p.cancelSubscriptions({ accountId: ACCT, customerRef: 'cus_Del1', subscriptionRefs: ['sub_Rec1', 'sub_EndedAlready'] });
+		expect(calls.map((c) => `${c.method} ${new URL(c.url).pathname}`)).toEqual(['GET /v1/subscriptions', 'DELETE /v1/subscriptions/sub_Rec1', 'DELETE /v1/subscriptions/sub_Unrec']);
+		expect(out.sort()).toEqual(['sub_EndedAlready', 'sub_Rec1', 'sub_Unrec']);
+	});
+
+	it('stripe with no customer stored cancels the recorded ones by id', async () => {
+		const { p, calls } = stripeWith([]);
+		expect(await p.cancelSubscriptions({ accountId: ACCT, customerRef: null, subscriptionRefs: ['sub_Rec2'] })).toEqual(['sub_Rec2']);
+		expect(calls.map((c) => c.method)).toEqual(['DELETE']);
+	});
+
+	it('stripe answers a failure as the coded 503 and no key as the same, before any call', async () => {
+		const failing = billingProvider(
+			{ BILLING_PROVIDER: 'stripe', BILLING_WEBHOOK_SECRET: SECRET, STRIPE_SECRET_KEY: 'test-only-key' },
+			{ fetch: (async () => new Response('{}', { status: 500 })) as unknown as typeof fetch }
+		)!;
+		await expect(failing.cancelSubscriptions({ accountId: ACCT, customerRef: 'cus_Del2', subscriptionRefs: [] })).rejects.toMatchObject({ status: 503, code: 'billing_provider_error' });
+		const keyless = billingProvider({ BILLING_PROVIDER: 'stripe', BILLING_WEBHOOK_SECRET: SECRET })!;
+		await expect(keyless.cancelSubscriptions({ accountId: ACCT, customerRef: null, subscriptionRefs: ['sub_X'] })).rejects.toMatchObject({ code: 'billing_provider_error' });
+	});
+
+	it('manual refuses (a grant has nothing at a provider)', async () => {
+		await expect(billingProvider({ BILLING_PROVIDER: 'manual' })!.cancelSubscriptions({ accountId: ACCT, customerRef: null, subscriptionRefs: [] })).rejects.toMatchObject({
+			code: 'billing_unavailable'
+		});
+	});
+});

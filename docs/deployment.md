@@ -5012,7 +5012,16 @@ Every step is an ordinary app action by an owner unless it says "operator".
    any other expedient way (POPIA s24,
    Regulation 3); act on it as soon as reasonably practicable. Confirm it
    comes from the account's address, and tell the WUA (the responsible
-   party for its farmers). As the schema owner, in one transaction:
+   party for its farmers). First their paid plan, which the SQL can't
+   reach: `SELECT s.provider, s.external_ref, a.external_customer_ref FROM
+   subscription s JOIN billing_account a ON a.id = s.billing_account_id
+   WHERE a.user_id = '…' AND s.status IN ('trialing', 'active',
+   'past_due');`. For a `stripe` row, cancel that subscription (and any
+   other open one of the customer) in Stripe's dashboard, **Cancel
+   immediately**, no prorated refund, and wait for its status here to read
+   `canceled`; keep the customer, the tax record ([billing.md § Deleting an
+   account](./billing.md#deleting-an-account)). Self-service does this
+   itself. Then, as the schema owner, in one transaction:
    `DELETE FROM app_user WHERE id = '…';`. Memberships, farm links, tokens,
    their pending jobs and the invites they sent go with it; notes,
    publications, keys and links stay with no author; projects, teams, runs,

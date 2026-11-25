@@ -12,6 +12,8 @@ import { requireOwnSecondFactor, requireTeamStepUp } from '../auth/stepUp.js';
 import { readJson } from '../http/body.js';
 import { teamName } from '../http/visibleName.js';
 import { recordTeamAudit } from '../history/record.js';
+import { cancelPlanAtProvider, teamBilling, TeamPlanNotCancelledError } from '../billing/cancelOnDelete.js';
+import { billingProvider } from '../billing/provider.js';
 import { applySettingsPatch, appliedThresholds, teamThresholds, TeamSettingsPatch } from './settings.js';
 import { PrivacyContactInput, toPrivacyContact } from './privacyContact.js';
 
@@ -190,6 +192,9 @@ export const teamRoutes = new Hono<AuthEnv>()
 					"this team can't be deleted yet: it keeps public records (a government body's records under the National Archives Act), so it is deleted only after the organisation confirms to the operator, in writing, that it holds its records or has a disposal authority.",
 					{ publicRecords: true }
 				);
+			// The team's paid plan, cancelled at the provider before its billing account cascades away
+			// (docs/billing.md § Deleting an account); a failure refuses with 503 and deletes nothing.
+			await cancelPlanAtProvider(await teamBilling(db, id), billingProvider(), () => new TeamPlanNotCancelledError());
 			// Recorded first, while the projects are still the team's: every member
 			// loses the access the team gave them on each one.
 			const { rows } = await db.query<{ name: string; members: number }>(

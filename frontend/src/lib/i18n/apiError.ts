@@ -50,6 +50,7 @@ const CODES: Record<string, Msg> = {
 	body_refused: msg('Something in what you sent can’t be saved (a hidden control character, or a number far too large). Check what you entered and try again.'),
 	run_unverified: msg('This run wasn’t stored by the model run itself, so it can’t be signed off or decided on. Delete it and run it again.'),
 	account_sole_holder: msg('You are the only owner of a project or the only admin of a team. Hand it to someone else first.'),
+	account_plan_not_cancelled: msg('Your paid plan couldn’t be cancelled with the payment provider, so your account wasn’t deleted. Try again in a few minutes.'),
 	// Two-step sign-in (issue #282).
 	mfa_code_wrong: msg('That code isn’t right. Enter the newest code from your authenticator app or your email, or one of your recovery codes.'),
 	mfa_locked: msg('Too many wrong codes. Try again in {wait}.'),

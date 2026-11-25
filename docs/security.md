@@ -4252,8 +4252,8 @@ PDF someone else asked for kept the person as a recipient
 | Dam traces, counted for the hourly cap: the user's id and the project's (186) | `map_compute_throttle` | One hour from the window's first attempt | Lapses with its window | Lapses with its window |
 | The assistant's use (262; 324 added the cache tokens and the cost in micro-USD): the person's tokens (input and output) and messages per project and UTC month, as counts only (never the conversation); own rows only under RLS; in "Download my data" (`assistantUsage`) | `assistant_usage` | The month it counts and the 12 after it (`ASSISTANT_USAGE_RETENTION_MONTHS`, 13), then deleted by the job tick (`app_purge_assistant`) | Kept without the name (`user_id` set null), so the month still counts what was spent, until its retention ends | Deleted |
 | The assistant's use per day (336, the dollar caps): the person's messages and cost in micro-USD per billing account and UTC day, counts only; own rows only under RLS; in "Download my data" (`assistantDays`) | `assistant_day_usage` | As `assistant_usage`: purged with it by the job tick (`app_purge_assistant`) | Deleted (`user_id` cascade); the month's cost stays on `assistant_usage` without the name | Deleted |
-| The person's billing account (323, issue #641): kind (`user`), its lifetime count of projects created and when it was made; made when their first project needs it or when they open their plan (`GET /account/plan`); own row only under RLS (a team's account is the team's, read by its admins); its customer reference at the billing provider (328, `external_customer_ref`: Stripe's `cus_…`, set at the first checkout; null under the mock and `manual`); in "Download my data" (`billing.account`, the reference included). `project.billing_account_id` points at it | `billing_account` | Until the account is deleted | Deleted (cascades from `app_user`); each project it billed keeps going with `billing_account_id` set null | – (the account isn't the project's) |
-| The billing account's subscriptions (323): plan, status, seats, period, trial end, whether it cancels at period end, the billing interval (332), the provider and its reference; empty in Phase 1 (no provider); read under RLS by the account's person (or its team's admins); in "Download my data" (`billing.subscriptions`) | `subscription` | Until the account is deleted | Deleted (cascades from `billing_account`) | – |
+| The person's billing account (323, issue #641): kind (`user`), its lifetime count of projects created and when it was made; made when their first project needs it or when they open their plan (`GET /account/plan`); own row only under RLS (a team's account is the team's, read by its admins); its customer reference at the billing provider (328, `external_customer_ref`: Stripe's `cus_…`, set at the first checkout; null under the mock and `manual`); in "Download my data" (`billing.account`, the reference included). `project.billing_account_id` points at it | `billing_account` | Until the account is deleted | Deleted (cascades from `app_user`); each project it billed keeps going with `billing_account_id` set null. First, self-service deletion cancels its live provider subscriptions at the provider, or refuses (`503 account_plan_not_cancelled`). The Stripe customer it named, with its invoices, stays at Stripe as the tax record (5 years under the Tax Administration Act s29, counsel to confirm), no longer linked to the person here | – (the account isn't the project's) |
+| The billing account's subscriptions (323): plan, status, seats, period, trial end, whether it cancels at period end, the billing interval (332), the provider and its reference; empty in Phase 1 (no provider); read under RLS by the account's person (or its team's admins); in "Download my data" (`billing.subscriptions`) | `subscription` | Until the account is deleted | Deleted (cascades from `billing_account`), after a live provider subscription is cancelled at the provider (billing.md § Deleting an account) | – |
 | The billing provider's webhook events for the account (326): the provider, its event id and type, when it arrived, what it did, and the account it named; no one reads it under RLS (owner-only); not in "Download my data", which already holds the subscriptions they set | `billing_event` | 90 days from arrival, then the tick deletes it (327 `app_purge_billing_events`, `BILLING_EVENT_RETENTION_DAYS`; never under 4 days, past Stripe's 3-day redelivery window) | Kept without the account (`account_id` set null when the billing account cascades away) | – |
 | The billing account's monthly counts (323): server PDF reports queued and evidence packs issued, per SAST month, counts only; read under RLS as `subscription`; in "Download my data" (`billing.usageCounters`) | `usage_counter` | Until the account is deleted | Deleted (cascades from `billing_account`) | – (counted on the account, not the project) |
 | The yearly renewal notices sent to the person (329, issue #641; CPA s14(2)(c)): one per subscription and period, with the period end it was about, its send status, attempts, when it was claimed, sent and settled, and a short failure reason; the email's words aren't stored. Written only by the worker's definer functions; own rows readable under RLS; in "Download my data" (`billing.renewalNotices`: period end, status, when sent and when made) | `renewal_notice` | Kept as the record that the notice went, until its subscription or the person's account is deleted | Deleted (cascades from `app_user`, and from `subscription` with the billing account) | – |
@@ -4373,7 +4373,25 @@ same way.
   co-owners deleting at once would otherwise each see the other and both
   pass), and fired again inside the request by `SET CONSTRAINTS ALL
   IMMEDIATE` (`delete-me.db.test.ts` runs two at once). The operator's path
-  is refused at commit. A responsible party
+  is refused at commit. **A paid plan at the payment provider:** before
+  the rows go, self-service cancels the person's own plan at the provider
+  (every live subscription of their `user` billing account, and any other
+  open one of their Stripe customer), now and with no refund; if the
+  provider can't, it answers `503 account_plan_not_cancelled` and deletes
+  nothing, so a card is never left charging for an account that is gone. A
+  team's plan stays with the team (deleting the team cancels it the same
+  way). The operator's SQL path can't reach Stripe, so its runbook cancels
+  the subscription in Stripe's dashboard first ([deployment.md §
+  Runbooks](./deployment.md#runbooks), item 7). **The Stripe customer
+  (`cus_…`) and its invoices are kept at Stripe** after the deletion, as
+  the record of the sale that tax law requires (5 years under the Tax
+  Administration Act s29 once registered; the US period otherwise; counsel
+  to confirm, billing-terms-draft.md § 6 item 9). Our customer holds only
+  the billing account's random id in its metadata; Stripe's Checkout and
+  invoices add the name, email, address and card Stripe collected. Nothing
+  here links that customer back to a person once `billing_account`
+  cascades away ([billing.md § Deleting an
+  account](./billing.md#deleting-an-account)). A responsible party
   that is DWS or a CMA keeps the name in its own record: the National
   Archives and Records Service of South Africa Act 43 of 1996 s13(2)(a)
   forbids erasing a governmental body's public record without the National

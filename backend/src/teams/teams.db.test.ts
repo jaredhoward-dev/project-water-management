@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { monthly, node, signUp } from '../__tests__/helpers.js';
+import { asOwner, monthly, node, signUp } from '../__tests__/helpers.js';
 import { withUser } from '../db/tx.js';
 
 describe('teams', () => {
@@ -285,3 +285,46 @@ describe('team viewer', () => {
 	});
 });
 
+
+describe('DELETE /teams/:id: the team’s paid plan is cancelled at the provider first (docs/billing.md § Deleting an account)', () => {
+	const teamWithPlan = async (name: string, provider: string, ref: string) => {
+		const admin = await signUp(name);
+		const teamId = (await admin.call('POST', '/teams', { name: `${name} ${ref.slice(-6)}` })).body.team.id as string;
+		const account = await withUser(admin.id, async (db) => (await db.query<{ id: string }>('SELECT app_team_billing_account($1) AS id', [teamId])).rows[0]!.id);
+		await asOwner(
+			`INSERT INTO subscription (billing_account_id, plan_code, status, provider, external_ref, period_start, period_end)
+			 VALUES ($1, 'team', 'active', $2, $3, now() - interval '1 day', now() + interval '29 days')`,
+			[account, provider, ref]
+		);
+		return { admin, teamId };
+	};
+	const teamExists = async (id: string) => (await asOwner('SELECT 1 FROM team WHERE id = $1', [id])).length === 1;
+
+	it('refuses with 503 and deletes nothing when the provider can’t cancel it', async () => {
+		const ref = `sub_TeamStuck${crypto.randomUUID().replace(/-/g, '').slice(0, 10)}`;
+		const { admin, teamId } = await teamWithPlan('TeamPlanStuck', 'stripe', ref);
+		const saved = { p: process.env.BILLING_PROVIDER, k: process.env.STRIPE_SECRET_KEY };
+		process.env.BILLING_PROVIDER = 'stripe';
+		delete process.env.STRIPE_SECRET_KEY;
+		try {
+			const res = await admin.call('DELETE', `/teams/${teamId}`);
+			expect(res.status).toBe(503);
+			expect(res.body.code).toBe('billing_provider_error');
+		} finally {
+			if (saved.p === undefined) delete process.env.BILLING_PROVIDER;
+			else process.env.BILLING_PROVIDER = saved.p;
+			if (saved.k !== undefined) process.env.STRIPE_SECRET_KEY = saved.k;
+		}
+		expect(await teamExists(teamId)).toBe(true);
+		expect(await asOwner('SELECT status FROM subscription WHERE external_ref = $1', [ref])).toEqual([{ status: 'active' }]);
+		await asOwner('DELETE FROM subscription WHERE external_ref = $1', [ref]);
+	});
+
+	it('deletes a team whose plan the provider cancels (the mock), the subscription going with it (positive control)', async () => {
+		const ref = `sub_mock_team${crypto.randomUUID().replace(/-/g, '')}`;
+		const { admin, teamId } = await teamWithPlan('TeamPlanGone', 'mock', ref);
+		expect((await admin.call('DELETE', `/teams/${teamId}`)).status).toBe(204);
+		expect(await teamExists(teamId)).toBe(false);
+		expect(await asOwner('SELECT 1 FROM subscription WHERE external_ref = $1', [ref])).toEqual([]);
+	});
+});

@@ -7,6 +7,8 @@ import { issueEmailToken, markVerified, verificationMail } from './email-routes.
 import { answerAlike } from './accountMail.js';
 import { accountDeletedMail, accountExistsMail, emailChangeTakenMail, siteLink } from '../mail/templates.js';
 import { lockOwnRoles, recordDeparture, soleHoldings, type Departure, type SoleHoldings } from './deleteAccount.js';
+import { cancelPlanAtProvider, ownBilling, PlanNotCancelledError, uncancelled } from '../billing/cancelOnDelete.js';
+import { billingProvider } from '../billing/provider.js';
 import { logEvent } from '../logging/logEvent.js';
 import type { Mail } from '../mail/transport.js';
 import { buildSubjectExport, ExportThrottled } from './export.js';
@@ -543,7 +545,9 @@ export const authRoutes = new Hono<AuthEnv>()
 		return c.json({ user: toUser(row) });
 	})
 	// "Delete my account" (issue #112; POPIA s24; 143_delete_my_account.sql,
-	// auth/deleteAccount.ts). The password is typed again. The only owner of a
+	// auth/deleteAccount.ts). The password is typed again. The person's own paid
+	// plan is cancelled at the provider first, or the deletion refused with 503
+	// account_plan_not_cancelled (billing/cancelOnDelete.ts). The only owner of a
 	// project or only admin of a team is refused with 409 account_sole_holder,
 	// naming them, until they hand it over: read up front as the person, with
 	// the owner and admin rows locked first (lockOwnRoles), so a co-owner
@@ -558,12 +562,25 @@ export const authRoutes = new Hono<AuthEnv>()
 		const userId = c.get('userId');
 		const account = await checkPasswordAgain(c, '/auth/me', body.password);
 		type Outcome = { kind: 'held'; held: SoleHoldings } | { kind: 'deleted'; left: Departure };
+		// First, the person's own paid plan, cancelled at the provider (docs/billing.md § Deleting an account): only once
+		// nothing they alone hold is in the way, and outside the deleting transaction, so no row lock is held over the
+		// provider's round trip. A failure refuses the deletion (503 account_plan_not_cancelled) with nothing deleted.
+		const pre = await withUser(userId, async (db) => {
+			await lockOwnRoles(db, userId);
+			const held = await soleHoldings(db, userId);
+			if (held.projects.length || held.teams.length) return { kind: 'held' as const, held };
+			return { kind: 'free' as const, billing: await ownBilling(db, userId) };
+		});
+		if (pre.kind === 'held') throw soleHolderError(pre.held);
+		const cancelled = await cancelPlanAtProvider(pre.billing, billingProvider());
 		let outcome: Outcome;
 		try {
 			outcome = await withUser(userId, async (db): Promise<Outcome> => {
 				await lockOwnRoles(db, userId);
 				const held = await soleHoldings(db, userId);
 				if (held.projects.length || held.teams.length) return { kind: 'held', held };
+				// A checkout that completed since: its subscription wasn't cancelled, so refuse rather than orphan it.
+				if (uncancelled(await ownBilling(db, userId), cancelled)) throw new PlanNotCancelledError();
 				const left = await recordDeparture(db, userId);
 				const { rows } = await db.query<{ gone: boolean }>('SELECT app_delete_my_account() AS gone');
 				if (!rows[0]?.gone) throw ApiError.coded(401, 'not_signed_in', 'not signed in');

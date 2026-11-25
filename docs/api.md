@@ -199,7 +199,13 @@ stored only as SHA-256 hashes. Links point at `SITE_URL`:
   `details`, and nothing changes; hand them over first. The owner and admin
   rows of those projects and teams are locked (`FOR UPDATE`) before the
   check, so a co-owner deleting their account or leaving at the same moment
-  waits for this request rather than both passing. Otherwise it records
+  waits for this request rather than both passing. Next, their own paid
+  plan (their `user` billing account's live provider subscriptions, and
+  any other a Stripe customer of theirs has) is cancelled at the provider,
+  now and with no refund, before anything is deleted; if the provider
+  can't, `503 account_plan_not_cancelled` and nothing changes. A team's
+  plan is the team's and isn't touched ([billing.md § Deleting an
+  account](./billing.md#deleting-an-account)). Otherwise it records
   one audit event in each project and team they belonged to
   (`member.removed` / `team_member.removed` with `self: true,
   accountDeleted: true`, and a farmer's `farmer.unlinked` with cause
@@ -459,6 +465,7 @@ the frontend catalogue (same contract: add, never rename):
 | `mfa_reset_admin` | 403 | `POST /teams/:id/members/:userId/mfa-reset` naming another admin of the team: only a member below admin (205, operator decision 2026-10-08) |
 | `run_unverified` | 409 | `POST …/runs/:runId/signoffs` for, or `POST …/scenarios/:sid/decide` with, a run whose server stamp is missing or no longer matches its rows (security.md § Run stamps) |
 | `account_sole_holder` | 409 | `DELETE /auth/me` from the only owner of a project or the only admin of a team; `details: { projects, teams }` names them (`[{ id, name }]` each) |
+| `account_plan_not_cancelled` | 503 | `DELETE /auth/me` when the person's own paid plan couldn't be cancelled at the payment provider; nothing was deleted ([billing.md § Deleting an account](./billing.md#deleting-an-account)) |
 
 **Farmers** (role `farmer`, WP-2.1) get `403` from every `/projects/:id`
 route except leaving (`DELETE /projects/:id/members/:self`); `GET /projects`
@@ -1475,7 +1482,7 @@ email show them by the project role they give, viewer / editor / owner
 | POST | `/teams` | `{ name }` | `201 { team }` (you become its admin); `400` a name that shows as nothing or is over 200 characters once cleaned ([§ Projects](#projects)) | – |
 | GET | `/teams/:id` | – | `{ team, members: TeamMember[] }` (admins first, then members, then viewers) | viewer |
 | PATCH | `/teams/:id` | `{ name?, settings?: { portfolio: { thresholds: { green, amber } \| null } }, privacyContact?: { name, email, postal? } \| null, requireMfa?: boolean }` (at least one) | `{ team }`. `thresholds` sets the portfolio's traffic lights (below); `null` goes back to the defaults. A change records `team_thresholds.changed` on each of the team's projects; one that changes nothing records nothing. `privacyContact` sets or (`null`) removes the privacy contact (below). `requireMfa` turns the team's two-step sign-in requirement on or off (below) | admin |
-| DELETE | `/teams/:id` | – | `204` — its projects stay, owned by their direct members (`team` → `null`) | admin |
+| DELETE | `/teams/:id` | – | `204` — its projects stay, owned by their direct members (`team` → `null`); the team's paid plan is cancelled at the provider first, `503 billing_provider_error` and nothing deleted if it can't be ([billing.md § Deleting an account](./billing.md#deleting-an-account)) | admin |
 | POST | `/teams/:id/members` | `{ email, role }` | `201 { invited: true, invite }`, the same whether or not the address has an account (issue #136, see Projects § Invites); `409` if already a member; `429` past the daily cap on adding by email (Projects § Invites) | admin |
 | PATCH | `/teams/:id/members/:userId` | `{ role }` | `{ member }` | admin |
 | DELETE | `/teams/:id/members/:userId` | – | `204` (admins remove anyone; anyone may remove themselves = leave) | viewer |

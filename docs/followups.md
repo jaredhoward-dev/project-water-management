@@ -889,9 +889,13 @@ are #641's checklist. Open items from building it:
       counsel question (2026-11-24, docs only). Left: counsel's answers
       (its § 6), then the live text, the consent tick and its record (a
       migration), the `LEGAL_VERSION` bump with its re-acceptance entry and
-      translation (its § 5), and the gap it found: deleting an account
+      translation (its § 5). ~~The gap it found: deleting an account
       neither cancels a live Stripe subscription nor deals with the Stripe
-      customer (its § 3, §7). Trigger: before the first charge
+      customer (its § 3, §7).~~ *Done (round 2026-11-24 r2): deleting an
+      account, or a team, cancels its live provider subscriptions first
+      and refuses if it can't; the Stripe customer and invoices are kept as
+      the tax record (billing.md § Deleting an account; counsel's § 6 items
+      9 and 13 remain).* Trigger: before the first charge
       (`BILLING_PROVIDER=stripe`), with Gates A, C and D.
 - [x] **The Plan page's "Compare plans" could link the public pricing
       page.** `/welcome/pricing` (Phase 4) now shows the three plans side by
