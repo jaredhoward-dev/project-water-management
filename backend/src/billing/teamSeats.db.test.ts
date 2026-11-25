@@ -12,7 +12,8 @@
 //  - two parallel grants of the last seat: exactly one wins;
 //  - confirming an address whose invite would pass the seats still confirms it, the invite stays pending, and
 //    accepting it on the invitations page answers 402 plan_limit; any other refusal there (role_conflict) is rethrown,
-//    so nothing is confirmed or joined;
+//    so nothing is confirmed or joined; with several invites only the one past the seats stays pending and the
+//    others are accepted (360_accept_invites_each), and it passes on the page once a seat is added;
 //  - a project billed to the team's account with no team_id (only the schema owner can make one) counts toward the
 //    team's seats and is refused past them.
 import { randomUUID } from 'node:crypto';
@@ -241,6 +242,55 @@ describe('the seat guard (334)', () => {
 		expect(row).toEqual({ verified: false, joined: false, pending: true });
 		await asOwner('DELETE FROM invite WHERE id = $1', [inviteId]);
 		await asOwner('DELETE FROM project_member WHERE project_id = $1 AND user_id = $2', [projectA, invited.id]);
+	});
+
+	it('confirming an address with several invites leaves only the one past the seats pending, and accepts the rest (360)', async () => {
+		const invited = await signUp('SeatSeveral', { verified: false });
+		const invite = async (sql: string, params: unknown[]) =>
+			((await asOwner(sql, [...params, randomUUID().replaceAll('-', '').repeat(2)])) as { id: string }[])[0]!.id;
+		// A seat on the full team (refused), a seat on a Free team (no cap) and a viewer on one of the full team's
+		// projects (no seat): before 360 one savepoint left all three pending.
+		const refusedId = await invite(
+			`INSERT INTO invite (email, team_id, team_role, invited_by, token_hash, expires_at)
+			 VALUES ($1, $2, 'member', $3, decode($4, 'hex'), now() + interval '7 days') RETURNING id`,
+			[invited.email, teamId, admin.id]
+		);
+		const freeId = await invite(
+			`INSERT INTO invite (email, team_id, team_role, invited_by, token_hash, expires_at)
+			 VALUES ($1, $2, 'member', $3, decode($4, 'hex'), now() + interval '7 days') RETURNING id`,
+			[invited.email, freeTeamId, outsider.id]
+		);
+		const viewerId = await invite(
+			`INSERT INTO invite (email, project_id, project_role, invited_by, token_hash, expires_at)
+			 VALUES ($1, $2, 'viewer', $3, decode($4, 'hex'), now() + interval '7 days') RETURNING id`,
+			[invited.email, projectA, admin.id]
+		);
+		process.env.BILLING_ENFORCED = 'true';
+		await withUser(invited.id, (db) => markVerified(db, invited.id));
+		const [row] = (await asOwner(
+			`SELECT u.email_verified_at IS NOT NULL AS verified,
+				EXISTS (SELECT 1 FROM team_member WHERE team_id = $2 AND user_id = u.id) AS "joinedFull",
+				EXISTS (SELECT 1 FROM team_member WHERE team_id = $3 AND user_id = u.id AND role = 'member') AS "joinedFree",
+				EXISTS (SELECT 1 FROM project_member WHERE project_id = $4 AND user_id = u.id AND role = 'viewer') AS "joinedViewer",
+				ARRAY(SELECT id::text FROM invite WHERE email = u.email ORDER BY id) AS pending,
+				EXISTS (SELECT 1 FROM audit_event WHERE kind = 'team_member.added' AND subject->>'userId' = u.id::text
+					AND subject->>'teamId' = $2::text) AS "loggedFull"
+			 FROM app_user u WHERE u.id = $1`,
+			[invited.id, teamId, freeTeamId, projectA]
+		)) as Record<string, unknown>[];
+		expect(row).toEqual({ verified: true, joinedFull: false, joinedFree: true, joinedViewer: true, pending: [refusedId], loggedFull: false });
+		expect(await inUse()).toBe(3);
+		// One invite named (the invitations page) still refuses loudly, and passes once a seat is added (positive control).
+		const r = await invited.call('POST', `/me/invites/${refusedId}/accept`);
+		expect(r.status).toBe(402);
+		expect(r.body).toMatchObject({ code: 'plan_limit' });
+		await setSeats(4);
+		expect((await invited.call('POST', `/me/invites/${refusedId}/accept`)).status).toBe(200);
+		expect(await inUse()).toBe(4);
+		expect(await asOwner('SELECT 1 FROM invite WHERE id = ANY($1)', [[refusedId, freeId, viewerId]])).toEqual([]);
+		await asOwner('DELETE FROM team_member WHERE user_id = $1', [invited.id]);
+		await asOwner('DELETE FROM project_member WHERE user_id = $1', [invited.id]);
+		await setSeats(3);
 	});
 
 	it('a project billed to the team’s account with no team_id still counts toward its seats and is refused past them', async () => {

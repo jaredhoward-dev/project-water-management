@@ -878,9 +878,12 @@ invites"; Enforcement design, "Editors per catchment / Team seats").
   trip). Nothing from a request reaches the setting. The committed dev and
   e2e env files leave it off.
 - **Confirming an address.** `markVerified` accepts the person's pending
-  invites inside a savepoint: if one would pass a Team's seats, they all stay
-  pending and the address is still confirmed. Accepting on the invitations
-  page then answers `402 plan_limit` until a team admin adds a seat
+  invites through `app_accept_invites`, which takes each invite in its own
+  subtransaction (360_accept_invites_each): one that would pass a Team's
+  seats stays pending, the others (to other teams or projects) are accepted,
+  and the address is still confirmed. Any other refusal still fails the
+  confirmation. Accepting the pending one on the invitations page (one invite
+  named, nothing caught) then answers `402 plan_limit` until a team admin adds a seat
   ([§ Changing a Team's seats](#changing-a-teams-seats)) or makes someone a
   viewer.
 - **Who sees it.** Only seat roles meet it, which a farmer never holds. The
@@ -891,10 +894,10 @@ invites"; Enforcement design, "Editors per catchment / Team seats").
 - **Tests.** `billing/teamSeats.db.test.ts` (the count and its exclusions,
   the app role refused the functions, off by default, refused on and passed
   after a seat is added, existing seat holders, a project moving in, a Free
-  team, the invite left pending, any other refusal on confirming rethrown,
+  team, the invite left pending, only the refused one of several left
+  pending and the rest accepted, any other refusal on confirming rethrown,
   a project billed to the team's account with no `team_id`, two parallel
-  grants of the last seat), `auth/email-routes.test.ts` (`isPlanLimit`
-  matches only the seat guard), `db/tx.db.test.ts` (the flag set only for
+  grants of the last seat), `db/tx.db.test.ts` (the flag set only for
   `BILLING_ENFORCED=true`) and `http/errors.test.ts` (402 with only the
   numbers).
 
