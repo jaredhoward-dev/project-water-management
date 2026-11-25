@@ -222,9 +222,11 @@ describe('one place decides (the guards)', () => {
 		expect(readers).toEqual(['app_user_reads_allocation_units']);
 		const policies = (await asOwner(`SELECT policyname FROM pg_policies WHERE qual LIKE '%app_allocations_viewer_units%' OR with_check LIKE '%app_allocations_viewer_units%'`)) as unknown[];
 		expect(policies).toEqual([]);
-		for (const name of ['app_audit_subject', 'report_enqueue']) {
-			const [d] = await def(name);
-			expect(d, name).toContain('app_reads_allocation_units(');
+		// Every overload (app_audit_subject has two since 365), not whichever pg_proc returns first.
+		for (const name of ['app_audit_subject', 'report_enqueue', 'app_audit_run_held_to_volumes']) {
+			const defs = await def(name);
+			expect(defs.length, name).toBeGreaterThan(0);
+			for (const d of defs) expect(d, name).toContain('app_reads_allocation_units(');
 		}
 	});
 

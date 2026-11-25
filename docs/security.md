@@ -3598,6 +3598,10 @@ database:
   stored mode while it is kept; once the run cap has trimmed it, an event
   from before 213 (or of unknown time) is withheld, a later one isn't
   (`app_audit_run_held_to_volumes`, 365; `publish/decisionLogCap.db.test.ts`).
+  Who is kept from the volumes stays `app_reads_allocation_units`'s to say:
+  both `app_audit_subject` forms and `app_audit_run_held_to_volumes` call it,
+  and none reads the viewers' switch or ranks a role for it
+  (`allocations/authority-reads.db.test.ts` checks every overload).
   The export's `holder` column is only in an editor's file.
 - **Decision D3** (provisional position, pre-counsel research, 2026-10-01).
   A per-farm volume beside a farm's name identifies its holder in a rural

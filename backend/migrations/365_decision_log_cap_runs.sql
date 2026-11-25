@@ -29,8 +29,10 @@
 --
 -- app_audit_run_held_to_volumes is SECURITY DEFINER: it reads the run's
 -- summary and the migration ledger (schema_migrations, the runner's own
--- table) as the owner, only for a viewer or above of the project, and
--- answers a boolean only.
+-- table) as the owner, only for a viewer or above of the project who is kept
+-- from the volumes, and answers a boolean only. Who is kept from them is
+-- app_reads_allocation_units's to say (231, the one place that decides): both
+-- functions call it and neither reads the viewers' switch or ranks a role.
 
 CREATE FUNCTION app_audit_run_held_to_volumes(p_project uuid, p_subject jsonb, p_at timestamptz) RETURNS boolean
 	LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public
@@ -40,7 +42,8 @@ CREATE FUNCTION app_audit_run_held_to_volumes(p_project uuid, p_subject jsonb, p
 		mode text;
 		cutoff timestamptz;
 	BEGIN
-		IF NOT coalesce(app_has_role(p_project, 'viewer'), false) THEN
+		-- Nothing for anyone below a viewer, and nothing to withhold from a reader of each volume.
+		IF NOT coalesce(app_has_role(p_project, 'viewer'), false) OR app_reads_allocation_units(p_project) THEN
 			RETURN false;
 		END IF;
 		IF p_subject ->> 'runId' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN
@@ -56,7 +59,7 @@ CREATE FUNCTION app_audit_run_held_to_volumes(p_project uuid, p_subject jsonb, p
 	END
 	$$;
 COMMENT ON FUNCTION app_audit_run_held_to_volumes(uuid, jsonb, timestamptz) IS
-	'Whether the run a publication.published subject names held farms to their registered volumes (365, #523 I): kept and ran in cap or fullAllocation mode; or gone, and the event (p_at) is from before 213 was applied, or that can''t be told. False for anyone below a viewer of the project. app_audit_subject reads it.';
+	'Whether the run a publication.published subject names held farms to their registered volumes, for a reader kept from them (365, #523 I): kept and ran in cap or fullAllocation mode; or gone, and the event (p_at) is from before 213 was applied, or that can''t be told. False for anyone below a viewer of the project and for anyone who reads each volume (app_reads_allocation_units). app_audit_subject reads it.';
 REVOKE ALL ON FUNCTION app_audit_run_held_to_volumes(uuid, jsonb, timestamptz) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app_audit_run_held_to_volumes(uuid, jsonb, timestamptz) TO water_app;
 
@@ -78,11 +81,17 @@ COMMENT ON FUNCTION app_audit_subject(uuid, text, jsonb, timestamptz) IS
 REVOKE ALL ON FUNCTION app_audit_subject(uuid, text, jsonb, timestamptz) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app_audit_subject(uuid, text, jsonb, timestamptz) TO water_app;
 
--- The three-argument form the code deployed before 365 calls: the same, with no time (a trimmed run's figures withheld).
+-- The three-argument form the code deployed before 365 calls: the same, with
+-- no time (a trimmed run's figures withheld). A reader of each volume gets the
+-- subject whole, as from the four-argument form; anyone else gets that form's
+-- answer.
 CREATE OR REPLACE FUNCTION app_audit_subject(p_project uuid, p_kind text, p_subject jsonb) RETURNS jsonb
 	LANGUAGE sql STABLE SET search_path = public
 	AS $$
-		SELECT app_audit_subject(p_project, p_kind, p_subject, NULL::timestamptz)
+		SELECT CASE
+			WHEN app_reads_allocation_units(p_project) THEN p_subject
+			ELSE app_audit_subject(p_project, p_kind, p_subject, NULL::timestamptz)
+		END
 	$$;
 COMMENT ON FUNCTION app_audit_subject(uuid, text, jsonb) IS
-	'The four-argument app_audit_subject (365) with no time, for the code deployed before 365; drop once nothing calls it.';
+	'The four-argument app_audit_subject (365) with no time, for the code deployed before 365: the subject whole for a reader of each volume (app_reads_allocation_units), else that form''s answer; drop once nothing calls it.';
