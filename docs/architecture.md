@@ -3098,7 +3098,8 @@ sequenceDiagram
   is noted on the report, not a failed job (the PDF is there to download).
 - **Schedules** (`report_schedule` + recipients): weekly or monthly, at an
   hour in the schedule's own IANA zone (`reports/due.ts`, pure and tested
-  under skewed process zones). Every tick (`jobs/runner.ts`) reads the
+  under skewed process zones; an hour a daylight-saving change skips fires
+  just after the gap, on its own day). Every tick (`jobs/runner.ts`) reads the
   enabled schedules through `app_report_schedules_to_check`, works out the
   latest due time, claims it atomically (`app_claim_report_schedule`: later
   than the last one, after the schedule was saved), and queues a render of
