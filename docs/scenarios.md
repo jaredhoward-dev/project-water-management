@@ -446,7 +446,13 @@ R1](./design/planning-outputs.md#31-r1-a-demandscale-scenario-op-foundation-s)).
   doesn't rescue it, and one after it that moves the run away from an
   accepted window isn't refused (its window then scales nothing, as
   before). An input with no series and no dates set checks only the months
-  against the dates. The input diff reports it
+  against the dates. Since the check reads the base's simulation dates and
+  series span, not just the op, a saved scenario's verdict can change with
+  its base's data: a window accepted today is refused (reported as the
+  scenario's problem, and its run refused) once the base's dates are moved
+  or its series are cut back so that no day of the window is left, and one
+  refused today is accepted once the data reaches it, with no edit to the
+  scenario. The input diff reports it
   (`dated demand factors none → 2021-10-01 – 2022-09-30 × 1.3`), the
   self-check replays it, a warm start counts a window starting before the
   snapshot day as history, and the drought restriction rule built from the
@@ -2014,7 +2020,11 @@ scenario is `'team'`, and behaves exactly as above).
   (`inputs.scenario`): a farm unlinked since moves the ops on it from the
   proposal to another's, so a run classed under the old units is no longer
   the application as it stands, though its ops and base didn't change.
-  Relinking it makes the run current again.
+  Relinking it makes the run current again. A run recorded before the run
+  stored its own units (`inputs.scenario` without `ownedNodeIds`) is read
+  as having none (`scenarios/results.ts`, `?? []`), so for an application
+  with own units it reads **not current** until it is run again, though
+  nothing changed; one with no own units still reads current.
 
   **The application's side only when every op was a proposal**
   (`app_run_all_proposals`, the share link's rule). A baseline assumption
