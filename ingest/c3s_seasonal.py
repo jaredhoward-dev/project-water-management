@@ -73,6 +73,17 @@ NaN fill, [bytes little-endian, gzip 6], chunk one member's whole forecast):
   Each system is written as its request is collected.
 - `c3s-hc/<system>/<MM>/tp_mm`: dims (year, member, lead_day, lat, lon), the
   `year` coordinate the group's `years`.
+- `c3s-hc-monthly/<system>/<MM>/tp_mm` (issue #837): the same hindcast's
+  calendar-month totals per cell (mm/month), dims (year, member, lead_month,
+  lat, lon), `LEAD_MONTHS` (7) lead months, lead month 0 the init month of the
+  hindcast year's own calendar (a leap February is 29 days); NaN for a month
+  with a NaN day. ONE chunk (the whole array, ~30x smaller than the daily
+  one), so the backend's outlook bridge (backend/src/outlooks/c3s.ts) reads a
+  system's hindcast in one GET instead of one per member per year. Written in
+  the same stage as the daily array; a hindcast held before it existed gets
+  it from the daily array, one hindcast a run (`derive_hindcast_monthly`). No manifest
+  of its own: it is derived from `c3s-hc/<system>/<MM>`, whose manifest
+  covers both.
 
 The group's attributes: `centres` (the contributing centres' names, for the
 credit), `source` ("C3S seasonal-original-single-levels"), `licence`,
@@ -140,6 +151,10 @@ GRID = grid.C3S
 #: One member's whole forecast (every lead, the whole region): ~800 kB raw.
 CHUNKS = (1, 1, LEAD_DAYS, GRID.rows, GRID.cols)
 VAR = "tp_mm"
+#: The hindcasts' monthly totals (issue #837): `c3s-hc-monthly/<system>/<MM>`.
+HC_MONTHLY_PRODUCT = "c3s-hc-monthly"
+#: Whole calendar months the lead axis holds from any 1st: 7 (July to January is 215 days, the most 7 months take).
+LEAD_MONTHS = 7
 
 #: Ask for a system's init this long after its 12 UTC release.
 RELEASE_MARGIN_S = 1800
@@ -186,6 +201,10 @@ def forecast_product(init: str) -> str:
 
 def hindcast_product(system: str, mm: str) -> str:
     return f"{HC_PRODUCT}/{system}/{mm}"
+
+
+def hindcast_monthly_product(system: str, mm: str) -> str:
+    return f"{HC_MONTHLY_PRODUCT}/{system}/{mm}"
 
 
 def product_of(key: tuple) -> str:
@@ -356,7 +375,7 @@ def _ensure_groups(store, path: str):
     return g
 
 
-def _create(store, path: str, shape, dims, attrs):
+def _create(store, path: str, shape, dims, attrs, chunks=CHUNKS):
     import zarr
     from zarr.codecs import BytesCodec, GzipCodec
 
@@ -364,7 +383,7 @@ def _create(store, path: str, shape, dims, attrs):
         store=store,
         name=f"{path}/{VAR}",
         shape=shape,
-        chunks=CHUNKS,
+        chunks=chunks,
         dtype="float32",
         fill_value=np.nan,
         serializer=BytesCodec(endian="little"),
@@ -410,18 +429,83 @@ def write_forecast_system(mirror, init: str, system: str, dec: Decoded) -> None:
         g.attrs.update({**_common_attrs(held), "init": init, "firstDay": f"{init}-01", "leadDays": LEAD_DAYS, "systems": systems, "members": members})
 
 
+def month_spans(year: int, month: int) -> list[tuple[int, int]]:
+    """(first, end) lead days of each of the `LEAD_MONTHS` calendar months from `year`'s 1st of `month`."""
+    first = dt.date(year, month, 1)
+
+    def start(k: int) -> int:
+        y, m = divmod(month - 1 + k, 12)
+        return (dt.date(year + y, m + 1, 1) - first).days
+
+    return [(start(k), start(k + 1)) for k in range(LEAD_MONTHS)]
+
+
+def monthly_totals(years: list[int], members: int, month: int, year_values: Callable[[int], np.ndarray]) -> np.ndarray:
+    """A hindcast's calendar-month totals per cell (mm), (years, members, LEAD_MONTHS, rows, cols) float32:
+    each year's months from its own 1st of `month`, summed in float64; NaN for a month with a NaN day.
+    `year_values(i)` is year i's daily slab, (members, LEAD_DAYS, rows, cols), read one year at a time."""
+    out = np.full((len(years), members, LEAD_MONTHS, GRID.rows, GRID.cols), np.nan, dtype=np.float32)
+    for i, year in enumerate(years):
+        v = year_values(i)
+        for k, (a, b) in enumerate(month_spans(year, month)):
+            if b <= LEAD_DAYS:
+                out[i, :, k] = v[:, a:b].sum(axis=1, dtype=np.float64)
+    return out
+
+
+def _monthly_prefixes(system: str, mm: str) -> list[str]:
+    return [f"{HC_MONTHLY_PRODUCT}/zarr.json", f"{HC_MONTHLY_PRODUCT}/{system}/zarr.json", f"{hindcast_monthly_product(system, mm)}/"]
+
+
+def _write_monthly(store, system: str, mm: str, years: list[int], members: int, year_values: Callable[[int], np.ndarray]) -> None:
+    product = hindcast_monthly_product(system, mm)
+    g = _ensure_groups(store, product)
+    shape = (len(years), members, LEAD_MONTHS, GRID.rows, GRID.cols)
+    attrs = {"units": "mm/month", "long_name": "calendar-month precipitation totals of the daily hindcast (lead month 0: the init month of the hindcast year)", "leadMonths": LEAD_MONTHS, **GRID.attrs}
+    arr = _create(store, product, shape, ("year", "member", "lead_month", "lat", "lon"), attrs, chunks=shape)
+    arr[...] = monthly_totals(years, members, int(mm), year_values)
+    g.attrs.update({**_common_attrs([system]), "system": system, "initMonth": int(mm), "years": years, "members": members, "leadMonths": LEAD_MONTHS, "leadDays": LEAD_DAYS})
+
+
 def write_hindcast(mirror, system: str, mm: str, dec: Decoded) -> None:
-    """Write `c3s-hc/<system>/<MM>/tp_mm` whole (one request holds every year)."""
+    """Write `c3s-hc/<system>/<MM>/tp_mm` whole (one request holds every year), and its monthly totals beside it."""
     import zarr
 
     product = hindcast_product(system, mm)
-    with mirror.stage([f"{HC_PRODUCT}/zarr.json", f"{HC_PRODUCT}/{system}/zarr.json", f"{product}/"]) as root:
+    with mirror.stage([f"{HC_PRODUCT}/zarr.json", f"{HC_PRODUCT}/{system}/zarr.json", f"{product}/", *_monthly_prefixes(system, mm)]) as root:
         store = zarr.storage.LocalStore(root)
         g = _ensure_groups(store, product)
         arr = _create(store, product, (len(dec.years), dec.members, LEAD_DAYS, GRID.rows, GRID.cols), ("year", "member", "lead_day", "lat", "lon"), _array_attrs(None))
         for i in range(len(dec.years)):
             arr[i] = dec.values[i]
         g.attrs.update({**_common_attrs([system]), "system": system, "initMonth": int(mm), "years": dec.years, "members": dec.members, "leadDays": LEAD_DAYS})
+        _write_monthly(store, system, mm, dec.years, dec.members, lambda i: dec.values[i])
+
+
+def has_monthly(mirror, system: str, mm: str) -> bool:
+    return mirror.read_json(f"{hindcast_monthly_product(system, mm)}/{VAR}/zarr.json") is not None
+
+
+def write_hindcast_monthly(mirror, system: str, mm: str, dec: Decoded) -> None:
+    """Write only `c3s-hc-monthly/<system>/<MM>` from a collected request (a hindcast held from before it existed)."""
+    import zarr
+
+    with mirror.stage(_monthly_prefixes(system, mm)) as root:
+        _write_monthly(zarr.storage.LocalStore(root), system, mm, dec.years, dec.members, lambda i: dec.values[i])
+
+
+def derive_hindcast_monthly(mirror, system: str, mm: str) -> None:
+    """Write `c3s-hc-monthly/<system>/<MM>` from the daily hindcast the copy holds, one year read at a time
+    (a hindcast held from before the monthly totals existed; the daily array is read, not rewritten)."""
+    import zarr
+
+    product = hindcast_product(system, mm)
+    with mirror.stage([f"{product}/", *_monthly_prefixes(system, mm)]) as root:
+        store = zarr.storage.LocalStore(root)
+        g = zarr.open_group(store=store, path=product, mode="r", zarr_format=3)
+        arr = zarr.open_array(store=store, path=f"{product}/{VAR}", mode="r", zarr_format=3)
+        years = [int(y) for y in g.attrs["years"]]
+        _write_monthly(store, system, mm, years, int(arr.shape[1]), lambda i: np.asarray(arr[i]))
 
 
 def read_index(mirror) -> dict:
@@ -467,6 +551,9 @@ def ingest_request(mirror, key: tuple, path: Path, now: Callable[[], str] = mani
             first = dt.date(dec.years[0], int(when[-2:]), 1)
             m["changes"].append({"revision": m["revision"], "days": [first.isoformat(), (first + dt.timedelta(days=LEAD_DAYS - 1)).isoformat()], "cellsChanged": GRID.rows * GRID.cols, "maxAbsDiff": MAX_DAILY_MM})
             outcome = "changed"
+    elif kind == "hc" and not has_monthly(mirror, system, when):
+        # Held from before the monthly totals existed (issue #837): add them, the daily array as it is.
+        write_hindcast_monthly(mirror, system, when, dec)
     manifest.upsert_file(m, {"url": url, "etag": None, "lastModified": None, "size": path.stat().st_size, "valuesSha256": sha, "revision": m["revision"], "fetchedAt": now()})
     if kind == "fc":
         last = dt.date(dec.years[0], int(when[5:]), 1) + dt.timedelta(days=LEAD_DAYS - 1)
@@ -539,7 +626,7 @@ def _run(mirror, mode: str, ev: dict, r: Run) -> dict:
     reqs = st["requests"]
     held = held_keys(read_index(mirror))
     now = r.clock()
-    out = {"collected": [], "submitted": [], "failed": [], "inFlight": 0, "gaveUp": []}
+    out = {"collected": [], "submitted": [], "failed": [], "inFlight": 0, "gaveUp": [], "derived": []}
 
     for key in held:
         e = reqs.setdefault(key_str(key), dict(ENTRY))
@@ -572,6 +659,15 @@ def _run(mirror, mode: str, ev: dict, r: Run) -> dict:
             log.warning("c3s: the %s request ended %s (attempt %d); resubmitting after %s", ks, status, e["attempts"], e["retryAt"])
             out["failed"].append({"request": ks, "status": status, "attempts": e["attempts"], "retryAt": e["retryAt"]})
         write_state(mirror, st)
+
+    # 1b. A hindcast held from before its monthly totals existed (issue #837): derive them from the copy, one a run.
+    for key in sorted(k for k in held if k[0] == "hc"):
+        if not has_monthly(mirror, key[1], key[2]):
+            if r.budget.allows(0):
+                derive_hindcast_monthly(mirror, key[1], key[2])
+                log.info("c3s: derived the monthly totals of %s from the copy", key_str(key))
+                out["derived"].append(key_str(key))
+            break
 
     # 2. What this run wants: forecasts (newest first), then the wanted hindcasts.
     wanted: list[tuple[tuple, str]] = []

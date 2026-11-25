@@ -2178,8 +2178,17 @@ EventBridge, daily
   summed into the engine's catchment monthly totals; then one engine call
   (`runForecastOutlook`) after the ESP members. A copy laid out otherwise
   fails the job; no forecast or no hindcast in the copy leaves the outlook
-  the ESP alone with the reason. Locally the committed copy holds invented
-  members (`backend/fixtures/mirror/c3s/`, `backend/scripts/c3s-fixture.ts`).
+  the ESP alone with the reason. A hindcast is read from its monthly totals
+  (`c3s-hc-monthly/<system>/<MM>`, (year, member, lead_month, lat, lon), one
+  chunk per system, which the ingest writes beside each daily hindcast and
+  derives for one held before it, a run at a time; issue #837) in one GET
+  instead of one daily chunk per member per year (~600 a system); without
+  them, or with them for other years or members, from the daily chunks,
+  with the same totals to float32 rounding (`c3s.test.ts` compares both on
+  the synthetic copy). Locally the committed copy holds invented members
+  (`backend/fixtures/mirror/c3s/`, `backend/scripts/c3s-fixture.ts`), and
+  ECMWF's hindcasts' monthly totals but not the Met Office's, so both paths
+  run.
 - **NEX-GDDP-CMIP6's monthly aggregates (issue #621 slice 2).** Not a
   scheduled product: the operator copies them once, in us-west-2 next to
   NASA's bucket (`ingest/cmip6_delta.py`,

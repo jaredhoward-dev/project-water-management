@@ -521,7 +521,13 @@ docstring is the spec; in short:
   `c3s/<YYYY-MM>/tp_mm` (system, member, lead_day, lat, lon), each system
   written into its slot as it is collected, members padded with NaN to the
   largest system's; `c3s-hc/<system>/<MM>/tp_mm` (year, member, lead_day,
-  lat, lon), written whole. The group's attributes carry the coordinates
+  lat, lon), written whole, and beside it in the same stage
+  `c3s-hc-monthly/<system>/<MM>/tp_mm` (year, member, lead_month, lat, lon:
+  each year's 7 calendar months from its own 1st of the init month, mm, NaN
+  for a month with a NaN day; ONE chunk, which the backend's outlook bridge
+  reads instead of ~600 daily chunks a system; issue #837). A hindcast held
+  from before that array existed has it derived from its daily array, one a
+  run (the result's `derived`). The group's attributes carry the coordinates
   (`systems` or `years`, `members`, `init`/`initMonth`, `firstDay`,
   `leadDays`) and the credit: `source`, `licence`, `credit`, `citation` and
   `centres` (the contributing centres' names). Each product's manifest lists

@@ -2611,8 +2611,11 @@ unchanged to the bit; once the forecasts are held but before the hindcast
 backfill below, it says the copy holds no hindcast. No new environment
 variable, flag or permission: the API never reads the copy (it isn't told
 where it is), only the worker. Each such outlook reads one chunk (~0.4 MB)
-per member per hindcast year of each system used, about 600 per system with
-25 hindcast members; see docs/followups.md § C3S outlook read cost.
+per forecast member of each system used, and each system's hindcast as one
+chunk of monthly totals (`c3s-hc-monthly/<system>/<MM>`, issue #837). A
+hindcast collected by an image older than that has its monthly totals
+derived from the copy by the next runs, one a run; until then it is read
+from its daily chunks, one per member per hindcast year (~600 a system).
 
 **No new secret.** The runs read ERA5-Land's `water-management/ingest/cds-key`
 (`infra/era5land.tf`). The daily rule (14:20 UTC,

@@ -7,6 +7,8 @@
 //
 //   c3s/<YYYY-MM>/tp_mm             (system, member, lead_day, lat, lon), the init month's forecasts
 //   c3s-hc/<system>/<MM>/tp_mm      (year, member, lead_day, lat, lon), that init month's hindcasts
+//   c3s-hc-monthly/<system>/<MM>/tp_mm  (year, member, lead_month, lat, lon), the same hindcasts'
+//                                   calendar-month totals per cell, one chunk (issue #837)
 //   c3s/index.json                  { inits: { "YYYY-MM": [systems] }, hindcasts: { system: ["MM"] } }
 //
 // lead_day 0 is the init month's 1st (a hindcast year's own), 215 days, mm a
@@ -44,8 +46,14 @@
 //
 // Reads go through the mirror store (MIRROR_URL), one member's slab of the
 // cells' bounding block at a time (its chunk is one member's whole forecast),
-// READ_CONCURRENCY at once. The cost is a chunk per member per hindcast year:
-// a system's 24 hindcast years × 25 members is 600 chunk reads, ~0.4 MB each.
+// READ_CONCURRENCY at once. A hindcast is read from its monthly totals when
+// the copy holds them for the same years and members (one chunk, one read per
+// system: Σ_cells w·(Σ_days v) ÷ Σ w is the daily path's Σ_days (Σ_cells w·v
+// ÷ Σ w), a month with a NaN day is NaN in both, and 215 days always hold
+// the 7 months the array has); else from the daily chunks, one per member per
+// hindcast year (a system's 24 years × 25 members is 600 reads, ~0.4 MB each).
+// The two agree to the monthly array's float32 rounding (~1e-5 mm in a month's
+// total; c3s.test.ts compares them on the synthetic copy).
 import type { AbsolutePath } from '@zarrita/storage';
 import * as zarr from 'zarrita';
 import { z } from 'zod';
@@ -61,6 +69,8 @@ import { registerNodeGzip, type MirrorStore } from '../mirror/store.js';
 
 /** Days on the lead axis (ingest/c3srequest.py LEAD_DAYS). */
 export const C3S_LEAD_DAYS = 215;
+/** Calendar months on the hindcasts' monthly totals' lead axis (ingest/c3s_seasonal.py LEAD_MONTHS): all 215 days hold from any 1st. */
+export const C3S_LEAD_MONTHS = 7;
 /** The day of the init month each centre's forecast is released on the CDS, at 12 UTC (ingest/c3srequest.py RELEASE_DAY). */
 export const C3S_RELEASE_DAY: Readonly<Record<string, number>> = { ecmwf: 6 };
 /** Every other centre's release day (ingest/c3srequest.py RELEASE_DAY_OTHERS). */
@@ -291,6 +301,56 @@ async function openC3s(store: MirrorStore, product: string, outer: 'system' | 'y
 	return { arr, attrs: attrs.data };
 }
 
+/**
+ * A hindcast's monthly totals (`c3s-hc-monthly/<system>/<MM>`, issue #837),
+ * checked against the layout; null when the copy doesn't hold them, or holds
+ * them for other years or members than the daily hindcast (written before a
+ * re-collection): the daily chunks are read then.
+ */
+async function openC3sMonthly(store: MirrorStore, system: string, mm: string, years: readonly number[], members: number): Promise<C3sArray | null> {
+	const product = `c3s-hc-monthly/${system}/${mm}`;
+	const group = (await readJson(store, `${product}/zarr.json`)) as { attributes?: unknown } | undefined;
+	const meta = (await readJson(store, `${product}/tp_mm/zarr.json`)) as Record<string, unknown> | undefined;
+	if (group === undefined || meta === undefined) return null;
+	const bad = (what: string) => new MirrorFormatError(`the rain data copy's ${product} is not laid out as expected (${what})`);
+	const attrs = GroupAttrs.safeParse(group.attributes ?? {});
+	if (!attrs.success) throw bad('group attributes');
+	const arr = (await zarr.open.v3(zarr.root(store).resolve(`${product}/tp_mm`), { kind: 'array' })) as C3sArray;
+	const { rows, cols } = regionSize(SEASONAL_REGION, 1);
+	if (arr.dtype !== 'float32') throw bad(`data type ${arr.dtype}`);
+	if ((arr.dimensionNames ?? []).join(',') !== 'year,member,lead_month,lat,lon') throw bad('dimension names');
+	if (arr.shape.length !== 5 || arr.shape[2] !== C3S_LEAD_MONTHS || arr.shape[3] !== rows || arr.shape[4] !== cols) throw bad(`shape ${arr.shape.join('×')}`);
+	if (arr.chunks.join(',') !== arr.shape.join(',')) throw bad(`chunks ${arr.chunks.join('×')}`);
+	const own = attrs.data.years ?? [];
+	if (own.length !== arr.shape[0] || own.join(',') !== years.join(',') || attrs.data.members !== members || arr.shape[1] !== members) return null;
+	return arr;
+}
+
+/**
+ * Each hindcast year's members' area-mean monthly totals from the monthly
+ * array, read in one go over the cells' block: Σ w·v ÷ Σ w per lead month,
+ * stopping at the first that isn't a finite number ≥ 0 (monthlyTotals' rule).
+ */
+async function hindcastFromMonthly(arr: C3sArray, yearIndex: readonly number[], members: number, b: ReturnType<typeof blockOf>, cells: readonly SeasonalCell[]): Promise<number[][][]> {
+	const got = await zarr.get(arr, [null, null, null, zarr.slice(b.y0, b.y0 + b.h), zarr.slice(b.x0, b.x0 + b.w)]);
+	const [s0, s1, s2, s3, s4] = got.stride as [number, number, number, number, number];
+	const data = got.data as Float32Array;
+	const total = cells.reduce((a, c) => a + c.weight, 0);
+	return yearIndex.map((yi) =>
+		Array.from({ length: members }, (_, m) => {
+			const out: number[] = [];
+			for (let k = 0; k < C3S_LEAD_MONTHS; k++) {
+				let sum = 0;
+				for (const c of cells) sum += c.weight * data[yi * s0 + m * s1 + k * s2 + (c.y - b.y0) * s3 + (c.x - b.x0) * s4]!;
+				const v = sum / total;
+				if (!Number.isFinite(v) || v < 0) break;
+				out.push(round(v, 6));
+			}
+			return out;
+		})
+	);
+}
+
 /** The cells' bounding block, and each cell's place in it. */
 function blockOf(cells: readonly SeasonalCell[]) {
 	const y0 = Math.min(...cells.map((c) => c.y));
@@ -474,9 +534,13 @@ export async function readC3sInputs(store: MirrorStore, area: ForecastArea, deci
 		if (years.length > C3S_HINDCAST_YEARS_MAX) years = years.slice(-C3S_HINDCAST_YEARS_MAX);
 		const hn = Math.min(typeof hc.attrs.members === 'number' ? hc.attrs.members : hc.arr.shape[1]!, hc.arr.shape[1]!, C3S_MEMBERS_MAX);
 		const all = hc.attrs.years ?? [];
-		const rows = await pooled(
-			years.flatMap((year) => Array.from({ length: hn }, (_, m) => async () => ({ year, monthly: monthlyTotals(dailyMeans(await readSlab(hc.arr, all.indexOf(year), m, block), block, area.cells), `${year}-${mm}-01`) })))
-		);
+		// The monthly totals when the copy holds them (one read), else every member's daily chunk of every year.
+		const monthly = await openC3sMonthly(store, system, mm, all, hc.arr.shape[1]!);
+		const rows = monthly
+			? (await hindcastFromMonthly(monthly, years.map((y) => all.indexOf(y)), hn, block, area.cells)).flatMap((members, i) => members.map((m) => ({ year: years[i]!, monthly: m })))
+			: await pooled(
+					years.flatMap((year) => Array.from({ length: hn }, (_, m) => async () => ({ year, monthly: monthlyTotals(dailyMeans(await readSlab(hc.arr, all.indexOf(year), m, block), block, area.cells), `${year}-${mm}-01`) })))
+				);
 		out.hindcasts.push({
 			system,
 			initMonth,
