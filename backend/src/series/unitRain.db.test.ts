@@ -6,7 +6,7 @@
 // source (node.mapMm / mapSource) and settings.unitRain are validated as the
 // engine's mapMmError and unitRainError say. Each refusal has its positive
 // control. Synthetic values only.
-import { unitRainSeriesKey } from '@water-management/engine';
+import { latestRainDay, unitRainSeriesKey, type SeriesMeta } from '@water-management/engine';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { asOwner, monthly, node, signUp } from '../__tests__/helpers.js';
 import { withUser } from '../db/tx.js';
@@ -84,7 +84,14 @@ describe('a land unit’s own rain (209_unit_rain_series)', () => {
 	it('a unit’s rain never moves the project’s recorded-rain end (dataUntil), which is the catchment’s', async () => {
 		const u = await signUp('UnitRainUntil');
 		const q = await unitProject(u, 'Until');
-		const until = async () => (await u.call('GET', '/projects')).body.projects.find((x: { id: string }) => x.id === q.id).dataUntil;
+		const listed = async () => (await u.call('GET', '/projects')).body.projects.find((x: { id: string }) => x.id === q.id).dataUntil;
+		// The workspace header's figure: the engine's latestRainDay over the series list (issue #832). Both must name the same day.
+		const header = async () => latestRainDay((await u.call('GET', `/projects/${q.id}/series`)).body.series as SeriesMeta[]);
+		const until = async () => {
+			const day = await listed();
+			expect(await header()).toBe(day);
+			return day;
+		};
 		// Positive control: the unit's series still with no site reaches further, and counts (it is the catchment's then).
 		const later = (await u.call('PUT', `/projects/${q.id}/series`, { kind: 'rain_chirps_mm', name: 'A later', unit: 'mm', startDate: '2020-03-01', values: [1, 2] })).body.id as string;
 		expect(await until()).toBe('2020-03-02');
