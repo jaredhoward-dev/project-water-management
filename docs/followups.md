@@ -344,6 +344,21 @@ It measured **11.1 s** on the dev laptop on 2026-11-01, and **1.5 s** (1.85,
       engine's self-checks (run them once per run, not per pass, or sample
       them) before adding more per-day work. Trigger: the V1 test's median
       passing 1.8 s, or a Lambda run of a client-sized catchment over 3 s.
+      **Measured 2026-11-25 (issue #838):** the checks already run **once
+      per run**, not per pass: `runModelChecked` → `withVerification` →
+      `verifyRun` is their only caller, and it runs once on the finished
+      output. On an invented catchment of the V1 test's shape (12 units on
+      two arms, 9 crops on 23 planted areas, one transfer, 16 000 days, 431
+      series; medians of 7, Node 24, laptop busy with other sessions' tests):
+      `runModel` 270 ms, `verifyRun` 253 ms, `runModelChecked` 649 ms. Per
+      check: `checkWorkings` **143 ms** (over half), `checkTransferLimits`
+      26, `checkBalance` 24, `checkEwrAttribution` 18, `checkOperatingRules`
+      8, the other eight under 4 ms each. So there is no per-pass repeat to
+      remove. What's left: `checkWorkings`'s per-day recompute of the
+      intermediate columns, and the ~125 ms `runModelChecked` spends beyond
+      `runModel` + `verifyRun` (the water balance and `runDrought`), both not
+      yet profiled. Next step: a CPU profile of `checkWorkings` on that
+      catchment, then share its work, keeping every check.
 - [ ] **Verifying a run still re-hashes its rows** (`app_run_digest`, 0.3 s
       for a client-sized run) on every `GET …/runs/:runId`, sign-off and
       decision. Fine for one run; a list that verified many would not be.
