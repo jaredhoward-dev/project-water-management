@@ -7,7 +7,7 @@
 import { dayText, fromEpochDay, monthOfEpochDay, toEpochDay } from '../calendar';
 import { withMonthlyRates } from '../network/transferRates';
 import { isSplitTransfer, transferDestinations, withDestinations } from '../network/transferSplits';
-import { DAM_AREA_EXPONENT, DEFAULT_IRRIGATION_SYSTEMS, DEMAND_PARTS, estimatedDamAreaM2, MONTHLY_ROW_OF, replacedByMonth, returnFlowFromLossReturn, upgradeLegacyModel, type Borehole, type DemandFactorWindow, type IrrigationSystemDef, type DailySeries, type LandCoverPatch, type ModelInput, type NetworkNode, type Transfer } from '../project';
+import { DAM_AREA_EXPONENT, DEFAULT_IRRIGATION_SYSTEMS, DEMAND_PARTS, estimatedDamAreaM2, MONTHLY_ROW_OF, replacedByMonth, returnFlowFromLossReturn, stationSeriesKey, upgradeLegacyModel, type Borehole, type DemandFactorWindow, type IrrigationSystemDef, type DailySeries, type LandCoverPatch, type ModelInput, type NetworkNode, type Transfer } from '../project';
 import {
 	BASELINE_NODE_FIELDS,
 	CROP_SET_FIELDS,
@@ -38,6 +38,8 @@ import {
 	type ScenarioOp
 } from './ops';
 import { structureIssues } from './structure';
+import { mergeSettings } from '../prepare';
+import { rainDriverSpan } from '../driverSpan';
 import { applyClimateDelta, climateFactorRowError } from './climate';
 import { resolveApanUnits, scaleApanUnits } from '../evaporation/apanUnits';
 import { modelFarmEfficiency } from '../demand';
@@ -1037,24 +1039,34 @@ const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep
 
 /**
  * The first and last epoch day a run of `d` can cover at most: the simulation
- * start and end when set, else the span of every series the input carries.
- * An outer bound of prepareRun's window (which reads only the rain series
- * among them, and moves an end left unset in to the last rained day), so a
- * day outside it is never a run day, while a day inside it may still not be
- * one. Null when nothing bounds it (no series and no dates set).
+ * start and end when set, else the span of the rain series that drive it
+ * (rainDriverSpan, the one prepareRun's window starts from: the catchment rain
+ * or its station's record, CHIRPS and the forecast, the gap-filling products'
+ * ends, rain-source periods). An outer bound of prepareRun's window (which then
+ * moves an end left unset in to the last rained day), so a day outside it is
+ * never a run day, while a day inside it may still not be one. A flow or
+ * A-pan record longer than the rain never widens it. Null when nothing bounds
+ * it (no rain series and no dates set).
  */
 function runDayBounds(d: ModelInput): [number, number] | null {
+	// The settings as the run merges them (its dates, rain-source periods, gap products and catchment station).
+	const s = mergeSettings(d.settings, [], d.model.nodes);
+	const series = d.series ?? {};
+	// A catchment station with a record drives the run in the catchment gauge's place (prepareRun's catchmentStationPlan);
+	// one that is the catchment gauge holds the rain-source periods' days in its record, which the shared span adds.
+	const stationId = s.rainStations?.catchment?.stationId;
+	const stored = typeof stationId === 'string' ? (series as Record<string, DailySeries | undefined>)[stationSeriesKey(stationId)] : undefined;
+	const station = !!stored && Array.isArray(stored.values) && stored.values.length > 0;
+	const gauge = station && (d.stations?.[stationId!] as { isCatchmentGauge?: boolean } | undefined)?.isCatchmentGauge === true;
 	let first = Infinity;
 	let last = -Infinity;
-	for (const s of Object.values(d.series ?? {}) as (DailySeries | undefined)[]) {
-		if (!s || !Array.isArray(s.values) || s.values.length === 0 || !isIsoDate(s.startDate)) continue;
-		const d0 = toEpochDay(s.startDate);
-		first = Math.min(first, d0);
-		last = Math.max(last, d0 + s.values.length - 1);
+	try {
+		[first, last] = rainDriverSpan({ catchment: station ? stored : series.rain_catchment_mm, series, gapRain: station ? null : s.gapRain, rainSource: station && !gauge ? [] : s.rainSource });
+	} catch {
+		// A series with a malformed start date: no bound from the series, never a refusal (the run itself refuses it).
 	}
-	const { simulationStart, simulationEnd } = d.settings as { simulationStart?: unknown; simulationEnd?: unknown };
-	if (isIsoDate(simulationStart)) first = toEpochDay(simulationStart);
-	if (isIsoDate(simulationEnd)) last = toEpochDay(simulationEnd);
+	if (isIsoDate(s.simulationStart)) first = toEpochDay(s.simulationStart);
+	if (isIsoDate(s.simulationEnd)) last = toEpochDay(s.simulationEnd);
 	if (first === Infinity && last === -Infinity) return null;
 	return [first === Infinity ? -Infinity : first, last === -Infinity ? Infinity : last];
 }
@@ -1069,9 +1081,11 @@ function monthFallsIn(months: readonly number[], a: number, b: number): boolean 
 /**
  * Why a dated demand.scale window (engine ≥ 1.119.0) would change no day, or
  * null: its months never fall between its dates (whatever the run), or none
- * of its days, or none of its months' days, is one a run of `d` can cover
- * (runDayBounds: the simulation period as the ops before it leave it). In the
- * words of series.scale's "no day of … falls in …".
+ * of its days, or none of its months' days, is one a run of `d` applies
+ * demand factors on (runDayBounds: the simulation period as the ops before it
+ * leave it, from settings.demandFactorFrom when that is later, as a seasonal
+ * outlook member's decision date is). In the words of series.scale's "no day
+ * of … falls in …".
  */
 function datedDemandWindowProblem(d: ModelInput, from: string | undefined, to: string | undefined, months: readonly number[] | undefined): string | null {
 	const lo = from === undefined ? -Infinity : toEpochDay(from);
@@ -1079,16 +1093,22 @@ function datedDemandWindowProblem(d: ModelInput, from: string | undefined, to: s
 	const names = months ? [...months].sort((x, y) => x - y).map((m) => MONTH_ABBR[m - 1]).join(', ') : '';
 	const end = (iso: string | undefined, open: string) => (iso === undefined ? open : dayText(iso));
 	if (months && from !== undefined && to !== undefined && !monthFallsIn(months, lo, hi)) return `its months (${names}) never fall between ${dayText(from)} and ${dayText(to)}, so it would change no day`;
-	const run = runDayBounds(d);
+	let run = runDayBounds(d);
+	// Demand factors, dated ones included, apply only from settings.demandFactorFrom (run.ts, demandFactorStart).
+	const factorFrom = (d.settings as { demandFactorFrom?: unknown }).demandFactorFrom;
+	const raised = isIsoDate(factorFrom) && (!run || toEpochDay(factorFrom) > run[0]);
+	if (raised) run = [toEpochDay(factorFrom), run ? run[1] : Infinity];
 	if (!run) return null;
 	const day = (t: number) => dayText(fromEpochDay(t));
 	const span = Number.isFinite(run[0]) && Number.isFinite(run[1]) ? `${day(run[0])} – ${day(run[1])}` : Number.isFinite(run[0]) ? `from ${day(run[0])}` : `to ${day(run[1])}`;
+	const what = raised ? 'the run applies demand factors on' : 'the run can cover';
 	const a = Math.max(lo, run[0]);
 	const b = Math.min(hi, run[1]);
-	if (a > b) return `no day the run can cover (${span}) falls in ${end(from, 'its start')} – ${end(to, 'its end')}, so it would change no day`;
+	if (a > b) return `no day ${what} (${span}) falls in ${end(from, 'its start')} – ${end(to, 'its end')}, so it would change no day`;
 	if (months && !monthFallsIn(months, a, b)) {
-		const clip = run[0] > lo && run[1] < hi ? `the run’s days are ${span}` : run[0] > lo ? `the run’s days start ${day(run[0])}` : `the run’s days end ${day(run[1])}`;
-		return `none of its months (${names}) falls on a day the run can cover between ${end(from, 'its start')} and ${end(to, 'its end')} (${clip}), so it would change no day`;
+		const starts = raised ? `demand factors apply from ${day(run[0])}` : `the run’s days start ${day(run[0])}`;
+		const clip = run[0] > lo && run[1] < hi ? (raised ? `demand factors apply on ${span}` : `the run’s days are ${span}`) : run[0] > lo ? starts : `the run’s days end ${day(run[1])}`;
+		return `none of its months (${names}) falls on a day ${what} between ${end(from, 'its start')} and ${end(to, 'its end')} (${clip}), so it would change no day`;
 	}
 	return null;
 }

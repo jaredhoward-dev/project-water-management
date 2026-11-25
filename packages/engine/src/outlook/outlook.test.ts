@@ -243,6 +243,30 @@ describe('runSeasonalOutlook on the invented catchment', () => {
 		expect(outlookLevelProblems({ id: 'x', label: 'x', ops: scale(1) })).toEqual([]);
 	});
 
+	it('reports a level whose dated op falls outside the season, and the summary skips it (engine ≥ 1.119.0)', () => {
+		// 2011 is history: before the decision date (2012-10-01), so no day of the season, whether the member
+		// continues the snapshot or re-runs the history (its demand factors apply from the decision date on).
+		for (const warmStart of [true, false]) {
+			const o = runSeasonalOutlook(input, {
+				...SEASON,
+				baseRun: base,
+				warmStart,
+				analogueYears: [2004],
+				levels: [
+					{ id: 'past', label: 'Last year', ops: scale(0.8, { from: '2011-01-01', to: '2011-12-31' }) },
+					{ id: 'ok', label: '80 %', ops: scale(0.8, { from: '2012-11-01', to: '2013-02-28' }) }
+				]
+			});
+			expect(o.levels.map((l) => [l.id, l.problems.length, l.years.length])).toEqual([
+				['past', 1, 0],
+				['ok', 0, 1]
+			]);
+			expect(o.levels[0]!.problems[0]).toBe(`op 1 (demand.scale): no day the run ${warmStart ? 'can cover' : 'applies demand factors on'} (1 Oct 2012 – 30 Apr 2013) falls in 1 Jan 2011 – 31 Dec 2011, so it would change no day`);
+			expect(o.planning.ranked.map((r) => r.levelId)).toEqual(['ok']);
+			expect(o.warnings.some((w) => w.startsWith('Last year: not run ('))).toBe(true);
+		}
+	});
+
 	it('a monthly plan (R1’s months form) scales only its months of the season', () => {
 		const o = runSeasonalOutlook(input, { ...SEASON, baseRun: base, analogueYears: [2004], levels: [{ id: 'flat', label: '100 %', ops: [] }, { id: 'taper', label: 'Taper', ops: scale(0.5, { months: [3, 4] }) }] });
 		const [flat, taper] = o.levels;
