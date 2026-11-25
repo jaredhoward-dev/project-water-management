@@ -96,7 +96,8 @@ is listed as "not read", never guessed.
   separator, or a space, must group the digits in threes (`1,500`,
   `12 000`, `1.500,5`), so the other locale's decimal (`"1,5"` in a `,`
   file, `1.5` in a `;` file) is a row error that says so, never read as 15
-  or 1 500 (`parseNumber`, `allocations/parse.ts`).
+  or 1 500 (`parseNumber`, `allocations/parse.ts`). In a `,` file a cell with
+  a comma in it is quoted (`"1,500"`), as a spreadsheet saves it.
 - **One row per s21 water use** (issue #72). WARMS registers water per
   water use, per property: a 21(a) row's registered volume is a take per
   year, but a 21(b) row's is the dam's storage. So each row is read by its
@@ -133,7 +134,10 @@ is listed as "not read", never guessed.
 - **Row problems** (listed per row; those rows are not imported): an unknown
   authorisation or water source, a missing volume, a volume or storage that
   isn't a number ≥ 0, a date that isn't `YYYY-MM-DD` (or `YYYY/MM/DD`), valid
-  from after valid to, no registration number, property or farm to match by.
+  from after valid to, no registration number, property or farm to match by,
+  more cells than the header (a delimiter inside an unquoted cell: `1,500`
+  in a comma file would read as a volume of 1 and a storage of 500, so the
+  cell needs double quotes, `"1,500"`).
   A WARMS extract without an authorisation column is read as registrations;
   the template must say.
 - **Authorisation words** (`parseAuthorisation`, issue #281): "existing",
