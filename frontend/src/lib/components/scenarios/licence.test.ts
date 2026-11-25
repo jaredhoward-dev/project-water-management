@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { DecisionEvent, JobMeta, LicenceTerms } from '#lib/api/types.js';
-import { earliestEventDate, eventHeading, licensedRunFinished, licensedRunState, licensedTerms, licenceLine, nextEvents } from './licence';
+import { earliestEventDate, eventHeading, licensedRunFinished, licensedRunState, licensedTerms, licenceLine, nextEvents, runTerms } from './licence';
 
 const terms = (v: number): LicenceTerms => ({
 	ops: [{ op: 'node.set', nodeId: 'n', field: 'damCapacityM3', value: v }],
@@ -158,5 +158,24 @@ describe('licensedRunFinished (293): when the run list is read again', () => {
 		expect(licensedRunFinished(at(job('a', 'queued')), at(job('b', 'done')))).toBe(false);
 		expect(licensedRunFinished(at(null), at(job('j', 'done')))).toBe(false);
 		expect(licensedRunFinished({}, at(job('j', 'done')))).toBe(false);
+	});
+});
+
+describe('runTerms', () => {
+	const applied = 'a'.repeat(64);
+	const decided = { opsSha256: applied, licence: { inForce: true, from: 'decision' as const, eventId: null, appealPending: false }, grantedTerms: terms(80_000), decisionEvents: [] };
+	it('reads a run of the licensed terms (the background run on a decision, 293) as that, not as an edited scenario', () => {
+		expect(runTerms(terms(80_000).opsSha256, decided)).toBe('licensed');
+		// A variation's terms, once it is the one in force.
+		const varied = { ...decided, licence: { ...decided.licence, from: 'event' as const, eventId: 'e2' }, decisionEvents: [ev('e1', 'lodged'), ev('e2', 'varied', { terms: terms(70_000) })] };
+		expect(runTerms(terms(70_000).opsSha256, varied)).toBe('licensed');
+		expect(runTerms(terms(80_000).opsSha256, varied)).toBe('stale');
+	});
+	it('reads a run of the ops applied for as current, and any other as stale (positive controls)', () => {
+		expect(runTerms(applied, decided)).toBe('applied');
+		expect(runTerms('b'.repeat(64), decided)).toBe('stale');
+		// No licence in force: granted terms set aside count for nothing.
+		expect(runTerms(terms(80_000).opsSha256, { ...decided, licence: { ...decided.licence, inForce: false } })).toBe('stale');
+		expect(runTerms(applied, { opsSha256: applied })).toBe('applied');
 	});
 });
