@@ -504,6 +504,19 @@ describe('the rain feed from the catchment boundary (issue #326 B-rain)', () => 
 		expect(boundaryFeedState([feed({ ...boundary, featureId: 'other' })], now)).toBe('none');
 	});
 
+	it('with the outline’s hash on both sides, a rename isn’t a change and a same-area reshape is; a mark without it goes by the version (followups F7)', () => {
+		const H1 = 'a'.repeat(32);
+		const H2 = 'b'.repeat(32);
+		const feed = (b: typeof boundary & { geomHash?: string }) => ({ source: 'chirps', config: { cells, boundary: b } });
+		const renamed = { id: 'b1', updatedAt: '2026-10-05T09:00:00Z', geomHash: H1 };
+		expect(boundaryFeedState([feed({ ...boundary, geomHash: H1 })], renamed)).toBe('current');
+		expect(boundaryFeedState([feed({ ...boundary, geomHash: H1 })], { ...renamed, updatedAt: boundary.updatedAt, geomHash: H2 })).toBe('changed');
+		// A mark from before the hash, or a server that serves none: the version, as before.
+		expect(boundaryFeedState([feed(boundary)], renamed)).toBe('changed');
+		expect(boundaryFeedState([feed(boundary)], { ...renamed, updatedAt: boundary.updatedAt })).toBe('current');
+		expect(boundaryFeedState([feed({ ...boundary, geomHash: H1 })], { id: 'b1', updatedAt: '2026-10-05T09:00:00Z' })).toBe('changed');
+	});
+
 	it('says what Apply will do', () => {
 		const feeds = [{ id: 'f1', targetKind: 'rain_chirps_mm', targetName: '' }];
 		const fresh = { product: 'sat' as const, startDate: null };

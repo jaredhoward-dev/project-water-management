@@ -36,6 +36,8 @@ export interface BoundaryMark {
 	/** The boundary's version when its cells were taken (map_feature.updated_at). */
 	updatedAt: string;
 	areaKm2: number;
+	/** The boundary's outline hash then (backend geo/geomHash.ts, followups F7); absent on a mark written before it. */
+	geomHash?: string;
 }
 
 /** How a station API feed sends its key (backend feeds/config.ts StationAuth); the key itself is the credential. */

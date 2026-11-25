@@ -1704,8 +1704,10 @@ row names a source, where to read it and the series it merges into:
   - **New cells re-read the record** (296_feed_area_replace, the durable fix
     for #326 B-rain's "new cells only into an empty series"). A gridded feed's
     days (`chirps`, `agera5_et0`) are the weighted mean of its cells, so new
-    cells (another box or list, the catchment boundary's, a unit's redrawn
-    parcel; `config.ts sameArea`: the same grid cells with the same shares of
+    cells (another box or list, the catchment boundary's (its feed's
+    `config.boundary` mark records the outline's hash, so only a reshape, not
+    a rename or a relink, proposes them again: [maps.md § Rain from the
+    boundary](./maps.md#rain-from-the-boundary)), a unit's redrawn parcel; `config.ts sameArea`: the same grid cells with the same shares of
     the weight and the same sea-cell rule is the same area) never merge onto
     days it wrote over its old ones. A save giving such a feed new cells while
     its series holds days it wrote (`feed_days`) answers **409**
@@ -1822,7 +1824,9 @@ row names a source, where to read it and the series it merges into:
   `disabled`, and `copy-behind` (a CHIRPS feed read from our copy whose copy
   is late, [§ Our copy of the rain data](#our-copy-of-the-rain-data)). A feed
   not fetched two days after it was attached or changed is
-  stale ("the background worker may not be running"). A project with the
+  stale ("the background worker may not be running"); which of the two it
+  says goes by the instants (`updated_at` against `created_at`), so a feed
+  attached and changed on one day says "changed". A project with the
   `data_stale` or `feed_failing` alert on emails its owners and editors
   ([§ Alert emails](#alert-emails)); `data_stale` also watches each series
   an API key sends (a logger pushing to `/ingest`, which has no feed):

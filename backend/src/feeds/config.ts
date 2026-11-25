@@ -112,17 +112,36 @@ const Cell = z.object({ lat: Lat, lon: Lon, weight: z.number().finite().positive
  * boundary as it was (its id, name, and when it was last changed) and its
  * area. Only the from-boundary route writes it; the plain feed routes refuse
  * it, and a new list of cells drops it. A boundary changed since is how the
- * Map tab and the panel know to propose the cells again.
+ * Map tab and the panel know to propose the cells again (boundaryMarkCurrent):
+ * with the outline's hash (followups F7; a mark from before has none), only a
+ * new outline is a change, not a rename or a relink.
  */
 const BoundaryMark = z
 	.object({
 		featureId: z.uuid(),
 		name: z.string().max(100),
 		updatedAt: z.iso.datetime({ offset: true }),
-		areaKm2: z.number().finite().nonnegative()
+		areaKm2: z.number().finite().nonnegative(),
+		/** The boundary's outline hash (geo/geomHash.ts, followups F7); absent on a mark written before it. */
+		geomHash: z
+			.string()
+			.regex(/^[0-9a-f]{32}$/)
+			.optional()
 	})
 	.strict();
 export type BoundaryMark = z.output<typeof BoundaryMark>;
+
+/**
+ * Whether a feed's boundary mark still reads the boundary as it is now: the same feature, and, when both carry the
+ * outline's hash, the same outline (a rename or a relink bumps updatedAt and keeps it; a reshape to the same area
+ * doesn't). A mark from before the hash falls back to the version: the same updatedAt, as it always did. The
+ * frontend's feeds/boundaryState.ts holds the same rule.
+ */
+export function boundaryMarkCurrent(m: Pick<BoundaryMark, 'featureId' | 'updatedAt' | 'geomHash'>, now: { id: string; updatedAt: string; geomHash: string | null }): boolean {
+	if (m.featureId !== now.id) return false;
+	if (m.geomHash && now.geomHash) return m.geomHash === now.geomHash;
+	return Date.parse(m.updatedAt) === Date.parse(now.updatedAt);
+}
 /**
  * The land unit a feed's listed cells came from (issue #482,
  * feeds/fromUnits.ts): the unit (its node id), its map polygon (the farm

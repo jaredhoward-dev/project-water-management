@@ -144,6 +144,11 @@ describe('feedHealth', () => {
 		expect(feedHealth(retargeted, today, 'UTC')).toEqual({ state: 'pending', stale: false, staleAfterDays: 12, reason: { code: 'waiting' } });
 		// Still unfetched two days on: the worker may not be running, counted from the save.
 		expect(feedHealth(retargeted, '2026-09-28', 'UTC')).toMatchObject({ state: 'stale', reason: { code: 'not-fetched', since: '2026-09-25', after: 'changed' } });
+		// Attached and changed on the same day: still "changed", the instants decide, not the dates.
+		const sameDay = { ...retargeted, createdAt: '2026-09-25T08:00:00Z' };
+		expect(feedHealth(sameDay, '2026-09-28', 'UTC')).toMatchObject({ state: 'stale', reason: { code: 'not-fetched', since: '2026-09-25', after: 'changed' } });
+		// Saved once (updated_at = created_at, as Date and string alike): "attached".
+		expect(feedHealth({ ...sameDay, updatedAt: new Date('2026-09-25T08:00:00Z') }, '2026-09-28', 'UTC')).toMatchObject({ reason: { code: 'not-fetched', after: 'attached' } });
 		// Fetched since, finding nothing: ok, with no newest day.
 		expect(feedHealth({ ...retargeted, lastAttemptAt: '2026-09-25T09:05:00Z', lastSuccessAt: '2026-09-25T09:05:00Z' }, today, 'UTC')).toMatchObject({
 			state: 'ok',

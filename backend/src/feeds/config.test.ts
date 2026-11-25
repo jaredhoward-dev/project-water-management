@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { CHIRPS_V3_RNL, CHIRPS_V3_SAT } from '@water-management/engine';
 import {
 	bboxCellCount,
+	boundaryMarkCurrent,
 	bboxCells,
 	BBOX_MAX_CELLS,
 	BBOX_MAX_ROWS,
@@ -402,5 +403,42 @@ describe('sameArea and the area confirmation (296_feed_area_replace)', () => {
 		expect(isAreaReplace('CHIRPS/2.0')).toBe(false);
 		expect(isAreaReplace('')).toBe(false);
 		expect(isAreaReplace(null)).toBe(false);
+	});
+});
+
+describe('boundaryMarkCurrent: does a feed still read the catchment boundary as it is (followups F7)', () => {
+	const H1 = 'a'.repeat(32);
+	const H2 = 'b'.repeat(32);
+	const mark = { featureId: 'f1', updatedAt: '2026-10-01T08:00:00.000Z', geomHash: H1 };
+	const now = { id: 'f1', updatedAt: '2026-10-01T08:00:00.000Z', geomHash: H1 };
+
+	it('with the hash on both sides, the outline decides: a rename or a relink is not a change, a same-area reshape is', () => {
+		expect(boundaryMarkCurrent(mark, now)).toBe(true);
+		// Renamed or relinked since: updatedAt moved, the outline didn't.
+		expect(boundaryMarkCurrent(mark, { ...now, updatedAt: '2026-10-05T09:00:00.000Z' })).toBe(true);
+		// Reshaped (to the same area or not): another hash, whatever updatedAt says.
+		expect(boundaryMarkCurrent(mark, { ...now, updatedAt: '2026-10-05T09:00:00.000Z', geomHash: H2 })).toBe(false);
+		expect(boundaryMarkCurrent(mark, { ...now, geomHash: H2 })).toBe(false);
+		// Another feature is never this boundary.
+		expect(boundaryMarkCurrent(mark, { ...now, id: 'f2' })).toBe(false);
+	});
+
+	it('a mark from before the hash falls back to the version, as it always did', () => {
+		const old = { featureId: 'f1', updatedAt: '2026-10-01T08:00:00.000Z' };
+		expect(boundaryMarkCurrent(old, now)).toBe(true);
+		// The same instant written another way is the same version.
+		expect(boundaryMarkCurrent(old, { ...now, updatedAt: '2026-10-01T10:00:00+02:00' })).toBe(true);
+		expect(boundaryMarkCurrent(old, { ...now, updatedAt: '2026-10-05T09:00:00.000Z' })).toBe(false);
+		// A boundary with no hash (not a polygon) also falls back.
+		expect(boundaryMarkCurrent(mark, { ...now, geomHash: null })).toBe(true);
+		expect(boundaryMarkCurrent(mark, { ...now, updatedAt: '2026-10-05T09:00:00.000Z', geomHash: null })).toBe(false);
+	});
+
+	it('the mark takes the hash, and refuses one that isn’t 32 hex digits', () => {
+		const cells = [{ lat: -33.675, lon: 21.225 }];
+		const boundary = { featureId: '00000000-0000-4000-8000-000000000001', name: 'B', updatedAt: '2026-10-01T08:00:00.000Z', areaKm2: 1 };
+		expect(FeedInput.safeParse({ source: 'chirps', config: { cells, boundary: { ...boundary, geomHash: H1 } }, targetKind: 'rain_chirps_mm' }).success).toBe(true);
+		expect(FeedInput.safeParse({ source: 'chirps', config: { cells, boundary }, targetKind: 'rain_chirps_mm' }).success).toBe(true);
+		expect(FeedInput.safeParse({ source: 'chirps', config: { cells, boundary: { ...boundary, geomHash: 'xyz' } }, targetKind: 'rain_chirps_mm' }).success).toBe(false);
 	});
 });

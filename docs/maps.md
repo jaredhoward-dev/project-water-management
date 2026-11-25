@@ -933,7 +933,8 @@ someone takes it again. These checks say so:
   area; it is never guessed at (`map/stale.ts`, the backend's
   `acceptances.ts outlineChanged`). A value from before 273 records nothing,
   so it is never flagged. The boundary's rain feed keeps its own flag (the
-  Getting started pill, MapRainLink).
+  Getting started pill, MapRainLink), by the same hash when its mark has
+  one, else by the version ([§ Rain from the boundary](#rain-from-the-boundary)).
 - **The outline's hash** (followups F7, `geo/geomHash.ts`): the server
   serves it on every polygon feature (`geomHash`, null for points and
   lines), and each stamp records it as the feature had it. It is the first
@@ -948,7 +949,8 @@ someone takes it again. These checks say so:
   outline. Changing the normalisation would read every stored stamp as
   redrawn, so a new one needs a new field, never a new meaning for
   `geomHash`. Each stamp is computed where it is written, on the server
-  (MAP from the grid, land cover, evaporation, Rain for each unit), and the
+  (MAP from the grid, land cover, evaporation, Rain for each unit, the
+  boundary's rain and reference ET feeds' `boundary` mark), and the
   WR2012 lookup copies the served hash; a project copy keeps the stamps'
   hashes, since its features are the same outlines.
 - **The rest of the catchment's area** (F8): the unit Start made beside
@@ -1159,7 +1161,14 @@ boundary itself rather than over a box around it.
   #521), for editors and owners. The Map tab shows one
   line, for editors, while a boundary exists and no CHIRPS feed reads it, or
   one read it before it was redrawn (`map/MapRainLink.svelte`); its link
-  opens the proposal (`?tab=series&rain=boundary#data-feeds`).
+  opens the proposal (`?tab=series&rain=boundary#data-feeds`). Redrawn means
+  another outline: when the feed's mark and the map both carry the
+  outline's hash ([§ Checks](#checks), followups F7), the hashes decide, so
+  a rename or a relink (which bump `updatedAt`) leaves the feed current and
+  a reshape that keeps the area doesn't; a mark from before the hash goes by
+  the version (`updatedAt`), as it always did (`feeds/config.ts
+  boundaryMarkCurrent`, the frontend's `feeds/boundaryState.ts`). The
+  proposal's "already reads this boundary" follows the same rule.
 - **The proposal** (`GET /projects/:id/feeds/chirps/from-boundary`, editor):
   the boundary (name, area, when it was last changed), the CHIRPS v3 cells
   it covers with how much of them lies inside, the method ("area-weighted
@@ -1173,8 +1182,8 @@ boundary itself rather than over a box around it.
   gives the cells to a CHIRPS feed whose series holds no days yet. It names
   the boundary version it was shown (`updatedAt`), so a boundary redrawn in
   between is refused (409) instead of applied unseen. The feed's config keeps
-  the boundary it came from (`config.boundary`: id, name, version, area),
-  which only this route writes; the History says "Set up the CHIRPS feed …
+  the boundary it came from (`config.boundary`: id, name, version, area and
+  the outline's hash, `geomHash`), which only this route writes; the History says "Set up the CHIRPS feed …
   from the catchment boundary “…” (N cells)".
 - **No splicing.** A feed's existing days were averaged over its old cells,
   so new cells never merge onto them: Apply gives them only to a feed whose

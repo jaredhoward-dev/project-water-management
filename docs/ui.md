@@ -4447,7 +4447,9 @@ map" card) stays the schematic; this is the geography.
   **Rain from the boundary** (issue #326 B-rain: "No rain feed reads this
   catchment boundary yet." with **Set up the rain feed from the boundary**,
   or "The boundary changed since the rain feed took its cells." with
-  **Propose its cells again**; both open Data → Data feeds with the
+  **Propose its cells again**, only for another outline: a rename or a
+  relink isn't one when the feed's mark has the outline's hash (maps.md §
+  Rain from the boundary); both open Data → Data feeds with the
   proposal showing). `MapRainLink.svelte` reads the feed list (its hidden
   marker's `data-state`, `loading`, `current`, `changed`, `none`, `error`,
   says when it is in). The pill goes once both are done, and doesn't show

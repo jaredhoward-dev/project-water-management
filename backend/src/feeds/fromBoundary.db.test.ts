@@ -71,7 +71,7 @@ describe('the rain feed from the catchment boundary', () => {
 		// Positive control: the owner.
 		const p = (await owner.call('GET', at(pid))).body;
 		expect(p.canApply).toBe(true);
-		expect(p.boundary).toEqual({ featureId: b.id, name: 'Test catchment', updatedAt: b.updatedAt, areaKm2: expect.any(Number) });
+		expect(p.boundary).toEqual({ featureId: b.id, name: 'Test catchment', updatedAt: b.updatedAt, areaKm2: expect.any(Number), geomHash: expect.stringMatching(/^[0-9a-f]{32}$/) });
 		expect(p.boundary.areaKm2).toBeCloseTo(b.areaM2 / 1e6, 2);
 		// 0.12° × 0.10° on the 0.05° grid: 3 whole-or-part columns × 3 rows (the edges cut cells at 21.20/21.35 and −33.80/−33.65).
 		expect(p.cells).toHaveLength(9);
@@ -96,6 +96,39 @@ describe('the rain feed from the catchment boundary', () => {
 
 		// Applied: the proposal now says so, and offers nothing to do.
 		expect((await owner.call('GET', at(pid))).body.apply).toEqual({ action: 'none', feedId: r.body.feed.id });
+	});
+
+	it('a rename doesn’t make the feed’s boundary stale, a same-area reshape does; a mark from before the outline hash goes by the version (followups F7)', async () => {
+		const { owner, pid } = await setup();
+		const b = await drawBoundary(owner, pid);
+		const r = await apply(owner, pid, b);
+		expect(r.status, JSON.stringify(r.body)).toBe(201);
+		const feedId = r.body.feed.id as string;
+		expect(r.body.feed.config.boundary.geomHash).toMatch(/^[0-9a-f]{32}$/);
+		const none = { action: 'none', feedId };
+
+		// Renamed: updatedAt moves, the outline doesn't, so the feed still reads it.
+		const renamed = await owner.call('PATCH', `/projects/${pid}/map/features/${b.id}`, { name: 'Renamed catchment' });
+		expect(renamed.status, JSON.stringify(renamed.body)).toBe(200);
+		expect(renamed.body.feature.updatedAt).not.toBe(b.updatedAt);
+		expect((await owner.call('GET', at(pid))).body.apply).toEqual(none);
+
+		// Reshaped to the same area (moved east by one cell's width, same latitudes): another outline, proposed again.
+		const shifted = await owner.call('PATCH', `/projects/${pid}/map/features/${b.id}`, { geometry: { type: 'Polygon', coordinates: [ring(21.26, -33.79, 21.38, -33.69)] } });
+		expect(shifted.status, JSON.stringify(shifted.body)).toBe(200);
+		expect(shifted.body.feature.areaM2).toBeCloseTo(b.areaM2, -1);
+		expect((await owner.call('GET', at(pid))).body.apply.action).not.toBe('none');
+
+		// Back to the first outline: the mark's hash matches again.
+		expect((await owner.call('PATCH', `/projects/${pid}/map/features/${b.id}`, { geometry: CATCHMENT })).status).toBe(200);
+		expect((await owner.call('GET', at(pid))).body.apply).toEqual(none);
+
+		// A mark from before the hash: the version decides, as before. Its own version is current; a rename then isn't.
+		const [{ updated_at: v }] = await asOwner(`SELECT to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS updated_at FROM map_feature WHERE id = $1`, [b.id]);
+		await asOwner(`UPDATE data_feed SET config = jsonb_set(config #- '{boundary,geomHash}', '{boundary,updatedAt}', to_jsonb($2::text)) WHERE id = $1`, [feedId, v]);
+		expect((await owner.call('GET', at(pid))).body.apply).toEqual(none);
+		expect((await owner.call('PATCH', `/projects/${pid}/map/features/${b.id}`, { name: 'Renamed again' })).status).toBe(200);
+		expect((await owner.call('GET', at(pid))).body.apply.action).not.toBe('none');
 	});
 
 	it('says clearly when there is no boundary, and refuses one too big for a feed', async () => {

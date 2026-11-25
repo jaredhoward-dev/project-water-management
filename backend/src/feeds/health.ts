@@ -248,7 +248,9 @@ export function feedHealth(f: HealthInput, today: string, timeZone: string, copy
 	if (stale) {
 		if (newest) return out('stale', staleAfterDays < 0 ? { code: 'old-forecast', newest } : { code: 'old-data', newest });
 		if (!unfetched) return out('stale', { code: 'no-data' });
-		return out('stale', { code: 'not-fetched', since: iso(since), after: iso(since) === iso(f.createdAt) ? 'attached' : 'changed' });
+		// Attached or changed by the instant, not the day: a feed attached and changed on one day was changed.
+		const changed = new Date(since).getTime() !== new Date(f.createdAt).getTime();
+		return out('stale', { code: 'not-fetched', since: iso(since), after: changed ? 'changed' : 'attached' });
 	}
 	if (unfetched || !f.lastAttemptAt) return out('pending', { code: 'waiting' });
 	return out('ok', { code: 'ok', newest, checked: iso(f.lastSuccessAt ?? f.lastAttemptAt) });

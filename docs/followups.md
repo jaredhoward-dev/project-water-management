@@ -8469,6 +8469,11 @@ editor's and a large boundary's notes in step 4
       canonically, holes and parts sorted), the server serves it on every
       polygon feature, and the hashes decide when both sides have one; a
       stamp from before falls back to the area rule (maps.md § Checks).
+      The catchment boundary's rain and reference ET feeds' `boundary` mark
+      got the hash later (2026-11-24): a rename or a relink of the boundary
+      no longer reads as a redraw on the Map's Getting started pill or the
+      proposal; a mark from before still goes by the version (maps.md §
+      Rain from the boundary).
 
 ## Planning outputs against the mock-ups (2026-11-03)
 
