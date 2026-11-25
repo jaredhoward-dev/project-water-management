@@ -147,13 +147,15 @@ function baseInput(opts: { rule?: DeclaredUncertaintyRule | null; reserve?: bool
 	return input;
 }
 
-/** The application: Farm two builds a dam and doubles its maize. */
+/** The application: Farm two builds a dam on the river, passing inflow up to the EWR (issue #831), and doubles its maize. */
 function applicationInput(base: ModelInput): ModelInput {
 	return {
 		...base,
 		model: {
 			...base.model,
-			nodes: base.model.nodes.map((n) => (n.id === 'F2' ? { ...n, pctRunoffToDam: 1, pctUpstreamToDam: 1, damCapacityM3: 1.5e6, damAreaFullM2: 3e5 } : n)),
+			nodes: base.model.nodes.map((n) =>
+				n.id === 'F2' ? { ...n, pctRunoffToDam: 1, pctUpstreamToDam: 1, damCapacityM3: 1.5e6, damAreaFullM2: 3e5, damReleaseRule: 'passInflow' as const, damReleaseM3Day: null } : n
+			),
 			cropAreas: base.model.cropAreas.map((a) => (a.nodeId === 'F2' ? { ...a, areaM2: 600_000 } : a))
 		}
 	};
@@ -629,10 +631,35 @@ describe('licensing checks on the river abstraction (issue #54, #90 Q15 and Q16,
 	});
 	const withOfftake = (t: import('../project').Transfer) => (m: Model): Model => ({ ...m, transfers: [...m.transfers, t] });
 
-	it('passes both on the fixture (positive control): no unit takes from the river, and the application adds none', () => {
+	it('passes both on the fixture (positive control): no unit pumps from the river, and the application’s dam on the river passes inflow', () => {
 		expect(check(input(), 'pumpCapacity')).toMatchObject({ passed: true, blocksIssue: true, refuses: false, fix: null });
+		// The dam on the river is bounded by the dam, not a pump: still no river pump in either run.
 		expect(check(input(), 'pumpCapacity')!.detail).toMatch(/^No unit, other water user or off-take takes from the river in either run/);
-		expect(check(input(), 'protectsEwr')).toMatchObject({ passed: true, blocksIssue: true, refuses: false, detail: 'The application adds or changes no river abstraction on the applicant’s units.' });
+		expect(check(input(), 'protectsEwr')).toMatchObject({
+			passed: true,
+			blocksIssue: true,
+			refuses: false,
+			detail: 'Farm two’s dam on the river (what it catches) leaves the EWR, or a hands-off flow, in the river before taking anything, in every month it takes.'
+		});
+	});
+
+	it('stops an application whose new dam on the river releases nothing (issue #831): what it catches is a take; pass inflow passes', () => {
+		const ops: ScenarioOp[] = [{ op: 'node.set', nodeId: 'F2', field: 'damCapacityM3', value: 1.5e6 }];
+		for (const release of [{ damReleaseRule: 'none' as const }, { damReleaseRule: 'fixed' as const, damReleaseM3Day: new Array(12).fill(500) }, { damReleaseRule: 'none' as const, handsOffEwr: true }]) {
+			const open = withModels({ app: setNode('F2', release), ops });
+			const c = check(open, 'protectsEwr')!;
+			expect(c.passed).toBe(false);
+			expect(c.detail).toMatch(/^Farm two’s dam on the river \(what it catches\) keeps neither the EWR nor a hands-off flow/);
+			expect(c.fix).toMatch(/give it the Pass inflow release rule \(Network › the unit › Dam survey and releases\)/);
+			expect(check(open, 'pumpCapacity')!.passed).toBe(true);
+			expect(evidenceReport(open).issuable).toBe(false);
+		}
+		// Positive controls: a pass-inflow release with amounts in every month, or the dam off the river.
+		expect(check(withModels({ app: setNode('F2', { damReleaseM3Day: new Array(12).fill(500) }), ops }), 'protectsEwr')!.passed).toBe(true);
+		expect(check(withModels({ app: setNode('F2', { damReleaseRule: 'none', pctUpstreamToDam: 0 }), ops }), 'protectsEwr')!.passed).toBe(true);
+		// The baseline's own dam on the river, untouched by a proposal, is current use: not judged.
+		const theirs = withModels({ ...both(setNode('F1', { pctUpstreamToDam: 1, damCapacityM3: 1e5 })), ops: [] });
+		expect(check(theirs, 'protectsEwr')!.passed).toBe(true);
 	});
 
 	it('stops issue on a river pump with no capacity in the baseline, naming it; a capacity passes', () => {
