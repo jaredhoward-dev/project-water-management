@@ -6829,7 +6829,9 @@ one keeps `passed_for_senior` meaning what it did.
   on-channel dam catching its own inflow, not an abstraction a hands-off
   condition applies to. Passing inflow through an on-channel dam is a
   release rule (§2.7a, pass inflow), which the pump already leaves in the
-  river. Out of scope here.
+  river. Out of scope here; the evidence pack's `protectsEwr` check judges
+  an applicant's dam on the river by that release (evidence-pack.md § What
+  stops issue on the river, issue #831).
 - *Without a dam it cuts K, M and O.* On a farm with no dam today (capacity
   0: none entered, or one not in service yet or filled with sediment,
   §2.7g), what the split and River to dam send "into the dam" is irrigated

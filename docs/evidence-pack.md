@@ -257,14 +257,16 @@ issued on it.
   dam transfer into it removed, its registered volume set or removed, an
   off-take added or changed) name the river
   abstractions to judge, as the application ran them: a river pump, River
-  to dam, a dam-less unit's take, an off-take, an other water user. Each
+  to dam, a dam-less unit's take, a dam on the river (what it catches,
+  below), an off-take, an other water user. Each
   must leave the EWR, or a set flow, in the river in **every month it can
   take**: the EWR kept (`handsOffEwr`), or a hands-off flow above 0 in each
   of those months (all twelve for a pump, the months River to dam runs for
   River to dam). A farm's binds its pump and River to dam (model.md §2.7h),
   an off-take's (one value for every month) its own take (§2.6a), and a
   pass-inflow dam release counts for the river pump, which keeps the
-  release's target (§2.7e). An other water user can't keep one in the
+  release's target (§2.7e), and is the only protection for a dam on the
+  river. An other water user can't keep one in the
   model, so the fix says to model the new take as a unit that pumps from
   the river. Under the NWA the Reserve comes first and a new licence
   normally carries a hands-off condition.
@@ -286,11 +288,28 @@ both for licensing; this is built on that recommendation):
   since a licence for the unit would carry the condition; a pump on a unit
   with no demand takes nothing and isn't named.
 
-Not covered: water an on-channel dam catches (the upstream-to-dam share into
-a dam that is there) isn't an abstraction a hands-off flow binds (model.md
-§2.7h); passing inflow through a dam is a release rule. A borehole's stream
-depletion is a lagged share of what it pumps (§2.7d), bounded by the
-borehole's own capacity.
+- *A dam on the river is judged by its release* (issue #831). What a dam
+  catches of the river (its share of the upstream flow above 0, on the days
+  it is there, under any rule but run of river) is water the river below
+  loses, so `protectsEwr` treats it as a take of the application's own
+  unit (an op that builds, raises or changes the dam names it), with or
+  without demand. A hands-off flow doesn't bind it (model.md §2.7h: it binds
+  the unit's abstractions, not its dam's catch), so only a **pass-inflow
+  release** keeps the EWR below it: up to the EWR required at the node, or
+  amounts above 0 in every month (model.md §2.7 Releases). A fixed release
+  doesn't count: it stops at dead storage and doesn't follow the EWR, so on
+  a dry day the dam can still hold back the Reserve. The fix says to give
+  the dam the Pass inflow rule, or take it off the river (its upstream
+  share to 0 %). It is bounded by the dam, so `pumpCapacity` doesn't name
+  it. Treating the catch as a take, rather than refusing an on-river dam
+  outright, follows the model: pass inflow is the compensation-flow licence
+  condition the engine already runs, and the dam's catch is what that
+  condition gives back. The dam's own runoff share isn't counted (an
+  off-channel dam's catchment, not the river's flow); pending the
+  hydrologist with the rest of this list.
+
+Not covered: a borehole's stream depletion is a lagged share of what it
+pumps (§2.7d), bounded by the borehole's own capacity.
 
 A pack drafted before `evidence-10` lists neither check in its frozen report,
 and its stored manifest still hashes to its recorded hash (nothing rebuilds

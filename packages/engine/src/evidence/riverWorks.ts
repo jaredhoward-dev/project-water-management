@@ -25,23 +25,27 @@ import { isSplitTransfer, transferDestinations } from '../network/transferSplits
  * - `user`: an other water user, which always takes from the river where it sits (§2.7c);
  * - `offtake`: a river off-take (a transfer rule with source 'river', §2.6a);
  * - `abstraction`: a demand's own river abstraction beside a unit's dam, the crops' or a demand
- *   object's (engine ≥ 1.65.0, §2.7j), with its own pump; it keeps the unit's hands-off flow.
+ *   object's (engine ≥ 1.65.0, §2.7j), with its own pump; it keeps the unit's hands-off flow;
+ * - `dam`: a dam on the river catching its upstream share (`pctUpstreamToDam` above 0) on days it is
+ *   there, under any rule but run of river (§2.7, issue #831): bounded by the dam, and only a
+ *   pass-inflow release keeps the EWR below it (§2.7 Releases), since a hands-off flow binds the
+ *   unit's abstractions, not what its dam catches (§2.7h).
  */
 export interface RiverWorks {
-	kind: 'pump' | 'divert' | 'noDam' | 'user' | 'offtake' | 'abstraction';
+	kind: 'pump' | 'divert' | 'noDam' | 'user' | 'offtake' | 'abstraction' | 'dam';
 	/** The node's id, or the transfer rule's; an abstraction's is `<node id>/<'crops' or the object's id>`. */
 	id: string;
 	/** `abstraction` only: its unit's id. */
 	nodeId?: string;
 	/** The node's name; for an off-take, its source's and destination's ("Upper → Canal head"). */
 	name: string;
-	/** Its take has a limit: a pump capacity (a size ≥ 0), River to dam's capacity, or an off-take's rate. */
+	/** Its take has a limit: a pump capacity (a size ≥ 0), River to dam's capacity, an off-take's rate, or a dam's capacity. */
 	bounded: boolean;
 	/**
 	 * It leaves the EWR, or a set flow, in the river before taking anything, in every month it can
 	 * take: the EWR kept (`handsOffEwr`), a hands-off flow above 0 in each such month, or, for a
-	 * river pump, a pass-inflow dam release (the pump keeps its target, §2.7e). Never for an other
-	 * water user, which the engine can't give one.
+	 * river pump, a pass-inflow dam release (the pump keeps its target, §2.7e). For a dam on the river,
+	 * a pass-inflow release only. Never for an other water user, which the engine can't give one.
 	 */
 	protectsEwr: boolean;
 	/** `noDam` only: the unit has a dam on other days of the run (it comes into service, or fills with sediment, inside it). */
@@ -103,6 +107,11 @@ export function nodeRiverWorks(n: NetworkNode, model: Pick<ProjectModel, 'cropAr
 	// Run of river zeroes the split and River to dam (simulate.ts); any other rule keeps them.
 	const split = rule !== 'runOfRiver';
 	if (split && dam.ever && divert) out.push({ kind: 'divert', id: n.id, name: n.name, bounded: true, protectsEwr: handsOffCovers(n, divertOn) });
+	// What a dam on the river catches of the upstream flow is water the river below loses (issue #831): a take
+	// bounded by the dam, which only a pass-inflow release gives back up to its target (§2.7 Releases). A fixed
+	// release stops at dead storage and doesn't follow the EWR, and a hands-off flow binds abstractions, not the
+	// dam's catch (§2.7h), so neither counts (the conservative side: it stops issue, never passes one).
+	if (split && dam.ever && above0(n.pctUpstreamToDam)) out.push({ kind: 'dam', id: n.id, name: n.name, bounded: true, protectsEwr: passInflowCovers(n) });
 	// A pass-inflow release doesn't count here: on a day with no dam it releases out of K + M + O only up to its
 	// target, a partial keep the check doesn't credit (the conservative side: it stops issue, never passes one).
 	const routed = above0(n.pctUpstreamToDam) || above0(n.pctRunoffToDam);
@@ -264,5 +273,7 @@ export function riverWorksName(w: RiverWorks): string {
 			return `the off-take ${w.name}`;
 		case 'abstraction':
 			return `the river abstraction ${w.name}`;
+		case 'dam':
+			return `${w.name}’s dam on the river (what it catches)`;
 	}
 }
