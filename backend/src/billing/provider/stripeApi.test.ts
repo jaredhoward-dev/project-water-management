@@ -2,7 +2,7 @@
 // live call. What each request sends (path, headers, form body) and how each
 // answer is read or refused.
 import { describe, expect, it, vi } from 'vitest';
-import { cancelSubscription, ORPHAN_REFUND_WINDOW_SECONDS, orphanCancelAndRefund, createCheckoutSession, createCustomer, expireCheckoutSession, listOpenCheckoutSessions, listOpenSubscriptions, createInvoice, createPortalSession, formEncode, STRIPE_API_VERSION, StripeApiError } from './stripeApi.js';
+import { cancelSubscription, ORPHAN_REFUND_WINDOW_SECONDS, orphanCancelAndRefund, createCheckoutSession, createCustomer, expireCheckoutSession, listOpenCheckoutSessions, listOpenSubscriptions, createInvoice, createPortalSession, FIND_INVOICE_MAX_PAGES, formEncode, STRIPE_API_VERSION, StripeApiError } from './stripeApi.js';
 
 const KEY = 'test-only-not-a-stripe-key';
 const ACCOUNT = '22222222-2222-4222-8222-222222222222';
@@ -245,6 +245,50 @@ describe('createInvoice (B2B, from the staff tool)', () => {
 		const { f, calls } = scripted({ 'GET /v1/invoices': [{ object: 'list', data: [{ id: 'in_Other', status: 'open', metadata: {} }, sent] }] });
 		expect(await createInvoice({ secretKey: KEY, fetch: f }, params)).toMatchObject({ invoiceId: 'in_New1', reused: true });
 		expect(calls).toHaveLength(1);
+	});
+
+	it('pages past the newest 100 invoices with starting_after: finds this key’s invoice on page 2', async () => {
+		const sent = { ...open, metadata: { ...open.metadata, wm_sent: 'true' } };
+		const page1 = Array.from({ length: 100 }, (_, i) => ({ id: `in_Old${i}`, status: 'paid', metadata: {} }));
+		const { f, calls } = scripted({
+			'GET /v1/invoices': [
+				{ object: 'list', has_more: true, data: page1 },
+				{ object: 'list', has_more: false, data: [sent] }
+			]
+		});
+		expect(await createInvoice({ secretKey: KEY, fetch: f }, params)).toMatchObject({ invoiceId: 'in_New1', reused: true });
+		expect(calls).toHaveLength(2);
+		const q = calls.map((c) => new URL(c.url).searchParams);
+		expect(q[0]!.get('starting_after')).toBeNull();
+		expect(q[1]!.get('starting_after')).toBe('in_Old99');
+		for (const p of q) expect([p.get('customer'), p.get('limit')]).toEqual(['cus_Test123', '100']);
+	});
+
+	it('makes a new invoice once every page is read without a match (has_more false ends the paging)', async () => {
+		const { f, calls } = scripted({
+			'GET /v1/invoices': [
+				{ object: 'list', has_more: true, data: [{ id: 'in_A', status: 'paid', metadata: {} }] },
+				{ object: 'list', has_more: false, data: [{ id: 'in_B', status: 'paid', metadata: { wm_invoice_key: 'someone-else' } }] }
+			],
+			'POST /v1/invoices': []
+		});
+		// The POST is unanswered (400): what matters is that the lookup ended and creation was tried.
+		await expect(createInvoice({ secretKey: KEY, fetch: f }, params)).rejects.toBeInstanceOf(StripeApiError);
+		expect(calls.map((c) => c.method)).toEqual(['GET', 'GET', 'POST']);
+	});
+
+	it(`refuses, logs and makes nothing after ${FIND_INVOICE_MAX_PAGES} pages, and refuses has_more with no cursor`, async () => {
+		const pages = Array.from({ length: FIND_INVOICE_MAX_PAGES + 1 }, (_, i) => ({ object: 'list', has_more: true, data: [{ id: `in_P${i}`, status: 'paid', metadata: {} }] }));
+		const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+		const a = scripted({ 'GET /v1/invoices': pages });
+		await expect(createInvoice({ secretKey: KEY, fetch: a.f }, params)).rejects.toMatchObject({ status: 502, code: 'invoice_pages' });
+		expect(a.calls).toHaveLength(FIND_INVOICE_MAX_PAGES);
+		expect(a.calls.every((c) => c.method === 'GET')).toBe(true);
+		expect(err).toHaveBeenCalledWith(expect.stringContaining('stripe_invoice_lookup_too_many'));
+		err.mockRestore();
+		const b = scripted({ 'GET /v1/invoices': [{ object: 'list', has_more: true, data: [] }] });
+		await expect(createInvoice({ secretKey: KEY, fetch: b.f }, params)).rejects.toMatchObject({ code: 'data' });
+		expect(b.calls).toHaveLength(1);
 	});
 
 	it('completes a draft this key left with its lines already on it: finalizes and sends without adding lines again', async () => {

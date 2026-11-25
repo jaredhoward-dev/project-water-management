@@ -1260,7 +1260,7 @@ are #641's checklist. Open items from building it:
       savepoint (or an exception block) per invite inside
       `app_accept_invites`, a forward migration, so only the refused one
       stays pending. Trigger: `BILLING_ENFORCED` turned on.
-- [ ] **`findInvoice` reads only the newest 100 invoices.** It lists a
+- [x] **`findInvoice` reads only the newest 100 invoices.** It lists a
       customer's invoices with `limit: 100` and no paging
       (`backend/src/billing/provider/stripeApi.ts`), so an older invoice made
       under the same key isn't found and a retry past Stripe's 24-hour
@@ -1268,6 +1268,12 @@ are #641's checklist. Open items from building it:
       Durable fix: page with `starting_after` until found or exhausted, or
       search by metadata (Stripe's invoice search). Trigger: a customer
       with near 100 invoices.
+      Done (2026-11-25): it pages with `starting_after` until found or
+      `has_more` is false, capped at `FIND_INVOICE_MAX_PAGES` (20 pages,
+      2,000 invoices), past which it logs `stripe_invoice_lookup_too_many`
+      and refuses with `invoice_pages` instead of making one. List paging,
+      not invoice search: search is eventually consistent and Stripe says
+      not to use it for read-after-write (docs/billing.md § B2B invoices).
 
 ## DB tests share the mail outbox (2026-10-02, PR #360)
 - [x] **Guard pending notices as db-setup.ts guards pending jobs.** The
