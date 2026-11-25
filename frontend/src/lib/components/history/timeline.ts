@@ -187,12 +187,21 @@ export function eventLine(e: Pick<HistoryEvent, 'kind' | 'subject'>): string {
 			return text[0]!.toUpperCase() + text.slice(1);
 		}
 		case 'member.added':
+			// handedFrom: a team admin given direct ownership when its only direct owner left the team (teams/leaveProjects.ts).
+			if (s.handedFrom) return `Made ${who} an owner, in place of ${str(s.handedFrom)}, who left the team`;
 			return s.via === 'invite' ? `${who} joined as ${role(s.role)} (accepted an invite)` : `Added ${who} as ${role(s.role)}`;
 		case 'member.removed':
 			// accountDeleted: they deleted their account (issue #112), which took them out of every project; the name reads "Deleted user".
 			if (s.accountDeleted) return `${who} deleted their account and left the project (${role(s.role)})`;
+			// leftTeam: leaving the project's team, or being removed from it, takes their direct role here too (2026-11-24).
+			if (s.leftTeam) {
+				return s.self
+					? `${who} left the project (${role(s.role)}) on leaving the team “${str(s.team)}”`
+					: `Removed ${who} (${role(s.role)}) with their removal from the team “${str(s.team)}”`;
+			}
 			return s.self ? `${who} left the project` : `Removed ${who} (${role(s.role)})`;
 		case 'member.role':
+			if (s.handedFrom) return `Changed ${who}’s role from ${role(s.from)} to ${role(s.to)}, in place of ${str(s.handedFrom)}, who left the team`;
 			return `Changed ${who}’s role from ${role(s.from)} to ${role(s.to)}`;
 		case 'member.party':
 			return s.to ? `Put ${who} in the applying party ${str(s.to)}` : `Took ${who} out of the applying party ${str(s.from)}`;

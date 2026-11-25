@@ -10,6 +10,7 @@
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { untrack } from 'svelte';
 	import { focusAfterRemove } from '#lib/a11y/focusAfterRemove.js';
+	import { removeMemberConfirm } from '#lib/teams/removeConfirm.js';
 	import { goto } from '$app/navigation';
 	import { openAfterClose, trackClose } from '#lib/nav/closeNav.js';
 	import { resolve } from '$app/paths';
@@ -190,21 +191,7 @@
 				: 'A team must keep at least one owner.';
 			return;
 		}
-		const ok = await confirmDialog(
-			self
-				? {
-						title: `Leave ${team?.name}?`,
-						message: "You lose access to its projects unless they're also shared with you directly.",
-						confirmLabel: 'Leave team',
-						danger: true
-					}
-				: {
-						title: 'Remove this member?',
-						message: `Remove ${m.displayName} (${m.email}) from the team? They lose access to its projects unless shared directly.`,
-						confirmLabel: 'Remove member',
-						danger: true
-					}
-		);
+		const ok = await confirmDialog(removeMemberConfirm(team?.name, m, self));
 		if (!ok) return;
 		busy = m.userId;
 		error = null;

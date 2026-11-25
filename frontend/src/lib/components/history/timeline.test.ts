@@ -103,6 +103,17 @@ describe('what an item says', () => {
 		);
 		expect(eventLine(ev('member.role', { displayName: 'Ben', from: 'viewer', to: 'editor' }))).toBe('Changed Ben’s role from viewer to editor');
 		expect(eventLine(ev('member.role', { displayName: 'Ben', from: 'viewer', to: 'contributor' }))).toBe('Changed Ben’s role from viewer to applicant');
+		// Leaving a team takes the direct role on its projects too; a project they alone owned passes to a team admin (2026-11-24).
+		expect(eventLine(ev('member.removed', { displayName: 'Ben', role: 'owner', self: true, team: 'Upper WUA', leftTeam: true }))).toBe(
+			'Ben left the project (owner) on leaving the team “Upper WUA”'
+		);
+		expect(eventLine(ev('member.removed', { displayName: 'Ben', role: 'editor', self: false, team: 'Upper WUA', leftTeam: true }))).toBe(
+			'Removed Ben (editor) with their removal from the team “Upper WUA”'
+		);
+		expect(eventLine(ev('member.added', { displayName: 'Ann', role: 'owner', handedFrom: 'Ben' }))).toBe('Made Ann an owner, in place of Ben, who left the team');
+		expect(eventLine(ev('member.role', { displayName: 'Ann', from: 'editor', to: 'owner', handedFrom: 'Ben' }))).toBe(
+			'Changed Ann’s role from editor to owner, in place of Ben, who left the team'
+		);
 		expect(eventLine(ev('invite.sent', { email: 'j•••@example.com', role: 'admin' }))).toBe('Invited j•••@example.com as owner');
 		expect(eventLine(ev('member.party', { displayName: 'Ben', from: null, to: 'Rooikloof Trust' }))).toBe('Put Ben in the applying party Rooikloof Trust');
 		expect(eventLine(ev('member.party', { displayName: 'Ben', from: 'Rooikloof Trust', to: null }))).toBe('Took Ben out of the applying party Rooikloof Trust');

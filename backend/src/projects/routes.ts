@@ -658,11 +658,13 @@ export const projectRoutes = new Hono<AuthEnv>()
 		});
 	})
 	.delete('/:id/members/:userId', async (c) => {
-		const { id, userId } = c.req.param();
+		const id = c.req.param('id');
+		// A uuid's case doesn't change whom it names: your own id in capitals is still you (leaving, not removing).
+		const userId = c.req.param('userId').toLowerCase();
 		return withUser(c.get('userId'), async (db) => {
 			// Anyone may leave, a farmer included; only an owner removes others.
 			const role = await requireRole(db, id, 'farmer');
-			const self = userId === c.get('userId');
+			const self = userId === c.get('userId').toLowerCase();
 			if (!self && role !== 'owner') throw new ApiError(403, 'requires owner role');
 			// Removing someone else is an owner's action: two-step sign-in where the project requires it (auth/stepUp.ts). Leaving isn't.
 			if (!self) await requireProjectStepUp(db, id);
