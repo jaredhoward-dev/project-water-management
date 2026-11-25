@@ -67,6 +67,12 @@ const seriesMap = (out: ModelOutput): SeriesMap => new Map(out.series.map((s) =>
 // rain_source (every run with rain from engine 1.27.0) is NaN where no source has a value, as rain_final is.
 // observed_flow_filled / observed_flow_other_filled (engine ≥ 1.23.0) are NaN on every day the gap fill didn't fill.
 // rain_chirps_mapped (engine ≥ 1.53.0, the CHIRPS gap map) is NaN where rain_chirps_corrected is (checkChirpsGapMap).
+/** Each day's calendar month (1–12), monthOfEpochDay(day0 + t), for a day loop that reads it many times. */
+function calendarMonths(day0: number, days: number): Uint8Array {
+	const m = new Uint8Array(days);
+	for (let t = 0; t < days; t++) m[t] = monthOfEpochDay(day0 + t);
+	return m;
+}
 /**
  * A cap's room and left columns are blank (NaN) on a day the source isn't capped, none of the unit's
  * allocations of it being in force (engine ≥ 1.70.0); checkAllocations holds them finite on every other day.
@@ -639,17 +645,21 @@ function boreholeReplay(b: PlanBorehole | undefined, day0: number) {
 	};
 	const withDam = order(false);
 	const withoutDam = order(true);
+	// The day's groundwater room left, and one pump step, made once rather than each day (a closure a day was most
+	// of this replay's cost on a long run).
+	let gLeft = Infinity;
+	const pump = (k: number, want: number) => {
+		const u = units[k]!;
+		const v = Math.max(0, Math.min(u.capacityM3Day, u.annualCapM3 - used[k]!, want, gLeft));
+		used[k]! += v;
+		gLeft -= v;
+		return v;
+	};
 	return (t: number, D: number, qPrev: number, avail: number, dead: number, cap: number, river = 0, rule: PlanSupply['rule'] = 1, sRoom = Infinity, gRoom = Infinity, dayD = D) => {
-		if (monthOfEpochDay(day0 + t) === 10 && (t === 0 || monthOfEpochDay(day0 + t - 1) !== 10)) used.fill(0);
+		// A new water year (1 October) restarts each unit's annual cap; with no units there is nothing to restart.
+		if (units.length > 0 && monthOfEpochDay(day0 + t) === 10 && (t === 0 || monthOfEpochDay(day0 + t - 1) !== 10)) used.fill(0);
 		const { primary, toDam, later } = cap > 0 ? withDam : withoutDam;
-		let gLeft = gRoom;
-		const pump = (k: number, want: number) => {
-			const u = units[k]!;
-			const v = Math.max(0, Math.min(u.capacityM3Day, u.annualCapM3 - used[k]!, want, gLeft));
-			used[k]! += v;
-			gLeft -= v;
-			return v;
-		};
+		gLeft = gRoom;
 		let direct = 0;
 		for (const k of primary) direct += pump(k, D - direct);
 		let dam = 0;
@@ -1593,6 +1603,8 @@ export function checkWorkings(input: ModelInput, out: ModelOutput): string | nul
 	const get = seriesMap(out);
 	// Open-water evaporation depth per day and the day's rain on a dam (audit N2), from the run's own settings and rain.
 	const day0 = toEpochDay(out.startDate);
+	// Each day's calendar month, once for every farm (the day loop reads it several times a day).
+	const months = calendarMonths(day0, out.days);
 	const evapShared = lakeEvaporationMmDay(input, out.startDate, out.days);
 	// Under the A-pan per hydro unit (engine ≥ 1.117.0) a covered unit's dam loses its own row.
 	const perUnit = inputApanUnits(input);
@@ -1721,20 +1733,26 @@ export function checkWorkings(input: ModelInput, out: ModelOutput): string | nul
 		// A unit's base-flow loss and gain (engine 1.86.0, docs/model.md §2.6b): the runoff the split reads is I − loss + gain.
 		const BFL = g(BASEFLOW_LOSS_SERIES.key);
 		const BFG = g(BASEFLOW_GAIN_SERIES.key);
+		// Per take, reused day to day (set for every take before it is read): what it asked, what it pumped from the
+		// flow (its take less what its pool gave) and its pool once its level had drawn it (before any refill). A pool
+		// is drawn or refilled on a day, never both: it is drawn only once its level has used the flow, which leaves
+		// nothing to refill it.
+		const asks: number[] = [];
+		const fromFlow: number[] = [];
+		const heldAfter: number[] = [];
 		for (let t = 0; t < out.days; t++) {
 			if (SET) qPrev += SET[t]!;
 			const gr = gross![t]!, ef = eff![t]!, f = F![t]!, d = D![t]!, gg = G![t]!, h = H![t]!, i = BFL || BFG ? I![t]! - (BFL?.[t] ?? 0) + (BFG?.[t] ?? 0) : I![t]!, j = J![t]!, k = K![t]!, l = L![t]!, m = M![t]!;
 			const nn = N![t]!, o = O![t]!, p = P![t]!, q = Q![t]!, r = R![t]!, ss = S![t]!, tt = T![t]!, u = U![t]!, v = V![t]!;
-			const where = `${n.id} day ${t}`;
 			const kd = ks ? ks[t]! : 1;
 			const cap = cap0 * kd;
 			const dead = kd === 1 ? dead0 : dead0 * kd;
 			// The dam-level triggers read the storage at the entered capacity's scale.
 			const qLevel = kd === 1 ? qPrev : kd > 0 ? qPrev / kd : 0;
-			if (CAPS && !near(CAPS[t]!, cap, cap0)) return `${where}: dam_capacity ${CAPS[t]} ≠ the capacity ${cap0} × ${kd}`;
+			if (CAPS && !near(CAPS[t]!, cap, cap0)) return `${n.id} day ${t}: dam_capacity ${CAPS[t]} ≠ the capacity ${cap0} × ${kd}`;
 			const df = DF[t]!;
 			if (!near(f, df * (Math.max(0, gr) - ef), df * Math.max(Math.abs(gr), Math.abs(ef))) || f < 0)
-				return `${where}: crop requirement ${f} ≠ ${scaled ? `demand factor ${df} × (` : ''}MAX(0, gross ${gr}) − effective rain used ${ef}${scaled ? ')' : ''}`;
+				return `${n.id} day ${t}: crop requirement ${f} ≠ ${scaled ? `demand factor ${df} × (` : ''}MAX(0, gross ${gr}) − effective rain used ${ef}${scaled ? ')' : ''}`;
 			const lvl = LV ? LV[t]! : 0;
 			let dr = DR ? DR[t]! : d;
 			// River abstractions (engine ≥ 1.65.0): each takes at most MIN(what it asks, its pump), an object's take is
@@ -1743,12 +1761,6 @@ export function checkWorkings(input: ModelInput, out: ModelOutput): string | nul
 			let dDay = d;
 			let gRivT = 0;
 			let poolChg = 0;
-			const asks: number[] = [];
-			// Per take (engine ≥ 1.66.0): what it pumped from the flow (its take less what its pool gave) and its pool
-			// once its level had drawn it (before any refill). A pool is drawn or refilled on a day, never both: it is
-			// drawn only once its level has used the flow, which leaves nothing to refill it.
-			const fromFlow: number[] = [];
-			const heldAfter: number[] = [];
 			const cropAsk = rule ? (f * (1 - checkedCut(rule, lvl, 'crops'))) / e : f / e;
 			if (riv || shares) {
 				const objAsk = (k: number) => (rule ? checkedObjectDemand(objs!.demand[k]![t]!, checkedCut(rule, lvl, objs!.category[k]!), objs!.floor[k]!) : objs!.demand[k]![t]!);
@@ -1762,17 +1774,18 @@ export function checkWorkings(input: ModelInput, out: ModelOutput): string | nul
 					}
 			}
 			if (riv) {
+				asks.length = 0;
 				const objAsk = (k: number) => (rule ? checkedObjectDemand(objs!.demand[k]![t]!, checkedCut(rule, lvl, objs!.category[k]!), objs!.floor[k]!) : objs!.demand[k]![t]!);
 				for (let a = 0; a < riv.takes.length; a++) {
 					const x = riv.takes[a]!;
 					const ask = x.obj < 0 ? cropAsk * riv.cropShare : objAsk(x.obj);
 					asks.push(ask);
 					const v = riv.got[a]![t]!;
-					if (v < -tol(0) || v > Math.min(ask, x.pumpM3Day) + tol(ask)) return `${where}: river abstraction ${x.key} pumped ${v}, outside [0, MIN(its demand ${ask}, pump ${x.pumpM3Day})]`;
+					if (v < -tol(0) || v > Math.min(ask, x.pumpM3Day) + tol(ask)) return `${n.id} day ${t}: river abstraction ${x.key} pumped ${v}, outside [0, MIN(its demand ${ask}, pump ${x.pumpM3Day})]`;
 					// Its unmet demand (engine ≥ 1.111.0): take + short = its demand after the restriction, short ≥ 0.
 					const sh = riv.short[a]![t]!;
-					if (sh < -tol(0) || !near(v + sh, ask, ask)) return `${where}: river abstraction ${x.key} pumped ${v} and was short ${sh}, which don't add up to its demand ${ask} after the restriction`;
-					if (x.obj >= 0 && !near(objs!.supplied[x.obj]![t]!, v, v)) return `${where}: demand object ${x.key} was supplied ${objs!.supplied[x.obj]![t]}, not the ${v} its river abstraction pumped`;
+					if (sh < -tol(0) || !near(v + sh, ask, ask)) return `${n.id} day ${t}: river abstraction ${x.key} pumped ${v} and was short ${sh}, which don't add up to its demand ${ask} after the restriction`;
+					if (x.obj >= 0 && !near(objs!.supplied[x.obj]![t]!, v, v)) return `${n.id} day ${t}: demand object ${x.key} was supplied ${objs!.supplied[x.obj]![t]}, not the ${v} its river abstraction pumped`;
 					gRivT += v;
 					fromFlow[a] = v;
 					heldAfter[a] = 0;
@@ -1791,20 +1804,20 @@ export function checkWorkings(input: ModelInput, out: ModelOutput): string | nul
 			// Another unit's dam's share of the crops (engine ≥ 1.73.0), within what the unit asked of it.
 			const gin = RIN?.[t] ?? 0;
 			const rout = ROUT?.[t] ?? 0;
-			if (gin < -tol(0) || gin > (shares ? shares.remote * cropAsk : 0) + tol(cropAsk)) return `${where}: supplied ${gin} from another unit's dam, outside [0, its share of the crop demand ${shares ? shares.remote * cropAsk : 0}]`;
+			if (gin < -tol(0) || gin > (shares ? shares.remote * cropAsk : 0) + tol(cropAsk)) return `${n.id} day ${t}: supplied ${gin} from another unit's dam, outside [0, its share of the crop demand ${shares ? shares.remote * cropAsk : 0}]`;
 			const gd0 = riv ? gg - gRivT - gin : gg - gin;
 			if (objs) {
 				const cuts = rule ? { cut: (c: DemandObject['category']) => checkedCut(rule, lvl, c), crop: (cds * f * (1 - checkedCut(rule, lvl, 'crops'))) / e } : null;
-				const bad = checkObjectsDay(objs, t, (monthOfEpochDay(day0 + t) + 2) % 12, df, (cds * f) / e, gd0, where, SC ? SC[t]! : df, KF ? KF[t]! : 1, t >= abstractFrom, objFactors, cuts, riv?.objOnRiver ?? null);
+				const bad = checkObjectsDay(objs, t, (months[t]! + 2) % 12, df, (cds * f) / e, gd0, `${n.id} day ${t}`, SC ? SC[t]! : df, KF ? KF[t]! : 1, t >= abstractFrom, objFactors, cuts, riv?.objOnRiver ?? null);
 				if (bad) return bad;
 				let od = 0;
 				for (const x of objs.demand) od += x[t]!;
-				if (!near(d, f / e + od, Math.max(f, od))) return `${where}: demand ${d} ≠ crop requirement ${f} ÷ efficiency ${e} + the demand objects' ${od}`;
-			} else if (!near(d, f / e, f)) return `${where}: demand ${d} ≠ crop requirement ${f} ÷ efficiency ${e}`;
-			if (!near(k + l, h, 0) || k < 0 || k > h * n.pctUpstreamToDam + tol(h)) return `${where}: upstream split K ${k} + L ${l} ≠ H ${h}`;
-			if (!near(m + nn, i, 0) || m < 0 || m > i * n.pctRunoffToDam + tol(i)) return `${where}: runoff split M ${m} + N ${nn} ≠ I ${i}`;
-			const divCap = divertCapacityToday(divertOf, monthOfEpochDay(day0 + t));
-			if (o < 0 || o > Math.min(divCap, l + nn) + tol(l + nn)) return `${where}: diverted ${o} outside [0, MIN(capacity ${divCap}, L + N)]`;
+				if (!near(d, f / e + od, Math.max(f, od))) return `${n.id} day ${t}: demand ${d} ≠ crop requirement ${f} ÷ efficiency ${e} + the demand objects' ${od}`;
+			} else if (!near(d, f / e, f)) return `${n.id} day ${t}: demand ${d} ≠ crop requirement ${f} ÷ efficiency ${e}`;
+			if (!near(k + l, h, 0) || k < 0 || k > h * n.pctUpstreamToDam + tol(h)) return `${n.id} day ${t}: upstream split K ${k} + L ${l} ≠ H ${h}`;
+			if (!near(m + nn, i, 0) || m < 0 || m > i * n.pctRunoffToDam + tol(i)) return `${n.id} day ${t}: runoff split M ${m} + N ${nn} ≠ I ${i}`;
+			const divCap = divertCapacityToday(divertOf, months[t]!);
+			if (o < 0 || o > Math.min(divCap, l + nn) + tol(l + nn)) return `${n.id} day ${t}: diverted ${o} outside [0, MIN(capacity ${divCap}, L + N)]`;
 			{
 				// River to dam's replay (docs/model.md §2.7c, §2.7h): O₀ = MIN(capacity, L + N), then the senior
 				// users' pass and the hands-off flow cut it, so S = MAX(L + N − O₀, MIN(Zs, H + I), MIN(L + N, keep)).
@@ -1812,20 +1825,20 @@ export function checkWorkings(input: ModelInput, out: ModelOutput): string | nul
 				const ror = sup !== undefined && sup.rule === 3;
 				const K0 = ror ? 0 : Math.min(h * n.pctUpstreamToDam, h);
 				const M0 = ror ? 0 : Math.min(i * n.pctRunoffToDam, i);
-				const hk = ops.handsOff ? handsOffToday(ops.handsOff, monthOfEpochDay(day0 + t), Zc[t]!) : 0;
+				const hk = ops.handsOff ? handsOffToday(ops.handsOff, months[t]!, Zc[t]!) : 0;
 				const zs = ZS?.[t] ?? 0;
 				if (k === K0 && m === M0) {
 					const o0 = ror ? 0 : Math.min(divCap, l + nn);
 					const wantO = Math.max(0, Math.min(o0, l + nn - Math.max(Math.min(zs, h + i), Math.min(l + nn, hk))));
 					if (!near(o, wantO, Math.max(l, nn, zs, hk)))
-						return `${where}: diverted ${o} ≠ ${wantO} (MIN(capacity ${divCap}, L + N) less what passes for ${zs > 0 ? `the priority requirement ${zs}${hk > 0 ? ' and ' : ''}` : ''}${hk > 0 ? `the hands-off flow ${hk}` : ''})`;
-				} else if (o !== 0) return `${where}: took less of K or M into the dam (${k} of ${K0}, ${m} of ${M0}) while still diverting ${o}`;
+						return `${n.id} day ${t}: diverted ${o} ≠ ${wantO} (MIN(capacity ${divCap}, L + N) less what passes for ${zs > 0 ? `the priority requirement ${zs}${hk > 0 ? ' and ' : ''}` : ''}${hk > 0 ? `the hands-off flow ${hk}` : ''})`;
+				} else if (o !== 0) return `${n.id} day ${t}: took less of K or M into the dam (${k} of ${K0}, ${m} of ${M0}) while still diverting ${o}`;
 			}
 			const area = AREA![t]!, pd = PD![t]!, ev = EV![t]!, sp = SP![t]!;
 			const c = curve && cap > 0 && qPrev > 0 ? curveAreaAt(curve, kd === 1 ? qPrev : qPrev / kd) : null;
 			const onCurve = c && kd !== 1 ? { area: c.area, slope: c.slope / kd } : c;
 			const a = !(cap > 0 && qPrev > 0) ? 0 : onCurve ? onCurve.area : areaFull * Math.pow(Math.min(qPrev / cap, 1), b);
-			if (!near(area, a, a)) return `${where}: dam area ${area} ≠ ${onCurve ? 'the survey curve at' : `A_full ${areaFull} × (`}Q[t−1] ${qPrev}${onCurve ? '' : ` / capacity ${cap})^${b}`}`;
+			if (!near(area, a, a)) return `${n.id} day ${t}: dam area ${area} ≠ ${onCurve ? 'the survey curve at' : `A_full ${areaFull} × (`}Q[t−1] ${qPrev}${onCurve ? '' : ` / capacity ${cap})^${b}`}`;
 			const pdWant = (damRain(t) * a) / 1000;
 			const there = Math.max(qPrev + pdWant + j, 0);
 			const evRaw = (evapMmDay[t]! * a) / 1000;
@@ -1841,9 +1854,9 @@ export function checkWorkings(input: ModelInput, out: ModelOutput): string | nul
 			// nothing to seep: yesterday's water spills.
 			const spWant = cap > 0 ? Math.min(seep * qPrev, there - evWant) : 0;
 			if (!near(pd, pdWant, qPrev) || !near(ev, evWant, qPrev) || !near(sp, spWant, qPrev))
-				return `${where}: rain on dam ${pd} / evaporation ${ev} / seepage ${sp} ≠ ${pdWant} / ${evWant} / ${spWant}`;
+				return `${n.id} day ${t}: rain on dam ${pd} / evaporation ${ev} / seepage ${sp} ≠ ${pdWant} / ${evWant} / ${spWant}`;
 			const s0 = qPrev + pd - ev - sp;
-			if (s0 + j < -tol(qPrev)) return `${where}: the dam losses and transfers take it below empty (${s0 + j})`;
+			if (s0 + j < -tol(qPrev)) return `${n.id} day ${t}: the dam losses and transfers take it below empty (${s0 + j})`;
 			const xin = XIN?.[t] ?? 0;
 			const xused = XUSED?.[t] ?? 0;
 			const xdam = XDAM?.[t] ?? 0;
@@ -1857,11 +1870,11 @@ export function checkWorkings(input: ModelInput, out: ModelOutput): string | nul
 					delivered += v;
 					if (r.topUp) toppers += v;
 				}
-				if (!near(xin, delivered, delivered)) return `${where}: off-take water in ${xin} ≠ what its rules took less their losses, ${delivered}`;
-				if (!near(xused, Math.min(xin, dr, capRoomOn(RS, t)), Math.max(xin, d))) return `${where}: off-take water used ${xused} ≠ MIN(what arrived ${xin}, demand ${dr}${RS ? `, the allocation room ${RS[t]}` : ''})`;
+				if (!near(xin, delivered, delivered)) return `${n.id} day ${t}: off-take water in ${xin} ≠ what its rules took less their losses, ${delivered}`;
+				if (!near(xused, Math.min(xin, dr, capRoomOn(RS, t)), Math.max(xin, d))) return `${n.id} day ${t}: off-take water used ${xused} ≠ MIN(what arrived ${xin}, demand ${dr}${RS ? `, the allocation room ${RS[t]}` : ''})`;
 				const rest = xin - xused;
 				const wantDam = rest > 0 && toppers > 0 ? Math.min(rest, (rest * toppers) / xin) : 0;
-				if (!near(xdam, wantDam, xin)) return `${where}: off-take water into the dam ${xdam} ≠ ${wantDam} (the top-up rules' share of the ${rest} left)`;
+				if (!near(xdam, wantDam, xin)) return `${n.id} day ${t}: off-take water into the dam ${xdam} ≠ ${wantDam} (the top-up rules' share of the ${rest} left)`;
 			}
 			const xpass = xin - xused - xdam;
 			// The unit's own sources supply what the off-take water didn't.
@@ -1872,16 +1885,16 @@ export function checkWorkings(input: ModelInput, out: ModelOutput): string | nul
 			const x = REL?.[t] ?? 0;
 			// No dam today (capacity 0: not in service yet, or silted full) is no release (docs/model.md §2.7g).
 			const relNow = cap > 0 ? rel : null;
-			if (rel && !relNow && x !== 0) return `${where}: released ${x} on a day the dam has no capacity`;
+			if (rel && !relNow && x !== 0) return `${n.id} day ${t}: released ${x} on a day the dam has no capacity`;
 			if (relNow) {
-				const month = monthOfEpochDay(day0 + t);
+				const month = months[t]!;
 				const passing = l + nn - o;
 				const want =
 					relNow.rule === 1
 						? Math.max(0, Math.min(m + o + k, (relNow.m3DayByMonth ? relNow.m3DayByMonth[month]! : Zc[t]!) - passing, relNow.outletM3Day, Math.max(avail0, 0)))
 						: Math.max(0, Math.min(relNow.m3DayByMonth![month]!, relNow.outletM3Day, Math.max(avail0, 0) - dead));
-				if (x < 0 || x > relNow.outletM3Day + tol(x)) return `${where}: release ${x} outside [0, outlet ${relNow.outletM3Day}]`;
-				if (!near(x, want, availScale)) return `${where}: release ${x} ≠ ${want} (${relNow.rule === 1 ? 'pass inflow' : 'fixed'} rule)`;
+				if (x < 0 || x > relNow.outletM3Day + tol(x)) return `${n.id} day ${t}: release ${x} outside [0, outlet ${relNow.outletM3Day}]`;
+				if (!near(x, want, availScale)) return `${n.id} day ${t}: release ${x} ≠ ${want} (${relNow.rule === 1 ? 'pass inflow' : 'fixed'} rule)`;
 			}
 			const avail = avail0 - x;
 			const surface = Math.max(avail - dead, 0);
@@ -1893,13 +1906,13 @@ export function checkWorkings(input: ModelInput, out: ModelOutput): string | nul
 			let room = 0;
 			let keep = 0;
 			if (sup) {
-				if (sup.rule === 3 && (k !== 0 || m !== 0 || o !== 0)) return `${where}: run of river has no dam, but K ${k}, M ${m}, O ${o} went into it`;
+				if (sup.rule === 3 && (k !== 0 || m !== 0 || o !== 0)) return `${n.id} day ${t}: run of river has no dam, but K ${k}, M ${m}, O ${o} went into it`;
 				onRiver = sup.rule !== 2 || (onRiver ? qLevel < sup.stopM3 : qLevel < sup.triggerM3);
-				const month = monthOfEpochDay(day0 + t);
+				const month = months[t]!;
 				keep = Math.max(ZS?.[t] ?? 0, passInflowTarget(relNow, month, Zc[t]!), ops.handsOff ? handsOffToday(ops.handsOff, month, Zc[t]!) : 0);
 				if (onRiver) room = Math.max(0, Math.min(sup.pumpM3Day, ss - keep));
-				if (gRiv < 0 || gRiv > sup.pumpM3Day + tol(gRiv)) return `${where}: pumped ${gRiv} from the river, outside [0, pump capacity ${sup.pumpM3Day}]`;
-				if (gRiv > Math.max(0, ss - keep) + tol(Math.max(ss, keep))) return `${where}: pumped ${gRiv} from the river, more than the ${ss} below the dam less the ${keep} that must pass`;
+				if (gRiv < 0 || gRiv > sup.pumpM3Day + tol(gRiv)) return `${n.id} day ${t}: pumped ${gRiv} from the river, outside [0, pump capacity ${sup.pumpM3Day}]`;
+				if (gRiv > Math.max(0, ss - keep) + tol(Math.max(ss, keep))) return `${n.id} day ${t}: pumped ${gRiv} from the river, more than the ${ss} below the dam less the ${keep} that must pass`;
 			}
 			// Boreholes: primary pump first, dam-target ones into the dam, supplemental (and emergency, while the dam is below its trigger) top up what the dam leaves.
 			// The surface's room under an allocation cap, after the off-take water used (Infinity without one).
@@ -1918,32 +1931,32 @@ export function checkWorkings(input: ModelInput, out: ModelOutput): string | nul
 				wantGr = Math.max(0, Math.min(room, dsl));
 				wantGs = Math.min(surface, dsl - wantGr);
 			}
-			if (!near(gRiv, wantGr, Math.max(ss, d, keep))) return `${where}: pumped ${gRiv} from the river ≠ ${wantGr} (supply rule ${sup?.rule}, ${onRiver ? 'on the river' : 'on the dam'})`;
-			if (!near(gw, rp.direct, Math.max(availScale, d))) return `${where}: groundwater ${gw} ≠ ${rp.direct} (borehole supply order and caps)`;
-			if (!near(gd, rp.dam, Math.max(availScale, d, cap))) return `${where}: groundwater into the dam ${gd} ≠ ${rp.dam}`;
-			if (gd > 0 && avail + gd > cap + tol(Math.max(cap, availScale))) return `${where}: pumped ${gd} into a dam with no room for it`;
+			if (!near(gRiv, wantGr, Math.max(ss, d, keep))) return `${n.id} day ${t}: pumped ${gRiv} from the river ≠ ${wantGr} (supply rule ${sup?.rule}, ${onRiver ? 'on the river' : 'on the dam'})`;
+			if (!near(gw, rp.direct, Math.max(availScale, d))) return `${n.id} day ${t}: groundwater ${gw} ≠ ${rp.direct} (borehole supply order and caps)`;
+			if (!near(gd, rp.dam, Math.max(availScale, d, cap))) return `${n.id} day ${t}: groundwater into the dam ${gd} ≠ ${rp.dam}`;
+			if (gd > 0 && avail + gd > cap + tol(Math.max(cap, availScale))) return `${n.id} day ${t}: pumped ${gd} into a dam with no room for it`;
 			if (!near(gd0 - xused - gw - gRiv, wantGs, Math.max(availScale, gd, gRiv)))
-				return `${where}: supplied ${gd0}${riv ? ' on the dam side' : ''} ≠ MIN(MAX(Q[t−1] + rain on dam − evaporation − seepage + M + O + K + J${gd ? ' + groundwater into the dam' : ''} − dead storage ${dead}, 0), D ${dr}${DR ? ' after the drought restriction' : ''})${bore ? ` + groundwater ${gw}` : ''}${sup ? ` + from the river ${gRiv}` : ''}`;
+				return `${n.id} day ${t}: supplied ${gd0}${riv ? ' on the dam side' : ''} ≠ MIN(MAX(Q[t−1] + rain on dam − evaporation − seepage + M + O + K + J${gd ? ' + groundwater into the dam' : ''} − dead storage ${dead}, 0), D ${dr}${DR ? ' after the drought restriction' : ''})${bore ? ` + groundwater ${gw}` : ''}${sup ? ` + from the river ${gRiv}` : ''}`;
 			if (!near(p, avail + gd - (gd0 - xused - gw - gRiv) - rout, Math.max(availScale, gg, gd, rout)))
-				return `${where}: interim storage ${p} ≠ Q[t−1] + rain on dam − evaporation − seepage + M + O + K + J + groundwater into the dam − what the dam gave${ROUT ? ' − what it gave other units’ crops' : ''}`;
+				return `${n.id} day ${t}: interim storage ${p} ≠ Q[t−1] + rain on dam − evaporation − seepage + M + O + K + J + groundwater into the dam − what the dam gave${ROUT ? ' − what it gave other units’ crops' : ''}`;
 			// What this dam gave other units' crops (engine ≥ 1.73.0) came from its storage above dead storage after its own unit.
-			if (rout < -tol(0) || (rout > 0 && p < dead - tol(Math.max(cap, rout)))) return `${where}: gave ${rout} to other units' crops, taking the dam below its dead storage ${dead} (interim ${p})`;
-			if (!near(q, Math.min(p, cap), cap) || !near(r, Math.max(p - cap, 0), cap)) return `${where}: storage ${q} / spill ${r} don't split interim storage ${p} at capacity ${cap}`;
-			if (!near(ss, l + nn - o, Math.max(l, nn, o))) return `${where}: below-dam flow S ${ss} ≠ L + N − O`;
+			if (rout < -tol(0) || (rout > 0 && p < dead - tol(Math.max(cap, rout)))) return `${n.id} day ${t}: gave ${rout} to other units' crops, taking the dam below its dead storage ${dead} (interim ${p})`;
+			if (!near(q, Math.min(p, cap), cap) || !near(r, Math.max(p - cap, 0), cap)) return `${n.id} day ${t}: storage ${q} / spill ${r} don't split interim storage ${p} at capacity ${cap}`;
+			if (!near(ss, l + nn - o, Math.max(l, nn, o))) return `${n.id} day ${t}: below-dam flow S ${ss} ≠ L + N − O`;
 			if (ZS) {
 				// Priority users below (WP-1.33): the farm passes MIN(Zs, H + I) below the dam, and keeps nothing back without them.
 				let zIn = 0;
 				for (let k = 0; k < upZS.length; k++) zIn += arrivingSenior(upZS[k]![t]!, upLost[k], t);
 				const zs = ZS[t]!;
 				const pass = PASSED![t]!;
-				if (zs < zIn - tol(zIn)) return `${where}: priority requirement ${zs} below the ${zIn} arriving from upstream`;
-				if (ss < Math.min(zs, h + i) - tol(Math.max(h + i, zs))) return `${where}: below-dam flow S ${ss} does not pass the priority requirement MIN(${zs}, H + I)`;
-				if (pass < -tol(0) || (zs === 0 && pass !== 0)) return `${where}: kept back ${pass} for a priority requirement of ${zs}`;
+				if (zs < zIn - tol(zIn)) return `${n.id} day ${t}: priority requirement ${zs} below the ${zIn} arriving from upstream`;
+				if (ss < Math.min(zs, h + i) - tol(Math.max(h + i, zs))) return `${n.id} day ${t}: below-dam flow S ${ss} does not pass the priority requirement MIN(${zs}, H + I)`;
+				if (pass < -tol(0) || (zs === 0 && pass !== 0)) return `${n.id} day ${t}: kept back ${pass} for a priority requirement of ${zs}`;
 			}
 			if (!near(tt, unitReturn(gg, returnPerSupplied, objs, t), gg))
-				return objs ? `${where}: return flow ${tt} ≠ β·(1 − e) × the crops' part of G + Σ each demand object's return share × its part` : `${where}: return flow ${tt} ≠ β·(1 − e)·G = G × ${returnPerSupplied}`;
+				return objs ? `${n.id} day ${t}: return flow ${tt} ≠ β·(1 − e) × the crops' part of G + Σ each demand object's return share × its part` : `${n.id} day ${t}: return flow ${tt} ≠ β·(1 − e)·G = G × ${returnPerSupplied}`;
 			const spl = SPL?.[t] ?? 0;
-			if (!near(spl, sp * (1 - seepRet), sp)) return `${where}: seepage lost ${spl} ≠ seepage ${sp} × (1 − return ${seepRet})`;
+			if (!near(spl, sp * (1 - seepRet), sp)) return `${n.id} day ${t}: seepage lost ${spl} ≠ seepage ${sp} × (1 − return ${seepRet})`;
 			// What the river abstractions took out of the flow passing the dam (engine ≥ 1.65.0): their takes, less what
 			// their pools gave, plus what refilled them, = Σ take + Σ (ΔV + pool evaporation). At most that flow above what
 			// the unit must leave in the river; while flow is left over (no cap) every take got MIN(its ask, its pump) and
@@ -1951,12 +1964,12 @@ export function checkWorkings(input: ModelInput, out: ModelOutput): string | nul
 			let flowTaken = 0;
 			if (riv) {
 				flowTaken = gRivT + poolChg;
-				const month = monthOfEpochDay(day0 + t);
+				const month = months[t]!;
 				const keepR = Math.max(ZS?.[t] ?? 0, passInflowTarget(relNow, month, Zc[t]!), ops.handsOff ? handsOffToday(ops.handsOff, month, Zc[t]!) : 0);
 				const past = r + (ss - gRiv) + (sp - spl) + x + xpass;
 				const free = Math.max(0, past - keepR);
 				const sc = Math.max(past, keepR, gRivT);
-				if (flowTaken > free + tol(sc)) return `${where}: the river abstractions took ${flowTaken} from the flow passing the dam, more than the ${free} above the ${keepR} it must leave`;
+				if (flowTaken > free + tol(sc)) return `${n.id} day ${t}: the river abstractions took ${flowTaken} from the flow passing the dam, more than the ${free} above the ${keepR} it must leave`;
 				// Each pump's limit (engine ≥ 1.66.0): within the take's shortfall, only once its pump is spent, and, with
 				// no cap, at least the flow left over (the flow its level left can't be less than what was left at the end).
 				for (let a = 0; a < riv.takes.length; a++) {
@@ -1966,28 +1979,28 @@ export function checkWorkings(input: ModelInput, out: ModelOutput): string | nul
 					const pl = PLa[t]!;
 					const got = riv.got[a]![t]!;
 					const short = Math.max(0, asks[a]! - got);
-					if (pl < -tol(0) || pl > short + tol(asks[a]!)) return `${where}: river abstraction ${k.key} pump-limited ${pl}, outside [0, its shortfall ${short}]`;
+					if (pl < -tol(0) || pl > short + tol(asks[a]!)) return `${n.id} day ${t}: river abstraction ${k.key} pump-limited ${pl}, outside [0, its shortfall ${short}]`;
 					const spent = got >= k.pumpM3Day - tol(Math.max(k.pumpM3Day, asks[a]!));
-					if (pl > tol(asks[a]!) && !spent) return `${where}: river abstraction ${k.key} pump-limited ${pl} with its pump not spent (${got} of ${k.pumpM3Day})`;
-					if (!RS && spent && pl < Math.min(short, free - flowTaken) - tol(sc)) return `${where}: river abstraction ${k.key} pump-limited ${pl}, less than its shortfall ${short} while ${free - flowTaken} of the flow was left`;
+					if (pl > tol(asks[a]!) && !spent) return `${n.id} day ${t}: river abstraction ${k.key} pump-limited ${pl} with its pump not spent (${got} of ${k.pumpM3Day})`;
+					if (!RS && spent && pl < Math.min(short, free - flowTaken) - tol(sc)) return `${n.id} day ${t}: river abstraction ${k.key} pump-limited ${pl}, less than its shortfall ${short} while ${free - flowTaken} of the flow was left`;
 					// No more than was there for it after its level: the flow it may take less what it took from it (the
 					// abstractions at its level and above took at least that), plus its own pool after its draw.
 					const there = Math.max(0, free - fromFlow[a]!) + heldAfter[a]!;
-					if (pl > there + tol(sc)) return `${where}: river abstraction ${k.key} pump-limited ${pl}, more than the ${there} left for it after its level (flow and its pool)`;
+					if (pl > there + tol(sc)) return `${n.id} day ${t}: river abstraction ${k.key} pump-limited ${pl}, more than the ${there} left for it after its level (flow and its pool)`;
 				}
 				if (!RS && free - flowTaken > tol(sc)) {
 					for (let a = 0; a < riv.takes.length; a++) {
 						const k = riv.takes[a]!;
-						if (riv.got[a]![t]! < Math.min(asks[a]!, k.pumpM3Day) - tol(sc)) return `${where}: river abstraction ${k.key} pumped ${riv.got[a]![t]} of ${Math.min(asks[a]!, k.pumpM3Day)} while ${free - flowTaken} of the flow it may take was left`;
-						if (k.pool && riv.pool[a]![t]! < k.pool.capM3 - tol(k.pool.capM3)) return `${where}: pool of river abstraction ${k.key} ends at ${riv.pool[a]![t]} of ${k.pool.capM3} while ${free - flowTaken} of the flow was left to refill it`;
+						if (riv.got[a]![t]! < Math.min(asks[a]!, k.pumpM3Day) - tol(sc)) return `${n.id} day ${t}: river abstraction ${k.key} pumped ${riv.got[a]![t]} of ${Math.min(asks[a]!, k.pumpM3Day)} while ${free - flowTaken} of the flow it may take was left`;
+						if (k.pool && riv.pool[a]![t]! < k.pool.capM3 - tol(k.pool.capM3)) return `${n.id} day ${t}: pool of river abstraction ${k.key} ends at ${riv.pool[a]![t]} of ${k.pool.capM3} while ${free - flowTaken} of the flow was left to refill it`;
 					}
 				}
 			}
 			if (!near(u, r + (ss - gRiv) + tt + (sp - spl) + x + xpass - dep - xout + xret - flowTaken, Math.max(r, ss, tt, sp, x, xin, xout, xret)))
-				return `${where}: outflow ${u} ≠ R + S${sup ? ' − from the river' : ''} + T + returned seepage${rel ? ' + release' : ''}${XIN ? ' + off-take water passed on' : ''}${bore ? ' − stream depletion' : ''}${XOUT ? ' − taken by river off-takes' : ''}${XRET ? ' + off-take losses seeping back' : ''}`;
+				return `${n.id} day ${t}: outflow ${u} ≠ R + S${sup ? ' − from the river' : ''} + T + returned seepage${rel ? ' + release' : ''}${XIN ? ' + off-take water passed on' : ''}${bore ? ' − stream depletion' : ''}${XOUT ? ' − taken by river off-takes' : ''}${XRET ? ' + off-take losses seeping back' : ''}`;
 			const vv = h + i + j + pd + gw + gd + xin + xret + gin - xout - rout - (gg - tt) - ev - (q - qPrev) - u - dep - spl - poolChg;
 			const scale = Math.max(Math.abs(h), Math.abs(i), Math.abs(j), Math.abs(gg), Math.abs(q), Math.abs(qPrev), Math.abs(u), pd, ev, gw, gd, xin, xout, xret, gin, rout);
-			if (Math.abs(v - vv) > tol(scale) || Math.abs(v) > tol(scale)) return `${where}: balance check V ${v} (recomputed ${vv}) is not float noise`;
+			if (Math.abs(v - vv) > tol(scale) || Math.abs(v) > tol(scale)) return `${n.id} day ${t}: balance check V ${v} (recomputed ${vv}) is not float noise`;
 			qPrev = q;
 		}
 	}
