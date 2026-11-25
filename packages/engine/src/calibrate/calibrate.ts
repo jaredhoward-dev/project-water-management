@@ -153,10 +153,19 @@ export interface CalibrateOptions {
 	 * the fit is every engine's before it, to the bit.
 	 */
 	prior?: CalibrationPrior;
+	/**
+	 * Also fit the whole record without the regional prior (engine 1.120.0,
+	 * issue #622, docs/model.md §2.10m), so the report can say what the prior
+	 * cost the fit: one more optimisation, from the seed, with no prior penalty
+	 * and, when the fit searched the prior's box, the wide box instead. The
+	 * WR2012 MAR penalty stays as the fit has it, so only the prior differs.
+	 * Its result is `prior.unpriored`. Default false; ignored without a prior.
+	 */
+	fitWithoutPrior?: boolean;
 }
 
-/** 'unpenalised': the second full fit, without the WR2012 MAR penalty, run only when the penalty is on. */
-export type CalibrationStage = 'full' | 'split' | 'dsst' | 'unpenalised';
+/** 'unpenalised': the second full fit, without the WR2012 MAR penalty, run only when the penalty is on; 'unpriored': the full fit again without the regional prior, run only when asked (fitWithoutPrior). */
+export type CalibrationStage = 'full' | 'split' | 'dsst' | 'unpenalised' | 'unpriored';
 
 export interface CalibrationProgress {
 	stage: CalibrationStage;
@@ -1064,6 +1073,24 @@ export function priorNotes(p: CalibrationPrior, bounded: boolean, free: readonly
 	return out;
 }
 
+/**
+ * What the regional prior cost the fit (issue #622, CalibrateOptions.fitWithoutPrior):
+ * the objective with and without it over the whole record. Every objective is
+ * higher-better, so the cost is the score without it less the score with it; a
+ * fit with the prior that scores as well or better (a search's luck, or a prior
+ * that only steered it off a poorer optimum) cost nothing.
+ */
+export function priorCostNote(objective: ObjectiveId, withPrior: Pick<ScoredPeriod, 'scores'>, without: Pick<ScoredPeriod, 'scores'>): string {
+	const label = OBJECTIVE_LABELS[objective].replace(/ \(.*\)$/, '');
+	const a = withPrior.scores[objective];
+	const b = without.scores[objective];
+	if (a === null || a === undefined || b === null || b === undefined) return `Fitted again without the regional prior, but ${label} can’t be scored on one of the two fits, so what the prior cost is unknown.`;
+	const cost = b - a;
+	return cost > 0
+		? `Without the regional prior the fit scores ${label} ${b.toFixed(3)}, against ${a.toFixed(3)} with it: the prior cost ${cost.toFixed(3)} of ${label}.`
+		: `Without the regional prior the fit scores ${label} ${b.toFixed(3)}, against ${a.toFixed(3)} with it: the prior cost the fit nothing.`;
+}
+
 /** How one optimisation of a fit may be paused and resumed (prepareCalibrationFits). */
 export interface FitStepOptions {
 	/** Go on from a paused optimisation's state. */
@@ -1078,6 +1105,8 @@ interface FitTask {
 	seed: number;
 	idx: Int32Array;
 	penalty: boolean;
+	/** False for the fit without the regional prior (fitWithoutPrior): no prior penalty, and the wide box for the prior's. */
+	prior?: boolean;
 	start?: { start: number; starts: number };
 }
 
@@ -1107,7 +1136,7 @@ interface CalibrationSetup {
 	/** The optimisations in the order calibrate() runs them: the starts, then split, dry → wet and unpenalised as they apply. */
 	tasks: FitTask[];
 	/** Index in `tasks` of each validation optimisation, or -1. */
-	at: { split: number; dsst: number; unpenalised: number };
+	at: { split: number; dsst: number; unpenalised: number; unpriored: number };
 }
 
 function setupCalibration(input: ModelInput, opts: CalibrateOptions): CalibrationSetup {
@@ -1130,7 +1159,7 @@ function setupCalibration(input: ModelInput, opts: CalibrateOptions): Calibratio
 	// The whole record from each start; the lowest loss is kept (CR-2).
 	const tasks: FitTask[] = [];
 	for (let i = 0; i < starts; i++) tasks.push({ stage: 'full', seed: startSeed(seed, i), idx: all, penalty: true, ...(starts > 1 ? { start: { start: i + 1, starts } } : {}) });
-	const at = { split: -1, dsst: -1, unpenalised: -1 };
+	const at = { split: -1, dsst: -1, unpenalised: -1, unpriored: -1 };
 	let split: CalibrationSetup['split'] = null;
 	let dsst: DsstSetup | null = null;
 	if (validate) {
@@ -1143,6 +1172,8 @@ function setupCalibration(input: ModelInput, opts: CalibrateOptions): Calibratio
 	}
 	// The same fit without the penalty, so its effect is visible.
 	if (penalty) at.unpenalised = tasks.push({ stage: 'unpenalised', seed, idx: all, penalty: false }) - 1;
+	// The same fit without the regional prior, when asked, so what it cost is visible (issue #622). Last, so a fit without it keeps every index.
+	if (prior && opts.fitWithoutPrior) at.unpriored = tasks.push({ stage: 'unpriored', seed, idx: all, penalty: true, prior: false }) - 1;
 	return { objective, bounds, budget, seed, starts, pb, specs, free, prior, penalty, all, split, dsst, tasks, at };
 }
 
@@ -1187,7 +1218,13 @@ function dsstSetup(pb: CalibrationProblem, opts: CalibrateOptions): DsstSetup {
 function runFitTask(c: CalibrationSetup, k: number, onProgress: CalibrateOptions['onProgress'], step: FitStepOptions = {}): FitResult | { paused: DdsState } {
 	const t = c.tasks[k];
 	if (!t) throw new Error(`the fit has no optimisation ${k + 1}`);
-	return fit(c.pb, t.idx, c.free, c.objective, c.budget, t.seed, t.stage, onProgress, t.penalty ? c.penalty : null, c.bounds, t.start, c.prior, step);
+	const noPrior = t.prior === false;
+	return fit(c.pb, t.idx, c.free, c.objective, c.budget, t.seed, t.stage, onProgress, t.penalty ? c.penalty : null, noPrior ? unpriorBounds(c.bounds) : c.bounds, t.start, noPrior ? null : c.prior, step);
+}
+
+/** The box the fit without the prior searches: the fit's own, or the wide box where the fit searched the prior's. */
+function unpriorBounds(b: FitBounds): FitBounds {
+	return b === 'prior' ? 'wide' : b;
 }
 
 /** Calibrate a runoff model's parameters against the project's observed flow. */
@@ -1208,7 +1245,7 @@ export function calibrate(input: ModelInput, opts: CalibrateOptions = {}): Calib
  * No progress and no cancel: a job that stops simply doesn't store its work.
  */
 export interface CalibrationFits {
-	/** Optimisations the fit makes, in order (the starts, then the validation fits, then the one without the WR2012 penalty). */
+	/** Optimisations the fit makes, in order (the starts, then the validation fits, then the one without the WR2012 penalty, then the one without the prior). */
 	readonly count: number;
 	/** Model runs each optimisation makes. */
 	readonly budget: number;
@@ -1353,6 +1390,15 @@ function calibrationReport(input: ModelInput, opts: CalibrateOptions, c: Calibra
 			unpenalised
 		};
 	}
+	// The same fit without the regional prior, when asked (issue #622): what the prior cost the fit.
+	let unpriored: PriorFitResult['unpriored'] = undefined;
+	if (prior && c.at.unpriored >= 0) {
+		unpriored = null;
+		if (!cancelled) {
+			const p0 = take(c.at.unpriored).params;
+			unpriored = { params: p0, bounds: unpriorBounds(bounds), fit: scored(pb, p0, all), penaltyAtFit: priorPenalty(prior.ranges, p0) };
+		}
+	}
 	notes.push(...validationNotes(objective, splitSample, differential, independentRecord));
 	notes.push(
 		...startsNotes(
@@ -1380,9 +1426,10 @@ function calibrationReport(input: ModelInput, opts: CalibrateOptions, c: Calibra
 		notes.push(...zoneCoverageNotes(at, zoneCompleteWaterYears(pb.startDate, pb.allDays ?? all).length, differential !== null));
 	}
 	if (opts.prior) notes.push(...priorNotes(opts.prior, bounds === 'prior', free));
+	const fitClean = scored(pb, params, all);
+	if (unpriored) notes.push(priorCostNote(objective, fitClean, unpriored.fit));
 	if (cancelled) notes.push('Calibration was cancelled: the parameters are the best found before it stopped.');
 
-	const fitClean = scored(pb, params, all);
 	// The fit on every observed day, flagged ones included and nothing censored (CR-19), when the flags changed anything.
 	const allDays = pb.allDays ?? all;
 	const fitAllDays =
@@ -1417,7 +1464,8 @@ function calibrationReport(input: ModelInput, opts: CalibrateOptions, c: Calibra
 						ranges: structuredClone(opts.prior.ranges),
 						provenance: structuredClone(opts.prior.provenance),
 						penaltyAtFit: priorPenalty(prior.ranges, params),
-						penaltyAtStart: priorPenalty(prior.ranges, pb.startParams)
+						penaltyAtStart: priorPenalty(prior.ranges, pb.startParams),
+						...(unpriored !== undefined ? { unpriored } : {})
 					}
 				}
 			: {}),

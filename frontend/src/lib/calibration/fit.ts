@@ -53,6 +53,8 @@ export interface FitRequest {
 	zone?: string | null;
 	/** The regional prior built for this fit's target (engine CalibrateOptions.prior, issue #622); undefined = none. */
 	prior?: CalibrationPrior;
+	/** Also fit without the prior, to show what it cost (engine CalibrateOptions.fitWithoutPrior, 1.120.0); only with `prior`. */
+	fitWithoutPrior?: boolean;
 }
 
 /** The "Bounds" select's label for each option (issue #4 phase 6). */
@@ -135,26 +137,52 @@ export function rankedByText(d: Pick<DifferentialTest, 'rankedBy'>): string {
 		: 'years ranked dry → wet by the fitted record’s own mean flow';
 }
 
-/** Runs the fit will make: one optimisation per start, two more with validation, plus one without the WR2012 penalty when it is on. */
-export const totalRuns = (budget: number, validate: boolean, penalty = false, starts = 1) => budget * (starts + (validate ? 2 : 0) + (penalty ? 1 : 0));
+/**
+ * Runs the fit will make: one optimisation per start, two more with validation, plus one without the WR2012 penalty
+ * when it is on, and one without the regional prior when asked (`unpriored`).
+ */
+export const totalRuns = (budget: number, validate: boolean, penalty = false, starts = 1, unpriored = false) =>
+	budget * (starts + (validate ? 2 : 0) + (penalty ? 1 : 0) + (unpriored ? 1 : 0));
 
 export const STAGE_LABEL: Record<CalibrationStage, string> = {
 	full: 'Fitting the whole record',
 	split: 'Split-sample test',
 	dsst: 'Dry → wet test',
-	unpenalised: 'Fitting again without the WR2012 penalty'
+	unpenalised: 'Fitting again without the WR2012 penalty',
+	unpriored: 'Fitting again without the regional prior'
 };
 
 /**
  * Overall progress 0–1 across the stages, each weighted by its runs: the
- * full fit once per start, then the validation stages, the unpenalised fit last.
+ * full fit once per start, then the validation stages, the unpenalised fit, the unpriored fit last.
  */
-export function progressFraction(p: CalibrationProgress, validate: boolean, penalty = false, starts = 1): number {
-	const stages: CalibrationStage[] = [...(validate ? (['full', 'split', 'dsst'] as const) : (['full'] as const)), ...(penalty ? (['unpenalised'] as const) : [])];
+export function progressFraction(p: CalibrationProgress, validate: boolean, penalty = false, starts = 1, unpriored = false): number {
+	const stages: CalibrationStage[] = [
+		...(validate ? (['full', 'split', 'dsst'] as const) : (['full'] as const)),
+		...(penalty ? (['unpenalised'] as const) : []),
+		...(unpriored ? (['unpriored'] as const) : [])
+	];
 	const i = Math.max(0, stages.indexOf(p.stage));
 	// Stages before this one: the full fit counts `starts` times.
 	const before = i === 0 ? (p.start ?? 1) - 1 : starts + i - 1;
 	return Math.min(1, (before + p.evaluations / p.budget) / (starts + stages.length - 1));
+}
+
+/**
+ * What the regional prior cost the fit (issue #622), from a report or fit record whose prior has the fit without it
+ * (engine 1.120.0, `prior.unpriored`): "Without the prior: KGE′ 0.850 (0.800 with it); the prior cost 0.050 of KGE′."
+ * Null when the fit wasn't asked to fit without it; a cancelled fit says it didn't run.
+ */
+export function priorCostLine(r: { objective: ObjectiveId; fit: Pick<ScoredPeriod, 'scores'>; prior?: { unpriored?: { fit: Pick<ScoredPeriod, 'scores'> } | null } }): string | null {
+	const u = r.prior?.unpriored;
+	if (u === undefined) return null;
+	if (u === null) return 'The fit without the prior didn’t run: the calibration was cancelled first.';
+	const name = objectiveName(r.objective).replace(/ \(.*\)$/, '');
+	const a = r.fit.scores[r.objective];
+	const b = u.fit.scores[r.objective];
+	if (a == null || b == null) return `Without the prior: ${name} can’t be scored on one of the two fits, so what the prior cost is unknown.`;
+	const cost = b - a;
+	return `Without the prior: ${name} ${fmtNum(b, 3)} (${fmtNum(a, 3)} with it); ${cost > 0 ? `the prior cost ${fmtNum(cost, 3)} of ${name}` : 'the prior cost the fit nothing'}.`;
 }
 
 /** The stage being run, with which start for a multi-start full fit. */

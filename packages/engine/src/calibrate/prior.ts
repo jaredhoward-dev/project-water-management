@@ -50,6 +50,8 @@
 import { canonicalJson } from '../manifest';
 import { GR4J_PARAMS, type Gr4jParams } from '../runoff/params';
 import { hashText } from '../warmstart/plain';
+import type { ScoredPeriod } from './calibrate';
+import type { FitBounds, ParamSet } from './params';
 
 /** The attributes donors are compared on (HydroATLAS's, read from BasinATLAS and converted, docs/model.md §2.10m). */
 export const PRIOR_ATTRIBUTES = ['aridity', 'mapMm', 'slopeDeg', 'clayPct', 'sandPct', 'forestPct', 'areaKm2'] as const;
@@ -603,6 +605,14 @@ export interface PriorFitResult {
 	/** priorPenalty (unweighted) at the fitted parameters and at the starting ones. */
 	penaltyAtFit: number;
 	penaltyAtStart: number;
+	/**
+	 * The same full fit without the prior (engine 1.120.0, CalibrateOptions.fitWithoutPrior),
+	 * so a hydrologist sees what the prior cost: its parameters, the box it searched (the
+	 * wide one where the fit searched the prior's), its scores over the whole record and the
+	 * prior's penalty (unweighted) at its parameters. Absent when not asked; null when the
+	 * fit was cancelled before it ran.
+	 */
+	unpriored?: { params: ParamSet; bounds: FitBounds; fit: ScoredPeriod; penaltyAtFit: number } | null;
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);

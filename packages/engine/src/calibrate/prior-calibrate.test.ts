@@ -15,7 +15,7 @@ import { gaugeSeriesKey } from '../project';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { reportDiff, reportGolden, type ReportGolden } from '../testing/golden';
 import { resolveEnsembleOptions } from '../uncertainty/ensemble';
-import { calibrate } from './calibrate';
+import { calibrate, prepareCalibrationFits, priorCostNote } from './calibrate';
 import { fitRecordFromReport } from './provenance';
 import { priorBox, priorStartParams, type CalibrationPrior, type ParamPriors, type PriorTargetRef } from './prior';
 import { priorTargetOf } from './priorTarget';
@@ -265,6 +265,79 @@ describe('the prior bounds', () => {
 		const { options, notes } = resolveEnsembleOptions(input, { members: 40 });
 		expect(options.bounds).toBe('typical');
 		expect(notes.some((n) => /regional prior’s p10–p90 box/.test(n))).toBe(true);
+	});
+});
+
+describe('what the prior cost the fit (fitWithoutPrior, engine 1.120.0)', () => {
+	it('fits again without the prior: its objective is at least the priored fit’s, and the cost is in a note and the record', () => {
+		const input = lumped();
+		// A heavy prior far from the truth (x1 250, prior median 650) costs the fit real KGE′.
+		const r = calibrate(input, { ...OPTS, prior: prior({ weight: 5 }), fitWithoutPrior: true });
+		const u = r.prior!.unpriored!;
+		expect(u).not.toBeNull();
+		expect(u.bounds).toBe('wide');
+		expect(u.fit.scores.kgePrime!).toBeGreaterThanOrEqual(r.fit.scores.kgePrime!);
+		// Without the pull it lands farther from the prior's median than the priored fit, so its penalty is the larger.
+		expect(u.penaltyAtFit).toBeGreaterThan(r.prior!.penaltyAtFit);
+		// It is the fit with no prior at all, from the same seed (the WR2012 penalty is off here, so nothing else differs).
+		const off = calibrate(input, OPTS);
+		expect(u.params).toEqual(off.params);
+		expect(r.notes.some((n) => /^Without the regional prior the fit scores KGE′ [\d.]+, against [\d.]+ with it: the prior cost [\d.]+ of KGE′\.$/.test(n))).toBe(true);
+		expect(r.evaluations).toBe(2 * OPTS.budget);
+		const ctx = {
+			settings: { calibrationStart: null, calibrationEnd: null, panCoefficient: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], apanMm: apan, chirpsBiasCorrection: 'none' },
+			validate: false,
+			validationRecord: null,
+			engineVersion: '1.120.0',
+			fittedAt: '2026-11-25T00:00:00.000Z'
+		} as never;
+		expect(fitRecordFromReport(r, ctx).prior!.unpriored).toEqual(u);
+	});
+
+	it('under the prior’s box, searches the wide box instead', () => {
+		const r = calibrate(lumped(), { ...OPTS, budget: 60, bounds: 'prior', prior: prior({ weight: 0 }), fitWithoutPrior: true });
+		expect(r.prior!.unpriored!.bounds).toBe('wide');
+		// The truth's x1 (250) is under the box's p10 (500): free of the box, the fit goes below it.
+		expect(r.params.x1!).toBeGreaterThanOrEqual(priorBox(RANGES).x1.min);
+		expect(r.prior!.unpriored!.params.x1!).toBeLessThan(priorBox(RANGES).x1.min);
+	});
+
+	it('off by default: the same report, to the bit, and no unpriored entry', () => {
+		const a = calibrate(lumped(), { ...OPTS, budget: 60, prior: prior() });
+		const b = calibrate(lumped(), { ...OPTS, budget: 60, prior: prior(), fitWithoutPrior: false });
+		expect(b).toEqual(a);
+		expect('unpriored' in a.prior!).toBe(false);
+		expect(a.notes.some((n) => /Without the regional prior/.test(n))).toBe(false);
+		// Asked without a prior, it does nothing: the report is the prior-off one.
+		expect(calibrate(lumped(), { ...OPTS, budget: 60, fitWithoutPrior: true })).toEqual(calibrate(lumped(), { ...OPTS, budget: 60 }));
+	});
+
+	it('runs in steps like the rest of the fit, its optimisation last', () => {
+		const opts = { ...OPTS, budget: 40, prior: prior({ weight: 5 }), fitWithoutPrior: true };
+		const f = prepareCalibrationFits(lumped(), opts);
+		expect(f.count).toBe(2);
+		const outs = Array.from({ length: f.count }, (_, k) => {
+			const r = f.fit(k);
+			if (!('done' in r)) throw new Error('paused');
+			return r.done;
+		});
+		expect(f.report(outs)).toEqual(calibrate(lumped(), opts));
+	});
+
+	it('a cancelled fit records null', () => {
+		let n = 0;
+		const r = calibrate(lumped(), { ...OPTS, budget: 40, prior: prior({ weight: 5 }), fitWithoutPrior: true, onProgress: () => ++n >= 10 });
+		expect(r.cancelled).toBe(true);
+		expect(r.prior!.unpriored).toBeNull();
+	});
+});
+
+describe('the prior cost note', () => {
+	const sc = (kgePrime: number | null) => ({ scores: { kgePrime } as never });
+	it('says the cost, nothing when the priored fit scores as well, and unknown without a score', () => {
+		expect(priorCostNote('kgePrime', sc(0.8), sc(0.85))).toBe('Without the regional prior the fit scores KGE′ 0.850, against 0.800 with it: the prior cost 0.050 of KGE′.');
+		expect(priorCostNote('kgePrime', sc(0.8), sc(0.79))).toMatch(/the prior cost the fit nothing\.$/);
+		expect(priorCostNote('kgePrime', sc(null), sc(0.79))).toMatch(/what the prior cost is unknown/);
 	});
 });
 

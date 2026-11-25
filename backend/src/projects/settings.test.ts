@@ -979,6 +979,25 @@ describe('SettingsPatch.fitRecord', () => {
 		expect(ok({ ...record, marPenalty: { ...marPenalty, extra: 1 } })).toBe(false);
 	});
 
+	it('accepts the regional prior with the fit without it (engine 1.120.0), null when cancelled first, and a record from before it without', () => {
+		const range = { p10: 1, p50: 2, p90: 3 };
+		const prior = {
+			weight: 0.1,
+			bounded: false,
+			ranges: { x1: range, x2: { p10: 0, p50: 0, p90: 0 }, x3: range, x4: range },
+			provenance: { dataset: 'synthetic', donorSetSha256: 'a'.repeat(64), donorCount: 2, donors: [{ id: 'SYN_01', weight: 1 }], leaveOneOutSkill: null, target: { zoneNodeId: null, units: null } },
+			penaltyAtFit: 0.2,
+			penaltyAtStart: 1.1
+		};
+		const unpriored = { params: { x1: 400 }, bounds: 'wide', fit: period, penaltyAtFit: 2.5 };
+		expect(ok({ ...record, prior })).toBe(true);
+		expect(ok({ ...record, prior: { ...prior, unpriored } })).toBe(true);
+		expect(ok({ ...record, prior: { ...prior, unpriored: null } })).toBe(true);
+		expect(ok({ ...record, prior: { ...prior, unpriored: { ...unpriored, bounds: 'loose' } } })).toBe(false);
+		expect(ok({ ...record, prior: { ...prior, unpriored: { ...unpriored, penaltyAtFit: -1 } } })).toBe(false);
+		expect(ok({ ...record, prior: { ...prior, unpriored: { ...unpriored, extra: 1 } } })).toBe(false);
+	});
+
 	it('accepts the quality-flag settings, summary and fit on all days (CR-18/19/22, engine ≥ 1.22.0), and a record from before them without', () => {
 		const flags = Uint8Array.from([0, 0, 4, 6]);
 		const settings = defaultProjectSettings().qualityFlags;

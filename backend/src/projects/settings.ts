@@ -1108,7 +1108,9 @@ const PriorFitResult = z
 		ranges: z.unknown(),
 		provenance: z.unknown(),
 		penaltyAtFit: z.number().min(0).nullable(),
-		penaltyAtStart: z.number().min(0).nullable()
+		penaltyAtStart: z.number().min(0).nullable(),
+		// Engine 1.120.0: the same fit without the prior, when the hydrologist asked for it (what the prior cost); null when cancelled first.
+		unpriored: z.object({ params, bounds: z.enum(FIT_BOUNDS), fit: ScoredPeriod, penaltyAtFit: z.number().min(0).nullable() }).strict().nullable().optional()
 	})
 	.strict()
 	.superRefine((v, ctx) => {
