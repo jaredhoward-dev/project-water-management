@@ -783,7 +783,8 @@ describe('licensing checks on the river abstraction (issue #54, #90 Q15 and Q16,
 	});
 
 	it('judges more of the applicant’s existing river take (a crop area on a unit that pumps), and River to dam', () => {
-		const pumps = both(setNode('F2', { supplyRule: 'riverFirst', pumpCapacityM3Day: 1200 }));
+		// No release on its dam (the fixture's application passes inflow, which would protect the pump).
+		const pumps = both(setNode('F2', { supplyRule: 'riverFirst', pumpCapacityM3Day: 1200, damReleaseRule: 'none' }));
 		const more = withModels({ ...pumps, ops: [{ op: 'cropArea.set', nodeId: 'F2', cropId: 'c', areaM2: 600_000 }] });
 		expect(check(more, 'protectsEwr')!.passed).toBe(false);
 		const divert = withModels({ app: setNode('F2', { damCapacityM3: 1e5, pctUpstreamToDam: 0, divertCapacityM3Day: 3000 }), ops: [{ op: 'node.set', nodeId: 'F2', field: 'divertCapacityM3Day', value: 3000 }] });

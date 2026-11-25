@@ -595,7 +595,7 @@ function prepareCalibrationParams(input: ModelInput, model: RunoffModelId, site:
 /** The project input one member runs: its parameters, pan shift, rain source and record. */
 export function memberInput(ctx: EnsembleContext, m: EnsembleMember): ModelInput {
 	const src = m.rain === 'chirps' ? ctx.chirps : m.rain === 'recorded' ? ctx.base : (ctx.gapProducts?.[m.rain] ?? null);
-	if (!src) throw new Error(m.rain === 'chirps' ? 'the CHIRPS-only rain source is not available for this project' : `the ${GAP_LABEL[m.rain]}-only rain source is not available for this project`);
+	if (!src) throw new Error(m.rain === 'chirps' ? 'the CHIRPS-only rain source is not available for this project' : `the ${GAP_LABEL[m.rain as GapRainSource]}-only rain source is not available for this project`);
 	const site = ctx.siteNodeId ?? null;
 	// The headline location's record and parameters (engine 1.110.0): a gauge's row, or the top level for the outlet.
 	// The flow kind on the normalised settings; the parameters through withHeadlineParams, which reads the stored shape.

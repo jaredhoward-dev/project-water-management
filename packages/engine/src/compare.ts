@@ -1591,7 +1591,7 @@ function diffWr2012(a: Partial<Wr2012Settings> | undefined, b: Partial<Wr2012Set
 	const fa = (a?.flags ?? {}) as Record<string, unknown>;
 	const fb = (b?.flags ?? {}) as Record<string, unknown>;
 	for (const [k, label] of Object.entries(WR2012_FLAG_FIELDS)) {
-		if (!same(fa[k], fb[k])) push('changed', `WR2012 ${label}`, `WR2012 ${label}: ${withUnit('%')(fa[k])} → ${withUnit('%')(fb[k])}`);
+		if (!same(fa[k], fb[k])) push('changed', `WR2012 ${label}`, `WR2012 ${label}: ${fmtChange(withUnit('%'), fa[k], fb[k])}`);
 	}
 	const pa = a?.calibrationPenalty;
 	const pb = b?.calibrationPenalty;
@@ -1902,7 +1902,7 @@ function diffModel(ma: ProjectModel | undefined, mb: ProjectModel | undefined): 
 		}
 		parts.push(...retiredNodeChanges(rawA.get(x.id), rawB.get(y.id)));
 		// The unit's MAP and its source (engine ≥ 1.78.0, docs/model.md §2.4h); absent = none.
-		if ((x.mapMm ?? null) !== (y.mapMm ?? null)) parts.push(`MAP ${withUnit('mm', 0)(x.mapMm ?? null)} → ${withUnit('mm', 0)(y.mapMm ?? null)}`);
+		if ((x.mapMm ?? null) !== (y.mapMm ?? null)) parts.push(`MAP ${fmtChange(withUnit('mm', 0), x.mapMm ?? null, y.mapMm ?? null)}`);
 		if ((x.mapSource ?? null) !== (y.mapSource ?? null)) parts.push(`MAP source ${x.mapSource ? `"${x.mapSource}"` : 'none'} → ${y.mapSource ? `"${y.mapSource}"` : 'none'}`);
 		// The unit whose dam supplies the crops' remote share (engine ≥ 1.73.0), by name: matched by name when the ids differ.
 		const ra = na.node(x.cropRemoteNodeId ?? null);
@@ -1978,7 +1978,7 @@ function diffModel(ma: ProjectModel | undefined, mb: ProjectModel | undefined): 
 		for (const s of systems.onlyB) out.push({ area: 'crops', kind: 'added', subject: s.name, text: `Irrigation system "${s.name}" added (${pct(s.efficiency)})` });
 		for (const [x, y] of systems.pairs) {
 			if (x.name !== y.name) out.push({ area: 'crops', kind: 'changed', subject: y.name, text: `Irrigation system "${y.name}" renamed from "${x.name}"` });
-			if (!same(x.efficiency, y.efficiency)) out.push({ area: 'crops', kind: 'changed', subject: y.name, text: `Irrigation system "${y.name}" efficiency: ${pct(x.efficiency)} → ${pct(y.efficiency)}` });
+			if (!same(x.efficiency, y.efficiency)) out.push({ area: 'crops', kind: 'changed', subject: y.name, text: `Irrigation system "${y.name}" efficiency: ${fmtChange(pct, x.efficiency, y.efficiency)}` });
 		}
 	}
 
@@ -2188,7 +2188,7 @@ function diffModel(ma: ProjectModel | undefined, mb: ProjectModel | undefined): 
 		const handsOff = (t: Transfer) => withUnit('m³/day', 0)(t.handsOffM3Day ?? null);
 		if ((x.handsOffM3Day ?? null) !== (y.handsOffM3Day ?? null)) parts.push(`hands-off flow ${handsOff(x)} → ${handsOff(y)}`);
 		if (!!x.handsOffEwr !== !!y.handsOffEwr) parts.push(y.handsOffEwr ? 'now leaves the EWR in the river' : 'no longer leaves the EWR in the river');
-		if ((x.lossPct ?? 0) !== (y.lossPct ?? 0)) parts.push(`conveyance losses ${pct(x.lossPct ?? 0)} → ${pct(y.lossPct ?? 0)}`);
+		if ((x.lossPct ?? 0) !== (y.lossPct ?? 0)) parts.push(`conveyance losses ${fmtChange(pct, x.lossPct ?? 0, y.lossPct ?? 0)}`);
 		const sizing = (t: Transfer) => (t.sizing === 'capacity' ? 'up to capacity' : t.sizing === 'diversionCurve' ? "by a diversion curve (a share of the river's flow)" : "to the destination's need");
 		if ((x.sizing ?? 'demand') !== (y.sizing ?? 'demand')) parts.push(`sized ${sizing(x)} → ${sizing(y)}`);
 		// A share of the river's flow (engine ≥ 1.113.0): its curve, each field as it differs.
@@ -2204,7 +2204,7 @@ function diffModel(ma: ProjectModel | undefined, mb: ProjectModel | undefined): 
 			} else {
 				if ((x.diversionCoefficient ?? null) !== (y.diversionCoefficient ?? null)) parts.push(`diversion curve coefficient a ${num(x.diversionCoefficient)} → ${num(y.diversionCoefficient)}`);
 				if ((x.diversionExponent ?? null) !== (y.diversionExponent ?? null)) parts.push(`diversion curve exponent b ${num(x.diversionExponent)} → ${num(y.diversionExponent)}`);
-				if ((x.diversionMaxPct ?? 1) !== (y.diversionMaxPct ?? 1)) parts.push(`largest share of the flow ${pct(x.diversionMaxPct ?? 1)} → ${pct(y.diversionMaxPct ?? 1)}`);
+				if ((x.diversionMaxPct ?? 1) !== (y.diversionMaxPct ?? 1)) parts.push(`largest share of the flow ${fmtChange(pct, x.diversionMaxPct ?? 1, y.diversionMaxPct ?? 1)}`);
 			}
 			if ((x.diversionFlowUnit ?? null) !== (y.diversionFlowUnit ?? null)) parts.push(`flow unit of the curve ${x.diversionFlowUnit ?? 'none'} → ${y.diversionFlowUnit ?? 'none'}`);
 			const basis = (t: Transfer) => (t.diversionFlowBasis === 'natural' ? 'the natural flow' : 'the modelled flow');
@@ -2212,7 +2212,7 @@ function diffModel(ma: ProjectModel | undefined, mb: ProjectModel | undefined): 
 		}
 		if (!!x.topUpDam !== !!y.topUpDam) parts.push(y.topUpDam ? "now tops up the destination's dam" : "no longer tops up the destination's dam");
 		// Canal seepage back to the river (engine ≥ 1.42.0): the share, and where it rejoins (by name, A's in B's names).
-		if ((x.lossReturnPct ?? 0) !== (y.lossReturnPct ?? 0)) parts.push(`share of the losses seeping back to the river ${pct(x.lossReturnPct ?? 0)} → ${pct(y.lossReturnPct ?? 0)}`);
+		if ((x.lossReturnPct ?? 0) !== (y.lossReturnPct ?? 0)) parts.push(`share of the losses seeping back to the river ${fmtChange(pct, x.lossReturnPct ?? 0, y.lossReturnPct ?? 0)}`);
 		const backA = x.lossReturnNodeId ? (nodeRename.get(x.lossReturnNodeId) ?? na.node(x.lossReturnNodeId)) : null;
 		const backB = y.lossReturnNodeId ? nb.node(y.lossReturnNodeId) : null;
 		if (backA !== backB) parts.push(`seepage rejoins below ${backA ?? 'the source'} → ${backB ?? 'the source'}`);
@@ -2240,8 +2240,8 @@ function diffModel(ma: ProjectModel | undefined, mb: ProjectModel | undefined): 
 			if (!same(monthSet(x.months), monthSet(y.months))) parts.push(`months ${describeCalendarMonths(x.months)} → ${describeCalendarMonths(y.months)}`);
 			if (x.maxRateM3s !== y.maxRateM3s) parts.push(`max rate ${fmtChange(plain, x.maxRateM3s, y.maxRateM3s)} m³/s`);
 		}
-		if (x.dailyCapM3 !== y.dailyCapM3) parts.push(`daily cap ${withUnit('m³', 0)(x.dailyCapM3)} → ${withUnit('m³', 0)(y.dailyCapM3)}`);
-		if (x.minStoragePct !== y.minStoragePct) parts.push(`minimum source storage ${pct(x.minStoragePct)} → ${pct(y.minStoragePct)}`);
+		if (x.dailyCapM3 !== y.dailyCapM3) parts.push(`daily cap ${fmtChange(withUnit('m³', 0), x.dailyCapM3, y.dailyCapM3)}`);
+		if (x.minStoragePct !== y.minStoragePct) parts.push(`minimum source storage ${fmtChange(pct, x.minStoragePct, y.minStoragePct)}`);
 		if (x.priority !== y.priority) parts.push(`priority ${fmtChange(plain, x.priority, y.priority)}`);
 		parts.push(...offtakeParts(x, y));
 		for (const p of parts) out.push({ area: 'transfers', kind: 'changed', subject: r, text: `Transfer ${r}: ${p}` });

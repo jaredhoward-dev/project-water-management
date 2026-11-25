@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dayText, toEpochDay } from '../calendar';
+import { dayText, fromEpochDay, toEpochDay } from '../calendar';
 import { ERA5L_SERIES_KEY, IMERG_SERIES_PREFIX, type ModelInput, type NetworkNode } from '../project';
 import { prepareRun } from '../prepare';
 import { Rng } from '../random';
@@ -470,9 +470,8 @@ describe('runEnsemble on a synthetic catchment', () => {
 		expect(input.settings.gapRain).toBeUndefined();
 		expect(options.rainSources).toEqual(['recorded', 'chirps']);
 		expect(options.dimensions.find((d) => d.kind === 'rain')).toEqual({ kind: 'rain', values: ['recorded', 'chirps'] });
-		// TODO(#834, before merge): pin the result's fingerprint as computed on the engine before #834
-		// (expect(fingerprint({ options, header, members, coverage })).toBe('<hash>:<length>')).
-		expect(fingerprint({ options: result.options, header: result.header, members: result.members, coverage: result.coverage })).toMatch(/^[0-9a-f]{8}:\d+$/);
+		// The whole result, pinned as computed on the engine before #834 (origin/main at 66f424485).
+		expect(fingerprint({ options: result.options, header: result.header, members: result.members, coverage: result.coverage })).toBe('a3cdec17:73838');
 		// The default written out ({ product: 'chirps', imergLate: false }) runs as absent: the same ensemble.
 		const written = { ...input, settings: { ...input.settings, gapRain: { product: 'chirps' as const, imergLate: false } } };
 		const o = resolveEnsembleOptions(written, { members: 45, thresholds: LOOSE }).options;
@@ -516,7 +515,7 @@ describe('rain-source members per gap-filling product (issue #834)', () => {
 			for (let k = -2; k <= 2; k++) s += values[i + k] ?? 0;
 			return Math.round((0.3 + (1.1 * s) / 5) * 10) / 10;
 		});
-		const imerg = imergDays ? { [`${IMERG_SERIES_PREFIX}V07`]: { startDate: dayText(d0 + values.length - imergDays), values: values.slice(-imergDays).map((v) => v * 0.8) } } : {};
+		const imerg = imergDays ? { [`${IMERG_SERIES_PREFIX}V07`]: { startDate: fromEpochDay(d0 + values.length - imergDays), values: values.slice(-imergDays).map((v) => v * 0.8) } } : {};
 		return {
 			...base,
 			settings: { ...base.settings, gapRain },

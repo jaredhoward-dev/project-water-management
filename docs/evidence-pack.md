@@ -288,15 +288,19 @@ both for licensing; this is built on that recommendation):
   since a licence for the unit would carry the condition; a pump on a unit
   with no demand takes nothing and isn't named.
 
-- *A dam on the river is judged by its release* (issue #831). What a dam
+- *A dam on the river is judged by its release* (issue #831, engine ≥ 1.121.0;
+  engine-audit.md DR1–DR2). What a dam
   catches of the river (its share of the upstream flow above 0, on the days
   it is there, under any rule but run of river) is water the river below
   loses, so `protectsEwr` treats it as a take of the application's own
-  unit (an op that builds, raises or changes the dam names it), with or
-  without demand. A hands-off flow doesn't bind it (model.md §2.7h: it binds
+  unit (any op on the unit names it, as above: a bigger crop area means
+  more refill from the river), with or without demand, and even when the
+  unit's abstraction starts after the run (§2.7g sets only demand to 0). A hands-off flow doesn't bind it (model.md §2.7h: it binds
   the unit's abstractions, not its dam's catch), so only a **pass-inflow
   release** keeps the EWR below it: up to the EWR required at the node, or
-  amounts above 0 in every month (model.md §2.7 Releases). A fixed release
+  amounts above 0 in every month (model.md §2.7 Releases), with no outlet
+  cap: the outlet caps the release, so an outlet of 0 releases nothing and a
+  set one can fall short on a high-flow day. A fixed release
   doesn't count: it stops at dead storage and doesn't follow the EWR, so on
   a dry day the dam can still hold back the Reserve. The fix says to give
   the dam the Pass inflow rule, or take it off the river (its upstream
@@ -307,6 +311,9 @@ both for licensing; this is built on that recommendation):
   condition gives back. The dam's own runoff share isn't counted (an
   off-channel dam's catchment, not the river's flow); pending the
   hydrologist with the rest of this list.
+  No erratum: packs on engine ≤ 1.120.0 left the dam's catch out as a
+  documented scope limit ("Not covered" in this list), not a departure from
+  the documented method, so a pack issued then is as its method said.
 
 Not covered: a borehole's stream depletion is a lagged share of what it
 pumps (§2.7d), bounded by the borehole's own capacity.

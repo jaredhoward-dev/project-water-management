@@ -1831,7 +1831,7 @@ distribution month by month, but a storm it puts on the wrong day stays
 there. With no overlap, a product runs raw. IMERG never fills a day inside
 the record, even one CHIRPS and ERA5-Land both lack. The uncertainty
 ensemble (§2.10e) varies each product the run reads as a rain source of
-its own (issue #834), but IMERG Late's 30-day copy is too short for its
+its own (issue #834, engine ≥ 1.121.0), but IMERG Late's 30-day copy is too short for its
 member, which needs 99 % of the run's days, so the bands still leave out
 IMERG Late's uncertainty.
 
@@ -10282,7 +10282,7 @@ it never changes a run's results.
     the record can't settle.
 
     **Each gap-filling product the run reads** (`settings.gapRain`, §2.4b
-    *Gap-filling product*; issue #834) is a rain source of its own:
+    *Gap-filling product*; issue #834, engine ≥ 1.121.0) is a rain source of its own:
     `era5l` when the setting reads ERA5-Land (`'era5l'` or
     `'chirpsThenEra5l'`), `imerg_late` with `imergLate`. Its members run
     on that product alone on every day, corrected by its own fit as the

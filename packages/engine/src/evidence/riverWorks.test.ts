@@ -142,6 +142,9 @@ describe('nodeRiverWorks', () => {
 		expect(nodeRiverWorks(node({ ...dam, damReleaseRule: 'passInflow', damReleaseM3Day: [0, ...new Array(11).fill(300)] }), none)[0]!.protectsEwr).toBe(false);
 		expect(nodeRiverWorks(node({ ...dam, damReleaseRule: 'fixed', damReleaseM3Day: new Array(12).fill(300) }), none)[0]!.protectsEwr).toBe(false);
 		expect(nodeRiverWorks(node({ ...dam, handsOffEwr: true }), none)[0]!.protectsEwr).toBe(false);
+		// The release is capped by the dam's outlet (§2.7 Releases): an outlet of 0 releases nothing, and a set outlet can fall short of the target.
+		expect(nodeRiverWorks(node({ ...dam, damReleaseRule: 'passInflow', damReleaseM3Day: null, damOutletCapacityM3Day: 0 }), none)[0]!.protectsEwr).toBe(false);
+		expect(nodeRiverWorks(node({ ...dam, damReleaseRule: 'passInflow', damReleaseM3Day: null, damOutletCapacityM3Day: 5000 }), none)[0]!.protectsEwr).toBe(false);
 		// Off the river (no upstream share), under run of river (no split), or with no dam: it catches no river flow.
 		expect(nodeRiverWorks(node({ ...dam, pctUpstreamToDam: 0, pctRunoffToDam: 1 }), none)).toEqual([]);
 		expect(nodeRiverWorks(node({ ...dam, supplyRule: 'runOfRiver', pumpCapacityM3Day: 0 }), none)).toEqual([]);
@@ -154,6 +157,10 @@ describe('nodeRiverWorks', () => {
 		expect(nodeRiverWorks(node({ supplyRule: 'riverFirst', abstractionFrom: '2008-01-01' }), crops, win)).toHaveLength(1);
 		const user = node({ kind: 'user', userDemandM3Day: new Array(12).fill(50), abstractionFrom: '2012-01-01' });
 		expect(nodeRiverWorks(user, crops, win)).toEqual([]);
+		// Its dam still fills from the river (§2.7g sets only demand to 0): the dam's catch alone is judged.
+		const late = node({ supplyRule: 'riverFirst', abstractionFrom: '2012-01-01', pctUpstreamToDam: 1, damCapacityM3: 1e4, divertCapacityM3Day: 50 });
+		expect(nodeRiverWorks(late, crops, win)).toEqual([{ kind: 'dam', id: 'F', name: 'Farm', bounded: true, protectsEwr: false }]);
+		expect(nodeRiverWorks({ ...late, damReleaseRule: 'passInflow', damReleaseM3Day: null }, crops, win)).toEqual([{ kind: 'dam', id: 'F', name: 'Farm', bounded: true, protectsEwr: true }]);
 	});
 
 	it('keeps the EWR: the EWR kept, or a hands-off flow above 0 in every month it takes; one dry month, or a value the run reads as 0, isn’t', () => {

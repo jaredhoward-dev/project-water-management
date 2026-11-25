@@ -789,6 +789,19 @@ confirmed by the client's hydrologist**.
 | **ET2** | On the newest days AgERA5 doesn't hold yet, the feed writes **ET₀ we compute with FAO-56 eq. 6 from NASA POWER's daily weather** (MERRA-2-based, 0.5°, nearest point to each 0.1° cell), and replaces those days with AgERA5's once its month lands (a 75-day re-read). No bias correction between the two. | AgERA5 is copied a month at a time about a week behind (issue #604 R5-E); POWER is 2–7 days behind with no sign-in. Both are FAO-56 Penman-Monteith on reanalysis weather, so they differ by their inputs, not their method; a fit between them would need years of overlap the fallback window (120 days) doesn't keep. The difference reaches only the last few weeks of a run. | `feeds/fromMirrorEt0.ts`; the feed's `powerDays`. |
 | **ET3** | The feed's value is the **area-weighted mean of the 0.1° cells** holding the catchment boundary's 0.05° cells, leaving out cells with no value (the sea) and renormalising; to 0.01 mm. | ET₀ varies smoothly in space; a coastal catchment's sea cell has no ET₀ and shouldn't count as 0. | `et0FromMirror`. |
 
+## Provisional decision 2026-11-25: an applicant's dam on the river (issue #831, engine 1.121.0)
+
+The evidence pack's `protectsEwr` check (evidence-pack.md § The river
+abstraction checks) used to leave out what an on-channel dam catches, as a
+documented scope limit. From engine 1.121.0 an application's dam on the river
+is one of its river takes. The calls below were made in the build and are
+**provisional, to be confirmed by the client's hydrologist**.
+
+| ID | Decision | Why (source) | What changed |
+| --- | --- | --- | --- |
+| **DR1** | What an applicant's dam catches of the **upstream flow** is a take, judged with or without demand and even when the unit's abstraction starts after the run; its share of the unit's **own runoff** isn't counted. | The upstream share is water the river below loses (model.md §2.7); §2.7g sets only demand to 0 before the abstraction date, so the dam still fills. The own-runoff share is an off-channel dam's catchment, not the river's flow. | `nodeRiverWorks` kind `dam`. |
+| **DR2** | Only a **pass-inflow release with no outlet cap** keeps the EWR below it: up to the EWR at the node, or amounts above 0 in every month. A fixed release, a hands-off flow, or a pass-inflow release through a set outlet doesn't count. | Pass inflow is the compensation-flow condition the engine runs (§2.7 Releases); a fixed release stops at dead storage, a hands-off flow binds abstractions not the dam's catch (§2.7h), and the outlet caps the release (X = MIN(…, outlet, …)), so on a high-flow day it can fall short. The conservative side: it stops issue, never passes one. | `passInflowCovers`. |
+
 ## Open questions for the hydrologist
 
 1. **H1 (closed 2026-09-26):** the base-flow reset was never replaced; engine

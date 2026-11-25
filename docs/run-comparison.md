@@ -206,7 +206,7 @@ bottom:
    every CSV export ([security.md](./security.md)).
 2. **Inputs that differ** ("What changed" until issue #466). Every difference in the inputs, grouped by network, crops,
    transfers, settings and time series. **The size of a change** (issue
-   #830, engine ≥ 1.120.0): a monthly table changed in one to three months
+   #830, engine ≥ 1.121.0): a monthly table changed in one to three months
    lists them with their values ("Pragmatic EWR: Oct 10 → 0 m³/day"); one
    changed in four or more states its total before and after with the
    signed change and the month that moved most ("changed in 12 months:

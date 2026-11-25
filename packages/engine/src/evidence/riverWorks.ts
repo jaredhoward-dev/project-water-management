@@ -72,9 +72,15 @@ function handsOffCovers(n: NetworkNode, on: readonly boolean[] | null): boolean 
 	return !!kept && kept.every((k, i) => k || (on !== null && !on[i]));
 }
 
-/** A pass-inflow release keeps its target (the EWR at the node, or the monthly amounts) below the dam, and the river pump leaves it (§2.7e). */
+/**
+ * A pass-inflow release keeps its target (the EWR at the node, or the monthly amounts) below the dam, and the river pump
+ * leaves it (§2.7e). The release is capped by the dam's outlet (§2.7 Releases: X = MIN(…, outlet, …)): an outlet of 0
+ * releases nothing, and a set outlet can fall short of the target on a high-flow day, so only an uncapped outlet counts
+ * (the conservative side: it stops issue, never passes one).
+ */
 function passInflowCovers(n: NetworkNode): boolean {
 	if (n.damReleaseRule !== 'passInflow' || !(n.damCapacityM3 > 0)) return false;
+	if (n.damOutletCapacityM3Day !== null && n.damOutletCapacityM3Day !== undefined) return false;
 	const m = monthsOn(n.damReleaseM3Day);
 	return m === null || m.every(Boolean);
 }
@@ -87,15 +93,17 @@ function hasDemand(model: Pick<ProjectModel, 'cropAreas' | 'demandObjects'>, nod
 /** The river abstractions of one node (none for a gauge, or for a node that takes nothing from the river in the run). */
 export function nodeRiverWorks(n: NetworkNode, model: Pick<ProjectModel, 'cropAreas' | 'demandObjects'>, window?: RiverWorksWindow): RiverWorks[] {
 	const out: RiverWorks[] = [];
-	// A unit whose abstraction starts after the run (§2.7g) takes nothing in it.
-	if (window && typeof n.abstractionFrom === 'string' && toEpochDay(n.abstractionFrom) > toEpochDay(window.endDate)) return out;
+	// A unit whose abstraction starts after the run (§2.7g) has no demand in it, but its dam still fills from the river:
+	// only the dam's catch is judged.
+	const late = !!window && typeof n.abstractionFrom === 'string' && toEpochDay(n.abstractionFrom) > toEpochDay(window.endDate);
+	if (late && n.kind !== 'farm') return out;
 	if (n.kind === 'user') {
 		// 0 = no river pump: it takes nothing from the river.
 		if (monthsOn(n.userDemandM3Day)?.some(Boolean) && n.pumpCapacityM3Day !== 0) out.push({ kind: 'user', id: n.id, name: n.name, bounded: size(n.pumpCapacityM3Day), protectsEwr: false });
 		return out;
 	}
 	if (n.kind !== 'farm') return out;
-	const demand = hasDemand(model, n.id);
+	const demand = !late && hasDemand(model, n.id);
 	const dam = damPresence(n, window ? { start: toEpochDay(window.startDate), end: toEpochDay(window.endDate) } : undefined);
 	const rule = n.supplyRule ?? 'damFirst';
 	// The run reads null / absent / not a size ≥ 0 as no limit (network/supply.ts supplyOf); 0 = no river pump. It pumps only for demand.
@@ -106,12 +114,13 @@ export function nodeRiverWorks(n: NetworkNode, model: Pick<ProjectModel, 'cropAr
 	const divert = !onRiverDam(n) && (divertOn ? divertOn.some(Boolean) : above0(n.divertCapacityM3Day));
 	// Run of river zeroes the split and River to dam (simulate.ts); any other rule keeps them.
 	const split = rule !== 'runOfRiver';
-	if (split && dam.ever && divert) out.push({ kind: 'divert', id: n.id, name: n.name, bounded: true, protectsEwr: handsOffCovers(n, divertOn) });
+	if (!late && split && dam.ever && divert) out.push({ kind: 'divert', id: n.id, name: n.name, bounded: true, protectsEwr: handsOffCovers(n, divertOn) });
 	// What a dam on the river catches of the upstream flow is water the river below loses (issue #831): a take
 	// bounded by the dam, which only a pass-inflow release gives back up to its target (§2.7 Releases). A fixed
 	// release stops at dead storage and doesn't follow the EWR, and a hands-off flow binds abstractions, not the
 	// dam's catch (§2.7h), so neither counts (the conservative side: it stops issue, never passes one).
 	if (split && dam.ever && above0(n.pctUpstreamToDam)) out.push({ kind: 'dam', id: n.id, name: n.name, bounded: true, protectsEwr: passInflowCovers(n) });
+	if (late) return out;
 	// A pass-inflow release doesn't count here: on a day with no dam it releases out of K + M + O only up to its
 	// target, a partial keep the check doesn't credit (the conservative side: it stops issue, never passes one).
 	const routed = above0(n.pctUpstreamToDam) || above0(n.pctRunoffToDam);
