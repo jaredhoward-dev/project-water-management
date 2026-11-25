@@ -442,13 +442,20 @@ export function positionLine(view: FarmView): string {
 }
 
 /**
+ * A reserve site's name as the farm pages write it: the API leaves the
+ * outlet's blank unless it is a gauge (the outflow node may be a neighbour's
+ * farm; backend publish.ts hiddenOutletName), and that one is "the catchment outlet".
+ */
+export const siteName = (name: string): string => name || t('the catchment outlet');
+
+/**
  * "River at Sandspruit Outlet: below its reserve on all of the last 30 days."
  * A count, never a flow volume. Once the figures are stale (staleUntil), the
  * days are the ones "to 10 Jan 2024", not "the last".
  */
 export function outletLine(view: FarmView, staleEnd: string | null = null): Rich {
 	const o = view.outlet30;
-	const v = { name: o.name, days: count(DAYS, o.days), n: o.daysNotMet, date: staleEnd ? fmtDay(staleEnd) : '' };
+	const v = { name: siteName(o.name), days: count(DAYS, o.days), n: o.daysNotMet, date: staleEnd ? fmtDay(staleEnd) : '' };
 	// i18n-section: farm.river
 	if (staleEnd) {
 		if (o.daysNotMet <= 0) return tRich('River at {name}: kept its reserve on every one of the {days} to {date}.', v);

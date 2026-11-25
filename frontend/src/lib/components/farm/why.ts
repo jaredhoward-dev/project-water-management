@@ -9,7 +9,7 @@
 import { DEMAND_PCT_FLOOR_M3_DAY, type FarmProjection, type FarmView } from '@water-management/engine';
 import { i18n, t, tRich } from '#lib/i18n/locale.svelte.js';
 import type { Rich } from '#lib/i18n/rich.js';
-import { levelWord, pumpLessAsked, seasonSpan, splitNotice } from './cards';
+import { levelWord, pumpLessAsked, seasonSpan, siteName, splitNotice } from './cards';
 import { pickNotice } from './notice';
 import { count, DAYS, fmtDay, fmtM3Day, fmtNumber, fmtPct, joinAnd, litresPerSecond, NBSP, roundAbout } from './format';
 
@@ -120,7 +120,7 @@ export function step2(farm: FarmProjection): Step2 {
 		const list: Rich = [];
 		met.forEach((s, i) => {
 			if (i > 0) list.push(i === met.length - 1 ? ` ${t('and')} ` : ', ');
-			list.push(...tRich('at {name} on **{days}**', { name: s.name, days: count(DAYS, s.daysNotMet) }));
+			list.push(...tRich('at {name} on **{days}**', { name: siteName(s.name), days: count(DAYS, s.daysNotMet) }));
 		});
 		sites = tRich('The river was below its reserve {sites}.', { sites: list });
 		const natural = met.filter((s) => s.daysOnlyNatural > 0);
@@ -129,7 +129,7 @@ export function step2(farm: FarmProjection): Step2 {
 		} else if (natural.every((s) => s.daysOnlyNatural >= s.daysNotMet) && natural.length === met.length) {
 			reason = t('It was only because of low rain: water taken upstream wasn’t part of the reason.');
 		} else {
-			const rain = joinAnd(natural.map((s) => t('{days} at {name}', { days: count(DAYS, s.daysOnlyNatural), name: s.name })));
+			const rain = joinAnd(natural.map((s) => t('{days} at {name}', { days: count(DAYS, s.daysOnlyNatural), name: siteName(s.name) })));
 			reason = t('Water taken upstream was part of the reason on the other days; on {list} it was only because of low rain.', { list: rain });
 		}
 	}

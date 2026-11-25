@@ -3700,7 +3700,9 @@ received. For a **forecast run** (WP-2.12) it is the day before
   and dates only: no flow volume and no total of farm quantities (design
   §10.3; the roadmap's "mean natural and simulated flow" and "totals at ≥ k"
   are left out on purpose, since `run_publication` is readable by farmers).
-  `sites` are the EWR sites, the outlet first, then the gauges.
+  `sites` are the EWR sites, the outlet first, then the gauges. A farmer
+  gets the outlet's `name` as `''` unless a gauge of the project has that
+  name (the outflow node may be a neighbour's farm).
   Viewers and above also get `recent = { to, from7, from30, farmsShort7, farmsShort30 }`
   (publications made since WP-2.14): farms short at least one day in the 7
   and 30 days to `dataUntil`, for the [portfolio](#portfolio). A farmer's
@@ -4632,7 +4634,11 @@ infrastructure). The contract types are `FarmIndex` and `FarmView` in
   with a "not translated" line (`pickNotice`, design §7), so a language
   switch needs no request.
 - `outlet30 = { name, daysNotMet, days }`: the outlet over the 30 days to
-  `dataUntil`, counts only.
+  `dataUntil`, counts only. `name` is `''` unless a gauge of the project has
+  the outlet's name: the outflow node may be a neighbour's farm, so the
+  farm view blanks it here, in `farm.river.sites[].name` and
+  `farm.river.bindingSite`, and the page says "the catchment outlet"
+  (`publish.ts hiddenOutletName`).
 - `stale` is `dataUntil` older than 7 days (the workspace's `STALE_DAYS`)
   when the response was built.
 - `today` is the date in the project's time zone (`project.timeZone`, 058)

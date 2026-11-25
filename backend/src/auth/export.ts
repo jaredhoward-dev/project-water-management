@@ -230,7 +230,7 @@ async function farmSection(db: Db, link: FarmLinkRow) {
 				notice: cur.notice
 			},
 			nextExpectedOn: cur.next_expected_on,
-			figures: await farmerProjection(db, link.projectId, link.nodeId, cur.view)
+			figures: await farmerProjection(db, link.projectId, link.nodeId, cur.view, cur.catchment_view)
 		};
 	}
 	return { ...link, allocations, publication };
