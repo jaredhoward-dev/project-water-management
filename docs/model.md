@@ -14235,7 +14235,9 @@ data mirror's 1° daily arrays (`c3s/<YYYY-MM>/tp_mm`,
   month, every year held (1993–2016); the engine fits on the years whose
   months the record holds wholly before the decision date (step 1).
 - *The run*: one call after the ESP members and the trigger table, at the
-  **full demand** (no level's ops), on the outlook's kept analogue years, on
+  **full demand** (no level's ops), on the outlook's kept analogue years
+  (none kept, as when every listed year is outside the record: the forecast
+  part is off, `noAnalogues`, never run on the record's every year), on
   the drought restriction rule's review dates, else the outlook's own review
   date, else the engine's default. Its own ESP members run from the same
   snapshot, so nothing stored for the ESP changes: an outlook of method `c3s`
