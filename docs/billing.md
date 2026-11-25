@@ -282,15 +282,22 @@ flight, since each begin settles the expired ones first), as are a person's
 own month (their own usage rows) and day (one row). The answer is the same as
 336's sum: one statement reads the counters and the reservations from one
 snapshot, and a charge writes its rows and the counters in one transaction.
-Each trigger takes a per-account advisory lock before it touches that
-account's counters, so a charge and a subscription change on one account
-can't miss each other's change. 264's deployment lock is unchanged (begins
+Each trigger takes one deployment-wide advisory lock
+(`assistant_counter_lock`, held to commit) before it touches any counter, so
+a charge and a subscription change can't miss each other's change, and no two
+writers can take the pool counter's shared rows in opposite orders and
+deadlock (per-account locks could: a charge writes the month row then the
+day's, a subscription change every retained month and day, the expiry sweep
+and the purge several accounts' rows in data order). Counter writes are
+serialised by it, as pool charges already were on the pool's two hot rows;
+each is a short transaction. 264's deployment lock is unchanged (begins
 still read, then reserve). A usage row moved to another project or month is
 counted where it lands; a trigger refuses an UPDATE that moves a day row with a
 cost to another account or day (nothing does; the pool sync re-reads those
 rows). Tests: `assistant/monthCounter.db.test.ts` (every counter equals a
 fresh sum, and the read equals 336's statement, after each path, last month
-and yesterday's SAST day included) and the begin's budget in
+and yesterday's SAST day included; two pool accounts writing two months in
+opposite orders both commit) and the begin's budget in
 `assistant/begin.db.perf.test.ts`.
 
 **Not built yet** ([followups.md](./followups.md#billing-issue-641)): Haiku
