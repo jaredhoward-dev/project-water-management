@@ -206,4 +206,55 @@ describe('deleting an account, against a charge on one of its projects', () => {
 		expect(usage!.usd).toBe(3000);
 		await asOwner('DELETE FROM assistant_reservation WHERE project_id = $1', [projectId]);
 	});
+
+	it('a person deletes their account while a begin settles their expired reservation: both commit', async () => {
+		const [person, coOwner, other] = (await Promise.all(['Sperson', 'Scoowner', 'Sother'].map((n) => signUp(n)))) as [User, User, User];
+		const projectId = (await person.call('POST', '/projects', { name: 'Lock order, settle' })).body.project.id;
+		expect((await person.call('POST', `/projects/${projectId}/members`, { email: coOwner.email, role: 'owner' })).status).toBeLessThan(300);
+		const otherProject = (await other.call('POST', '/projects', { name: 'Lock order, settle, other' })).body.project.id;
+		expect(await account(projectId)).toBeTruthy();
+		// The person's priced reservation, expired: the other person's begin settles it, so it locks the person's
+		// row, the project and the person's billing account.
+		await asOwner(
+			`INSERT INTO assistant_reservation (project_id, user_id, month, day, reserved, reserved_usd_micros, created_at, expires_at)
+			 VALUES ($1, $2, date_trunc('month', now() AT TIME ZONE 'UTC')::date, assistant_day_of(now()), 1000, 7000, now() - interval '10 minutes', now() - interval '1 minute')`,
+			[projectId, person.id]
+		);
+		// The person's audit events, which the deletion's first trigger (app_user_pseudonymise) rewrites: holding them
+		// pauses the deletion with the person's row locked and before 364's trigger locks the billing account.
+		expect((await asOwner('SELECT 1 FROM audit_event WHERE actor_user_id = $1', [person.id])).length).toBeGreaterThan(0);
+
+		const hold = await open();
+		const d = await open(person);
+		const b = await open(other);
+		try {
+			await hold.query('SELECT 1 FROM audit_event WHERE actor_user_id = $1 FOR UPDATE', [person.id]);
+			const deleted = d.query('SELECT app_delete_my_account() AS gone');
+			deleted.catch(() => {});
+			expect(await waitingOn(d)).toMatch(/^(transactionid|tuple)$/);
+			// The settle waits for the person's row. Before the fix it already held the project and the billing
+			// account FOR KEY SHARE, which the deletion's trigger then asks FOR UPDATE.
+			const began = b.query(
+				`SELECT outcome FROM app_assistant_begin($1, 1000000000, 1000, 1000000000, 10000000000000, 150000, 1000, 300, $2, 300000, 20, 1000000000000000)`,
+				[otherProject, PRICE]
+			);
+			began.catch(() => {});
+			expect(await waitingOn(b)).toMatch(/^(transactionid|tuple)$/);
+			await hold.query('COMMIT');
+			expect((await deleted).rows[0].gone).toBe(true);
+			await d.query('COMMIT');
+			expect((await began).rows[0].outcome).toBe('ok');
+			await b.query('COMMIT');
+		} finally {
+			await end(hold, d, b);
+		}
+		expect(await asOwner('SELECT 1 FROM app_user WHERE id = $1', [person.id])).toEqual([]);
+		// The reservation was settled after the deletion: charged in full to the project, with no person.
+		const [usage] = await asOwner(
+			`SELECT sum(cost_usd_micros)::float8 AS usd FROM assistant_usage WHERE project_id = $1 AND user_id IS NULL`,
+			[projectId]
+		);
+		expect(usage!.usd).toBe(7000);
+		await asOwner('DELETE FROM assistant_reservation WHERE project_id = ANY($1)', [[projectId, otherProject]]);
+	});
 });
