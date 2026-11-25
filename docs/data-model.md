@@ -1255,7 +1255,7 @@ the result change?", and put back any earlier version.
   every non-GET route under `/projects/:id`: each either `records` (with a
   `call` that proves the revision or event is written) or is `exempt` with a
   reason. A new write route fails the inventory until it's listed. Exempt
-  today, with reasons in the table: project delete, `POST /jobs`, feed
+  today, with reasons in the table: project delete, feed
   run-now, evidence nomination (its own append-only history), uncertainty
   ensembles, `POST /reports`, the allocation import preview (writes
   nothing), notes (each is its own record), queuing or cancelling a

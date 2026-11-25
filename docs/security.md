@@ -2462,7 +2462,8 @@ In short:
   ([§ API keys](#api-keys)). `job_enqueue` still stamps any signed-in enqueuer
   and refuses a plain insert with no user; only a definer function
   (`current_user` ≠ `session_user`) may name the acting user. A client can't
-  queue an auto re-run (`POST /jobs` takes a label only), and an auto run
+  queue a re-run at all (no route does; `POST /jobs` was removed on
+  2026-11-25), and an auto run
   never publishes itself unless the project opted in to "if no new
   warnings", never for the first publication.
 - **The evidence report is a viewer read, and adds nothing a viewer can't

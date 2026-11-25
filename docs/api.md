@@ -741,7 +741,7 @@ alongside teams, e.g. to give an outside client `viewer` access.
   rule from the baseline run itself), so saving it moves `updatedAt`: the
   latest run shows as stale and, with automatic runs on, a re-run is queued.
   `rerunQueuedFor` is when the project's
-  pending re-run (automatic or queued through `POST /jobs`) is due, ISO, or
+  pending automatic re-run is due, ISO, or
   `null`; on `GET /projects/:id` and the other routes that answer
   `{ project }`, not on the list.
   `PATCH` validates the known fields: e.g. `simulationStart/End` and
@@ -4677,7 +4677,6 @@ A job runs later, in the worker, as the editor who queued it.
 | Method | Path | Body | Response | Min role |
 | --- | --- | --- | --- | --- |
 | GET | `/projects/:id/jobs?status=&limit=` | – | `{ jobs: JobMeta[] }`, newest first. `status` ∈ `queued`, `running`, `done`, `failed`, `dead` (`400` otherwise); `limit` 1–200, default 50. A contributor lists only their own yield jobs (RLS, 096), which is how the Yield panel follows one on the Applicant view | viewer (a contributor: their own yield jobs) |
-| POST | `/projects/:id/jobs` | `{ kind: "rerun", label? }` | `202 { job: JobMeta, created: true }`: a model run is queued, due now. If one is already pending (queued, or failed and waiting to retry; an automatic re-run included, which may be due later) the answer is `200 { job, created: false }` with that job, and nothing new is queued. `label` as for `POST /runs` (trimmed, ≤ 200). Only `rerun` is accepted (`400`), and no other field (a client can't queue an automatic re-run) | editor |
 
 - `JobMeta = { id, kind, status, attempts, maxAttempts, runAfter, createdAt, startedAt, finishedAt, error, createdBy, progress }`.
   Never the payload, and nothing about the worker's lease. `progress`
@@ -4696,14 +4695,17 @@ A job runs later, in the worker, as the editor who queued it.
   writes nothing), or a generic `an internal error` /
   `a database error (SQLSTATE …)`.
 - A queued re-run is `POST /runs` off the request path: the same engine run,
-  the same 20-run cap, as the editor who queued it. It appears in
-  `GET /runs` once the job is `done`.
+  the same 20-run cap, as the editor whose new data queued it. It appears in
+  `GET /runs` once the job is `done`. Nothing queues one through the API:
+  `POST /projects/:id/jobs` (a manual re-run) was removed on 2026-11-25, as
+  no page, script or spec called it; a `manual` re-run queued before then
+  still runs. The jobs list's caller is the frontend's `api.jobs.list` (the
+  Yield panel follows its job through it).
 - `GET /jobs` also lists the automatic re-runs new data queues (`kind:
   'rerun'`, `runAfter` the debounced due time; WP-2.11). One pending re-run
-  per project, automatic or not.
+  per project.
 - `GET /jobs` also lists the data feeds' `feed_fetch` / `feed_ingest` jobs
-  ([§ Data feeds](#data-feeds)); they are queued by the server, never through
-  `POST /jobs`. It lists `yield` jobs too, queued through `POST /yield`
+  ([§ Data feeds](#data-feeds)); they are queued by the server. It lists `yield` jobs too, queued through `POST /yield`
   ([§ Yield](#yield)), and `sweep` jobs, queued through `POST /sweeps`
   ([§ Sweeps](#sweeps)).
 

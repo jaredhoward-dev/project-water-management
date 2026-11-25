@@ -7276,7 +7276,7 @@ assume, the questions for counsel); these are the actions, with triggers.
 
 ## Housekeeping
 
-- [ ] **Three routes with no client call (round 4 reports; operator
+- [x] **Three routes with no client call (round 4 reports; operator
       decision 2026-10-11, issue #90).** `POST /projects/:id/jobs`, and the
       farm `series` and `history` routes looked to have no caller in `frontend/src` (round 4 reports).
       **Durable fix:** for each, find a caller (a script, e2e, a planned
@@ -7291,15 +7291,10 @@ assume, the questions for counsel); these are the actions, with triggers.
       - [x] Done (2026-11-25): farm `history` removed. No caller anywhere,
             and design/farmer-view.md §12 chose "compared with last season"
             from `lastSeason`, not `/history`.
-      - [ ] Decided (2026-11-25): remove `POST /projects/:id/jobs`. No
-            caller outside backend DB tests (`jobs/jobs.db.test.ts`,
-            `runs/autoRun.db.test.ts`, which use it to queue a `rerun`) and
-            run-locally.md's mention; not an integrator route. Left for a
-            follow-up PR: re-point those tests at `enqueueJob`, keep the
-            `rerun` handler's `manual` trigger for jobs already queued, and
-            drop its lines in api.md, architecture.md, run-locally.md,
-            security.md, data-model.md and the route sample/write-route
-            tables. **Trigger:** the next backend round.
+      - [x] Done (2026-11-25): `POST /projects/:id/jobs` removed. No caller
+            outside backend DB tests, which now queue through `enqueueJob`;
+            not an integrator route. The `rerun` handler still runs a
+            `manual` job queued before the removal.
 - [ ] **A client navigation to a glossary topic once never committed
       (2026-10-30, seen once).** help.spec.ts › "a guide shows its diagrams
       and links into the glossary" failed once at load average ~70 (other

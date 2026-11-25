@@ -753,7 +753,7 @@ own idempotency; do that only if jobs start competing for connections.
 Work that shouldn't run inside a request, or can't fit the API Lambda's 30 s,
 goes through one job queue (roadmap WP-2.8; `backend/src/jobs/`,
 `016_jobs.sql`). Its consumers are `rerun` (a model run off the request
-path, `POST /projects/:id/jobs`, and the automatic re-run after new data,
+path: the automatic re-run after new data,
 [§ Automatic runs](#automatic-runs)), the data feeds' `feed_fetch` /
 `feed_ingest` ([§ Data feeds](#data-feeds)) and the server-side PDF's
 `report_render` ([§ Server-side reports](#server-side-reports)) and the

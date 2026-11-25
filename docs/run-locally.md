@@ -358,9 +358,8 @@ pnpm dev:mail:bounce farmer1@example.com
 
 ## Background jobs
 
-Some work runs later, in a worker, instead of inside a request: a queued
-model run (`POST /projects/:id/jobs`), the data feeds (below), automatic
-re-runs after new data, and alert emails ([architecture.md § Background work](./architecture.md#background-work)).
+Some work runs later, in a worker, instead of inside a request: the data
+feeds (below), automatic re-runs after new data, and alert emails ([architecture.md § Background work](./architecture.md#background-work)).
 Locally the worker is one Node process against the same Postgres, with no AWS
 and no queue emulator (`JOB_TRANSPORT=inprocess`, the default). It is opt-in:
 
