@@ -131,12 +131,18 @@ test('Fit automatically uses the prior as a penalty and its box, and the fit rec
 	await fit.getByLabel('Model runs per fit').fill('50');
 	await fit.getByLabel('Starts').fill('1');
 	await fit.getByRole('checkbox', { name: /^Validate/ }).uncheck();
+	// Also fit without the prior, so the result and the record say what it cost (issue #622).
+	await fit.getByTestId('fit-prior-cost-choice').getByRole('checkbox').check();
 	await fit.getByRole('button', { name: 'Fit automatically', exact: true }).click();
 	await expect(fit.getByText(/Regional prior \(p10–p90\) bounds · seed 1/)).toBeVisible();
+	await expect(fit.getByTestId('fit-prior-cost')).toHaveText(
+		/^Without the prior: KGE′ [−-]?[\d.]+ \([−-]?[\d.]+ with it\); (the prior cost [\d.]+ of KGE′|the fit with the prior scored [\d.]+ higher, and the comparison can’t separate that from search luck|the two fits score the same)\.$/
+	);
 	await expect(fit.getByText(/The fit used the regional GR4J prior from 7 donor basins of 14 \(synthetic, invented donors\): a penalty of weight 0\.1 pulled the parameters toward its medians, and the search kept to its p10–p90 box\./)).toBeVisible();
 	await fit.getByRole('button', { name: 'Apply to form' }).click();
 	const record = page.getByRole('region', { name: /^Fit record of these parameters/ });
 	await expect(record.getByTestId('fit-prior')).toContainText(/Regional prior: penalty weight 0\.10, searched its p10–p90 box; 7 of 14 donors from “synthetic” \(invented donors\), SHA-256 [0-9a-f]{12}…/);
+	await expect(record.getByTestId('fit-record-prior-cost')).toHaveText(/^ ?Without the prior: KGE′ [−-]?[\d.]+ \([−-]?[\d.]+ with it\); /);
 });
 
 test('with no position for the donors, Fit automatically offers only Off, and a prior chosen before goes back to Off', async ({ page, owner }) => {

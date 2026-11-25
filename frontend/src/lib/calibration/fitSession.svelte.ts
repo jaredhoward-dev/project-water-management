@@ -50,7 +50,7 @@ export class FitSession {
 	priorUse = $state<PriorUse>('off');
 	/** The prior's penalty weight (engine DEFAULT_PRIOR_WEIGHT unless changed). */
 	priorWeight = $state<number | null>(DEFAULT_PRIOR_WEIGHT);
-	/** Also fit without the prior, to show what it cost (engine 1.120.0): one more optimisation. */
+	/** Also fit without the prior, to show what it cost (engine 1.120.0): one more optimisation per start. */
 	priorCost = $state(false);
 	budget = $state<number | null>(1500);
 	validate = $state(true);

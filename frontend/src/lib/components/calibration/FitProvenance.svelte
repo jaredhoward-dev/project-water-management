@@ -107,7 +107,7 @@
 			<!-- Issue #622: the regional prior the fit used, its donors and the donor set's hash. -->
 			{#if record.prior}
 				{@const cost = priorCostLine(record)}
-				<div data-testid="fit-prior"><dt>Regional prior</dt><dd>{priorRecordLine(record.prior)}{#if cost}<span data-testid="fit-prior-cost"> {cost}</span>{/if}</dd></div>
+				<div data-testid="fit-prior"><dt>Regional prior</dt><dd>{priorRecordLine(record.prior)}{#if cost}<span data-testid="fit-record-prior-cost"> {cost}</span>{/if}</dd></div>
 			{/if}
 			<div><dt>Seed</dt><dd>{record.seed}</dd></div>
 			<div><dt>Model runs</dt><dd>{fmtNum(record.budget)} per fit{(record.starts ?? 1) > 1 ? `, ${record.starts} starts` : ''}, {fmtNum(record.evaluations)} in all{record.cancelled ? ' (cancelled)' : ''}</dd></div>

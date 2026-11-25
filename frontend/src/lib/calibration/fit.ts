@@ -139,10 +139,10 @@ export function rankedByText(d: Pick<DifferentialTest, 'rankedBy'>): string {
 
 /**
  * Runs the fit will make: one optimisation per start, two more with validation, plus one without the WR2012 penalty
- * when it is on, and one without the regional prior when asked (`unpriored`).
+ * when it is on, and one per start without the regional prior when asked (`unpriored`).
  */
 export const totalRuns = (budget: number, validate: boolean, penalty = false, starts = 1, unpriored = false) =>
-	budget * (starts + (validate ? 2 : 0) + (penalty ? 1 : 0) + (unpriored ? 1 : 0));
+	budget * (starts + (validate ? 2 : 0) + (penalty ? 1 : 0) + (unpriored ? starts : 0));
 
 export const STAGE_LABEL: Record<CalibrationStage, string> = {
 	full: 'Fitting the whole record',
@@ -154,7 +154,8 @@ export const STAGE_LABEL: Record<CalibrationStage, string> = {
 
 /**
  * Overall progress 0–1 across the stages, each weighted by its runs: the
- * full fit once per start, then the validation stages, the unpenalised fit, the unpriored fit last.
+ * full fit once per start, then the validation stages, the unpenalised fit,
+ * the unpriored fit last (once per start, as the full fit).
  */
 export function progressFraction(p: CalibrationProgress, validate: boolean, penalty = false, starts = 1, unpriored = false): number {
 	const stages: CalibrationStage[] = [
@@ -162,16 +163,19 @@ export function progressFraction(p: CalibrationProgress, validate: boolean, pena
 		...(penalty ? (['unpenalised'] as const) : []),
 		...(unpriored ? (['unpriored'] as const) : [])
 	];
+	const runs = (s: CalibrationStage) => (s === 'full' || s === 'unpriored' ? starts : 1);
 	const i = Math.max(0, stages.indexOf(p.stage));
-	// Stages before this one: the full fit counts `starts` times.
-	const before = i === 0 ? (p.start ?? 1) - 1 : starts + i - 1;
-	return Math.min(1, (before + p.evaluations / p.budget) / (starts + stages.length - 1));
+	// Optimisations before this one: each earlier stage's, then the earlier starts of this one.
+	const before = stages.slice(0, i).reduce((a, s) => a + runs(s), 0) + (runs(stages[i]!) > 1 ? (p.start ?? 1) - 1 : 0);
+	const total = stages.reduce((a, s) => a + runs(s), 0);
+	return Math.min(1, (before + p.evaluations / p.budget) / total);
 }
 
 /**
  * What the regional prior cost the fit (issue #622), from a report or fit record whose prior has the fit without it
  * (engine 1.120.0, `prior.unpriored`): "Without the prior: KGE′ 0.850 (0.800 with it); the prior cost 0.050 of KGE′."
- * Null when the fit wasn't asked to fit without it; a cancelled fit says it didn't run.
+ * When the fit with the prior scored higher it says so, and that the comparison can't tell it from search luck; equal
+ * to three places is a tie. Null when the fit wasn't asked to fit without it; a cancelled fit says it didn't run.
  */
 export function priorCostLine(r: { objective: ObjectiveId; fit: Pick<ScoredPeriod, 'scores'>; prior?: { unpriored?: { fit: Pick<ScoredPeriod, 'scores'> } | null } }): string | null {
 	const u = r.prior?.unpriored;
@@ -182,7 +186,11 @@ export function priorCostLine(r: { objective: ObjectiveId; fit: Pick<ScoredPerio
 	const b = u.fit.scores[r.objective];
 	if (a == null || b == null) return `Without the prior: ${name} can’t be scored on one of the two fits, so what the prior cost is unknown.`;
 	const cost = b - a;
-	return `Without the prior: ${name} ${fmtNum(b, 3)} (${fmtNum(a, 3)} with it); ${cost > 0 ? `the prior cost ${fmtNum(cost, 3)} of ${name}` : 'the prior cost the fit nothing'}.`;
+	const head = `Without the prior: ${name} ${fmtNum(b, 3)} (${fmtNum(a, 3)} with it)`;
+	// Shown to three places, so a difference under 0.0005 either way is a tie, not "0.000".
+	if (Math.abs(cost) < 0.0005) return `${head}; the two fits score the same.`;
+	if (cost > 0) return `${head}; the prior cost ${fmtNum(cost, 3)} of ${name}.`;
+	return `${head}; the fit with the prior scored ${fmtNum(-cost, 3)} higher, and the comparison can’t separate that from search luck.`;
 }
 
 /** The stage being run, with which start for a multi-start full fit. */
