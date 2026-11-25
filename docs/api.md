@@ -416,6 +416,13 @@ the frontend catalogue (same contract: add, never rename):
   `assistant_output_limit`, `assistant_timeout`, `assistant_provider_error`
   (a stream's `error` event): the assistant ([§ Assistant](#assistant)). The
   panel is an English workspace page.
+- `team_plan_not_cancelled` (`503` from `DELETE /teams/:id`): the team's
+  paid plan couldn't be ended at the payment provider (it failed, no
+  provider that can cancel is set up, or a checkout landed a subscription
+  the cancel didn't reach), so nothing was deleted. The message says to try
+  again in a few minutes, and that the plan may already have ended, which
+  lets the same delete go through; the team page shows it as it is
+  ([billing.md § Deleting an account](./billing.md#deleting-an-account)).
 
 | Code | Status | When |
 | --- | --- | --- |
@@ -1487,7 +1494,7 @@ email show them by the project role they give, viewer / editor / owner
 | POST | `/teams` | `{ name }` | `201 { team }` (you become its admin); `400` a name that shows as nothing or is over 200 characters once cleaned ([§ Projects](#projects)) | – |
 | GET | `/teams/:id` | – | `{ team, members: TeamMember[] }` (admins first, then members, then viewers) | viewer |
 | PATCH | `/teams/:id` | `{ name?, settings?: { portfolio: { thresholds: { green, amber } \| null } }, privacyContact?: { name, email, postal? } \| null, requireMfa?: boolean }` (at least one) | `{ team }`. `thresholds` sets the portfolio's traffic lights (below); `null` goes back to the defaults. A change records `team_thresholds.changed` on each of the team's projects; one that changes nothing records nothing. `privacyContact` sets or (`null`) removes the privacy contact (below). `requireMfa` turns the team's two-step sign-in requirement on or off (below) | admin |
-| DELETE | `/teams/:id` | – | `204` — its projects stay, owned by their direct members (`team` → `null`); the team's paid plan is cancelled at the provider first, `503 billing_provider_error` and nothing deleted if it can't be ([billing.md § Deleting an account](./billing.md#deleting-an-account)) | admin |
+| DELETE | `/teams/:id` | – | `204` — its projects stay, owned by their direct members (`team` → `null`); the team's paid plan is cancelled at the provider first, `503 team_plan_not_cancelled` and nothing deleted if it can't be ([billing.md § Deleting an account](./billing.md#deleting-an-account)) | admin |
 | POST | `/teams/:id/members` | `{ email, role }` | `201 { invited: true, invite }`, the same whether or not the address has an account (issue #136, see Projects § Invites); `409` if already a member; `429` past the daily cap on adding by email (Projects § Invites) | admin |
 | PATCH | `/teams/:id/members/:userId` | `{ role }` | `{ member }` | admin |
 | DELETE | `/teams/:id/members/:userId` | – | `204` (admins remove anyone; anyone may remove themselves = leave) | viewer |

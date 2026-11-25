@@ -10,6 +10,7 @@ import { expect, test } from '../support/fixtures.ts';
 import { closeTeamSettings, openTeamSettings } from '../support/teams.ts';
 import { doneThenClick } from '../support/network.ts';
 import { answerConfirm } from '../support/confirm.ts';
+import { endSubscription, plantForeignTeamSubscription } from '../support/db.ts';
 import { expectNoSidewaysScroll, layoutSettled } from '../support/reflow.ts';
 
 test('a team owns catchments together', async ({ page, owner, signIn }) => {
@@ -435,6 +436,32 @@ test('an admin renames and deletes the team from the settings sheet; a member le
 	await answerConfirm(page, true);
 	await expect(page).toHaveURL(/\/teams$/);
 	await expect(page.getByText("You're not in any team yet.")).toBeVisible();
+});
+
+// A team whose paid plan can't be ended at the payment provider isn't deleted (docs/billing.md § Deleting an account):
+// here the live subscription is another provider's than the API's, so the delete refuses with 503
+// team_plan_not_cancelled, and the page says what happened and what to do. Once the plan has ended, deleting goes through.
+test('deleting a team whose paid plan can’t be ended says so and deletes nothing', async ({ page, owner }) => {
+	void owner;
+	const { team } = (await (await page.request.post(`${API_URL}/teams`, { data: { name: 'Paying Board' } })).json()) as { team: { id: string } };
+	const ref = await plantForeignTeamSubscription(team.id);
+
+	await page.goto(`/teams/${team.id}`);
+	let sheet = await openTeamSettings(page);
+	await sheet.getByRole('button', { name: 'Delete team' }).click();
+	await answerConfirm(page, true);
+	await expect(page.getByRole('alert').filter({ hasText: 'paid plan' })).toHaveText(
+		'the team’s paid plan couldn’t be ended at the payment provider, so nothing was deleted; try again in a few minutes (the plan may already have ended, and then deleting the team goes through)'
+	);
+	await expect(page).toHaveURL(new RegExp(`/teams/${team.id}(\\?|$)`));
+	await expect(page.getByRole('heading', { level: 1, name: 'Paying Board' })).toBeVisible();
+
+	// The plan ends (its webhook): the same delete goes through.
+	await endSubscription(ref);
+	sheet = await openTeamSettings(page);
+	await sheet.getByRole('button', { name: 'Delete team' }).click();
+	await answerConfirm(page, true);
+	await expect(page).toHaveURL(/\/teams$/);
 });
 
 // Issue #520: the Members panel is a narrow side column, and a third column clipped "Reset two-step" to "Reset two-"

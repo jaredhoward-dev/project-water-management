@@ -1734,7 +1734,10 @@ payment provider. So the route cancels the plan there first
   (`manual`, none configured, no Stripe key), or a live subscription
   another provider holds (a mock one after switching to Stripe) refuses the
   deletion with `503 account_plan_not_cancelled` (a team: `503
-  billing_provider_error`), and nothing is deleted. Logged as
+  team_plan_not_cancelled`, whose message the team page shows as it is:
+  the plan couldn't be ended at the payment provider, so nothing was
+  deleted; try again in a few minutes, and the plan may already have
+  ended), and nothing is deleted. Logged as
   `account_delete_plan_not_cancelled` with the account's random id.
 - **Order.** Self-service checks what the person alone holds first (no
   cancel for a deletion that would be refused anyway), cancels outside the
@@ -1744,7 +1747,7 @@ payment provider. So the route cancels the plan there first
   (`503 account_plan_not_cancelled`) rather than orphan it. Deleting a team
   does the same: the admin check, then the cancel outside the transaction
   (a non-admin never triggers one), then the same re-check inside the
-  deleting transaction (`503 billing_provider_error`).
+  deleting transaction (`503 team_plan_not_cancelled`).
 - **A refused deletion may already have ended the plan.** A refusal after
   the cancel (a checkout completed in between, or a co-owner left at the
   same moment) leaves the plan cancelled: Stripe's
