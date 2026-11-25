@@ -502,10 +502,24 @@ falls through to the first when it was the last. Neither is granted to
     factor through `mfa_remove_factors` (the authenticator and codes by
     email alike), signs the member out everywhere and logs
     `mfa.reset_by_admin`; the route records `team_member.mfa_reset` on each
-    of the team's projects and emails the member. An admin can thus take a
-    member's factor away; it gives them nothing they couldn't do already
-    (an admin owns every team project), and the member, emailed, sees it in
-    their security log. The team page offers it only on rows below admin.
+    of the team's projects and emails the member. **Nor anyone who is an
+    admin of any other team** (359, operator decision 2026-11-24; the same
+    `403 mfa_reset_admin` and words as for this team's admins;
+    `app_mfa_team_reset` answers `team_admin`). That answer tells the
+    caller one bit, that this member administers some team, never which
+    one: accepted, since refusing at all says as much. An admin owns
+    every project of their own team, so stripping a member's factor there
+    gives them nothing on those projects they couldn't do already; but the
+    member's account reaches more than this team: as an admin of another
+    team they own its projects, and a factor removed by this team's admin
+    (one stolen session) would open those to whoever holds the password.
+    Such a person recovers through the self-service reset or the
+    operator's identity-checked reset (below; deployment.md § Runbooks 14).
+    What remains: a plain member's other memberships (direct project roles,
+    member or viewer of another team) are opened the same way; the member,
+    emailed, sees it in their security log, and every project they reach
+    can require two-step sign-in of its own. The team page offers it only
+    on rows below admin (it can't see other teams; the API refuses those).
   - **The operator, last** (deployment.md § Runbooks 14): when the person
     can't reach the inbox or can't wait and has no team admin, after
     checking who is asking out of band.
@@ -2144,6 +2158,32 @@ In short:
   "false" and looks cheaper than the generic plan, so PL/pgSQL's plan cache
   plans it again on every call (~150 µs a row; the ingest key sweep over
   every table timed out in CI). `role-check.db.perf.test.ts` guards it.
+- **Leaving a team, or being removed from it, takes its projects** (operator
+  decision, 2026-11-24; `backend/src/teams/leaveProjects.ts`). Until then a
+  member who created a team project stayed its direct owner after they left
+  or were removed, so removing someone from the team left them the projects
+  they had made in it. Now `DELETE /teams/:id/members/:userId` drops their
+  direct project roles on the team's projects in the same transaction as
+  the removal and its history entries (a `farmer` row stays: it reaches only
+  their own farm). A project they alone owned directly is handed to a team
+  admin first (the admin removing them, else the longest-standing other
+  admin), so the keep-owner trigger's direct owner is always there and the
+  team's admins keep the project. A demotion isn't serialised with it, so an
+  admin demoted at that moment can end up a team member who owns the project
+  directly: no project is left without an owner, and the remaining admins
+  still own it through the team. Removals from one team serialise on a
+  per-team advisory lock taken before anything is read (`lockTeamLeave`):
+  `assertNotLastAdmin`'s row lock can't do it, since a plain member leaving
+  can't lock the admin rows (`FOR UPDATE` needs the UPDATE policy).
+  Their own projects outside the team are untouched. Tests:
+  `teams/leave-projects.db.test.ts` (the removed creator loses access, an
+  admin owns it, the keep-owner trigger holds, a concurrent leave, the
+  positive control).
+- **Your own id in any case is you.** The member routes (`DELETE
+  /teams/:id/members/:userId`, `DELETE /projects/:id/members/:userId`)
+  compare the id case-insensitively with the caller's, as the team's MFA
+  reset does, so an uppercased own id is a leave, not a removal of someone
+  else (which needs admin or owner and step-up).
 - The backend connects as **`water_app`**: no superuser, no `BYPASSRLS`, owns
   no tables. Each request that touches project data runs in a transaction that
   sets `app.current_user_id` (transaction-local), and RLS policies on every

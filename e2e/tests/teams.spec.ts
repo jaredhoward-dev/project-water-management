@@ -424,6 +424,10 @@ test('an admin renames and deletes the team from the settings sheet; a member le
 	await expect(theirs.getByRole('button', { name: 'Rename' })).toHaveCount(0);
 	await expect(theirs.getByRole('button', { name: 'Delete team' })).toHaveCount(0);
 	await theirs.getByRole('button', { name: 'Leave team' }).click();
+	// Leaving takes the team's projects with it, the ones they created included (2026-11-24).
+	await expect(colleague.page.getByRole('alertdialog', { name: /^Leave / })).toContainText(
+		'You lose your access to its projects, including the ones you created.'
+	);
 	await answerConfirm(colleague.page, true);
 	await expect(colleague.page).toHaveURL(/\/teams$/);
 	await expect(colleague.page.getByText("You're not in any team yet.")).toBeVisible();

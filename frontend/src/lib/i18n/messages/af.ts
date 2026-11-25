@@ -1909,8 +1909,8 @@ export const af: Catalogue = {
 	'9d6d2ca6': 'Dit het tweestap-intekening nodig. Teken uit en teken dan weer met ’n kode in.',
 	// You asked for this a few times today already. Check your inbox and spam folder, or try again tomorrow.
 	'65455dcb': 'Jy het vandag al ’n paar keer hiervoor gevra. Kyk in jou inkassie en gemorspos, of probeer môre weer.',
-	// A team admin can’t remove another admin’s two-step sign-in. They can remove it themselves when they sign in, after a 3-day wait.
-	'972426a2': '’n Spanadministrateur kan nie ’n ander administrateur se tweestap-intekening verwyder nie. Hulle kan dit self verwyder wanneer hulle inteken, ná ’n wagtyd van 3 dae.',
+	// A team admin can’t remove the two-step sign-in of someone who is an admin of this or any other team. They can remove it themselves when they sign in, after a 3-day wait, or ask the operator.
+	'755af8e6': '’n Spanadministrateur kan nie die tweestap-intekening verwyder van iemand wat ’n administrateur van hierdie of enige ander span is nie. Hulle kan dit self verwyder wanneer hulle inteken, ná ’n wagtyd van 3 dae, of die mense wat hierdie app bedryf, vra.',
 	// We just emailed you a code. You can ask for another in {wait}.
 	'5edf5f13': 'Ons het pas vir jou ’n kode ge-e-pos. Jy kan oor {wait} vir nog een vra.',
 	// We couldn’t send the email. Try again in a minute.

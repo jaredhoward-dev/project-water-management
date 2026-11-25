@@ -826,4 +826,35 @@ describe('the team admin’s reset with codes by email, and never another admin 
 		expect((await reset(admin.twoStep, coAdmin.id)).status).toBe(204);
 		expect(await hasFactor(coAdmin.id)).toBe(false);
 	});
+
+	it('refuses a plain member here who is an admin of another team (359, 2026-11-24); a member of no other team is reset (positive control)', async () => {
+		const elsewhere = await enrolled('TeamResetOtherTeamAdmin');
+		expect((await elsewhere.call('POST', '/teams', { name: 'Their own WUA' })).status).toBe(201);
+		expect((await admin.call('POST', `/teams/${teamId}/members`, { email: elsewhere.email, role: 'member' })).status).toBe(201);
+		const r = await reset(admin.twoStep, elsewhere.id);
+		// The same code and words as for this team's own admin: nothing names the other team.
+		expect(r).toMatchObject({ status: 403, body: { code: 'mfa_reset_admin' } });
+		expect(r.body.error).toMatch(/operator/);
+		expect(await hasFactor(elsewhere.id)).toBe(true);
+		expect((await anon('GET', '/auth/me', undefined, elsewhere.twoStep)).status).toBe(200);
+		expect((await events(elsewhere.id)).filter((k) => k === 'mfa.reset_by_admin')).toEqual([]);
+		// The database refuses it whatever the route.
+		const [row] = await withUser(admin.id, (db) => db.query('SELECT status FROM app_mfa_team_reset($1, $2, now())', [teamId, elsewhere.id])).then((x) => x.rows);
+		expect(row).toEqual({ status: 'team_admin' });
+		expect(await hasFactor(elsewhere.id)).toBe(true);
+
+		// Positive control: a plain member of this team and of no other is reset.
+		const plain = await enrolled('TeamResetPlainMember');
+		expect((await admin.call('POST', `/teams/${teamId}/members`, { email: plain.email, role: 'member' })).status).toBe(201);
+		expect((await reset(admin.twoStep, plain.id)).status).toBe(204);
+		expect(await hasFactor(plain.id)).toBe(false);
+
+		// A member (not admin) of another team is no bar either.
+		const memberElsewhere = await enrolled('TeamResetMemberElsewhere');
+		const other = (await elsewhere.call('POST', '/teams', { name: 'Their second WUA' })).body.team.id;
+		expect((await elsewhere.call('POST', `/teams/${other}/members`, { email: memberElsewhere.email, role: 'member' })).status).toBe(201);
+		expect((await admin.call('POST', `/teams/${teamId}/members`, { email: memberElsewhere.email, role: 'viewer' })).status).toBe(201);
+		expect((await reset(admin.twoStep, memberElsewhere.id)).status).toBe(204);
+		expect(await hasFactor(memberElsewhere.id)).toBe(false);
+	});
 });

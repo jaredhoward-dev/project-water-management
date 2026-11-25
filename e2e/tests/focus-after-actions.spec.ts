@@ -66,6 +66,8 @@ test('the team settings sheet and a team member removed leave the focus on the p
 
 	// The colleague's row goes; the row now in its place (yours, the last) takes the focus, on its role.
 	await page.getByRole('button', { name: 'Remove Focus colleague' }).click();
+	// The removed member loses the team's projects, the ones they created included (2026-11-24).
+	await expect(page.getByRole('alertdialog', { name: 'Remove this member?' })).toContainText('They lose their access to its projects, including the ones they created.');
 	await answerConfirm(page, true, 'Remove this member?');
 	await expect(page.getByRole('button', { name: 'Remove Focus colleague' })).toHaveCount(0);
 	await expect(page.locator('tr[data-member] select')).toBeFocused();
