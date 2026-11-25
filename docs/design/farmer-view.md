@@ -413,7 +413,8 @@ screen-reader user can jump by heading.
   (localStorage, keyed by user and node) and shown at once on the next visit,
   with the offline strip, or a quiet "Updating…" until the network answers.
   It holds only what the farmer may see anyway. It is cleared on sign-out,
-  on a 403 or 404 for that farm, when the user changes, and after 30 days
+  on a 403 or 404 for that farm, when the catchment's list of the user's
+  farms no longer has it, when the user changes, and after 30 days
   unused. Menu has "Don't keep a copy on this phone", for a phone shared with
   a foreman or family, and the help says what's kept (§11 F23).
 - **No service worker** in the first release. The SPA has to load, which
