@@ -5782,7 +5782,18 @@ the Map tab, Settings → WR2012 check → Propose from the map;
       Report 1489/1/06 the A-pan grid comes from, in `ATLAS_APAN_ATTRIBUTION`
       (backend geo/evaporationGrid.ts) and `ATLAS_APAN_STATEMENT`
       (frontend dataCredits.ts), changed together. Trigger: whoever next has
-      the report open.
+      the report open. Searched 2026-11-25 (#828): two papers that cite the
+      Atlas give it as **Section 13.2**, "A-pan equivalent reference
+      potential evaporation" (Schulze and Maharaj 2007), which fits the MAP
+      grid's Section 6.2, but no primary source could be read: the WRC site
+      search finds nothing, the Water Research Observatory's 2008 zip needs
+      an account, and the online copies are the 1997 Atlas (WRC TT 82/96,
+      numbered differently). To close it: open Section 13.2's heading in the
+      Observatory's zip (with a login) or the report's contents in the WRC
+      Knowledge Hub in a browser, then change both strings, the tests that
+      pin them (`referenceLoad.test.ts`, `mapLayers.test.ts`, the legal and
+      map-layers e2e specs) and maps.md, data-sources.md and
+      legal/map-data-licences.md.
 - [ ] **Load the Southwestern Cape MAP surface in production** (operator;
       issue #560; deployment.md § Reference datasets). The code allows it
       as dataset `WAAS-SWCape-2007`; nothing is loaded yet, so production's
