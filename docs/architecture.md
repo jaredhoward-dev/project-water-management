@@ -2292,7 +2292,8 @@ EventBridge, daily
   cells in the job (`feeds/fromMirrorEcmwf.ts`), whatever `CHIRPS_SOURCE`
   says: there is no per-feed path to ECMWF, and the fetcher refuses one. It
   maps each day through `ecmwf/qm.json` (the operator's offline fit,
-  `ingest/ecmwf_qm_fit.py`) when that covers the place and season, else
+  `ingest/ecmwf_qm_fit.py`; a group fitted on area means before a per-cell
+  one, issue #835) when that covers the place and season, else
   writes the model's own value with `last_meta.calibration` = `not yet
   calibrated`. Today's issue, else yesterday's; a copy with neither waits
   without a failure. The feeds fall due at 14:00 UTC

@@ -2092,6 +2092,15 @@ limits we keep to are in [data-sources.md § ecmwf-ens](./data-sources.md#ecmwf-
   observed rain first, `--regions` fits per region (default the whole
   region D1), and each group (region × season) needs `--min-samples` pairs
   (default 2,000). Removing `ecmwf/qm.json` returns feeds to uncalibrated.
+  Feeds map a catchment's area mean, so compare the per-cell fit with one
+  made on area means first (issue #835): add `--holdout-from <day>` (a day
+  about a month before the archive's last) to print each fit's error on the
+  area means of the days after it, then write the better one with
+  `--basis cell|area|both` (`--block N` sets the area blocks, N × N 0.1°
+  cells, default 5; `--block 0` with the feeds' boxes in `--regions` fits
+  each feed region whole). The feed applies an area group before a per-cell
+  one. A backend older than #835 refuses a file with area groups (the fit
+  file's schema is strict), so release the backend first.
 
 ### Backfill
 

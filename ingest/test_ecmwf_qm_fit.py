@@ -91,6 +91,7 @@ class Fit(unittest.TestCase):
         self.assertEqual(doc["forecasts"], {"issues": 3, "first": "2026-01-05", "last": "2026-01-07"})
         self.assertEqual([g["id"] for g in doc["groups"]], ["D1-DJF"])  # January only
         g = doc["groups"][0]
+        self.assertEqual(sorted(g), ["id", "months", "pairs", "region", "samples"])  # the per-cell group's keys, as before #835
         self.assertEqual(g["months"], [12, 1, 2])
         self.assertGreater(g["samples"], 1000)
         # Twice the rain maps back to the rain (the 2x2 mean of gamma days is smoother, so a loose tolerance).
@@ -113,6 +114,100 @@ class Fit(unittest.TestCase):
         shutil.rmtree(self.root / "sat")
         doc = qm.fit(self.root, stride=3, min_samples=1)
         self.assertEqual((doc["forecasts"]["issues"], doc["groups"]), (0, []))
+
+
+class BlockMeans(unittest.TestCase):
+    def test_means_over_the_cells_finite_in_both_and_half_full_blocks_only(self):
+        f = np.arange(16, dtype=np.float64).reshape(4, 4)
+        o = np.ones((4, 4))
+        o[0, 0] = np.nan  # one cell of the first block: its mean skips it in both
+        o[2:, 2:] = np.nan  # a whole block: left out
+        o[2, 0] = o[3, 0] = o[3, 1] = np.nan  # three of four: under half, left out
+        fm, om = qm._block_means(f, o, np.arange(4), np.arange(4), 2)
+        self.assertEqual(fm.tolist(), [(1 + 4 + 5) / 3, (2 + 3 + 6 + 7) / 4])
+        self.assertEqual(om.tolist(), [1.0, 1.0])
+        # Block 0: the region whole, one mean; an edge that doesn't fill a block is dropped.
+        fm, _ = qm._block_means(f, np.ones((4, 4)), np.arange(4), np.arange(4), 0)
+        self.assertEqual(fm.tolist(), [7.5])
+        self.assertEqual(qm._block_means(f, o, np.arange(4), np.arange(4), 3)[0].size, 1)
+        self.assertEqual(qm._block_means(f, o, np.arange(2), np.arange(4), 3)[0].size, 0)
+
+
+class AreaFit(unittest.TestCase):
+    """Issue #835: a copy where a cell's forecast is noisier than its area mean.
+
+    The observed rain is one value per 0.5 deg block and day (uniform over its
+    5 x 5 0.1 deg cells); each cell's forecast is that times independent
+    exponential noise (mean 1). A cell's forecast then has more dry-ish and
+    more extreme days than the observations, but a block's mean forecast is
+    close to the block's rain: the per-cell fit, made to undo the cell noise,
+    distorts an area mean, and the area fit leaves it nearly alone."""
+
+    REGION = {"w": 20.01, "s": -25.49, "e": 22.99, "n": -22.51}  # 0.1 deg rows and cols 100..129
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        mirror = zarrstore.LocalMirror(self.root)
+        rng = np.random.default_rng(835)
+        first = dt.date(2026, 1, 1)
+        issues = [first + dt.timedelta(days=i) for i in range(12)]
+        days = (issues[-1] - first).days + ecmwf_forecast.DAYS
+        blocks = gamma_rain(rng, days * 36, wet=0.5).reshape(days, 6, 6)
+        obs = np.full((days, 550, 620), np.nan, np.float32)
+        obs[:, 200:260, 200:260] = np.kron(blocks, np.ones((10, 10)))
+        zarrstore.write_finals(self.root, "sat", first, obs)
+        coarse = np.kron(blocks, np.ones((5, 5)))  # (days, 30, 30) on the 0.1 deg cells
+        for i, issue in enumerate(issues):
+            v = np.zeros((4, ecmwf_forecast.DAYS, ecmwf_forecast.ROWS, ecmwf_forecast.COLS), np.float32)
+            v[0, :, 100:130, 100:130] = coarse[i : i + ecmwf_forecast.DAYS] * rng.exponential(1.0, (ecmwf_forecast.DAYS, 30, 30))
+            ecmwf_forecast.write_issue(mirror, issue, v, 50)
+        ecmwf_forecast.write_index(mirror, [issues[-1].isoformat()], [d.isoformat() for d in issues[:-1]])
+        self.regions = [{"id": "T", "region": dict(self.REGION)}]
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_both_bases_in_one_file_the_cell_groups_as_before(self):
+        doc = qm.fit(self.root, regions=self.regions, stride=1, min_samples=500, basis="both", block=5, fitted_at="2026-11-25T00:00:00Z")
+        self.assertEqual([g["id"] for g in doc["groups"]], ["T-DJF", "T-DJF-area"])
+        cell, area = doc["groups"]
+        self.assertNotIn("basis", cell)
+        self.assertEqual((area["basis"], area["block"]), ("area", 5))
+        self.assertEqual(cell["samples"], 25 * area["samples"])  # 900 cells, 36 blocks a day
+        self.assertIn("area groups", doc["method"])
+        # The feed's choice: the area group where there is one, else the per-cell group.
+        self.assertIs(qm.group_for(doc, -24.0, 21.5, 1), area)
+        self.assertIs(qm.group_for({**doc, "groups": [cell]}, -24.0, 21.5, 1), cell)
+        self.assertIsNone(qm.group_for(doc, -24.0, 21.5, 6))
+        # Block 0: each region one area, one sample a paired day.
+        whole = qm.fit(self.root, regions=self.regions, min_samples=1, basis="area", block=0)
+        paired = sum(1 for _ in qm._paired_days(self.root, "sat", 1.0))
+        self.assertEqual(whole["groups"][0]["samples"], paired)
+        self.assertEqual(whole["method"], qm.METHOD_AREA)
+
+    def test_held_out_days_the_area_fit_maps_area_means_better_than_the_per_cell_fit(self):
+        split = dt.date(2026, 1, 12)
+        r = qm.holdout(self.root, split, regions=self.regions, stride=1, min_samples=500, block=5)
+        self.assertEqual(r["samples"], 114 * 36)  # 114 held-out (issue, day) pairs, 36 blocks each
+        mae = r["mae"]
+        # The area means are close to the rain already; the per-cell fit pulls them away, the area fit doesn't.
+        self.assertLess(mae["area"], mae["cell"] * 0.8, r)
+        self.assertLess(mae["area"], mae["raw"] * 1.1, r)
+        self.assertLess(abs(r["bias"]["area"]), abs(r["bias"]["cell"]), r)
+        # main prints the same comparison and writes nothing.
+        self.assertEqual(qm.main(["--copy", str(self.root), "--holdout-from", "2026-01-12", "--cell-stride", "1", "--min-samples", "500", "--regions", str(self._regions_file())]), 0)
+        self.assertFalse((self.root / ecmwf_forecast.QM_KEY).exists())
+
+    def test_main_writes_an_area_fit(self):
+        self.assertEqual(qm.main(["--copy", str(self.root), "--basis", "area", "--min-samples", "500", "--regions", str(self._regions_file())]), 0)
+        doc = json.loads((self.root / ecmwf_forecast.QM_KEY).read_text())
+        self.assertEqual([(g["id"], g["basis"], g["block"]) for g in doc["groups"]], [("T-DJF-area", "area", 5)])
+
+    def _regions_file(self) -> Path:
+        p = self.root / "regions.json"
+        p.write_text(json.dumps(self.regions))
+        return p
 
 
 if __name__ == "__main__":
