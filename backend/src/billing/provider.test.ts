@@ -232,7 +232,7 @@ describe('cancelOrphan (a subscription whose account is gone)', () => {
 	it('the mock answers it cancelled with nothing refunded, and makes no network call', async () => {
 		const f = vi.fn(async () => new Response('{}'));
 		const mock = billingProvider({ BILLING_PROVIDER: 'mock', BILLING_WEBHOOK_SECRET: SECRET }, { fetch: f as unknown as typeof fetch })!;
-		expect(await mock.cancelOrphan({ accountId: ACCT, subscriptionRef: 'sub_mock_1' })).toEqual({ cancelled: true, refunds: 0, refundedMinor: 0 });
+		expect(await mock.cancelOrphan({ accountId: ACCT, subscriptionRef: 'sub_mock_1' })).toEqual({ cancelled: true, refunds: 0, refundedMinor: 0, skipped: false });
 		expect(f).not.toHaveBeenCalled();
 	});
 
@@ -243,7 +243,7 @@ describe('cancelOrphan (a subscription whose account is gone)', () => {
 			calls.push(`${init?.method} ${path}`);
 			const body =
 				path === '/v1/invoices'
-					? { data: [{ id: 'in_A1', amount_paid: 100 }] }
+					? { data: [{ id: 'in_A1', amount_paid: 100, billing_reason: 'subscription_create', status_transitions: { paid_at: Math.floor(Date.now() / 1000) - 60 } }] }
 					: path === '/v1/invoice_payments'
 						? { data: [{ payment: { type: 'payment_intent', payment_intent: 'pi_A1' } }] }
 						: path === '/v1/refunds'
@@ -252,8 +252,8 @@ describe('cancelOrphan (a subscription whose account is gone)', () => {
 			return new Response(JSON.stringify(body), { status: 200 });
 		});
 		const p = billingProvider({ BILLING_PROVIDER: 'stripe', BILLING_WEBHOOK_SECRET: SECRET, STRIPE_SECRET_KEY: 'test-only-key' }, { fetch: f as unknown as typeof fetch })!;
-		expect(await p.cancelOrphan({ accountId: ACCT, subscriptionRef: 'sub_Orph1' })).toEqual({ cancelled: true, refunds: 1, refundedMinor: 100 });
-		expect(calls).toEqual(['GET /v1/subscriptions/sub_Orph1', 'DELETE /v1/subscriptions/sub_Orph1', 'GET /v1/invoices', 'GET /v1/invoice_payments', 'POST /v1/refunds']);
+		expect(await p.cancelOrphan({ accountId: ACCT, subscriptionRef: 'sub_Orph1' })).toEqual({ cancelled: true, refunds: 1, refundedMinor: 100, skipped: false });
+		expect(calls).toEqual(['GET /v1/subscriptions/sub_Orph1', 'GET /v1/invoices', 'DELETE /v1/subscriptions/sub_Orph1', 'GET /v1/invoice_payments', 'POST /v1/refunds']);
 
 		const failing = billingProvider(
 			{ BILLING_PROVIDER: 'stripe', BILLING_WEBHOOK_SECRET: SECRET, STRIPE_SECRET_KEY: 'test-only-key' },

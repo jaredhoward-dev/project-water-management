@@ -4054,8 +4054,11 @@ API key's transaction, as `app_billing_apply`:
   `checkout.completed` row `recorded` with no account becomes
   `orphan_pending`, answering true. Without it (a redelivery), true only for
   a row already `orphan_pending`.
-- `app_billing_orphan_done(provider, event_id) → boolean`: `orphan_pending`
-  becomes `orphan_refunded` once the provider has cancelled and refunded.
+- `app_billing_orphan_done(provider, event_id, outcome) → boolean`:
+  `orphan_pending` becomes `orphan_refunded` once the provider has cancelled
+  and refunded, or `orphan_skipped_old` when the provider had it ended and
+  its first invoice was paid before the refund window, so nothing was done
+  (billing.md § Deleting an account); any other outcome raises `22023`.
 - Tested in `src/billing/orphan.db.test.ts`.
 
 ### Two-step sign-in (150_mfa.sql, 206_mfa_email_code.sql)

@@ -12,6 +12,7 @@
 // Stripe.
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { InvoiceRequest } from '../provider.js';
+import { billingEnvironment } from './environment.js';
 import { signPayload } from './signature.js';
 import { invoiceMetadata } from './stripeApi.js';
 
@@ -126,7 +127,7 @@ function subscriptionObject(
 		status,
 		cancel_at_period_end: cancelAtPeriodEnd,
 		trial_end: null,
-		metadata: { billing_account_id: accountId, plan_code: planCode, seats_included: String(seatsIncluded) },
+		metadata: { billing_account_id: accountId, plan_code: planCode, seats_included: String(seatsIncluded), wm_environment: billingEnvironment() },
 		items: { object: 'list', data: extra > 0 ? [item(1), item(extra)] : [item(1)] }
 	};
 }

@@ -19,8 +19,15 @@
 --                     so the provider redelivers it, and the redelivery (a
 --                     duplicate to app_billing_apply) finds it here and tries
 --                     again.
---   'orphan_refunded' cancelled at the provider and refunded (or nothing was
---                     paid, a trial): done; a redelivery is a plain duplicate.
+--   'orphan_refunded' cancelled at the provider and its first invoice refunded
+--                     (or nothing was paid, a trial, or a live one whose first
+--                     invoice is past the refund window: cancelled only): done;
+--                     a redelivery is a plain duplicate.
+--   'orphan_skipped_old' the provider had it ended already and its first invoice
+--                     was paid before the refund window (stripeApi.ts
+--                     ORPHAN_REFUND_WINDOW_SECONDS): a late or out-of-order
+--                     event about a subscription its account paid for and used,
+--                     so nothing is cancelled or refunded: done.
 --
 -- app_billing_orphan_claim(provider, event_id, first) → boolean, called in the
 -- same transaction as app_billing_apply (so no crash can leave an orphan
@@ -35,8 +42,9 @@
 --                 true only for a row already `orphan_pending`. A redelivered
 --                 event whose account was deleted *after* it first applied
 --                 is never taken for an orphan (its row isn't pending).
--- app_billing_orphan_done(provider, event_id) → boolean: `orphan_pending` →
---   `orphan_refunded`; false when the row wasn't pending (a concurrent
+-- app_billing_orphan_done(provider, event_id, outcome) → boolean:
+--   `orphan_pending` → outcome (`orphan_refunded` or `orphan_skipped_old`; any
+--   other raises 22023); false when the row wasn't pending (a concurrent
 --   delivery finished first).
 --
 -- Both are SECURITY DEFINER with a pinned search_path, run with no user (as
@@ -47,7 +55,7 @@
 
 ALTER TABLE billing_event DROP CONSTRAINT billing_event_outcome_check;
 ALTER TABLE billing_event ADD CONSTRAINT billing_event_outcome_check
-	CHECK (outcome IN ('applied', 'recorded', 'conflict', 'unknown_account', 'stale', 'orphan_pending', 'orphan_refunded'));
+	CHECK (outcome IN ('applied', 'recorded', 'conflict', 'unknown_account', 'stale', 'orphan_pending', 'orphan_refunded', 'orphan_skipped_old'));
 
 CREATE FUNCTION app_billing_orphan_claim(p_provider text, p_event_id text, p_first boolean) RETURNS boolean
 	LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
@@ -72,17 +80,20 @@ CREATE FUNCTION app_billing_orphan_claim(p_provider text, p_event_id text, p_fir
 REVOKE ALL ON FUNCTION app_billing_orphan_claim(text, text, boolean) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app_billing_orphan_claim(text, text, boolean) TO water_app;
 
-CREATE FUNCTION app_billing_orphan_done(p_provider text, p_event_id text) RETURNS boolean
+CREATE FUNCTION app_billing_orphan_done(p_provider text, p_event_id text, p_outcome text) RETURNS boolean
 	LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
 	AS $$
 	BEGIN
 		IF app_current_user_id() IS NOT NULL OR nullif(current_setting('app.current_api_key_id', true), '') IS NOT NULL THEN
 			RAISE EXCEPTION 'app_billing_orphan_done runs with no user' USING ERRCODE = 'insufficient_privilege';
 		END IF;
-		UPDATE billing_event SET outcome = 'orphan_refunded'
+		IF p_outcome IS NULL OR p_outcome NOT IN ('orphan_refunded', 'orphan_skipped_old') THEN
+			RAISE EXCEPTION 'app_billing_orphan_done: unknown outcome' USING ERRCODE = 'invalid_parameter_value';
+		END IF;
+		UPDATE billing_event SET outcome = p_outcome
 			WHERE provider = p_provider AND event_id = p_event_id AND outcome = 'orphan_pending';
 		RETURN FOUND;
 	END
 	$$;
-REVOKE ALL ON FUNCTION app_billing_orphan_done(text, text) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION app_billing_orphan_done(text, text) TO water_app;
+REVOKE ALL ON FUNCTION app_billing_orphan_done(text, text, text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION app_billing_orphan_done(text, text, text) TO water_app;

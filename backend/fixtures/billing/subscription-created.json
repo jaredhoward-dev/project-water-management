@@ -12,7 +12,7 @@
 			"status": "trialing",
 			"cancel_at_period_end": false,
 			"trial_end": 1796209600,
-			"metadata": { "billing_account_id": "00000000-0000-4000-8000-000000000641", "plan_code": "pro" },
+			"metadata": { "billing_account_id": "00000000-0000-4000-8000-000000000641", "plan_code": "pro", "wm_environment": "local" },
 			"items": { "object": "list", "data": [{ "id": "si_synthetic_0001", "quantity": 1, "current_period_start": 1795000000, "current_period_end": 1796209600 }] }
 		}
 	}
