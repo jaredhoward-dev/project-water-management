@@ -351,23 +351,22 @@ describe('model store', () => {
 		expect((await u.call('GET', `/projects/${projectId}/model`)).body).toEqual(JSON.parse(JSON.stringify(got)));
 	});
 
-	it('ignores the retired High-MAP, Low-MAP and manual shares on save and leaves them out on read (engine 1.105.0, issue #616)', async () => {
+	it('ignores the retired High-MAP, Low-MAP and manual shares on save and leaves them out on read (engine 1.105.0, issue #616; columns dropped by 366)', async () => {
 		const u = await signUp('Retiredshares');
 		const projectId = await newProject(u, 'Retired shares');
 		const outlet = node('Outlet', null);
 		// An older web build still sends them, even out of their old range: dropped, not refused.
 		const farm = node('Upper', outlet.id, { areaHiKm2: 4.5, areaLoKm2: 2, flowShareManual: 3 });
 		expect((await u.call('PUT', `/projects/${projectId}/model`, { nodes: [outlet, farm], crops: [], cropAreas: [], transfers: [] })).status).toBe(200);
-		const columns = async () =>
-			(await asOwner('SELECT area_hi_km2 AS hi, area_lo_km2 AS lo, flow_share_manual AS manual FROM node WHERE id = $1', [farm.id]))[0] as { hi: number; lo: number; manual: number | null };
-		// Not written: a new row takes the columns' defaults until the contract migration drops them.
-		expect(await columns()).toEqual({ hi: 0, lo: 0, manual: null });
+		// Migration 366 (issue #836) dropped the columns; area_km2 is the positive control that the query sees node's columns.
+		const cols = (await asOwner(
+			`SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'node'
+			   AND column_name IN ('area_km2', 'area_hi_km2', 'area_lo_km2', 'flow_share_manual')`
+		)) as { column_name: string }[];
+		expect(cols.map((c) => c.column_name)).toEqual(['area_km2']);
 		const read = async () => (await withUser(u.id, (db) => loadModel(db, projectId))).nodes as unknown as Record<string, unknown>[];
 		for (const n of await read()) for (const k of ['areaHiKm2', 'areaLoKm2', 'flowShareManual']) expect(k in n, `${String(n.name)}.${k}`).toBe(false);
-		// A row an older backend wrote keeps its values (264's History event recorded them), and a save leaves them alone.
-		await asOwner('UPDATE node SET area_hi_km2 = 4.5, area_lo_km2 = 2, flow_share_manual = 0.7 WHERE id = $1', [farm.id]);
 		expect((await u.call('PUT', `/projects/${projectId}/model`, { nodes: [outlet, { ...farm, areaKm2: 12 }], crops: [], cropAreas: [], transfers: [] })).status).toBe(200);
-		expect(await columns()).toEqual({ hi: 4.5, lo: 2, manual: 0.7 });
 		const after = await read();
 		// The positive control: the save went through.
 		expect(after.find((n) => n.id === farm.id)).toMatchObject({ areaKm2: 12 });

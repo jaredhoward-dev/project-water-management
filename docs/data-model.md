@@ -107,8 +107,8 @@ data](./api.md#model-data)).
 | `node` column | Farm spec column | Notes |
 | --- | --- | --- |
 | `area_km2` | Total area farms (km²) | The unit's runoff area: GR4J on its own rain (Per unit; until engine 1.109.0 also the share runs under Fragmentation, which set its natural MAR share), `RainToM3`, land cover, and the area shares the natural MAR shares fall back to ([model.md §2.5](./model.md)) |
-| `area_hi_km2` / `area_lo_km2` | Farm area high / low MAP | The retired *Hi/Lo* method. Neither read nor written since engine 1.105.0 (issue #616, [266](#flow-share-methods-retired-266_retire_flow_share_methodsql)); a later contract migration drops them |
-| `flow_share_manual` | External fragmentation (%) | The retired *Specific* method (0–1). Neither read nor written since engine 1.105.0 (issue #616, [266](#flow-share-methods-retired-266_retire_flow_share_methodsql)); a later contract migration drops it |
+| *(dropped)* `area_hi_km2` / `area_lo_km2` | Farm area high / low MAP | The retired *Hi/Lo* method. Neither read nor written since engine 1.105.0 (issue #616, [266](#flow-share-methods-retired-266_retire_flow_share_methodsql)); migration 366 dropped them (issue #836) |
+| *(dropped)* `flow_share_manual` | External fragmentation (%) | The retired *Specific* method (0–1). Neither read nor written since engine 1.105.0 (issue #616, [266](#flow-share-methods-retired-266_retire_flow_share_methodsql)); migration 366 dropped it (issue #836) |
 | `pct_upstream_to_dam` | "Upstream inflow above dam (%)" | The share of upstream inflow that enters the dam (engine ≥ 0.9.0). The workbook's formula applied it to the water passing below the dam; the client confirmed the label's meaning ([model.md Q1](./model.md#3-workbook-quirks-and-suspected-bugs)). Defaults to 1 (a dam on the river). |
 | `pct_runoff_to_dam` | Farm runoff above (into) dam (%) | |
 | `dam_capacity_m3` | Composite dam capacity (m³) | |
@@ -4796,12 +4796,15 @@ expand/contract:
 - It then strips `flowShareMethod` and `hiLoSplit` from `project.settings`.
   The engine's and the API's `mergeSettings` drop them too
   (`RETIRED_SETTINGS_KEYS`).
-- The three node columns stay for now. The backend from this release
-  neither reads nor writes them (`model/store.ts`; new rows take the
+- The three node columns stayed. The backend from this release
+  neither reads nor writes them (`model/store.ts`; new rows took the
   defaults 0, 0 and NULL), and the engine drops the fields from any input
-  it reads (`upgradeLegacyModel`, `RETIRED_NODE_FIELDS`). A later contract
-  migration drops the columns once this backend release is in production
-  ([followups.md](./followups.md)).
+  it reads (`upgradeLegacyModel`, `RETIRED_NODE_FIELDS`). The contract
+  half, `366_drop_flow_share_columns.sql` (issue #836), drops them, once
+  the release carrying 266 (backend@0.10.0) and every later one in
+  production had stopped reading them: no policy, view, index or function
+  names them, the row-type readers look columns up by name, and their
+  CHECK constraints go with them.
 
 Stored runs, model revisions and scenario ops keep the values in their
 JSON, as records: an older run's summary keeps its recorded shares, the

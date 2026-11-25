@@ -158,8 +158,8 @@ export async function saveModel(db: Db, projectId: string, m: ProjectModel): Pro
 
 	// Nodes go in without their topology: the same-project trigger checks a
 	// row's downstream node as the row goes in, before later rows exist.
-	// area_hi_km2, area_lo_km2 and flow_share_manual are neither read nor written (retired in engine 1.105.0, issue
-	// #616): a new row takes their defaults, and a later migration drops them (data-model.md § node).
+	// The retired area_hi_km2, area_lo_km2 and flow_share_manual (engine 1.105.0, issue #616) were dropped by
+	// migration 366 (issue #836).
 	await upsertAll(
 		`INSERT INTO node (id, project_id, name, kind, sort_order, area_km2, pct_upstream_to_dam, pct_runoff_to_dam, dam_capacity_m3, dam_initial_pct,
 			dam_min_pct, divert_capacity_m3_day, irrigation_efficiency, return_flow_fraction,
