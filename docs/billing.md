@@ -143,7 +143,9 @@ Built, **off unless `BILLING_ENFORCED`** (issue #641 "Free AI allowance" and
 after the token caps (264), against the project's billing account, and
 reserves the turn's dollars beside its tokens, so the month's (and day's)
 spend plus every running turn's reservation never passes a cap, however many
-turns run at once (begins are serialised by 264's deployment lock).
+turns run at once (begins are serialised by 264's deployment lock). Since
+361 the begin reads the spend from counters (§ The counters below), not by
+summing every account's rows.
 
 | Cap | Who | Limit | Refusal (`429`, `Retry-After`) |
 | --- | --- | --- | --- |
@@ -248,9 +250,48 @@ turn still running when the status is read makes its day look cheaper (its
 message is counted at begin, its cost at the charge): an estimate, and worded
 as one. The Free pool isn't in it (not the person's allowance; its refusal
 says so). Off, a paid plan, or no billing account: `day` is null. It reads
-the person's own sums, not `assistant_dollars_spent` (which scans every pool
-account's month), since the status is read each time the panel loads and
-again after each turn.
+the person's own sums, not `assistant_dollars_spent` (which also reads the
+pool and the account's month), since the status is read each time the panel
+loads and again after each turn.
+
+### The counters
+
+`361_assistant_month_counter.sql` (docs/followups.md § Billing, "Every turn's
+begin sums the month's dollars"). Before it, `assistant_dollars_spent` summed
+the UTC month's `assistant_usage`, the SAST day's `assistant_day_usage` and
+every reservation, and checked `assistant_pool_account` once per account with
+any of them, inside the deployment-wide lock: a begin's cost grew with every
+account that used the assistant this month. Now the recorded dollars are also
+kept in counters, written by triggers on the tables they count, so every
+writer keeps them exact (the charge, the expiry sweep, the purge, a project
+deleted or moved to another account, an account deleted):
+
+- `assistant_month_counter`: per billing account and UTC month, its projects'
+  `assistant_usage.cost_usd_micros`;
+- `assistant_pool_counter`: the Free pool's per UTC month (from
+  `assistant_usage`) and per SAST day (from `assistant_day_usage`), over the
+  accounts in `assistant_pool_member`;
+- `assistant_pool_member`: the accounts whose spend is in the pool counter.
+  Membership is still decided live by `assistant_pool_account` (a Pro
+  account's month leaves the pool when it upgrades, a lapsed one's comes
+  back), so a subscription change moves the account's whole retained spend in
+  or out of the pool counter (`assistant_pool_sync`).
+
+The reservations are still summed live (the table holds only the turns in
+flight, since each begin settles the expired ones first), as are a person's
+own month (their own usage rows) and day (one row). The answer is the same as
+336's sum: one statement reads the counters and the reservations from one
+snapshot, and a charge writes its rows and the counters in one transaction.
+Each trigger takes a per-account advisory lock before it touches that
+account's counters, so a charge and a subscription change on one account
+can't miss each other's change. 264's deployment lock is unchanged (begins
+still read, then reserve). A usage row moved to another project or month is
+counted where it lands; a trigger refuses an UPDATE that moves a day row with a
+cost to another account or day (nothing does; the pool sync re-reads those
+rows). Tests: `assistant/monthCounter.db.test.ts` (every counter equals a
+fresh sum, and the read equals 336's statement, after each path, last month
+and yesterday's SAST day included) and the begin's budget in
+`assistant/begin.db.perf.test.ts`.
 
 **Not built yet** ([followups.md](./followups.md#billing-issue-641)): Haiku
 on Free.
