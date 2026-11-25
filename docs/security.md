@@ -3591,6 +3591,13 @@ database:
   each volume (`app_audit_subject`, 190, the History's one read of an
   event's subject), and the data-subject export leaves both out of every
   allocation event (they are the registered user's, not the exporter's).
+  The same reader gets a `publication.published` event (the season decision
+  log, `publish/decision.ts`) of a cap or full-allocation run without its
+  per-farm figures (`perFarm`; the farm count stays): they are worked out
+  from each farm's volume (issue #523 finding I). The run is told by its
+  stored mode while it is kept; once the run cap has trimmed it, an event
+  from before 213 (or of unknown time) is withheld, a later one isn't
+  (`app_audit_run_held_to_volumes`, 365; `publish/decisionLogCap.db.test.ts`).
   The export's `holder` column is only in an editor's file.
 - **Decision D3** (provisional position, pre-counsel research, 2026-10-01).
   A per-farm volume beside a farm's name identifies its holder in a rural
