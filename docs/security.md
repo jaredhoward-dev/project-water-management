@@ -973,7 +973,11 @@ buys a **render session** that can read one report and nothing else.
 - **The token** (`render_token`, `023_reports.sql`) is the `email_token`
   pattern with purpose `report`: 32 random bytes, stored **only as their
   SHA-256**, **single use** (consuming deletes the row), **5 minutes** (the
-  insert trigger sets the expiry whatever the caller sent), and tied to one
+  insert trigger sets the expiry whatever the caller sent; in production the
+  worker issues one only once its request holds a render slot and is sent,
+  so a burst of renders waits in the job table without tokens, rather than
+  outliving them on the renderer's queue: architecture.md § Server-side
+  reports, render slots), and tied to one
   user, one project and one run. Only the requester can issue it, as
   themselves, for a project they can view and a run of that project (RLS
   and the trigger); a farmer can't. An impact report's token (082) also names

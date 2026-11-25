@@ -3079,7 +3079,31 @@ sequenceDiagram
   renders, two at a time: the token would be refused as final;
   `RENDER_REQUEST_MAX_AGE_MS`). Its answer carries that `retry` flag back, and the worker
   asks again with a fresh token after 2, then 4 minutes, up to 3 renders
-  (`jobs/handlers/report-render.ts` `requestRenderAgain`).
+  (`jobs/handlers/report-render.ts` `requestRenderAgain`). An answer that
+  only says the request outwaited its token (`STALE_REQUEST_ERROR`: nothing
+  was rendered; with render slots, below, only an SQS redelivery after a
+  visibility timeout or a stalled renderer does it) is asked again at once
+  and never counts toward the 3, up to 5 times (`MAX_EXPIRED_REQUESTS`).
+- **Render slots** (`reports/renderSlots.ts`, `353_render_slot`; production,
+  `REPORT_RENDERER=sqs`, only). The worker never has more render requests in
+  flight than the renderer runs at once: `RENDER_CONCURRENCY` (2), the number
+  `infra/reports.tf` gives the renderer's SQS trigger as
+  `maximum_concurrency` (`local.renderer_concurrency`, both from one
+  local). A `report_render`, `pack_render` or `applicant_pack_render`
+  request job takes a slot (`app_render_slot_take`, under an advisory lock)
+  *before* it issues its render token and sends; without one it goes back
+  to the job table (`JobRelease`, its attempt given back) and asks again in
+  15 s, keeping its place in a first-asked, first-sent line, so a burst
+  (many Monday 07:00 schedules) waits in our queue, not in `render-requests`
+  with its tokens dying. A slot frees when the renderer's answer arrives
+  (`lambda-worker.ts`, any answer, before it is queued as a job), when the
+  send fails, or on its own 10 minutes after it was taken (a token's 5, a
+  render's 2, a margin: the answer was lost or dead-lettered); a waiter that
+  stops asking (its report deleted) leaves the line as long after its last
+  ask. One target (a report, a pack, an applicant's copy) is never in
+  flight twice. A report's 1-hour answer window counts from its send
+  (`report.sent_at`), not from when it was asked for. Locally
+  (`REPORT_RENDERER=inline`) the job renders itself and takes no slot.
 - **Storage** (`reports/storage.ts`, `STORAGE`): one S3 client.
   `local` (the default) is MinIO from docker-compose on :9002, bucket created
   on first use; `s3` is the private production bucket (SSE, 7-day

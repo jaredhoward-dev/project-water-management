@@ -5159,6 +5159,22 @@ role and not before it.
       `backend/renderer-deps/package-lock.json` now resolves it (through
       `aws-lambda-ric` → `node-gyp` → `make-fetch-happen`, build-time only).
       The `osv-scanner.toml` entry is gone.
+- [x] **A burst of renders outlived its render tokens on the renderer's
+      queue** (round 4 review). The worker issued each 5-minute token just
+      before sending, and the renderer runs 2 at a time, so a burst (many
+      Monday 07:00 schedules) left requests waiting past their token's life;
+      the renderer answered them "expired, retry" and the worker's 3 requests
+      could all be spent that way. Done: render slots (`353_render_slot`,
+      `reports/renderSlots.ts`): never more requests in flight than
+      `RENDER_CONCURRENCY` (Terraform's `local.renderer_concurrency`, also the
+      trigger's `maximum_concurrency`); the token is issued only on send; the
+      rest wait in the job table, in order, their attempts given back; a slot
+      frees on any answer, a failed send, or 10 minutes. An expired,
+      never-rendered answer (an SQS redelivery) asks again uncounted, up to 5
+      times. Reports, packs and applicants' copies alike; a report's answer
+      window counts from its send (`report.sent_at`). Tests:
+      `reports/renderSlots.db.test.ts`, the handler unit tests,
+      `lambda-worker.test.ts`.
 - [ ] **The renderer image has never run on Lambda.** CI and
       the gates cover the render path with the local Chromium (the worker's
       inline renderer, MinIO, Mailpit, e2e) and the renderer Lambda's

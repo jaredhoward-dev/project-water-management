@@ -3687,8 +3687,12 @@ run on the job queue, with the rendering done outside the VPC (infra/reports.tf)
     `expired` (always `retry` true): the request waited on `render-requests`
     longer than its token lives (4 of its 5 minutes,
     `RENDER_REQUEST_MAX_AGE_MS`), so the renderer answered without a
-    browser and the worker asks again with a fresh token; many mean a burst
-    (a popular schedule hour) is outrunning the renderer's concurrency.
+    browser and the worker asks again with a fresh token, without counting
+    it toward the 3. The worker sends no more requests than the renderer
+    runs at once (render slots, architecture.md § Server-side reports), so a
+    burst waits in the job table and this should be rare: many mean SQS
+    redeliveries (renderer invocations crashing or timing out) or a
+    renderer that has stopped taking requests.
 - **SES**: report emails go to members, so they count against the same SES
   sending limits as account email; production access (Operator step 8a) is
   needed before a schedule can mail anyone but verified addresses.
