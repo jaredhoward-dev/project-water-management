@@ -13,7 +13,7 @@ import { C3S_FIXTURE, c3sFixtureValue } from '../../scripts/c3s-fixture.js';
 import { MIRROR_FIXTURE_DIR } from '../../scripts/gen-mirror-fixture.js';
 import type { Geometry } from '../geo/geojson.js';
 import { MirrorFormatError } from '../mirror/arrays.js';
-import { openStore } from '../mirror/store.js';
+import { openStore, type MirrorStore } from '../mirror/store.js';
 import { C3S_LEAD_DAYS, C3S_RELEASE_DAY, C3S_RELEASE_DAY_OTHERS, c3sIssuedOn, monthlyTotals, pickC3sInit, readC3sInputs, seasonalCells, type ForecastArea } from './c3s.js';
 
 const square = (lon: number, lat: number, half: number): Extract<Geometry, { type: 'Polygon' }> => ({
@@ -189,6 +189,78 @@ describe('readC3sInputs on the committed synthetic copy', () => {
 		expect(u.systems.map((s) => s.system)).toEqual(['ecmwf-51', 'ukmo-604']);
 		const mean = (k: number) => [0, 1, 2].reduce((acc, m) => acc + monthlyTotals(Array.from({ length: C3S_LEAD_DAYS }, (_, d) => Math.fround(c3sFixtureValue('ecmwf-51', 2018, m, d, 1, 2))), '2018-09-01')[k]!, 0) / 3;
 		u.systems[0]!.meanMonthlyMm.forEach((v, k) => expect(v).toBeCloseTo(mean(k), 2));
+	});
+
+	/** The fixture copy, counting the chunk reads under each product, and hiding the monthly totals when `hide`. */
+	function counted(hide: boolean): { store: MirrorStore; reads: Map<string, number> } {
+		const reads = new Map<string, number>();
+		const wrapped: MirrorStore = {
+			get: async (k, o) => {
+				if (hide && k.startsWith('/c3s-hc-monthly/')) return undefined;
+				const at = /^\/(.+)\/tp_mm\/c\//.exec(k);
+				if (at) reads.set(at[1]!, (reads.get(at[1]!) ?? 0) + 1);
+				return store.get(k, o);
+			},
+			set: (k, v) => store.set(k, v)
+		} as MirrorStore;
+		return { store: wrapped, reads };
+	}
+
+	it('reads a hindcast from its monthly totals in one chunk, with the daily chunks’ result (issue #837)', async () => {
+		const unit = seasonalCells(square(22.3, -33.7, 0.2));
+		if ('problem' in unit) throw new Error(unit.problem);
+		const two = seasonalCells({ type: 'MultiPolygon', coordinates: [square(21.3, -33.7, 0.1).coordinates, square(22.3, -33.7, 0.2).coordinates] });
+		if ('problem' in two) throw new Error(two.problem);
+		for (const [cells, decisionDate] of [
+			[area.cells, '2018-10-01'],
+			[two.cells, '2018-10-01'],
+			[two.cells, '2018-10-06']
+		] as const) {
+			const a = { ...area, cells, units: [{ nodeId: 'u1', name: 'Upper', cells: unit.cells }] };
+			const fast = counted(false);
+			const slow = counted(true);
+			const viaMonthly = await readC3sInputs(fast.store, a, decisionDate);
+			const viaDaily = await readC3sInputs(slow.store, a, decisionDate);
+			// ECMWF's hindcast is read from its monthly totals (one chunk); the Met Office's, which the copy holds only daily, from 24 years × 2 members.
+			const mm = decisionDate === '2018-10-06' ? '10' : '09';
+			expect(fast.reads.get(`c3s-hc-monthly/ecmwf-51/${mm}`)).toBe(1);
+			expect(fast.reads.get(`c3s-hc/ecmwf-51/${mm}`)).toBeUndefined();
+			expect(slow.reads.get(`c3s-hc/ecmwf-51/${mm}`)).toBe(24 * 3);
+			if (mm === '09') expect(fast.reads.get('c3s-hc/ukmo-604/09')).toBe(24 * 2);
+			// The same inputs either way, to the monthly array's float32 rounding.
+			const { hindcasts: hm, ...restM } = viaMonthly;
+			const { hindcasts: hd, ...restD } = viaDaily;
+			expect(restM).toEqual(restD);
+			expect(hm.map((h) => [h.system, h.initMonth, h.years.map((y) => [y.year, y.members.map((m) => m.monthlyMm.length)])])).toEqual(
+				hd.map((h) => [h.system, h.initMonth, h.years.map((y) => [y.year, y.members.map((m) => m.monthlyMm.length)])])
+			);
+			expect(hm.flatMap((h) => h.years.flatMap((y) => y.members.flatMap((m) => m.monthlyMm))).length).toBeGreaterThan(0);
+			hm.forEach((h, i) => h.years.forEach((y, j) => y.members.forEach((m, k) => m.monthlyMm.forEach((v, n) => expect(Math.abs(v - hd[i]!.years[j]!.members[k]!.monthlyMm[n]!)).toBeLessThan(1e-4)))));
+		}
+	});
+
+	it('falls back to the daily chunks when the monthly totals are for other years or members', async () => {
+		const copy = mkdtempSync(join(tmpdir(), 'c3s-stale-'));
+		dirs.push(copy);
+		cpSync(MIRROR_FIXTURE_DIR, copy, { recursive: true });
+		const g = join(copy, 'c3s-hc-monthly/ecmwf-51/09/zarr.json');
+		const meta = JSON.parse(readFileSync(g, 'utf8'));
+		meta.attributes.members = 2;
+		writeFileSync(g, JSON.stringify(meta));
+		const want = await readC3sInputs(store, area, '2018-10-01');
+		const got = await readC3sInputs(openStore(pathToFileURL(`${copy}/`).href), area, '2018-10-01');
+		const months = expectedMonths('ecmwf-51', 1996, 2, '1996-09-01');
+		expect(got.hindcasts[0]!.years[3]!.members[2]!.monthlyMm).toHaveLength(months.length);
+		got.hindcasts[0]!.years[3]!.members[2]!.monthlyMm.forEach((v, k) => expect(v).toBeCloseTo(months[k]!, 4));
+		expect(got.hindcasts.map((h) => h.years.length)).toEqual(want.hindcasts.map((h) => h.years.length));
+		// A monthly array laid out otherwise is a copy laid out wrong.
+		const a = join(copy, 'c3s-hc-monthly/ecmwf-51/09/tp_mm/zarr.json');
+		const am = JSON.parse(readFileSync(a, 'utf8'));
+		am.dimension_names = ['year', 'member', 'lead_day', 'lat', 'lon'];
+		writeFileSync(a, JSON.stringify(am));
+		meta.attributes.members = 3;
+		writeFileSync(g, JSON.stringify(meta));
+		await expect(readC3sInputs(openStore(pathToFileURL(`${copy}/`).href), area, '2018-10-01')).rejects.toThrow(/c3s-hc-monthly\/ecmwf-51\/09 is not laid out as expected \(dimension names\)/);
 	});
 
 	it('gives no forecast before any init is issued, or with no copy of them; passes a system without a hindcast with a note', async () => {
