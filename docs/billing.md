@@ -31,6 +31,24 @@ and `team_id` is set, each unique).
 - An account's live `subscription` gives its plan. **No live subscription
   means Free.** In Phase 1 no one has a subscription, so every account is on
   Free.
+- **Who reads a plan, and where *Compare plans* goes.** A person reads
+  their own account's plan; a team's is read by its admins only
+  (`app_billing_account_readable`, 323: `GET /teams/:id/plan` is `404` to a
+  team member, a team viewer and someone shared a team project directly
+  outside the team). So every *Compare plans* link is built by
+  `planLink` (`frontend/src/lib/components/billing/planLink.ts`) from the
+  project's `team`, whose `role` is the caller's role in it
+  (`app_team_role`; `null` outside the team; [api.md](./api.md)): a
+  personal catchment opens `/account/plan`, a team admin `/teams/:id/plan`,
+  and anyone else in a team catchment the public price list
+  (`/welcome/pricing`) with "This catchment is on *team*'s plan: ask a team
+  admin to change it." (*its team's plan* for someone outside the team, who
+  can't read its name). Not their own plan: the catchment bills to the
+  team, so upgrading their own account wouldn't change what it may do, and
+  the price list shows what the team's admin would be choosing between. A
+  team without `role` (the list's summary, an older API) counts as not an
+  admin: the price list is always there, a plan page they can't open is a
+  404.
 - Pro attaches to a person, Team to a team. In Step 4 a billing account
   becomes an organisation 1:1 ([roadmap step 4](./roadmap/step-4-platform.md)), so nothing here
   is thrown away.
@@ -1212,9 +1230,11 @@ a second one when `BILLING_ENFORCED` is on.
   bills the catchment: a team catchment's team (`/teams/:id/plan`), any
   other the person's own (`/account/plan`; [§ Who the plan belongs
   to](#who-the-plan-belongs-to)). Every Compare plans link (this note, the
-  copy and import dialogs' line, the assistant's cap) builds it with
-  `planHref` (`planLink.ts`), the team from `project.team`, which the
-  workspace provides to the components below it. The note also shows in
+  copy and import dialogs' line, the assistant's cap, the paused and
+  trial notices) builds it with `planLink` (`planLink.ts`) from
+  `project.team` and the caller's `team.role`, which the workspace provides
+  to the components below it: the team's plan only for a team admin, else
+  the price list with "ask a team admin" (§ Who the plan belongs to). The note also shows in
   the settings save bar (automatic runs; `SaveBar.svelte`, from the settings
   draft's `liveLimit`, the edit kept unsaved) and the Publish this run
   dialog (`PublicationPanel.svelte`, the dialog kept open), each in place of

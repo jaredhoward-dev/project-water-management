@@ -551,7 +551,12 @@ alongside teams, e.g. to give an outside client `viewer` access.
   the portfolio row's `today` is (issue #137).
 - `team = { id, name } | null` — `null` for a personal project. `name` is
   `null` when you reach a team's project through direct sharing but aren't in
-  the team (team names are visible to members only).
+  the team (team names are visible to members only). On `GET`/`PATCH
+  /projects/:id`, create, import and copy (not the list) it also carries
+  `role`: your role in the team (`viewer`, `member`, `admin`; `app_team_role`),
+  `null` when you aren't in it. Only a team admin reads the team's plan, so
+  *Compare plans* opens `/teams/:id/plan` only for `admin`
+  ([billing.md § Who the plan belongs to](./billing.md#who-the-plan-belongs-to)).
 - **Paused past Free** (341; [billing.md § Pausing after a downgrade](./billing.md#pausing-after-a-downgrade)):
   `project.planPausedAt` (on `GET`/`PATCH /projects/:id`, create, import,
   copy; not in the list) is when the project's feeds, alerts and automatic

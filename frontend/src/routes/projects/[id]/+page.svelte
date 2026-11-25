@@ -199,7 +199,7 @@
 	const invalidFields = provideInvalidFields();
 	// Compare plans anywhere in the workspace (the live-limit note, the assistant's cap) opens the plan that bills this
 	// catchment: its team's, else your own (billing/planLink.ts; docs/billing.md § Who the plan belongs to).
-	provideBillingTeam(() => project?.team?.id);
+	provideBillingTeam(() => project?.team);
 	// A model tab with problems in unsaved edits stays in the strip though hidden, so its link and dot can be reached.
 	const problemTabs = $derived(hasRole(project?.role, 'editor') && editor.dirty ? MODEL_TABS.filter((id) => editor.issues.some((x) => x.area === id)) : []);
 	const stripIds = $derived(stripTabs(shownIds, tab, TAB_IDS, problemTabs));
