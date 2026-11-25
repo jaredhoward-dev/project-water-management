@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	abuseReport, activation, busiestWeek, buildReport, canonicalEmail, formatReport, freeLimitShares, gateRefusals, heaviestFree, newAccountFreeSpend,
-	NOT_YET_MEASURABLE, percentile, redact, reverseTrialToPaid, spendByPlan, type AccountRow, type PersonRow
+	NOT_YET_MEASURABLE, ORPHAN_RETRY_DAYS, percentile, redact, reverseTrialToPaid, spendByPlan, staleOrphans, type AccountRow, type PersonRow
 } from './metrics.js';
 
 const t = (iso: string) => new Date(iso);
@@ -218,5 +218,36 @@ describe('reverseTrialToPaid (342: reverse trial → paid within 30 days)', () =
 		const gaps = text.slice(text.indexOf('Not yet measurable'));
 		expect(gaps).not.toMatch(/Reverse trial/);
 		expect(gaps).not.toMatch(/live-catchment/);
+	});
+});
+
+describe('staleOrphans (352: an orphan the provider stopped retrying)', () => {
+	const now = t('2026-11-24T12:00:00Z');
+	const row = (eventId: string, receivedAt: string) => ({ provider: 'stripe', eventId, type: 'subscription.updated', receivedAt: t(receivedAt) });
+
+	it('keeps the pending rows received more than 3 days ago, oldest first; a row inside the retry window is left to the retries', () => {
+		expect(ORPHAN_RETRY_DAYS).toBe(3);
+		const rows = [
+			row('evt_inside', '2026-11-21T12:00:01Z'), // 1 s short of 3 days: Stripe may still redeliver it
+			row('evt_newer', '2026-11-21T11:59:59Z'),
+			row('evt_older', '2026-11-10T00:00:00Z')
+		];
+		expect(staleOrphans(rows, now)).toEqual([
+			{ provider: 'stripe', eventId: 'evt_older', type: 'subscription.updated', receivedAt: '2026-11-10T00:00:00.000Z', days: 14 },
+			{ provider: 'stripe', eventId: 'evt_newer', type: 'subscription.updated', receivedAt: '2026-11-21T11:59:59.000Z', days: 3 }
+		]);
+		expect(staleOrphans([], now)).toEqual([]);
+	});
+
+	it('prints them first, as an action, with the event ids the dashboard finds them by; none says so', () => {
+		const stale = buildReport('2026-11', now, [], [], FREE, [], [], [row('evt_stuck', '2026-11-01T00:00:00Z')]);
+		const text = formatReport(redact(stale), false);
+		const lines = text.split('\n');
+		expect(lines[2]).toMatch(/^ACTION: 1 orphaned subscription\(s\) still pending past the provider's 3-day retries/);
+		expect(lines[3]).toBe('  stripe  evt_stuck  subscription.updated  received 2026-11-01T00:00:00.000Z (23 days ago)');
+		// redact keeps them: an event id names no person.
+		expect(redact(stale).staleOrphans).toHaveLength(1);
+		const none = formatReport(buildReport('2026-11', now, [], [], FREE, [], [], [row('evt_new', '2026-11-24T00:00:00Z')]), false);
+		expect(none.split('\n')[2]).toBe("Orphaned subscriptions still pending past the provider's 3-day retries: none");
 	});
 });

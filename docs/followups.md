@@ -914,6 +914,17 @@ are #641's checklist. Open items from building it:
       Stripe retries when either fails; the event row records
       `orphan_pending` then `orphan_refunded` (352; billing.md § The route,
       "An orphan", and § Deleting an account).*
+- [x] **An orphan that can't be cancelled or refunded was only a log line.**
+      If every redelivery of an orphan's event fails for Stripe's 3 days,
+      the row stays `orphan_pending` and the customer keeps paying.
+      *Done (round 2026-11-24 r5): the `billing-orphan-failed` alarm pages on
+      the webhook's first `orphan_failed` line (essential tier, with
+      `billing_provider = "stripe"`), and the billing report opens with every
+      row still pending past the 3 days, read as the schema owner, so not on
+      logs (deployment.md § Billing alarms). Not the job tick: `billing_event`
+      is owner-only and the tick runs as `water_app`, so that would need a
+      migration (a SECURITY DEFINER listing and an operator email from the
+      tick), left for when a proactive non-log signal is wanted.*
 - [x] **The Plan page's "Compare plans" could link the public pricing
       page.** `/welcome/pricing` (Phase 4) now shows the three plans side by
       side; the Plan page (`PlanUsage.svelte`) and its Compare plans links

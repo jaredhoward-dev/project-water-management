@@ -848,6 +848,47 @@ run "essential_alarm_tier" {
   }
 }
 
+# The orphan alarm (352; docs/deployment.md § Billing alarms) exists only with
+# Stripe on, on the essential tier, and reads the webhook's orphan_failed line
+# in the API's log group.
+run "billing_orphan_alarm_with_stripe" {
+  command = plan
+
+  variables {
+    alarm_tier             = "essential"
+    billing_provider       = "stripe"
+    stripe_egress_enabled  = true
+    stripe_secret_key      = "rk_live_0000synthetic0000000000"
+    billing_webhook_secret = "whsec_synthetic0000000000000000000000"
+  }
+
+  assert {
+    condition = (
+      length(aws_cloudwatch_metric_alarm.billing_orphan_failed) == 1 &&
+      aws_cloudwatch_log_metric_filter.billing_orphan_failed[0].log_group_name == aws_cloudwatch_log_group.lambda.name &&
+      aws_cloudwatch_log_metric_filter.billing_orphan_failed[0].pattern == "{ $.message.event = \"billing_webhook\" && $.message.result = \"orphan_failed\" }" &&
+      aws_cloudwatch_metric_alarm.billing_orphan_failed[0].metric_name == aws_cloudwatch_log_metric_filter.billing_orphan_failed[0].metric_transformation[0].name &&
+      aws_cloudwatch_metric_alarm.billing_orphan_failed[0].threshold == 0 &&
+      aws_cloudwatch_metric_alarm.billing_orphan_failed[0].treat_missing_data == "notBreaching" &&
+      aws_cloudwatch_metric_alarm.billing_orphan_failed[0].alarm_actions == toset([aws_sns_topic.alerts.arn])
+    )
+    error_message = "With billing_provider = \"stripe\", any orphan_failed line from the billing webhook must page the alerts topic."
+  }
+}
+
+run "no_billing_orphan_alarm_without_stripe" {
+  command = plan
+
+  variables {
+    alarm_tier = "essential"
+  }
+
+  assert {
+    condition     = length(aws_cloudwatch_metric_alarm.billing_orphan_failed) == 0 && length(aws_cloudwatch_log_metric_filter.billing_orphan_failed) == 0
+    error_message = "billing_provider = \"manual\" takes no webhooks, so no orphan alarm."
+  }
+}
+
 run "no_alarm_tier" {
   command = plan
 
