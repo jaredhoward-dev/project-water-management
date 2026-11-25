@@ -2338,8 +2338,10 @@ recorded before 0.30.0 ran with none). Settings → Rain gaps → Flagged rain �
 **Sub-daily imports and the day boundary.** Manual gauges are read at 08:00
 and the reading is booked to the previous day; an automatic station reports
 midnight to midnight, so a storm straddling midnight lands a day apart in
-the two. A CSV with several timed readings a day is added up into days in
-the window the uploader picks: **08:00 to 08:00, booked to the day it
+the two. A CSV with several timed readings a day is made into days in
+the window the uploader picks (a depth added up, a flow averaged, since a
+flow reading is a rate; a first or last day the file covers only in part
+is left out; issue #829): **08:00 to 08:00, booked to the day it
 starts** (the default, the manual-gauge day), or midnight to midnight. Each
 timestamp is taken to close its interval, so a reading stamped exactly
 08:00 belongs to the day before. The series records the choice
