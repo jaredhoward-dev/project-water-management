@@ -17,7 +17,7 @@
 	import { focusPageStart, pageStart } from '#lib/a11y/focusPage.js';
 	import { followRetry } from '#lib/components/common/loadState.js';
 	import { session } from '#lib/auth/session.svelte.js';
-	import { ALERT_MODES, choiceLabel, DAILY_CAP, modeLabel, resumeProblem, suppressedText, thresholdLine } from '#lib/components/alerts/words.js';
+	import { ALERT_MODES, capNotice, choiceLabel, modeLabel, resumeProblem, suppressedText, thresholdLine } from '#lib/components/alerts/words.js';
 	import SectionHeader from '#lib/components/workspace/SectionHeader.svelte';
 	import { t } from '#lib/i18n/locale.svelte.js';
 	import { APP_SHORT_NAME } from '#lib/brand.js';
@@ -26,6 +26,8 @@
 	import { page } from '$app/state';
 
 	let projects = $state<ProjectAlerts[] | null>(null);
+	/** The daily cap on immediate alert mails, as the API serves it (ALERTS_DAILY_CAP); null until loaded. */
+	let dailyCap = $state<number | null>(null);
 	let loadError = $state<string | null>(null);
 	/** Per project: saving, saved, or an error message. */
 	let status = $state<Record<string, { saving?: boolean; saved?: boolean; error?: string }>>({});
@@ -36,7 +38,9 @@
 	async function load() {
 		loadError = null;
 		try {
-			projects = await api.alerts.mine();
+			const mine = await api.alerts.mine();
+			projects = mine.projects;
+			dailyCap = mine.dailyCap;
 		} catch (e) {
 			loadError = msg(e);
 		}
@@ -131,7 +135,7 @@
 		{#snippet notices()}
 			<!-- Then the farmer word for these emails (lib/help/farmer.ts farm-alerts): inline, so the slim line stays one row. -->
 			<p class="notice">
-				{t('At most {cap} alert emails a day come right away. Any more wait for the next morning’s summary (06:00).', { cap: DAILY_CAP })}
+				{#if dailyCap !== null}{capNotice(dailyCap)}{/if}
 				<a href={wordsHref(basePath(), page.url, 'farm-alerts')}>{t('What are alert emails?')}</a>
 			</p>
 			{#if session.user?.mailSuppressed}

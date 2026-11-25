@@ -4,7 +4,7 @@
 import type { AlertChoice, AlertEvent, AlertMode, FeedbackAnswered, Unsubscribed, User } from '#lib/api/types.js';
 import { ApiError } from '#lib/api/client.js';
 import { fmtPct } from '#lib/components/farm/numbers.js';
-import { msg, t, type Msg } from '#lib/i18n/locale.svelte.js';
+import { msg, plural, t, tn, type Msg } from '#lib/i18n/locale.svelte.js';
 import { errorText } from '#lib/i18n/apiError.js';
 
 export const ALERT_MODES: readonly AlertMode[] = ['immediate', 'daily_digest', 'off'];
@@ -34,8 +34,23 @@ const UNSUBSCRIBED: Record<Exclude<Unsubscribed['kind'], 'all'>, Msg> = {
 	farms_short: msg('hydrological units short of water')
 };
 
-/** Immediate alert mails a person gets a day before the rest wait for the digest (the backend's ALERTS_DAILY_CAP default). */
-export const DAILY_CAP = 5;
+// i18n-section: alerts
+const CAP_NOTICE = plural({
+	one: 'At most {n} alert email a day comes right away. Any more wait for the next morning’s summary (06:00).',
+	other: 'At most {n} alert emails a day come right away. Any more wait for the next morning’s summary (06:00).'
+});
+
+/**
+ * The page's line on the daily cap: `cap` is the number of immediate alert
+ * mails a person gets a day before the rest wait for the digest, as
+ * GET /me/alerts serves it (the backend's ALERTS_DAILY_CAP), never a copy
+ * of its default.
+ */
+export function capNotice(cap: number): string {
+	// i18n-section: alerts
+	if (cap <= 0) return t('Every alert email waits for the next morning’s summary (06:00).');
+	return tn(CAP_NOTICE, cap);
+}
 
 /** The token in an unsubscribe link's fragment (`#t=…`, 43 base64url characters), or null. */
 export function fragmentToken(hash: string): string | null {

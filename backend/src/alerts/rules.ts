@@ -131,3 +131,16 @@ export function defaultMode(role: AudienceRole, kind: AlertKind): AlertMode | nu
 			return role === 'owner' ? 'immediate' : role === 'editor' ? 'off' : null;
 	}
 }
+
+/** At most this many immediate alert mails per person per digest day; the rest wait for the digest. */
+export const DEFAULT_DAILY_CAP = 5;
+
+/**
+ * At most this many immediate mails per person per digest day (ALERTS_DAILY_CAP,
+ * default 5): the worker's claim applies it (send.ts), and GET /me/alerts
+ * serves it so the alert emails page says the cap the worker uses.
+ */
+export function dailyCap(): number {
+	const n = Number(process.env.ALERTS_DAILY_CAP);
+	return process.env.ALERTS_DAILY_CAP?.trim() && Number.isInteger(n) && n >= 0 ? n : DEFAULT_DAILY_CAP;
+}

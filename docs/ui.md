@@ -16083,7 +16083,10 @@ the catalogue, [§ Language](#language)); both unit-tested.
   (`workspace/SectionHeader`, issue #17) is the page's one title, **Alert
   emails**, with what the page is for as its context line, **Back to your
   account** on the right, and under it one slim line with the daily cap (5
-  right away, the rest in the next morning's summary) ending in **What are
+  right away by default, the rest in the next morning's summary; the number
+  is the server's `ALERTS_DAILY_CAP`, which `GET /me/alerts` serves as
+  `dailyCap`, and `capNotice` in `alerts/words.ts` words it, "1 alert email
+  … comes" for one and "every alert email waits" for 0) ending in **What are
   alert emails?**, an inline link to the `farm-alerts` entry on
   `/farm/words` (inline so the line stays one row; no `?from=`, so its back
   link is **Your hydrological units**), and, when mail is

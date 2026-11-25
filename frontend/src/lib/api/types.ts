@@ -661,6 +661,13 @@ export interface ProjectAlerts {
 	choices: AlertChoice[];
 }
 
+/** GET /me/alerts: every catchment's choices, and the daily cap the worker applies. */
+export interface MyAlerts {
+	projects: ProjectAlerts[];
+	/** Immediate alert mails a person gets a day before the rest wait for the 06:00 digest (ALERTS_DAILY_CAP; 0: every one waits). */
+	dailyCap: number;
+}
+
 export interface AlertChoiceChange {
 	kind: AlertKind | 'all';
 	nodeId?: string | null;
