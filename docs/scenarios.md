@@ -438,9 +438,14 @@ R1](./design/planning-outputs.md#31-r1-a-demandscale-scenario-op-foundation-s)).
   applied such an op, so the scenario said demand changed while its run
   equalled its base. What a run can cover is an outer bound of its window,
   taken from the input as the ops before the op leave it: the simulation
-  start and end when set, else the span of every series the input carries
-  (not only the rain the run's window follows, so a window over days only a
-  flow record reaches still applies and changes nothing). The ops apply in
+  start and end when set, else the span of the rain that drives the run
+  (the catchment rain or its station's record, CHIRPS, the forecast, the
+  gap-filling products' ends and rain-source periods: `rainDriverSpan`, the
+  span `prepareRun` starts the window from), never a longer flow or A-pan
+  record; and only from `settings.demandFactorFrom` when that is later, as
+  in a seasonal outlook member, whose demand factors start at the decision
+  date, so an outlook level whose dated op falls outside the season is
+  reported as a problem and not run. The ops apply in
   order, so a `settings.set` of `simulationStart`/`simulationEnd` that
   brings the window into the run must come before the op; one after it
   doesn't rescue it, and one after it that moves the run away from an
