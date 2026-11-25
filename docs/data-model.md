@@ -543,7 +543,10 @@ area-weighted CHIRPS (`rain_chirps_mm`, the from-units feeds,
   /model`, `POST /map/unit-map` writes both from a MAP grid (a `model_put`
   revision; [maps.md § MAP for each unit](./maps.md#map-for-each-unit)).
   `node.map_polygon` (273, issue #646 F7): the polygon `POST /map/unit-map`
-  took the MAP over, `{ featureId, updatedAt, areaM2 }` as it stood; the
+  took the MAP over, `{ featureId, updatedAt, areaM2, geomHash }` as it
+  stood (`geomHash`, the outline's hash, since followups F7; the stamps of
+  `crop_area_land_cover.polygons` and `evaporation_accepted.boundary` carry
+  it too, and one without it is read by its area; maps.md § Checks); the
   model store clears it when a save changes the MAP or its source (a typed
   MAP is over no polygon), and nothing else writes it. NULL = unknown or
   typed.
@@ -5068,7 +5071,7 @@ One scheduled feed per row ([architecture.md § Data feeds](./architecture.md#da
 | Column | Holds |
 | --- | --- |
 | `project_id`, `source` | The project, and `chirps`, `chirps_gefs`, `dws`, `ecmwf_ens` (253), `agera5_et0` (260, issue #604 R5-E: daily reference ET from our copy into `evap_et0_mm`) or `station_api` (321, issue #784: a rainfall station's own web API into `rain_catchment_mm`; its key is in `data_feed_credential`, below) |
-| `config` | JSON ≤ 8 KB, validated per source by `feeds/config.ts`: `{ cells: [{ lat, lon, weight }] }` or `{ bbox: { south, west, north, east }, skipNoData? }` (at most 100 cells in 25 rows) or `{ station }`, or for `station_api` `{ url, station?, auth, headers?, urlTimeFormat?, maxDaysPerRequest?, revisionDays?, format }` (a URL template, how the key is sent, and how to read the answer; never the key: [api.md § Data feeds](./api.md#data-feeds)), plus optional `startDate`, `staleAfterDays`, and for CHIRPS `product` (`sat`, the default, from 1998; `rnl` from 1981). Listed cells may carry the mark of where they came from, written only by its route: `boundary` (the catchment boundary, `fromBoundary.ts`) or `unit` (`{ nodeId, featureId, updatedAt, areaKm2 }`: a land unit's parcel, `fromUnits.ts`, issue #482; such a feed writes the unit's own rain, [§ Unit rain series](#unit-rain-series-209_unit_rain_seriessql)) |
+| `config` | JSON ≤ 8 KB, validated per source by `feeds/config.ts`: `{ cells: [{ lat, lon, weight }] }` or `{ bbox: { south, west, north, east }, skipNoData? }` (at most 100 cells in 25 rows) or `{ station }`, or for `station_api` `{ url, station?, auth, headers?, urlTimeFormat?, maxDaysPerRequest?, revisionDays?, format }` (a URL template, how the key is sent, and how to read the answer; never the key: [api.md § Data feeds](./api.md#data-feeds)), plus optional `startDate`, `staleAfterDays`, and for CHIRPS `product` (`sat`, the default, from 1998; `rnl` from 1981). Listed cells may carry the mark of where they came from, written only by its route: `boundary` (the catchment boundary, `fromBoundary.ts`) or `unit` (`{ nodeId, featureId, updatedAt, areaKm2, geomHash? }`: a land unit's parcel, its outline hash since followups F7, `fromUnits.ts`, issue #482; such a feed writes the unit's own rain, [§ Unit rain series](#unit-rain-series-209_unit_rain_seriessql)) |
 | `target_kind`, `target_name` | The series the values merge into (`time_series (project_id, kind, name)`). `UNIQUE (project_id, target_kind, target_name)`: one feed per series. A fetched value replaces only a day the feed wrote itself, or fills an empty one; an uploaded or imported value is kept, and a gap never erases ([§ Feed days](#feed-days-031_feed_dayssql)). A CHIRPS feed writes nothing into a series holding another product or version (032, [§ Series provenance](#series-provenance-032_series_provenancesql)) |
 | `enabled`, `schedule` | `schedule` is always `daily` (CHECK, 111: no source publishes more often; the migration turned `hourly` feeds daily) |
 | `acting_user_id` | The owner who last saved it (stamped by the trigger). Fetches run as this user under RLS and need editor at run time. `ON DELETE SET NULL`: a deleted account leaves the feed, skipped until an owner saves it |

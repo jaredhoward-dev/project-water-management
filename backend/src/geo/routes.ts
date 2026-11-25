@@ -52,6 +52,7 @@ import {
 } from './geojson.js';
 import { quaternaryAt, quaternaryDatasets } from './quaternary.js';
 import { mapAcceptances } from './acceptances.js';
+import { geometryHash } from './geomHash.js';
 import { configuredWater, traceDam, TraceRefused, type MinOccurrence } from '../delineation/damTrace.js';
 import { countMapCompute } from '../delineation/throttle.js';
 import { DAM_POSITIONS, type DamPosition } from '../delineation/subcatchments.js';
@@ -249,6 +250,8 @@ export interface MapFeature {
 	updatedAt: string;
 	/** A gauge linked to its node: where it stood when linked (273, issue #646 F9); null otherwise, or linked before 273. */
 	linkPoint: Position | null;
+	/** A polygon's outline hash (geomHash.ts, followups F7), what a stamp of a value read over it records; null for points and lines. */
+	geomHash: string | null;
 }
 
 export const toFeature = (r: FeatureRow): MapFeature => ({
@@ -267,7 +270,8 @@ export const toFeature = (r: FeatureRow): MapFeature => ({
 	createdBy: r.created_by_name,
 	createdAt: r.created_at.toISOString(),
 	updatedAt: r.updated_at.toISOString(),
-	linkPoint: r.link_point?.coordinates ?? null
+	linkPoint: r.link_point?.coordinates ?? null,
+	geomHash: geometryHash(r.geometry)
 });
 
 const SELECT_FEATURES = `

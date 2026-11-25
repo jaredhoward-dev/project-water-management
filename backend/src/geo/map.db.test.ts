@@ -661,8 +661,42 @@ describe('where a gauge stood when it became its node, and what the map list say
 			JSON.stringify({ cells: [{ lat: -33.675, lon: 21.325, weight: 1 }], unit: mark })
 		]);
 		const listed = (await viewer.call('GET', at('/features'))).body.accepted;
+		// A mark from before the outline hash (followups F7) is listed without one, not with a guessed one.
 		expect(listed.unitRain).toEqual([mark]);
+		expect(listed.unitRain[0]).not.toHaveProperty('geomHash');
 		expect(listed).toMatchObject({ unitMap: [], landCover: [], evaporation: [] });
 		expect((await stranger.call('GET', at('/features'))).status).toBe(404);
+		// One with the hash lists it.
+		const hashed = { ...mark, nodeId: farmB.id, geomHash: '0123456789abcdef0123456789abcdef' };
+		await asOwner(`INSERT INTO data_feed (project_id, source, config, target_kind, target_name) VALUES ($1, 'chirps', $2, 'rain_chirps_mm', 'CHIRPS v3 (rnl) Farm B')`, [
+			projectId,
+			JSON.stringify({ cells: [{ lat: -33.675, lon: 21.325, weight: 1 }], unit: hashed })
+		]);
+		expect((await viewer.call('GET', at('/features'))).body.accepted.unitRain).toEqual(expect.arrayContaining([mark, hashed]));
+	});
+
+	it('serves each polygon’s outline hash (followups F7): kept by a rename or relink, changed by a reshape to the same area, none for a point', async () => {
+		const weir = node('Weir H', null);
+		const unit = node('Farm H', weir.id);
+		const pid = (await owner.call('POST', '/projects', { name: 'Map outline hashes' })).body.project.id as string;
+		expect((await owner.call('PUT', `/projects/${pid}/model`, { nodes: [weir, unit], crops: [], cropAreas: [], transfers: [] })).status).toBe(200);
+		const made = await owner.call('POST', `/projects/${pid}/map/features`, { kind: 'farm_parcel', name: 'P1', geometry: { type: 'Polygon', coordinates: [box(21.3, -33.7, 0.02)] } });
+		expect(made.status, JSON.stringify(made.body)).toBe(201);
+		const f = made.body.feature as { id: string; geomHash: string; areaM2: number };
+		expect(f.geomHash).toMatch(/^[0-9a-f]{32}$/);
+		const read = async () => (await owner.call('GET', `/projects/${pid}/map/features`)).body.features.find((x: { id: string }) => x.id === f.id);
+		expect((await read()).geomHash).toBe(f.geomHash);
+		// Renamed and linked: another updatedAt, the same outline.
+		expect((await owner.call('PATCH', `/projects/${pid}/map/features/${f.id}`, { name: 'P1 renamed', nodeId: unit.id })).status).toBe(200);
+		expect(await read()).toMatchObject({ name: 'P1 renamed', geomHash: f.geomHash });
+		// Moved 0.001° east: the same area, another outline.
+		expect((await owner.call('PATCH', `/projects/${pid}/map/features/${f.id}`, { geometry: { type: 'Polygon', coordinates: [box(21.301, -33.7, 0.02)] } })).status).toBe(200);
+		const moved = await read();
+		expect(Math.abs(moved.areaM2 - f.areaM2)).toBeLessThanOrEqual(0.5);
+		expect(moved.geomHash).toMatch(/^[0-9a-f]{32}$/);
+		expect(moved.geomHash).not.toBe(f.geomHash);
+		const pt = await owner.call('POST', `/projects/${pid}/map/features`, { kind: 'other', name: 'Spot', lon: 21.3, lat: -33.7 });
+		expect(pt.status).toBe(201);
+		expect(pt.body.feature.geomHash).toBeNull();
 	});
 });

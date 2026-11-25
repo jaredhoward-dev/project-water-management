@@ -82,6 +82,7 @@ import {
 	type MonthlyMeans
 } from './evaporationStations.js';
 import type { Geometry } from './geojson.js';
+import { polygonStamp } from './acceptances.js';
 import { EVAP_STATION_CODE } from './loadEvaporationStations.js';
 import { quaternaryDatasets } from './quaternary.js';
 import { quaternariesText, wr2012EvaporationFor } from './wr2012Evaporation.js';
@@ -312,8 +313,9 @@ export const evaporationRoutes = new Hono<AuthEnv>()
 				 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
 				 ON CONFLICT (project_id, target) DO UPDATE SET monthly_mm = EXCLUDED.monthly_mm, dataset = EXCLUDED.dataset, kind = EXCLUDED.kind,
 					source = EXCLUDED.source, version = EXCLUDED.version, method = EXCLUDED.method, coverage = EXCLUDED.coverage, boundary = EXCLUDED.boundary, accepted_at = now()`,
-				// The boundary as it was summarised (273, issue #646 F8): the Map's Checks flag a redraw since.
-				[id, target, summary.monthlyMm, d.dataset, d.kind, d.source, d.version, d.method, summary.coverage, JSON.stringify({ featureId: boundary.id, updatedAt: boundary.updatedAt, areaM2: boundary.areaM2 ?? 0 })]
+				// The boundary as it was summarised (273, issue #646 F8), its outline's hash with it (followups F7): the Map's
+				// Checks flag a redraw since.
+				[id, target, summary.monthlyMm, d.dataset, d.kind, d.source, d.version, d.method, summary.coverage, JSON.stringify(polygonStamp(boundary))]
 			);
 			const revision = await recordModelRevision(db, id, { source: 'settings_patch', before, reason: evaporationReason(d, boundary, summary) });
 			return c.json({ target, monthlyMm: summary.monthlyMm, dataset: d.dataset, revisionId: revision?.id ?? null });

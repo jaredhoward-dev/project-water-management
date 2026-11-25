@@ -62,7 +62,7 @@ const at = (pid: string) => `/projects/${pid}/feeds/chirps/from-units`;
 async function parcel(u: User, pid: string, nodeId: string, geometry: unknown = PARCEL_A, name = 'Parcel') {
 	const r = await u.call('POST', `/projects/${pid}/map/features`, { kind: 'farm_parcel', name, nodeId, geometry });
 	expect(r.status, JSON.stringify(r.body)).toBe(201);
-	return r.body.feature as { id: string; updatedAt: string; areaM2: number };
+	return r.body.feature as { id: string; updatedAt: string; areaM2: number; geomHash: string };
 }
 const unitSeries = async (pid: string, nodeId: string) =>
 	asOwner(`SELECT id, name, site_node_id AS "siteNodeId", cardinality("values") AS n FROM time_series WHERE project_id = $1 AND kind = 'rain_chirps_mm' AND site_node_id = $2`, [pid, nodeId]);
@@ -114,7 +114,7 @@ describe('rain for each unit (from-units)', () => {
 			source: 'chirps',
 			targetKind: 'rain_chirps_mm',
 			targetName: 'CHIRPS v3 (rnl) Unit A',
-			config: { product: 'rnl', startDate: '1981-01-01', unit: { nodeId: s.a.id, featureId: f.id, updatedAt: f.updatedAt }, cells: u.cells.map(({ lat, lon, weight }: { lat: number; lon: number; weight: number }) => ({ lat, lon, weight })) }
+			config: { product: 'rnl', startDate: '1981-01-01', unit: { nodeId: s.a.id, featureId: f.id, updatedAt: f.updatedAt, geomHash: f.geomHash }, cells: u.cells.map(({ lat, lon, weight }: { lat: number; lon: number; weight: number }) => ({ lat, lon, weight })) }
 		});
 		// Its series exists already, empty, sited at the unit.
 		expect(await unitSeries(s.pid, s.a.id)).toEqual([{ id: expect.any(String), name: 'CHIRPS v3 (rnl) Unit A', siteNodeId: s.a.id, n: 0 }]);

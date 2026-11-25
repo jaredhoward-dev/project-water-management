@@ -10,13 +10,13 @@ import { monthly, node, signUp } from '../__tests__/helpers.js';
 import { withUser } from '../db/tx.js';
 
 type User = Awaited<ReturnType<typeof signUp>>;
-type Feature = { id: string; kind: string; name: string; nodeId: string | null; sourceId: string | null; areaM2: number | null; geometry: { coordinates: unknown }; linkPoint?: unknown };
+type Feature = { id: string; kind: string; name: string; nodeId: string | null; sourceId: string | null; areaM2: number | null; geometry: { coordinates: unknown }; linkPoint?: unknown; geomHash?: string | null };
 type MapBody = {
 	features: Feature[];
 	sources: { id: string; fileName: string; sha256: string; features: number }[];
 	nodes: { id: string; name: string; areaSource: string; areaBasis: string | null; areaFeatureId: string | null }[];
 	accepted: {
-		unitMap: { nodeId: string; polygon: { featureId: string; updatedAt: string; areaM2: number } }[];
+		unitMap: { nodeId: string; polygon: { featureId: string; updatedAt: string; areaM2: number; geomHash?: string } }[];
 		landCover: { nodeId: string; cropId: string; polygons: { featureId: string }[] }[];
 		evaporation: { target: string; boundary: { featureId: string } | null }[];
 	};
@@ -57,7 +57,7 @@ async function mappedProject(owner: User) {
 	const area = await owner.call('POST', `/projects/${projectId}/nodes/${farm.id}/area-from-map`, { featureId: parcel.id });
 	expect(area.status, JSON.stringify(area.body)).toBe(200);
 	// What accepted values were read over (273): written as their routes write them, under the owner's RLS.
-	const stamp = { featureId: parcel.id, updatedAt: '2026-01-01T00:00:00.000Z', areaM2: parcel.areaM2 };
+	const stamp = { featureId: parcel.id, updatedAt: '2026-01-01T00:00:00.000Z', areaM2: parcel.areaM2, geomHash: parcel.geomHash };
 	await withUser(owner.id, async (db) => {
 		await db.query('UPDATE node SET map_mm = 600, map_source = $3, map_polygon = $4::jsonb WHERE id = $1 AND project_id = $2', [farm.id, projectId, 'Synthetic grid', JSON.stringify(stamp)]);
 		await db.query(
@@ -127,7 +127,9 @@ describe('copying a project copies its catchment map', () => {
 
 		// What accepted values were read over names the copied parcel; a polygon the copy has no feature for gets an id of neither project.
 		const copiedParcel = dupFeature('Farm 1').id;
-		expect(dup.accepted.unitMap).toEqual([{ nodeId: dupNode('Farm 1').id, polygon: { featureId: copiedParcel, updatedAt: '2026-01-01T00:00:00.000Z', areaM2: parcel.areaM2 } }]);
+		// The outline's hash (followups F7) is kept: the copied parcel is the same outline, so it hashes alike.
+		expect(dupFeature('Farm 1').geomHash).toBe(parcel.geomHash);
+		expect(dup.accepted.unitMap).toEqual([{ nodeId: dupNode('Farm 1').id, polygon: { featureId: copiedParcel, updatedAt: '2026-01-01T00:00:00.000Z', areaM2: parcel.areaM2, geomHash: parcel.geomHash } }]);
 		expect(dup.accepted.landCover).toHaveLength(1);
 		expect(dup.accepted.landCover[0]!.nodeId).toBe(dupNode('Farm 1').id);
 		const [first, gone] = dup.accepted.landCover[0]!.polygons;

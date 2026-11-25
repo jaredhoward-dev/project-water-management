@@ -33,6 +33,7 @@ import { z } from 'zod';
 import type { AuthEnv } from '../auth/middleware.js';
 import { withUser, type Db } from '../db/tx.js';
 import type { Geometry } from '../geo/geojson.js';
+import { geometryHash } from '../geo/geomHash.js';
 import { UNIT_POLYGONS_SQL } from '../geo/unitPolygon.js';
 import { readJson } from '../http/body.js';
 import { ApiError } from '../http/errors.js';
@@ -202,7 +203,9 @@ async function plan(db: Db, projectId: string, asked?: ChirpsDailyProduct): Prom
 			continue;
 		}
 		const cells = r.cells.map(({ lat, lon, share, weight }) => ({ lat, lon, share, weight }));
-		const mark: UnitMark = { nodeId: u.nodeId, featureId: parcel.id, updatedAt: parcel.updatedAt, areaKm2: Math.round(parcel.areaM2 / 1e3) / 1e3 };
+		// The outline's hash with it (followups F7), so a reshape that keeps the area to 0.001 km² still reads as one.
+		const geomHash = geometryHash(parcel.geometry);
+		const mark: UnitMark = { nodeId: u.nodeId, featureId: parcel.id, updatedAt: parcel.updatedAt, areaKm2: Math.round(parcel.areaM2 / 1e3) / 1e3, ...(geomHash ? { geomHash } : {}) };
 		const feed = feeds.get(u.nodeId) ?? null;
 		const own = series.get(u.nodeId) ?? null;
 		let action: UnitAction = 'create';

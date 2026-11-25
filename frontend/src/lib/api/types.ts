@@ -3204,6 +3204,8 @@ export interface MapFeature {
 	updatedAt: string;
 	/** A gauge linked to its node: where it stood when linked (273, issue #646 F9); null or absent otherwise, or linked before 273. */
 	linkPoint?: MapPosition | null;
+	/** A polygon's outline hash (backend geo/geomHash.ts, followups F7): what a stamp of a value read over it records. null for points and lines; absent from an older server. */
+	geomHash?: string | null;
 }
 
 /** One feature on a farm's map (GET /projects/:id/farm/:nodeId/map, issue #326 A3): the farm's own parcels and dams, the boundary, rivers and gauges. No node, no properties, no author. */
@@ -3266,13 +3268,15 @@ export interface PolygonStamp {
 	featureId: string;
 	updatedAt: string;
 	areaM2: number;
+	/** Its outline's hash then (followups F7); absent in a stamp from before. */
+	geomHash?: string;
 }
 
 /** GET …/map/features `accepted`: the polygon each value from the map was read over (map/stale.ts compares them with the map now). */
 export interface MapAcceptances {
 	unitMap: { nodeId: string; polygon: PolygonStamp }[];
-	/** A unit's own CHIRPS feed's `unit` mark (its area rounded to 0.001 km²). */
-	unitRain: { nodeId: string; featureId: string; updatedAt: string; areaKm2: number }[];
+	/** A unit's own CHIRPS feed's `unit` mark (its area rounded to 0.001 km², and its outline's hash since followups F7). */
+	unitRain: { nodeId: string; featureId: string; updatedAt: string; areaKm2: number; geomHash?: string }[];
 	landCover: { nodeId: string; cropId: string; cropName: string; polygons: PolygonStamp[] }[];
 	evaporation: { target: 'pe' | 'apan'; boundary: PolygonStamp | null }[];
 }
