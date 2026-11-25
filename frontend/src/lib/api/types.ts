@@ -3805,11 +3805,21 @@ export interface Gr4jPriorDonor {
 	kgeFit: number;
 	kgeValidation: number | null;
 	params: { x1: number; x2: number; x3: number; x4: number };
+	/** The free parameters its fit left within 1 % of a typical bound, with the side ('x4:high'); [] none; null when the set didn't record it (362). Absent from an older server. */
+	atBound?: string[] | null;
+}
+
+/** A donor set's flow-space leave-one-out score (362): median KGE′ of the prior's p50s on each held-out donor, and of the same donors' own fits on the same days. */
+export interface Gr4jLooFlow {
+	kge: number;
+	kgeFit: number;
+	n: number;
 }
 
 /** GET /projects/:id/gr4j-prior (issue #622, docs/api.md § Regional GR4J prior): the prior for the catchment or one calibration zone. */
 export interface Gr4jPrior {
-	dataset: { dataset: string; version: string; source: string; method: string; attribution: string; synthetic: boolean; donorSetSha256: string; donors: number } | null;
+	/** `looFlow`: null when the set has no flow-space score; absent from an older server. */
+	dataset: { dataset: string; version: string; source: string; method: string; attribution: string; synthetic: boolean; donorSetSha256: string; donors: number; looFlow?: Gr4jLooFlow | null } | null;
 	datasets: { dataset: string; version: string; synthetic: boolean; donors: number }[];
 	soil: { dataset: string; version: string; attribution: string; synthetic: boolean } | null;
 	target: {

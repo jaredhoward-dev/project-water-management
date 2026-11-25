@@ -52,7 +52,12 @@ test('an editor starts an ungauged project’s GR4J from the regional prior; His
 	const project = await ungauged(page, 'Regional prior');
 	await openPanel(page, project.id);
 	await expect(panel(page).getByTestId('prior-synthetic')).toContainText('Synthetic test data.');
-	await expect(panel(page).getByTestId('prior-skill')).toContainText(/^Skill: \d\.\d\d \(leave-one-out over 14 donors\)$/);
+	await expect(panel(page).getByTestId('prior-skill')).toContainText(/^Skill \(parameters\): \d\.\d\d \(leave-one-out over 14 donors\)$/);
+	// The synthetic set's invented flow-space score, and its donors' at-bound record (none at a bound), 362.
+	await expect(panel(page).getByTestId('prior-flow-skill')).toHaveText(
+		'Skill (flow): KGE′ 0.58 from the prior’s medians on each held-out donor, against 0.74 from their own fits (medians over 14 donors)'
+	);
+	await expect(panel(page).getByTestId('prior-at-bound')).toHaveText('None of the 7 donors kept ended at a typical bound.');
 	await expect(panel(page).getByTestId('prior-no-skill')).toHaveCount(0);
 	const ranges = panel(page).getByTestId('prior-ranges');
 	await expect(ranges.getByRole('row')).toHaveCount(5);
