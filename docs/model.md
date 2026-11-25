@@ -11977,6 +11977,22 @@ the wiring and checked on macOS and Linux. After a fit in the prior's box the un
 Perrin's typical box instead, with a note (sampling the prior's box is
 followups.md's).
 
+**What the prior cost the fit** (engine 1.120.0,
+`CalibrateOptions.fitWithoutPrior`, off by default). Asked, `calibrate()`
+runs one more optimisation after every other: the whole record from the
+seed, with no prior penalty and, where the fit searched the prior's box,
+the wide box instead (`unpriorBounds`); the WR2012 MAR penalty stays as the
+fit has it, so only the prior differs, as `marPenalty.unpenalised` (§2.10c)
+differs only by the MAR term. The report's `prior.unpriored` holds its
+parameters, the box it searched, its scores over the whole record and the
+prior's (unweighted) penalty at its parameters, or `null` when the fit was
+cancelled first; a note gives the objective with and without the prior and
+the difference, "the prior cost 0.050 of KGE′" (`priorCostNote`; nothing,
+when the fit with the prior scores as well). Off, or without a prior, the
+report is the same as before it to the bit and has no `unpriored`
+(`prior-calibrate.test.ts`). It changes no fitted parameter, only the
+report's and the fit record's shape, which is why the version moved.
+
 **Provenance.** The fit's report and its fit record (§2.10b) carry `prior`:
 the weight, whether the box was used, the ranges, the penalty (unweighted)
 at the start and at the fit, and the provenance the backend gave it

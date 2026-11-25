@@ -624,12 +624,17 @@ step 5. What's done and what's open:
       rules option for the prior (use and weight), the server building the
       prior per case's target from the loaded donors, recorded in each case.
       Trigger: a project calibrating by rules on a short record.
-- [ ] **What the prior cost the fit.** Missing: the report gives the
+- [x] **What the prior cost the fit.** Missing: the report gives the
       penalty at the start and the fit, but not the objective with the prior
       left out, so a hydrologist can't see how much KGE′ the prior cost.
       Durable fix: an optional unpriored full fit, as `marPenalty.unpenalised`.
       Trigger: the hydrologist asking, or a fit whose penalty at the fit is
-      large.
+      large. Done (2026-11-25): `CalibrateOptions.fitWithoutPrior` (engine
+      1.120.0, off by default) fits the whole record again without the prior
+      and reports it as `prior.unpriored` with a note; Fit automatically's
+      "Also fit without the prior" box asks for it, and the result and the
+      fit record say "Without the prior: KGE′ … (… with it); the prior cost …"
+      (model.md §2.10m, ui.md § Calibration).
 - [ ] **Step 6 (optional): x1 per unit by PAWC.** Changes `runModel`, so it
       needs its own `ENGINE_VERSION`, the `verify/` mirror, an invariant
       (equal PAWC across units reproduces the shared parameters bit for

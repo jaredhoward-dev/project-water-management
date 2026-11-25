@@ -9695,7 +9695,13 @@ calibration's line points at *How the shown run fits* for NSE and PBIAS.
   the fit fetches the prior for each step's target (the catchment, or each
   calibration zone's own) before it runs, and the result's notes and the fit
   record (**Regional prior** row) name it, its donors and the donor set's
-  SHA-256. When no fit on the project can have a prior (no donor basins
+  SHA-256. With the prior on, **Also fit without the prior, to show what it
+  cost (one more fit)** (`fit-prior-cost-choice`, off by default; a re-fit
+  ticks it again when the last fit's record had one) fits the whole record
+  once more without it (engine 1.120.0, model.md §2.10m), and the result and
+  the record's **Regional prior** row say "Without the prior: KGE′ 0.850
+  (0.800 with it); the prior cost 0.050 of KGE′." (`fit-prior-cost`,
+  `priorCostLine` in `lib/calibration/fit.ts`). When no fit on the project can have a prior (no donor basins
   loaded, or no position to compare donors by: `priorUnavailable`, read from
   the prior route's `dataset` and `target`, asked once as the card opens), the
   choice offers only Off, and the hint under it says why

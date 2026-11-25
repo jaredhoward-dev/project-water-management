@@ -1147,7 +1147,10 @@ alongside teams, e.g. to give an outside client `viewer` access.
   the fit), from engine 1.106.0 the optional `prior` (issue #622: `{ weight
   (0–10), bounded, ranges, provenance, penaltyAtFit, penaltyAtStart }`, the
   regional GR4J prior the fit used, checked by the engine's
-  `calibrationPriorError`, a `400` otherwise; `bounds` is then `wide`,
+  `calibrationPriorError`, a `400` otherwise; from engine 1.120.0 it may
+  carry `unpriored`, `{ params, bounds, fit, penaltyAtFit }` (the same fit
+  without the prior, when asked, so the record says what the prior cost) or
+  `null` (cancelled before it ran); `bounds` is then `wide`,
   `typical` or `prior`, the prior's box), and no others. `auto` is the server's to write
   ([§ Automated calibration](#automated-calibration) `…/apply`): a save whose
   `fitRecord` carries a new or changed `auto` is a `409`; one carrying the

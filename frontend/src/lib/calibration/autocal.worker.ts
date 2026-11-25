@@ -62,6 +62,8 @@ self.onmessage = (e: MessageEvent<FitRequest | EnsembleJob | SensitivityJob>) =>
 			...(req.zone !== undefined ? { zone: req.zone } : {}),
 			// The regional prior built for this fit's target (issue #622): absent, the fit is every engine's before it.
 			...(req.prior ? { prior: req.prior } : {}),
+			// And the same fit without it, when asked, so the report says what the prior cost (engine 1.120.0).
+			...(req.prior && req.fitWithoutPrior ? { fitWithoutPrior: true } : {}),
 			onProgress: (progress) => {
 				const now = performance.now();
 				if (now - last >= 100 || progress.evaluations === progress.budget) {

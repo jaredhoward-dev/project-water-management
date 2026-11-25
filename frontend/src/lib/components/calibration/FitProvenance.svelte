@@ -7,7 +7,7 @@
 -->
 <script lang="ts">
 	import { arealRainText, exclusionLabel, fitPeriodText, fitRecordCaveats, fitRecordStatus, gapFillRecordLabel, originLabel, provenanceLabel, rainSourceText, resolveArealRain, type ApanDailyFingerprint, type ChirpsFactorSet, type FitForcingNow, type FitRecord, type PeInput, type ProjectSettings, type SeriesOrigin, type SeriesProvenance } from '@water-management/engine';
-	import { fittedAtText, objectiveName, rankedByText, scoreCellText, scoreColumns, waterYearsText } from '#lib/calibration/fit.js';
+	import { fittedAtText, objectiveName, priorCostLine, rankedByText, scoreCellText, scoreColumns, waterYearsText } from '#lib/calibration/fit.js';
 	import { FLOW_KIND_LABEL } from '#lib/components/calibration/metrics.js';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { CHIRPS_BIAS_OPTIONS, describeZeroRain } from '#lib/components/settings/rain.js';
@@ -105,7 +105,10 @@
 			<div><dt>Objective</dt><dd>{objectiveName(record.objective)}</dd></div>
 			<div><dt>Bounds</dt><dd>{record.bounds === 'typical' ? 'typical (Perrin et al. 80 %)' : record.bounds === 'prior' ? 'the regional prior’s p10–p90' : 'wide'}</dd></div>
 			<!-- Issue #622: the regional prior the fit used, its donors and the donor set's hash. -->
-			{#if record.prior}<div data-testid="fit-prior"><dt>Regional prior</dt><dd>{priorRecordLine(record.prior)}</dd></div>{/if}
+			{#if record.prior}
+				{@const cost = priorCostLine(record)}
+				<div data-testid="fit-prior"><dt>Regional prior</dt><dd>{priorRecordLine(record.prior)}{#if cost}<span data-testid="fit-prior-cost"> {cost}</span>{/if}</dd></div>
+			{/if}
 			<div><dt>Seed</dt><dd>{record.seed}</dd></div>
 			<div><dt>Model runs</dt><dd>{fmtNum(record.budget)} per fit{(record.starts ?? 1) > 1 ? `, ${record.starts} starts` : ''}, {fmtNum(record.evaluations)} in all{record.cancelled ? ' (cancelled)' : ''}</dd></div>
 			<div><dt>Engine</dt><dd>{record.engineVersion}</dd></div>

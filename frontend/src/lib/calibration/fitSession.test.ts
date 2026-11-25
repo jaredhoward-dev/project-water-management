@@ -184,6 +184,18 @@ describe('FitSession', () => {
 			expect(s.priorUse).toBe('off');
 		});
 
+		it('asks for the fit without the prior again when the last fit had one (engine 1.120.0), and resets it', () => {
+			const s = new FitSession();
+			s.reset('p1');
+			expect(s.priorCost).toBe(false);
+			s.searchFrom({ bounds: 'wide', budget: 800, starts: 3, seed: 42, prior: { weight: 0.3, bounded: false, unpriored: null } as never });
+			expect([s.priorUse, s.priorCost]).toEqual(['penalty', true]);
+			s.reset('p2');
+			expect(s.priorCost).toBe(false);
+			s.searchFrom({ bounds: 'wide', budget: 800, starts: 3, seed: 42, prior: { weight: 0.3, bounded: false } as never });
+			expect(s.priorCost).toBe(false);
+		});
+
 		it('reads a record from before starts were recorded as one start', () => {
 			const s = new FitSession();
 			s.reset('p1');
