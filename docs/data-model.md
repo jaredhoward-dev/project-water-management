@@ -3739,7 +3739,7 @@ secret kept in `infra-secrets` (see [security.md](./security.md)).
 - Goes with the account (cascade) and is in the data-subject export
   (`preferences`).
 
-### Assistant usage (262_assistant_usage.sql, 324_assistant_turn_cost.sql, 336_assistant_dollar_caps.sql, 337_assistant_sast_day.sql)
+### Assistant usage (262_assistant_usage.sql, 324_assistant_turn_cost.sql, 336_assistant_dollar_caps.sql, 337_assistant_sast_day.sql, 361_assistant_month_counter.sql)
 
 What the assistant costs, counted, and each running turn's reserved budget (issue #610; 264 added the reservations, issues #640 and #641; [api.md §
 Assistant](./api.md#assistant), [security.md §
@@ -3752,6 +3752,9 @@ page holds the conversation and sends it with each turn.
 | `assistant_rate` | The hourly message cap: `user_id` (primary key, cascade), `window_start`, `messages`, a fixed one-hour window as `map_compute_throttle` (186); a row goes once its hour is over, at the person's next turn or the job tick |
 | `assistant_reservation` | A running turn's reserved budget (264): `id`, `project_id` (cascade), `user_id` (set null), `month` (the UTC month it began in, which it counts against and is charged to), `reserved` (weighted tokens), `created_at`, `expires_at`; indexes on `project_id`, `user_id`, `month` and `expires_at`. Deleted when the turn is charged; converted into the usage row in full once expired. Owner-only: RLS on, no policy, no grant; since 336 `reserved_usd_micros` (the dollars its budget can cost at most; NULL for an unpriced model) and `day` (the SAST day it began since 337, a UTC day before; indexed) |
 | `assistant_day_usage` | Each person's assistant day per billing account (336, the dollar caps; [billing.md § Assistant dollar caps](./billing.md#assistant-dollar-caps)): `billing_account_id` (cascade), `user_id` (cascade), `day` (the SAST day since 337; rows written before hold a UTC day, read as the same date), `messages` (counted at begin), `cost_usd_micros` (added at charge, or an expired reservation's dollars), `updated_at`; primary key (`billing_account_id`, `day`, `user_id`), which covers the account key, and indexes on `user_id` and `day`. A person reads their own rows (`assistant_day_usage_own`, SELECT only); only the definer functions write; purged with the usage rows (`app_purge_assistant`); in Download my data (`assistantDays`) |
+| `assistant_month_counter` | Each billing account's recorded assistant cost per UTC month (361): `billing_account_id` (cascade), `month`, `cost_usd_micros`, the sum of its projects' `assistant_usage.cost_usd_micros`; primary key (`billing_account_id`, `month`), which covers the account key, and an index on `month` (the purge). Kept by triggers on `assistant_usage` and `project`; owner-only (RLS on, no policy, no grant) |
+| `assistant_pool_counter` | The Free pool's recorded assistant cost (361): `period` (`month`: a UTC month from `assistant_usage`; `day`: a SAST day from `assistant_day_usage`), `start`, `cost_usd_micros`, over the accounts in `assistant_pool_member`; primary key (`period`, `start`). Kept by triggers; owner-only |
+| `assistant_pool_member` | The billing accounts whose spend is in `assistant_pool_counter` (361): `billing_account_id` (primary key, cascade), kept in step with `assistant_pool_account` by `assistant_pool_sync` on every subscription change; owner-only. [billing.md § The counters](./billing.md#the-counters) |
 
 - Every cap counts weighted tokens, `input + 5 × output`
   (`assistant_weighted`; assistant/config.ts `OUTPUT_TOKEN_WEIGHT`: output

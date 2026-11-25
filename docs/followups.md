@@ -1045,7 +1045,7 @@ are #641's checklist. Open items from building it:
       HMAC under a server secret rather than a bare SHA-256 (a bare hash can be
       tested against a known address; an HMAC needs a secret kept for good, or
       the claims stop matching); operator decision.
-- [ ] **Every turn's begin sums the month's dollars.** 336's
+- [x] **Every turn's begin sums the month's dollars.** 336's
       `assistant_dollars_spent` scans the month's `assistant_usage`, today's
       `assistant_day_usage` and every reservation, and the pool calls
       `assistant_pool_account` once per account, all under the
@@ -1054,7 +1054,12 @@ are #641's checklist. Open items from building it:
       accounts grow. Durable fix: a per-month pool counter row the charge
       updates, read in O(1), not a wider lock; a `perf-db` budget on begin
       to pin it. Trigger: begin latency visible in the assistant's p95, or
-      a few hundred active Free accounts.
+      a few hundred active Free accounts. Done (2026-11-25, 361): per-account
+      month and pool month/day counters kept by triggers on the counted
+      tables, read in one statement with the reservations in flight; the
+      deployment lock unchanged, a per-account lock for exactness
+      (billing.md § The counters; `monthCounter.db.test.ts`,
+      `begin.db.perf.test.ts`).
 - [x] **Webhook events apply in arrival order.** `app_billing_apply` (326)
       ignores the payload's `eventCreated`, and Stripe doesn't guarantee
       delivery order, so an older `customer.subscription.updated` arriving
