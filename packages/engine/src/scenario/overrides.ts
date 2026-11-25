@@ -1339,7 +1339,12 @@ export function classifyOp(op: ScenarioOp, ownedNodeIds: Iterable<string>, input
 			const n = input?.model.nodes.find((x) => x.id === op.nodeId);
 			// Removing a node also drops any EWR rule table sited at it.
 			const ewrSite = Array.isArray(input?.settings.ewrRules) && input.settings.ewrRules.some((t) => t?.siteNodeId === op.nodeId);
-			return ok(mine(op.nodeId) && !!n && !sharesRunoff(n) && !ewrSite);
+			// It drops every rule from or to it: each must reach only the applicant's units, as transfer.remove asks, else
+			// removing a node would take another party's rule as the proposal. Only rules from or to it: the owner of a node
+			// sees each of those (applicant.ts); an off-take whose seepage alone rejoins below it may be hidden from them,
+			// and classing by it would tell an applicant it exists (the removal's note leaves it out for the same reason).
+			const touched = (input?.model.transfers ?? []).filter((t) => t.fromNodeId === op.nodeId || transferDestinations(t).some((x) => x.nodeId === op.nodeId));
+			return ok(mine(op.nodeId) && !!n && !sharesRunoff(n) && !ewrSite && touched.every(allEndsMine));
 		}
 		case 'node.insert':
 			// As node.add: a new structure on the reach. The nodes it re-points keep their values and their order along the river.

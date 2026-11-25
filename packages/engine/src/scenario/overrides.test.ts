@@ -2180,6 +2180,8 @@ describe('classifyOp', () => {
 		const noLand = base();
 		Object.assign(nodeOf(noLand, 'A')!, { areaKm2: 0 });
 		noLand.settings.ewrRules = [blankEwrRuleTable('G')];
+		// Without t1 (C → A), which the removal would drop: another party's rule (next test).
+		noLand.model.transfers = [];
 		expect(classifyOp({ op: 'node.remove', nodeId: 'A' }, owned, noLand)).toBe('proposal');
 		expect(classifyOp({ op: 'node.remove', nodeId: 'A' }, owned)).toBe('baseline');
 		expect(cls({ op: 'node.remove', nodeId: 'A' })).toBe('baseline');
@@ -2188,6 +2190,24 @@ describe('classifyOp', () => {
 		// A retired specific share on a stored unit no longer makes it land (engine 1.105.0, issue #616).
 		Object.assign(nodeOf(noLand, 'A')!, { flowShareManual: 0.3 });
 		expect(classifyOp({ op: 'node.remove', nodeId: 'A' }, owned, noLand)).toBe('proposal');
+	});
+
+	it('removing an owned node that drops or changes another party’s transfer is baseline, as transfer.remove would be', () => {
+		const noLand = base();
+		Object.assign(nodeOf(noLand, 'A')!, { areaKm2: 0 });
+		noLand.settings.ewrRules = [blankEwrRuleTable('G')];
+		// t1 runs C → A, and C is another party's: removing A drops C's rule.
+		expect(applyScenario(noLand, [{ op: 'node.remove', nodeId: 'A' }]).applied[0]!.notes.join()).toMatch(/dropped 1 transfer/);
+		expect(classifyOp({ op: 'transfer.remove', transferId: 't1' }, owned, noLand)).toBe('baseline');
+		expect(classifyOp({ op: 'node.remove', nodeId: 'A' }, owned, noLand)).toBe('baseline');
+		// Positive control: with C the applicant's too, or without the rule, the removal is the proposal.
+		expect(classifyOp({ op: 'node.remove', nodeId: 'A' }, ['A', 'C'], noLand)).toBe('proposal');
+		const noRule = { ...noLand, model: { ...noLand.model, transfers: [] } };
+		expect(classifyOp({ op: 'node.remove', nodeId: 'A' }, owned, noRule)).toBe('proposal');
+		// A rule from A to another party's B likewise.
+		const out = { ...noRule, model: { ...noRule.model, transfers: [{ ...noLand.model.transfers[0]!, fromNodeId: 'A', toNodeId: 'B' }] } };
+		expect(classifyOp({ op: 'node.remove', nodeId: 'A' }, owned, out)).toBe('baseline');
+		expect(classifyOp({ op: 'node.remove', nodeId: 'A' }, ['A', 'B'], out)).toBe('proposal');
 	});
 
 	it('classifyScenario counts nodes the scenario added as owned', () => {
