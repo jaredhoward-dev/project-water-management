@@ -408,6 +408,16 @@ export async function beginFeedFetch(db: Db, feedId: string, jobId: string, wind
 }
 
 /**
+ * A station API feed's beginFeedFetch, bounded per project (app_begin_station_fetch, 363): records the fetch only
+ * while the project has fewer than `cap` other station fetches out, and says whether it did. False: nothing was
+ * recorded, and the fetch must not be sent yet (jobs/handlers/feed-fetch.ts hands the job back to wait its turn).
+ */
+export async function beginStationFetch(db: Db, feedId: string, jobId: string, window: FetchWindow, cap: number): Promise<boolean> {
+	const { rows } = await db.query<{ ok: boolean }>('SELECT app_begin_station_fetch($1, $2, $3, $4, $5) AS ok', [feedId, jobId, window.start, window.end, cap]);
+	return rows[0]?.ok === true;
+}
+
+/**
  * Claim the window of the fetch an answer is for (app_take_feed_fetch, 029).
  * Null when that fetch isn't the feed's newest or its answer was already
  * applied: the answer must be dropped.

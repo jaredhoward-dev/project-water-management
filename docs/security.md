@@ -3491,11 +3491,26 @@ fetches use, nor the headroom of the scheduled passes (which a throttle
 would drop). A station fetch never falls back to the shared queue: with no
 station queue the job fails at once. What is still shared is the station
 side itself: every project's station feeds share those 2 executions, one
-fetch per host at a time, so one project's slow hosts (each fetch up to
-2 minutes) can delay **other projects' station feeds**, never by more than
-the backlog drains at 2 fetches at a time; the station queue's age alarm
-(over an hour) pages a backlog. Per-project fairness on the station side
-isn't built.
+fetch per host at a time. **Each project's share is bounded**
+(363_station_feed_fairness): a project has at most 2 station fetches out at
+once (`jobs/handlers/feed-fetch.ts` `STATION_FETCHES_PER_PROJECT`; sent to
+the station queue, answer not yet applied). A station `feed_fetch` job
+records its fetch only through `app_begin_station_fetch`, which counts the
+project's other station fetches out (`app_feed_fetch_out`) under a
+per-project advisory lock; without a place it records and sends nothing and
+goes back to the job table, its attempt given back (`JobRelease`), asking
+again in `STATION_TURN_WAIT_SECONDS` (30 s). Every path that queues a fetch
+(the schedule, Run now, a backfill's next window) goes through it. So
+however many feeds on slow hosts one project has, another project's feed
+waits behind at most 2 of each project's fetches (each up to 2 minutes, 2
+at a time), and a project alone still uses both executions and drains its
+own fetches as their answers come back. A lost answer holds its place no
+longer than a day (`app_feed_fetch_out`'s limit). The bound is per project,
+not per owner (accepted): someone with many projects gets each project's
+share, so an owner's total is 2 fetches out per project they own with
+station feeds. The station queue's age
+alarm (over an hour) still pages a backlog. Guard:
+`jobs/handlers/feed-fetch.station-fairness.db.test.ts`.
 
 ### Import reports
 
