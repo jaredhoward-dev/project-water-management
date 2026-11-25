@@ -3654,7 +3654,11 @@ secret kept in `infra-secrets` (see [security.md](./security.md)).
   another role keeps it and gets no link), records `member.added` and `farmer.linked` (cause `invite`),
   gives an account with no `locale` yet the `locale` of the most recently
   sent invite it accepts (050_user_locale.sql, WP-2.5; a chosen locale is
-  never overwritten), and deletes those invites. Each of those functions,
+  never overwritten), and deletes those invites. It takes each invite in its
+  own subtransaction (360_accept_invites_each): with no invite named, one
+  refused by a Team's seats (334, `plan_limit`) is rolled back alone and
+  stays pending while the rest are accepted; any other error, or any error
+  with one invite named, is raised. Each of those functions,
   and `app_my_invites` / `app_accept_invite` (109), takes an invite only
   while its `invited_by` still holds owner on the project (directly or as
   the team's admin) or admin on the team (155_invite_sender_role.sql,

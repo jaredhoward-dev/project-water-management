@@ -1252,7 +1252,13 @@ are #641's checklist. Open items from building it:
       refusing what doesn't check out as a logged `conflict` (billing.md §
       B2B invoices). An invoice sent from Stripe's dashboard, without our
       metadata, is still granted by hand (runbook 21).
-- [ ] **One refused invite leaves all of a person's invites pending.**
+- [x] **One refused invite leaves all of a person's invites pending.**
+      Done (2026-11-25, 360): `app_accept_invites` takes each invite in its
+      own exception block (360_accept_invites_each.sql), so with no invite
+      named a `plan_limit` refusal leaves only that invite pending and the
+      rest are accepted; one invite named (the Invitations page) still
+      refuses with 402. `markVerified`'s savepoint and `isPlanLimit` went
+      with it; test in `billing/teamSeats.db.test.ts`.
       `markVerified` (`backend/src/auth/email-routes.ts`) runs
       `app_accept_invites` in one savepoint, so when one invite would pass a
       Team's seats the others (to other teams or projects) stay pending too.
