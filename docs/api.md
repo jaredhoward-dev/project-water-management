@@ -1658,7 +1658,7 @@ the worker mails each recipient ([§ below](#how-alert-mail-is-sent)).
 
 | Method | Path | Body | Response | Min role |
 | --- | --- | --- | --- | --- |
-| GET | `/me/alerts` | – | `{ projects: ProjectAlerts[] }`: every catchment you can open (never an applicant's), by name | signed in |
+| GET | `/me/alerts` | – | `{ projects: ProjectAlerts[], dailyCap }`: every catchment you can open (never an applicant's), by name, and `dailyCap`, the immediate alert emails a person gets a day before the rest wait for the digest (`ALERTS_DAILY_CAP`, default 5; 0: every one waits), so the page says the cap the worker applies | signed in |
 | PUT | `/me/alerts/:projectId` | `{ items: { kind, nodeId?, mode }[] }` (1–100) | `{ project: ProjectAlerts }` | farmer (not contributor) |
 | POST | `/me/alerts/resume` | – | `{ mailSuppressed: null }`. Turns alert emails back on after SES suppressed your address: takes it off SES's suppression list (production), then clears the flag; your choices apply again as they were. Harmless when nothing is paused. `429` within a day of the last resume (the address bounced again) | signed in |
 | GET | `/projects/:id/alert-rules` | – | `{ rules: AlertRule[] }`: every project-wide kind, a `dam_below` per farm in network order, a `data_stale` per data feed (057), and a `data_stale` per series an API key writes (141; by kind and name); one not saved yet is `{ id: null, enabled: false }` at its default threshold (a feed's: its source's; a series': 2). An unsaved feed's or series' rule is `enabled: true` while any `data_stale` rule is on (the next evaluation switches it on) | editor |
@@ -1785,7 +1785,9 @@ the worker mails each recipient ([§ below](#how-alert-mail-is-sent)).
   go out in one **digest** per catchment after 06:00 there. A digest lists at most 20 alerts (the newest), then
   "…and N more" pointing at the app; those are marked sent with it. At most
   200 lines a person are taken per digest; older ones are dropped as over
-  the limit, never sent later.
+  the limit, never sent later. A person's digest lines go to one worker
+  (a per-person advisory lock, 357), so two workers at once never split
+  them over two emails.
 - The mail is built **as its recipient**, under RLS, when it is sent: their
   access and choice are checked again then (a member removed since the
   event, or who turned the alert off, gets nothing; nor does anyone once an

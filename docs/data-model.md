@@ -6043,6 +6043,12 @@ Email alerts (roadmap WP-2.13; [api.md § Alerts](./api.md#alerts),
     lines past that are marked `skipped` ("over the digest limit"), so
     nothing piles up for the next digest. 051 took the boundary itself
     (06:00 SAST for every project); 059 moved it to each project's zone.
+    357 claims each person under a transaction-scoped advisory *try* lock
+    (`'alert_digest:' || user_id`), taken before any of their lines is read:
+    a person another worker is claiming right now is left to it, so two
+    workers claiming at once can't each take part of one person's lines
+    (`FOR UPDATE SKIP LOCKED` alone let their scans interleave and split
+    them into two digests), and never wait for each other.
   - `alert_digest_start(at, zone)` (059, internal: no grant to water_app):
     the latest 06:00 in `zone` at or before `at`.
   - `app_alert_finish(event, user, status, reason)`: `sent`, `skipped`,
