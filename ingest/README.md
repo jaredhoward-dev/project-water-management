@@ -842,8 +842,11 @@ Outputs go to `--out` (default `data/swot-trial/`). The script refuses any
 directory outside the repo's gitignored `data/`. `dams.json` holds the
 per-dam results: the lake matched, pass counts, σ, the pairs and the fitted
 curve as `levelM`, `areaM2` and `volumeM3`. `summary.md` holds aggregates
-by band only, with no dam key, name, coordinate or lake id. It is what step 3
-copies into `docs/spikes/604-swot-trial.md`.
+by band only, with no dam key, name, coordinate or lake id, and ends with
+the dataset's credit and citation (verbatim from its DOI landing page, with
+the run's date as the access date; [docs/data-sources.md §
+swot-lakesp](../docs/data-sources.md#swot-lakesp)). It is what step 3
+copies into `docs/spikes/604-swot-trial.md`, citation included.
 
 Run it from your own shell, with the token exported there (never in a file in
 the repo):

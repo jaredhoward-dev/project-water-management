@@ -328,11 +328,17 @@ class Analysis(unittest.TestCase):
         self.assertEqual(by["> 6.25 ha"]["verdict"]["pld"], "pass")
         self.assertEqual(by["> 6.25 ha"]["verdict"]["passes"], "pass")
         self.assertEqual(by["> 6.25 ha"]["verdict"]["volume"], "no data")  # one survey dam, the bar wants 3
-        md = st.summary_markdown(rows, START, END, 25, "prefer-observed")
+        md = st.summary_markdown(rows, START, END, 25, "prefer-observed", accessed=dt.date(2026, 11, 25))
         for leak in ("-40", "0.0018", "-39.99", "SWOT_L2_HR_LakeSP_Prior_0", "| A "):
             self.assertNotIn(leak, md)
         self.assertNotRegex(md, r"\bL[123]\b")  # no lake id
         self.assertIn("SWOT LakeSP vD, NASA/CNES, PO.DAAC", md)
+        self.assertIn(
+            "Data: SWOT. (2025). SWOT Level 2 Lake Single-Pass Vector Data Product [Data set]. "
+            "NASA Physical Oceanography Distributed Active Archive Center. https://doi.org/10.5067/SWOT-LAKESP-D "
+            "Date accessed: 2026-11-25.",
+            md,
+        )
 
 
 # --- the network ------------------------------------------------------------------
