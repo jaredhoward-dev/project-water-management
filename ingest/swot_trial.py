@@ -79,6 +79,13 @@ DATA_DIR = REPO / "data"
 DEFAULT_OUT = DATA_DIR / "swot-trial"
 
 SHORT_NAME = "SWOT_L2_HR_LakeSP_D"
+# The short credit and the dataset's own citation, verbatim from its DOI landing page's
+# APA style (docs/data-sources.md § swot-lakesp, read 2026-11-25); the summary adds the access date.
+CREDIT = "SWOT LakeSP vD, NASA/CNES, PO.DAAC"
+CITATION = (
+    "SWOT. (2025). SWOT Level 2 Lake Single-Pass Vector Data Product [Data set]. "
+    "NASA Physical Oceanography Distributed Active Archive Center. https://doi.org/10.5067/SWOT-LAKESP-D"
+)
 PRIOR_PATTERN = "SWOT_L2_HR_LakeSP_Prior_*"
 CMR_SEARCH = imerg.CMR_SEARCH
 ARCHIVE_HOST = "archive.swot.podaac.earthdata.nasa.gov"
@@ -674,12 +681,15 @@ def _fmt(x, spec: str = ".2f", pct: bool = False) -> str:
     return f"{x * 100:.0f} %" if pct else format(x, spec)
 
 
-def summary_markdown(rows: list[dict], start: dt.date, end: dt.date, granules: int, area_mode: str) -> str:
+def summary_markdown(
+    rows: list[dict], start: dt.date, end: dt.date, granules: int, area_mode: str, accessed: dt.date | None = None
+) -> str:
     """The aggregate-only report: no dam key, name, coordinate or lake id."""
+    accessed = accessed or dt.date.today()
     lines = [
         "# SWOT lake height trial: summary",
         "",
-        f"SWOT LakeSP vD, NASA/CNES, PO.DAAC (`{SHORT_NAME}`, Prior granules), {start.isoformat()} to {end.isoformat()}: {granules} granules read. "
+        f"{CREDIT} (`{SHORT_NAME}`, Prior granules), {start.isoformat()} to {end.isoformat()}: {granules} granules read. "
         f"Areas paired: {area_mode}. Aggregates by the dam outline's size band only (issue #625).",
         "",
         "| Band | Dams | In PLD | Valid passes / yr (median) | σ stable level, m (median; dams) | Roll outliers / stable pairs | Fitted | Survey dams | Volume err at 50 % / 100 % area (median abs) |",
@@ -702,7 +712,7 @@ def summary_markdown(rows: list[dict], start: dt.date, end: dt.date, granules: i
     for r in rows:
         v = r["verdict"]
         lines.append(f"| {r['band']} | {v['pld']} | {v['passes']} | {v['sigma']} | {v['volume']} |")
-    lines.append("")
+    lines += ["", f"Data: {CITATION} Date accessed: {accessed.isoformat()}.", ""]
     return "\n".join(lines)
 
 

@@ -693,32 +693,47 @@ for the WOfS backfill's pace only: each key keeps its own cadence below.
   not yet seen with our token). Direct S3 access
   (`s3://podaac-swot-ops-cumulus-protected/SWOT_L2_HR_LakeSP_D/`, with
   `/s3credentials`) works only from us-west-2, so it isn't for us.
-- **Licence:** NASA's data use guidance: "Unless the content is marked with
-  a use restriction or license, data provided from a NASA-led mission are
-  licensed as Creative Commons Zero (CC0)", and restricted content "shall be
-  labeled as such"
+- **Licence:** CC0, confirmed from the record on 2026-11-25. The dataset's
+  DOI landing page (doi:10.5067/SWOT-LAKESP-D resolves to
+  [Earthdata's catalog page](https://www.earthdata.nasa.gov/data/catalog/pocloud-swot-l2-hr-lakesp-d-d),
+  read 2026-11-25) says: "This dataset is openly shared, without
+  restriction, in accordance with the EOSDIS Data Use and Citation
+  Guidance." That guidance: "Unless the content is marked with a use
+  restriction or license, data provided from a NASA-led mission are
+  licensed as Creative Commons Zero (CC0)", and restricted content "shall
+  be labeled as such"
   ([Earthdata](https://www.earthdata.nasa.gov/engage/open-data-services-software-policies/data-use-guidance),
-  read 2026-11-24). The collection carries no label: its CMR record has no
-  `UseConstraints` and no `AccessConstraints` (read 2026-11-24), and its
-  PO.DAAC page names no licence and asks only for citation (read
-  2026-10-27; podaac.jpl.nasa.gov refused connections on 2026-11-24). NASA's
-  data and information policy adds no period of exclusive access and
-  non-discriminatory access for all users
+  read 2026-11-24 and again 2026-11-25). The CMR record
+  ([`C3233944983-POCLOUD.umm_json`](https://cmr.earthdata.nasa.gov/search/concepts/C3233944983-POCLOUD.umm_json),
+  read 2026-11-25) has no `UseConstraints` and no `AccessConstraints`
+  field at all (both absent, not empty); its only licence-adjacent entry is
+  a `RelatedUrls` link of subtype `DATA CITATION GUIDELINES` to
+  `https://podaac.jpl.nasa.gov/CitingPODAAC`. Nothing in the record or the
+  landing page restricts commercial use or redistributing values or curves
+  derived from the data, which passes D-B. NASA's data and information
+  policy adds no period of exclusive access and non-discriminatory access
+  for all users
   ([Earthdata](https://www.earthdata.nasa.gov/engage/open-data-services-software-policies/data-information-policy),
-  read 2026-11-24). So CC0: commercial use and redistributing values or
-  curves derived from them are allowed, which passes D-B. Two caveats.
-  SWOT is a joint mission, and NASA's guidance says CC0 for "NASA-led"
-  missions; PO.DAAC distributes it as NASA's (publisher "JPL NASA") with no
-  label, which is what the guidance says a restriction would need, so we
-  read it as CC0. And CNES's copies (Hydroweb.next, AVISO) carry CNES's own
-  terms; we never use them.
-- **Attribution:** none is required under CC0; NASA asks that the dataset
-  be cited and NASA acknowledged as the source, without implying NASA's
-  endorsement. Wherever a derived curve shows: "SWOT LakeSP vD, NASA/CNES,
-  PO.DAAC", and in a report, PO.DAAC's citation (its usual form; the
-  landing page's own wording to be checked when it answers): "SWOT. 2025. SWOT Level 2
-  Lake Single-Pass Vector Data Product, Version D. Ver. D. PO.DAAC, CA, USA.
-  Dataset accessed [date] at https://doi.org/10.5067/SWOT-LAKESP-D."
+  read 2026-11-24). Two caveats. SWOT is a joint mission, and the guidance
+  says CC0 for "NASA-led" missions; the landing page's "without
+  restriction" covers this dataset as PO.DAAC distributes it (publisher
+  "JPL NASA"), so we read it as CC0. And CNES's copies (Hydroweb.next,
+  AVISO) carry CNES's own terms; we never use them. PO.DAAC's own site
+  (`podaac.jpl.nasa.gov`, its dataset page and CitingPODAAC) timed out on
+  2026-11-24 and 2026-11-25; its dataset page named no licence and asked
+  only for citation when read 2026-10-27.
+- **Attribution:** none is required under CC0; the guidance says users "are
+  very strongly urged to cite the data", NASA "should be acknowledged as the
+  source", and use must not "suggest or imply endorsement". Wherever a
+  derived curve shows: "SWOT LakeSP vD, NASA/CNES, PO.DAAC". In a report,
+  the landing page's citation (its APA style, verbatim, read 2026-11-25):
+  "SWOT. (2025). SWOT Level 2 Lake Single-Pass Vector Data Product [Data
+  set]. NASA Physical Oceanography Distributed Active Archive Center.
+  https://doi.org/10.5067/SWOT-LAKESP-D", followed by "Date Accessed:
+  [date]". The trial's `summary.md` ends with both (`swot_trial.py`'s
+  `CREDIT` and `CITATION`). This replaces the PO.DAAC-style form recorded
+  on 2026-11-24 ("SWOT. 2025. … Ver. D. PO.DAAC, CA, USA. Dataset accessed
+  [date] at …"), which was the usual pattern, not the page's wording.
 - **Contact:** PO.DAAC user services (podaac@podaac.jpl.nasa.gov) and the
   Earthdata forum; Earthdata Login support (earthdata-support@nasa.gov).
 - **Access pattern (the trial):** run once, by the operator, never by the
