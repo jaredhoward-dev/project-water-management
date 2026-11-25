@@ -19,7 +19,7 @@ export interface ApplicantResultsRun {
 	endDate: string;
 	createdAt: string;
 	baseRunId: string;
-	/** Made from the application's ops and base as they are now (not an earlier version of them). */
+	/** Made from the application's ops, base and own units as they are now (not an earlier version of them). */
 	current: boolean;
 }
 
@@ -38,6 +38,17 @@ interface Row {
 	allProposals: boolean;
 	farmHoldersOk: boolean;
 }
+
+/**
+ * The same own units, in any order: the run's (recorded when it ran) and the
+ * application's now (its owner's farm links among them, SCENARIO_SELECT). A
+ * farm unlinked since moves the ops on it from the proposal to another's
+ * (classifyScenario), so the run was classed under units it no longer has.
+ */
+const sameUnits = (then: readonly string[], now: readonly string[]) => {
+	const a = new Set(then);
+	return a.size === new Set(now).size && now.every((id) => a.has(id));
+};
 
 /** The newest run of an application the caller reads (app_scenario_run_meta, 046), or null. */
 export async function newestApplicationRun(db: Db, projectId: string, scenarioId: string): Promise<string | null> {
@@ -91,7 +102,7 @@ export async function loadApplicantResults(db: Db, projectId: string, s: Scenari
 			endDate: r.endDate,
 			createdAt: r.createdAt,
 			baseRunId: r.baseRunId,
-			current: recorded.opsSha256 === s.opsSha256 && recorded.baseRunId === s.baseRunId
+			current: recorded.opsSha256 === s.opsSha256 && recorded.baseRunId === s.baseRunId && sameUnits(recorded.ownedNodeIds ?? [], s.ownedNodeIds)
 		},
 		results
 	};

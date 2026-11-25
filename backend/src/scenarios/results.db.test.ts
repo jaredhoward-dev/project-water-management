@@ -228,4 +228,26 @@ describe("an applicant's results", () => {
 			expect(catchment.sort(), run).toEqual(['ewr', 'natural_flow']);
 		}
 	});
+
+	it('reads a run as current only under the own units it was classed with: a farm unlinked after the run makes it not current (control: relinked, current again)', async () => {
+		const applicantC = await signUp('Rapplicantc');
+		expect((await owner.call('POST', `${P()}/members`, { email: applicantC.email, role: 'contributor' })).status).toBe(201);
+		const [bergvliet, , , uitsig] = others as [typeof outlet, typeof outlet, typeof outlet, typeof outlet];
+		const link = (nodeIds: string[]) => owner.call('PUT', `${P()}/farmers/${applicantC.id}`, { nodeIds });
+		expect((await link([bergvliet.id, uitsig.id])).status).toBe(200);
+		const app = await application(applicantC, 'Raise Bergvliet', [damRaise(bergvliet.id, 50_000)]);
+		const current = async () => {
+			const res = await results(applicantC, app.sid);
+			expect(res.status, JSON.stringify(res.body)).toBe(200);
+			expect(res.body.run.id).toBe(app.runId);
+			return res.body.run.current as boolean;
+		};
+		expect(await current()).toBe(true);
+		// Uitsig changes hands: the applicant's own units are Bergvliet alone, so
+		// an op on Uitsig would now class as another's, not the proposal.
+		expect((await link([bergvliet.id])).status).toBe(200);
+		expect(await current()).toBe(false);
+		expect((await link([bergvliet.id, uitsig.id])).status).toBe(200);
+		expect(await current()).toBe(true);
+	});
 });

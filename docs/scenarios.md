@@ -1984,6 +1984,14 @@ scenario is `'team'`, and behaves exactly as above).
     them, where an item an op added under a hidden item's id (the run holds
     it under a fresh one) shows under the id the applicant gave it.
 
+  The run reads **current** (`run.current`) only while the application's
+  ops (their hash), its base run and its own units (as the applicant reads
+  them now, in any order) are the ones the run recorded
+  (`inputs.scenario`): a farm unlinked since moves the ops on it from the
+  proposal to another's, so a run classed under the old units is no longer
+  the application as it stands, though its ops and base didn't change.
+  Relinking it makes the run current again.
+
   **The application's side only when every op was a proposal**
   (`app_run_all_proposals`, the share link's rule). A baseline assumption
   can change another unit's inputs (its demand halved, its dam emptied, its
