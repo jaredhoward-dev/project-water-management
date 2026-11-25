@@ -381,6 +381,28 @@ It measured **11.1 s** on the dev laptop on 2026-11-01, and **1.5 s** (1.85,
       `runModel` + `verifyRun` (the water balance and `runDrought`), both not
       yet profiled. Next step: a CPU profile of `checkWorkings` on that
       catchment, then share its work, keeping every check.
+      **Profiled 2026-11-25 (issue #841):** the recompute itself was not the
+      cost. Most of `checkWorkings`'s time was overhead around it: the
+      borehole replay built a new `pump` closure every day (esbuild's
+      `--keep-names`, which the Lambda bundles use too, names each one with
+      `Object.defineProperty`, ~25 % of the profile) and asked for the month
+      twice a day even on a farm with no boreholes; each day also built its
+      `where` text (number to string) and three empty arrays, and called
+      `monthOfEpochDay` up to five times; `dailyDemandFactor` filled its
+      array through `Float64Array.from` with a mapping function. Now the
+      closure is made once per farm, the month check is skipped with no
+      boreholes, the months are worked out once per run (`calendarMonths`),
+      the text is built only on a failure, the arrays are reused, and the
+      factor is a plain loop. Every comparison and tolerance is unchanged,
+      so no check compares anything new. Same script, interleaved before and
+      after on one checkout, medians of 7, Node 24, load average 2.6–3.7
+      (other sessions' jobs): `checkWorkings` **149–153 → 71–75 ms** (one
+      after-run read 98 ms while the load spiked), `verifyRun` 259–282 →
+      178–195 ms, `runModelChecked` 673–701 → 582–623 ms. The checked run's
+      fingerprint is identical before and after (a6342d9e0ab33646 on this
+      main; #838's dd0d2bebfeeb59a7 was an older main). What's left in
+      `checkWorkings` is the day's arithmetic and its `near` comparisons
+      (~60 % of its profile), which are the checks themselves.
 - [ ] **Verifying a run still re-hashes its rows** (`app_run_digest`, 0.3 s
       for a client-sized run) on every `GET …/runs/:runId`, sign-off and
       decision. Fine for one run; a list that verified many would not be.
