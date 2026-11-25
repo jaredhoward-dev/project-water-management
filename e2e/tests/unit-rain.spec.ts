@@ -120,7 +120,8 @@ test('a parcel redrawn over the same cells offers to update the outline record a
 	);
 	await expect(panel.getByTestId('unit-rain-apply')).toHaveText('Update the outline record');
 	await panel.getByTestId('unit-rain-apply').click();
-	await expect(panel.getByTestId('unit-rain-done')).toHaveText('Updated the outline record of 1 feed; the cells and the series are as they were.');
+	// The seed's Lower farm has no parcel, so the answer also says it was left out, as Create's does above.
+	await expect(panel.getByTestId('unit-rain-done')).toHaveText('Updated the outline record of 1 feed; the cells and the series are as they were. 1 unit left out: see below.');
 	await expect(panel.getByTestId('unit-rain-apply')).toHaveCount(0);
 	await expect(panel.getByTestId('unit-rain-words')).toHaveText('Every unit’s feed already reads its parcel with this product: nothing to change.');
 });
