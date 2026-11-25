@@ -748,6 +748,11 @@ export function createApi(baseUrl: string, fetchFn: FetchFn = (...a) => fetch(..
 				request<{ team: Team }>('PATCH', t(id), { privacyContact }).then((r) => r.team),
 			/** Admin actions, and an owner's on every team project, need two-step sign-in (team admin, 204_mfa_opt_in). */
 			setRequireMfa: (id: string, requireMfa: boolean) => request<{ team: Team }>('PATCH', t(id), { requireMfa }).then((r) => r.team),
+			/**
+			 * Deletes the team (team admin). ApiError 503 `team_plan_not_cancelled` =
+			 * its paid plan couldn't be ended at the payment provider, so nothing was
+			 * deleted; the team page shows the server's message, which says to try again.
+			 */
 			remove: (id: string) => request<void>('DELETE', t(id)),
 			/** Always an invite (`{ invited: true, invite }`), account or not: its holder accepts it (issue #136). */
 			addMember: (id: string, email: string, role: TeamRole) =>

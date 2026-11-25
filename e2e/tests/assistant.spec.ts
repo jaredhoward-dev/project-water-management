@@ -13,11 +13,14 @@
 // A dollar cap's refusal (issue #641, the POST answered 429 by page.route, since
 // the e2e API runs without billing enforced): the server's words, the box
 // closed, and Compare plans to the Plan page on Free's day; none on the Free pool.
+// In a team catchment Compare plans opens the team's plan for its admin, and the
+// price list with planLink's "ask a team admin" line for a member or a direct editor.
 // A reverse trial (the status's `day` added by page.route, as an enforced API
 // sends it): the questions-left meter, and its day cap's own words, no upsell.
 // Invented data only.
 import type { Page } from '@playwright/test';
-import { createProject, createRun, seedRunnableProject } from '../support/api.ts';
+import { acceptInvites, addMember, createProject, createRun, seedRunnableProject } from '../support/api.ts';
+import { API_URL } from '../support/env.ts';
 import { expectNoViolations } from '../support/a11y.ts';
 import { expectNoSidewaysScroll } from '../support/reflow.ts';
 import { ask, assistantButton, assistantSheet, openAssistant } from '../support/assistant.ts';
@@ -250,6 +253,52 @@ test('a dollar cap: Free’s day shows the server’s words, closes the box and 
 	await expect(again.getByRole('textbox', { name: 'Your question' })).toBeDisabled();
 	await expect(poolCap.getByRole('link', { name: 'Compare plans' })).toHaveCount(0);
 	await expect(poolCap).not.toContainText('Pro includes');
+});
+
+// Compare plans in a team catchment (docs/billing.md § Who the plan belongs to): only a team admin reads the team's
+// plan, so a team member, or an editor shared the catchment directly, gets the price list and whose plan it is.
+test('a dollar cap in a team catchment: Compare plans opens the team’s plan for its admin, and the price list with “ask a team admin” for a member or a direct editor', async ({ page, owner, signIn }) => {
+	void owner;
+	const team = (await (await page.request.post(`${API_URL}/teams`, { data: { name: 'Assistant Plan WUA' } })).json()) as { team: { id: string } };
+	const made = await page.request.post(`${API_URL}/projects`, { data: { name: 'Assistant team plan', teamId: team.team.id } });
+	expect(made.status()).toBe(201);
+	const projectId = ((await made.json()) as { project: { id: string } }).project.id;
+	const member = await signIn('Assistant team member');
+	expect((await page.request.post(`${API_URL}/teams/${team.team.id}/members`, { data: { email: member.user.email, role: 'member' } })).status()).toBe(201);
+	expect(await acceptInvites(member.user.email, team.team.id)).toBe(1);
+	const direct = await signIn('Assistant direct editor');
+	await addMember(page.request, projectId, direct.user.email, 'editor');
+	const words = 'That’s today’s free assistant use. It’s back at midnight (UTC).';
+
+	const capped = async (p: Page) => {
+		await refuseWith(p, 'assistant_daily_cap', words, 'free');
+		await p.goto(`/projects/${projectId}`);
+		const sheet = await openAssistant(p);
+		await sheet.getByRole('textbox', { name: 'Your question' }).fill('How full is the dam?');
+		await sheet.getByRole('button', { name: 'Send' }).click();
+		const cap = sheet.getByTestId('assistant-cap');
+		await expect(cap).toContainText(words);
+		return cap;
+	};
+
+	// The admin (who made the team): the team's plan, no "ask".
+	const adminCap = await capped(page);
+	await expect(adminCap.getByRole('link', { name: 'Compare plans' })).toHaveAttribute('href', `/teams/${team.team.id}/plan`);
+	await expect(adminCap.getByTestId('plan-ask-admin')).toHaveCount(0);
+
+	// A team member: the price list, naming the team.
+	const memberCap = await capped(member.page);
+	await expect(memberCap.getByTestId('plan-ask-admin')).toHaveText('This catchment is on Assistant Plan WUA’s plan: ask a team admin to change it.');
+	const plans = memberCap.getByRole('link', { name: 'Compare plans' });
+	await expect(plans).toHaveAttribute('href', '/welcome/pricing');
+	await expectNoViolations(member.page);
+	await plans.click();
+	await expect(member.page).toHaveURL(/\/welcome\/pricing$/);
+
+	// Shared directly, outside the team: the team's name is private to its members.
+	const directCap = await capped(direct.page);
+	await expect(directCap.getByTestId('plan-ask-admin')).toHaveText('This catchment is on its team’s plan: ask a team admin to change it.');
+	await expect(directCap.getByRole('link', { name: 'Compare plans' })).toHaveAttribute('href', '/welcome/pricing');
 });
 
 /** Adds `day` to the assistant's status, as the API sends it for a capped account with billing enforced (usage.ts dayMeter). */

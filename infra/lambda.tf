@@ -183,6 +183,12 @@ resource "aws_lambda_function" "backend" {
       # default) takes no webhooks. stripe puts the Stripe pair in the runtime
       # secret (secrets.tf), never here (deployment.md § Turning on Stripe).
       BILLING_PROVIDER = var.billing_provider
+      # This deployment's billing tag (billing/provider/environment.ts): checkout
+      # stamps it into what it sells, and the webhook cancels and refunds an
+      # orphan only when the event carries the same one, so another deployment
+      # sharing the Stripe account is never refunded from here (docs/billing.md
+      # § Deleting an account). The site's domain: one per deployment.
+      BILLING_ENVIRONMENT = var.domain_name
 
       # Email (ses.tf, docs/deployment.md § Email). MAIL_TRANSPORT must be set:
       # the default `log` sends nothing.

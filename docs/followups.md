@@ -897,7 +897,7 @@ are #641's checklist. Open items from building it:
       the tax record (billing.md § Deleting an account; counsel's § 6 items
       9 and 13 remain).* Trigger: before the first charge
       (`BILLING_PROVIDER=stripe`), with Gates A, C and D.
-- [ ] **A checkout started during an account's deletion can still charge.**
+- [x] **A checkout started during an account's deletion can still charge.**
       Deleting an account or team expires its customer's open Stripe
       Checkout sessions and re-checks its live subscriptions inside the
       deleting transaction (round 2026-11-24 r2), but a session started in
@@ -908,6 +908,18 @@ are #641's checklist. Open items from building it:
       names one of ours, cancels it at Stripe (now, no proration) and
       refunds its first invoice, logged; a webhook test with faked Stripe
       HTTP. Trigger: before the first charge (`BILLING_PROVIDER=stripe`).
+      *Done (round 2026-11-24 r3): the webhook cancels such a subscription
+      at Stripe now and refunds its first invoice (`subscription_create`)
+      only when that was paid within 4 days (Stripe's 3-day retries plus a
+      day), once across redeliveries (an idempotency key per payment),
+      answering `503` so Stripe retries when either fails; an already-ended
+      one with an older first invoice (a late event about a used
+      subscription) is left alone, `orphan_skipped_old`; only a subscription
+      carrying this deployment's `BILLING_ENVIRONMENT` tag is touched, so a
+      staging deployment sharing the Stripe account never refunds
+      production's; the event row records `orphan_pending` then
+      `orphan_refunded` or `orphan_skipped_old` (352; billing.md § The
+      route, "An orphan", and § Deleting an account).*
 - [x] **The Plan page's "Compare plans" could link the public pricing
       page.** `/welcome/pricing` (Phase 4) now shows the three plans side by
       side; the Plan page (`PlanUsage.svelte`) and its Compare plans links
@@ -1167,7 +1179,9 @@ are #641's checklist. Open items from building it:
       team's plan, anyone else in a team catchment the public price list
       with "This catchment is on *team*'s plan: ask a team admin to change
       it." (billing.md § Who the plan belongs to). Not their own plan: the
-      catchment bills to the team, so it wouldn't help.
+      catchment bills to the team, so it wouldn't help. Round 3: the
+      assistant panel's cap note shows that line beside its *Compare plans*
+      too (it had only the link's address changed; ui.md § Assistant).
 - [ ] **Free's verified-email gate: what 343 left** (issue #641 round 9,
       2026-11-24). `343_free_email_gate` refuses the assistant and switching
       a feed on, on Free, to an unverified or disposable-domain address when

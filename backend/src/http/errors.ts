@@ -197,6 +197,12 @@ export const ERROR_CODES = [
  *     account that never checked out), billing_grant_seats (409, POST
  *     /teams/:id/plan/seats on a staff grant, whose seats change by a new
  *     grant; Phase 5).
+ *   team_plan_not_cancelled (503): DELETE /teams/:id when the team's paid
+ *     plan couldn't be ended at the payment provider (it failed, no provider
+ *     that can cancel is set up, or a checkout landed a subscription the
+ *     cancel didn't reach); nothing was deleted (billing/cancelOnDelete.ts
+ *     TeamPlanNotCancelledError). The team page is an English workspace
+ *     page and shows the message, which says to try again.
  *   email_unverified, email_disposable (403): Free's verified-email gate
  *     (billing/emailGate.ts, 343_free_email_gate; only with BILLING_ENFORCED
  *     on): the caller, on a project whose account is on Free, hasn't verified
@@ -239,6 +245,7 @@ export const MACHINE_ERROR_CODES = [
 	'billing_provider_error',
 	'billing_no_customer',
 	'billing_grant_seats',
+	'team_plan_not_cancelled',
 	'email_unverified',
 	'email_disposable'
 ] as const;

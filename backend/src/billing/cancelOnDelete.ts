@@ -62,11 +62,20 @@ export class PlanNotCancelledError extends ApiError {
 	}
 }
 
-/** The same for deleting a team (the workspace's Teams page, in English): the team's plan couldn't be cancelled, so the team stays. */
+/**
+ * The same for deleting a team: the team's plan couldn't be ended at the
+ * provider (it failed, none is set up that can cancel, or a checkout landed a
+ * new subscription meanwhile), so nothing was deleted. The team page is an
+ * English workspace page and shows this message as it is, so it says what to
+ * do; `team_plan_not_cancelled` is in MACHINE_ERROR_CODES (http/errors.ts).
+ */
 export class TeamPlanNotCancelledError extends ApiError {
 	constructor() {
-		super(503, 'the team’s paid plan couldn’t be cancelled with the payment provider, so the team wasn’t deleted; try again in a few minutes');
-		this.code = 'billing_provider_error';
+		super(
+			503,
+			'the team’s paid plan couldn’t be ended at the payment provider, so nothing was deleted; try again in a few minutes (the plan may already have ended, and then deleting the team goes through)'
+		);
+		this.code = 'team_plan_not_cancelled';
 	}
 }
 

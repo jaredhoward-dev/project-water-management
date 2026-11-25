@@ -9,6 +9,7 @@ import { render } from 'svelte/server';
 import { describe, expect, it, vi } from 'vitest';
 import type { AssistantProposal, AssistantStatus } from '#lib/api/types.js';
 import { fmtWhen } from '#lib/format/number.js';
+import { BILLING_TEAM_CONTEXT, planLink, type BillingTeam } from '#lib/components/billing/planLink.js';
 import AssistantPanel from './AssistantPanel.svelte';
 import { AssistantChat, type AssistantTurn } from './chat.svelte';
 
@@ -294,6 +295,48 @@ describe('AssistantPanel', () => {
 		}
 		// The workspace's words: never "quota", "abuse" or "402".
 		expect(day + month).not.toMatch(/quota|abuse|402/i);
+	});
+
+	it('Compare plans in a team catchment: the team’s plan for its admin; the price list and planLink’s “ask a team admin” for a member or a direct member; a personal catchment unchanged', () => {
+		const capIn = (team: BillingTeam | null, code: 'assistant_daily_cap' | 'assistant_monthly_cap' = 'assistant_daily_cap') =>
+			render(AssistantPanel, {
+				props: { open: true, chat: chat({ refusal: { kind: 'cap', code, seconds: 3600, resetsAt: '2026-12-01T00:00:00.000Z', message: 'Words.', plan: 'free' } }) },
+				context: new Map([[BILLING_TEAM_CONTEXT, () => team]])
+			}).body;
+		const plansHref = (out: string) => out.match(/<a [^>]*href="([^"]*)"[^>]*data-testid="assistant-compare-plans"/)?.[1];
+
+		const admin = capIn({ id: 't 1', name: 'Hill WUA', role: 'admin' });
+		expect(plansHref(admin)).toBe('/teams/t%201/plan');
+		expect(admin).not.toContain('plan-ask-admin');
+
+		const personal = capIn(null);
+		expect(plansHref(personal)).toBe('/account/plan');
+		expect(personal).not.toContain('plan-ask-admin');
+
+		const member: BillingTeam = { id: 't1', name: 'Hill WUA', role: 'member' };
+		const direct: BillingTeam = { id: 't1', name: null, role: null };
+		for (const team of [member, direct]) {
+			for (const code of ['assistant_daily_cap', 'assistant_monthly_cap'] as const) {
+				const out = capIn(team, code);
+				expect(plansHref(out)).toBe('/welcome/pricing');
+				// planLink's own words, not a second copy of them.
+				const note = planLink(team).note!;
+				expect(out).toContain(`data-testid="plan-ask-admin">${esc(note)}</span>`);
+				// Beside the link, inside the cap's note.
+				const cap = out.slice(out.indexOf('data-testid="assistant-cap"'));
+				expect(cap.indexOf('plan-ask-admin')).toBeLessThan(cap.indexOf('assistant-compare-plans'));
+			}
+		}
+		expect(capIn(member)).toContain('This catchment is on Hill WUA’s plan: ask a team admin to change it.');
+		expect(capIn(direct)).toContain('This catchment is on its team’s plan: ask a team admin to change it.');
+
+		// No Compare plans, no note: a paid account's cap in a team catchment never mentions the plan.
+		const paid = render(AssistantPanel, {
+			props: { open: true, chat: chat({ refusal: { kind: 'cap', code: 'assistant_monthly_cap', seconds: 3600, resetsAt: '2026-12-01T00:00:00.000Z', message: 'Words.', plan: 'pro' } }) },
+			context: new Map([[BILLING_TEAM_CONTEXT, () => member]])
+		}).body;
+		expect(paid).not.toContain('plan-ask-admin');
+		expect(paid).not.toContain('assistant-compare-plans');
 	});
 
 	it('says chats are kept only in this browser, and offers Past chats with their count once read', () => {

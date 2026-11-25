@@ -68,6 +68,7 @@ In a git worktree both URLs point at that worktree's own dev database,
 | `REVERSE_TRIAL` | unset (off) | The 14-day Pro reverse trial on a first verification, once per canonical email; only `true` together with `BILLING_ENFORCED=true` grants one ([billing.md § The reverse trial](./billing.md#the-reverse-trial-built-off)) |
 | `BILLING_PROVIDER` | `mock` (code default) | The billing provider the webhook route serves: `mock` (events signed with the dev key below), `manual` (no webhooks) or `stripe` ([billing.md § Webhooks and providers](./billing.md#webhooks-and-providers)) |
 | `BILLING_WEBHOOK_SECRET` | `dev-only-billing-webhook-secret-…` (committed, `.env.development`) | Signs and checks billing webhook events. The committed value is a public dev-only key; production refuses the mock, and Stripe's real secret lives in infra-secrets ([deployment.md § 2. Secrets](./deployment.md#2-secrets-one-time-then-as-needed)) |
+| `BILLING_ENVIRONMENT` | `local` (code default) | This deployment's billing tag: checkout stamps it into the subscription's metadata, and the webhook cancels and refunds an orphan only when the event carries the same one ([billing.md § The route](./billing.md#the-route), "Only this deployment's"). Leave it unset locally; the fixtures carry `local`. Production sets the site's domain |
 | `STRIPE_SECRET_KEY` | unset (never set locally) | Stripe's API key, for checkout and the Customer Portal with `BILLING_PROVIDER=stripe` only. The mock needs none: its checkout and portal are pages on the local API ([billing.md § The mock](./billing.md#the-mock)). Production requires a live key (`sk_live_…` or `rk_live_…`) from infra-secrets; never put a real key in an env file here |
 | `PUBLIC_API_URL` (frontend) | `http://localhost:3001` | `/api` in production |
 | `PUBLIC_REVERSE_TRIAL` (frontend) | empty (off) | The pricing page's "14 days of Pro free" line; only `true` shows it. A build-time mirror of `REVERSE_TRIAL`, since the prerendered page can't ask the API: set it with `REVERSE_TRIAL` and `BILLING_ENFORCED` ([billing.md § The pricing page and the trial](./billing.md#the-pricing-page-and-the-trial)) |
@@ -641,8 +642,10 @@ pnpm dev:billing:replay subscription-deleted --account <id> --new-id
 ```
 
 Each prints the API's status and answer (`applied`, `recorded`, `duplicate`,
-`stale`, `conflict`, `unknown_account`). Without `--account`, the fixtures' placeholder
-account answers `unknown_account`. The script signs only with a `dev-only-`
+`stale`, `conflict`, `unknown_account`, `orphan_refunded`, `orphan_skipped_old`). Without `--account`, the fixtures' placeholder
+account is one that doesn't exist: a live subscription or a completed checkout answers
+`orphan_refunded` (the mock "cancels and refunds" it, with no network; billing.md § The
+route), anything else `unknown_account` or `recorded`. The script signs only with a `dev-only-`
 key and posts only to localhost.
 
 To grant a plan by hand (the operator's staff grant: an invoiced customer, a

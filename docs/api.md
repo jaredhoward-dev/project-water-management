@@ -416,6 +416,13 @@ the frontend catalogue (same contract: add, never rename):
   `assistant_output_limit`, `assistant_timeout`, `assistant_provider_error`
   (a stream's `error` event): the assistant ([§ Assistant](#assistant)). The
   panel is an English workspace page.
+- `team_plan_not_cancelled` (`503` from `DELETE /teams/:id`): the team's
+  paid plan couldn't be ended at the payment provider (it failed, no
+  provider that can cancel is set up, or a checkout landed a subscription
+  the cancel didn't reach), so nothing was deleted. The message says to try
+  again in a few minutes, and that the plan may already have ended, which
+  lets the same delete go through; the team page shows it as it is
+  ([billing.md § Deleting an account](./billing.md#deleting-an-account)).
 
 | Code | Status | When |
 | --- | --- | --- |
@@ -1487,7 +1494,7 @@ email show them by the project role they give, viewer / editor / owner
 | POST | `/teams` | `{ name }` | `201 { team }` (you become its admin); `400` a name that shows as nothing or is over 200 characters once cleaned ([§ Projects](#projects)) | – |
 | GET | `/teams/:id` | – | `{ team, members: TeamMember[] }` (admins first, then members, then viewers) | viewer |
 | PATCH | `/teams/:id` | `{ name?, settings?: { portfolio: { thresholds: { green, amber } \| null } }, privacyContact?: { name, email, postal? } \| null, requireMfa?: boolean }` (at least one) | `{ team }`. `thresholds` sets the portfolio's traffic lights (below); `null` goes back to the defaults. A change records `team_thresholds.changed` on each of the team's projects; one that changes nothing records nothing. `privacyContact` sets or (`null`) removes the privacy contact (below). `requireMfa` turns the team's two-step sign-in requirement on or off (below) | admin |
-| DELETE | `/teams/:id` | – | `204` — its projects stay, owned by their direct members (`team` → `null`); the team's paid plan is cancelled at the provider first, `503 billing_provider_error` and nothing deleted if it can't be ([billing.md § Deleting an account](./billing.md#deleting-an-account)) | admin |
+| DELETE | `/teams/:id` | – | `204` — its projects stay, owned by their direct members (`team` → `null`); the team's paid plan is cancelled at the provider first, `503 team_plan_not_cancelled` and nothing deleted if it can't be ([billing.md § Deleting an account](./billing.md#deleting-an-account)) | admin |
 | POST | `/teams/:id/members` | `{ email, role }` | `201 { invited: true, invite }`, the same whether or not the address has an account (issue #136, see Projects § Invites); `409` if already a member; `429` past the daily cap on adding by email (Projects § Invites) | admin |
 | PATCH | `/teams/:id/members/:userId` | `{ role }` | `{ member }` | admin |
 | DELETE | `/teams/:id/members/:userId` | – | `204` (admins remove anyone; anyone may remove themselves = leave) | viewer |
@@ -6005,7 +6012,7 @@ Each answer comes from a `323_billing` definer function run as the caller.
 | POST | `/account/plan/keep` | `{ projectId }` | `LiveCatchments` as it now stands: keeps that catchment live past Free's limit (345 `app_billing_keep_live`, then 341's `app_billing_keep_catchment`); past the grace with billing enforced the pause moves at once. `404` when the project isn't one of the account's live catchments (the same answer whatever the project); `400` for a body other than `{ projectId: <uuid> }`; `Cache-Control: no-store` | signed in |
 | POST | `/teams/:id/plan/keep` | `{ projectId }` | as `/account/plan/keep`, for the team's account; `404` unless you are a team admin (before the body is read) | team admin |
 | GET, POST | `/billing/mock/checkout?t=…`, `/billing/mock/portal?t=…` | – (the POST's choice is in its query: `outcome=pays\|declines\|cancels`, `action=cancel`) | the mock provider's pages, plain HTML forms: `404` unless `BILLING_PROVIDER=mock` (production refuses it) or for a forged or expired token; pays and cancel post signed events to `/billing/webhook/mock` and answer `303` to the plan page; declines answers `402` with the page again | anyone (public allowlist): the token, signed with the dev key for one account and an hour, is the credential; exempt from the CSRF check, since they post from the API's own origin ([billing.md § Checkout and portal](./billing.md#checkout-and-portal)) |
-| POST | `/billing/webhook/:provider` | the provider's event, raw (≤ 256 KiB), signed in `Stripe-Signature: t=…,v1=…` | `200 { received: true, result }`, where `result` is `applied`, `recorded`, `duplicate`, `stale` (older than the event last applied, 327), `conflict`, `unknown_account` or `ignored` (a type not acted on); `400 { error: 'invalid signature' \| 'invalid event' }`; `404` unless `:provider` is the configured `BILLING_PROVIDER` and takes webhooks (`mock` or `stripe`; `manual` takes none); `413` over the cap | anyone (public allowlist): the signature over the raw body is the credential ([billing.md § Webhooks and providers](./billing.md#webhooks-and-providers)) |
+| POST | `/billing/webhook/:provider` | the provider's event, raw (≤ 256 KiB), signed in `Stripe-Signature: t=…,v1=…` | `200 { received: true, result }`, where `result` is `applied`, `recorded`, `duplicate`, `stale` (older than the event last applied, 327), `conflict`, `unknown_account`, `orphan_refunded` (a live subscription or completed checkout whose account is gone, cancelled and its first payment refunded at the provider, 352; only one this deployment sold, by its `wm_environment` tag), `orphan_skipped_old` (such a subscription the provider had already ended, first paid before the 4-day refund window: nothing done) or `ignored` (a type not acted on); `400 { error: 'invalid signature' \| 'invalid event' }`; `503 { error }` when an orphan's cancel or refund failed (the provider redelivers); `404` unless `:provider` is the configured `BILLING_PROVIDER` and takes webhooks (`mock` or `stripe`; `manual` takes none); `413` over the cap | anyone (public allowlist): the signature over the raw body is the credential ([billing.md § Webhooks and providers](./billing.md#webhooks-and-providers)) |
 
 - `Plan = { code: 'free' \| 'pro' \| 'team', name, priceMonthlyMinor, priceAnnualMinor, currency, limits, features, trialDays }`.
   Prices are minor units (ZAR cents). `limits` keeps the database's
