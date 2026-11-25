@@ -246,10 +246,14 @@ describe('the counters equal a fresh sum, and the read equals 336’s', () => {
 		await expectExact();
 	});
 
-	it('refuses an UPDATE that moves a counted row to another month', async () => {
+	it('a usage row moved to last month is counted there; a costed day row never moves', async () => {
 		await spend(owner, projectId, 1_000, await utcMonth());
+		await asOwner('UPDATE assistant_usage SET month = $2 WHERE project_id = $1', [projectId, await utcMonth(-1)]);
+		expect(await monthCounter(account)).toBe(0);
+		await expectExact();
+		await dayRow(owner, account, await sastDay(), 1_000);
 		await expect(
-			asOwner('UPDATE assistant_usage SET month = $2 WHERE project_id = $1', [projectId, await utcMonth(-1)])
+			asOwner('UPDATE assistant_day_usage SET day = day - 1 WHERE billing_account_id = $1 AND user_id = $2', [account, owner.id])
 		).rejects.toThrow(/never moves/);
 	});
 });

@@ -44,9 +44,9 @@
 -- today) are a hot spot for charges of pool accounts: each holds the row
 -- until it commits, a short transaction.
 --
--- A trigger refuses an UPDATE that moves a usage row to another project or
--- month, or a day row to another account or day: nothing does, and the
--- counters assume it.
+-- A usage row moved to another project or month is counted where it lands. A
+-- trigger refuses an UPDATE that moves a day row with a cost to another
+-- account or day: nothing does, and the pool sync re-reads those rows.
 --
 -- Backfilled here from the existing rows, with the tables written to locked
 -- until the migration commits.
@@ -200,14 +200,16 @@ CREATE FUNCTION assistant_usage_counted() RETURNS trigger
 	LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
 	AS $$
 	BEGIN
-		IF TG_OP = 'UPDATE' AND (OLD.project_id <> NEW.project_id OR OLD.month <> NEW.month) THEN
-			RAISE EXCEPTION 'assistant_usage: a row never moves to another project or month (361 counts it where it is)';
-		END IF;
 		-- A project being deleted took its rows out of the counters first (assistant_project_counted), and is no longer visible.
+		-- A row moved to another project or month is taken out where it was and counted where it is: the month
+		-- counter is kept here (never re-read from assistant_usage), so the two steps are exact in either order.
 		IF TG_OP = 'INSERT' THEN
 			PERFORM assistant_month_count((SELECT billing_account_id FROM project WHERE id = NEW.project_id), NEW.month, NEW.cost_usd_micros);
-		ELSIF TG_OP = 'UPDATE' THEN
+		ELSIF TG_OP = 'UPDATE' AND OLD.project_id = NEW.project_id AND OLD.month = NEW.month THEN
 			PERFORM assistant_month_count((SELECT billing_account_id FROM project WHERE id = NEW.project_id), NEW.month, NEW.cost_usd_micros - OLD.cost_usd_micros);
+		ELSIF TG_OP = 'UPDATE' THEN
+			PERFORM assistant_month_count((SELECT billing_account_id FROM project WHERE id = OLD.project_id), OLD.month, -OLD.cost_usd_micros);
+			PERFORM assistant_month_count((SELECT billing_account_id FROM project WHERE id = NEW.project_id), NEW.month, NEW.cost_usd_micros);
 		ELSE
 			PERFORM assistant_month_count((SELECT billing_account_id FROM project WHERE id = OLD.project_id), OLD.month, -OLD.cost_usd_micros);
 		END IF;
@@ -228,7 +230,10 @@ CREATE FUNCTION assistant_day_usage_counted() RETURNS trigger
 	LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
 	AS $$
 	BEGIN
-		IF TG_OP = 'UPDATE' AND (OLD.billing_account_id <> NEW.billing_account_id OR OLD.day <> NEW.day) THEN
+		-- The pool sync re-reads the account's day rows, so a costed row that moved would be counted twice when
+		-- the move also brings its account into the pool: refused (nothing moves one; a row with no cost may move).
+		IF TG_OP = 'UPDATE' AND (OLD.billing_account_id <> NEW.billing_account_id OR OLD.day <> NEW.day)
+			AND (OLD.cost_usd_micros <> 0 OR NEW.cost_usd_micros <> 0) THEN
 			RAISE EXCEPTION 'assistant_day_usage: a row never moves to another account or day (361 counts it where it is)';
 		END IF;
 		IF TG_OP = 'INSERT' THEN

@@ -285,9 +285,10 @@ snapshot, and a charge writes its rows and the counters in one transaction.
 Each trigger takes a per-account advisory lock before it touches that
 account's counters, so a charge and a subscription change on one account
 can't miss each other's change. 264's deployment lock is unchanged (begins
-still read, then reserve). A trigger refuses an UPDATE that moves a usage row
-to another project or month, or a day row to another account or day (nothing
-does). Tests: `assistant/monthCounter.db.test.ts` (every counter equals a
+still read, then reserve). A usage row moved to another project or month is
+counted where it lands; a trigger refuses an UPDATE that moves a day row with a
+cost to another account or day (nothing does; the pool sync re-reads those
+rows). Tests: `assistant/monthCounter.db.test.ts` (every counter equals a
 fresh sum, and the read equals 336's statement, after each path, last month
 and yesterday's SAST day included) and the begin's budget in
 `assistant/begin.db.perf.test.ts`.
