@@ -490,19 +490,21 @@ def fetch_token(secret_arn: str, client=None) -> str:
 
 class EarthdataOpener:
     """An opener for polite.PoliteClient that adds `Authorization: Bearer` to
-    requests for AUTH_HOSTS only, as an unredirected header (urllib never
-    copies it onto a redirect, so it can't reach S3 or anyone else), and turns
-    a landing on Earthdata Login's page into a 401."""
+    requests for `hosts` only (AUTH_HOSTS by default; swot_trial.py passes
+    PO.DAAC's SWOT archive), as an unredirected header (urllib never copies it
+    onto a redirect, so it can't reach S3 or anyone else), and turns a landing
+    on Earthdata Login's page into a 401."""
 
-    def __init__(self, token: str | None, base=None):
+    def __init__(self, token: str | None, base=None, hosts: frozenset[str] = AUTH_HOSTS):
         self._token = token
         self.base = base or urllib.request.urlopen
+        self.hosts = frozenset(hosts)
 
     def __repr__(self):
         return f"EarthdataOpener(token={'set' if self._token else 'none'})"
 
     def __call__(self, req, timeout=None):
-        if self._token and urllib.parse.urlparse(req.full_url).hostname in AUTH_HOSTS:
+        if self._token and urllib.parse.urlparse(req.full_url).hostname in self.hosts:
             req.add_unredirected_header("Authorization", f"Bearer {self._token}")
         res = self.base(req, timeout=timeout)
         landed = res.geturl() if hasattr(res, "geturl") else req.full_url
