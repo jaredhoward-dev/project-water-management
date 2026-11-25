@@ -15209,7 +15209,7 @@ overview's size, at the same height on every page (`e2e/tests/help-pages.spec.ts
   modal and the node and crop sheets, and every way into the farm drawer),
   and *Compare runs and try what-ifs* points at the Compare runs tab.
   An old `/help#<term>` link goes on to the term's glossary topic page.
-- **Guides** (`/help/guides/<id>`, content in `lib/help/guides.ts`): one task
+- **Guides** (`/help/guides/<id>`, content in `lib/help/guides-<group>.ts`, joined by `lib/help/guides.ts`): one task
   or one idea each, with an "On this page" list (a box under the intro; when
   the Help text column is at least 56rem wide, a container query on
   `help-main`, a sticky rail pinned to the column's right edge instead). A

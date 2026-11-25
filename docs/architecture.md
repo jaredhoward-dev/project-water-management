@@ -204,11 +204,14 @@ fails if the page, or anything it imports statically, reaches the import
 components or the spreadsheet code again.
 
 Help tooltips (`components/help/HelpTip.svelte`) don't import the help text
-either. The text is three modules, each its own chunk: `lib/help/tips.ts`
-(each entry's term, short text, units and field keys: 10 KB gzip),
-`lib/help/articles.ts` (the fuller text, other names, related ids and source,
-by id: 32 KB with `content.ts`, which joins them for the /help pages) and
-`lib/help/farmer.ts` (the farm view's words, whole: 2 KB). The first HelpTip
+either. The text is in modules of its own, each its own chunk:
+`lib/help/tips.ts` (each entry's term, short text, units and field keys:
+10 KB gzip), the glossary's articles (`lib/help/articles.ts` and one
+`articles-<topic>.ts` per split topic, joined by `content.ts` for the /help
+pages), the guides (one `guides-<group>.ts` per contents group, joined by
+`guides.ts`; [ui.md § Help](./ui.md) has the split) and `lib/help/farmer.ts`
+(the farm view's words, whole: 2 KB); a tip never loads the articles or the
+guides. The first HelpTip
 starts fetching the tips when its module loads, off the page's critical path,
 and every HelpTip shares them; until they arrive a tip renders nothing, as it
 does for an unknown key. A tip never loads the long text (it was one 42 KB
