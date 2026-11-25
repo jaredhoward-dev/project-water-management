@@ -75,12 +75,13 @@ describe('POST /billing/webhook/mock against app_billing_apply', () => {
 		expect((await subscription())?.status).toBe('canceled');
 	});
 
-	it('a recorded-only event is recorded once, and an unknown account is answered 200 and changes nothing', async () => {
+	it('a recorded-only event is recorded once, and an unknown account is answered 200 and writes no subscription', async () => {
 		expect(await (await post(event('invoice-paid'))).json()).toEqual({ received: true, result: 'recorded' });
 		const stranger = event('subscription-updated', { id: `evt_stranger_${run}`, sub: `sub_stranger_${run}` }).replaceAll(accountId, crypto.randomUUID());
 		const res = await post(stranger);
 		expect(res.status).toBe(200);
-		expect(await res.json()).toEqual({ received: true, result: 'unknown_account' });
+		// A live subscription for an account that can't be found is a checkout paid after a delete: cancelled and refunded at the provider (352; orphan.db.test.ts).
+		expect(await res.json()).toEqual({ received: true, result: 'orphan_refunded' });
 		expect(await asOwner('SELECT 1 FROM subscription WHERE external_ref = $1', [`sub_stranger_${run}`])).toHaveLength(0);
 	});
 });

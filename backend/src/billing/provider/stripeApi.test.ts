@@ -2,7 +2,7 @@
 // live call. What each request sends (path, headers, form body) and how each
 // answer is read or refused.
 import { describe, expect, it, vi } from 'vitest';
-import { cancelSubscription, createCheckoutSession, createCustomer, expireCheckoutSession, listOpenCheckoutSessions, listOpenSubscriptions, createInvoice, createPortalSession, formEncode, STRIPE_API_VERSION, StripeApiError } from './stripeApi.js';
+import { cancelSubscription, orphanCancelAndRefund, createCheckoutSession, createCustomer, expireCheckoutSession, listOpenCheckoutSessions, listOpenSubscriptions, createInvoice, createPortalSession, formEncode, STRIPE_API_VERSION, StripeApiError } from './stripeApi.js';
 
 const KEY = 'test-only-not-a-stripe-key';
 const ACCOUNT = '22222222-2222-4222-8222-222222222222';
@@ -351,6 +351,119 @@ describe('listOpenCheckoutSessions and expireCheckoutSession (deleting an accoun
 		await expect(expireCheckoutSession({ secretKey: KEY, fetch: fakeFetch(500, { error: { type: 'api_error' } }).f }, 'cs_test_Open1')).rejects.toBeInstanceOf(StripeApiError);
 		const { f, calls } = fakeFetch(200, {});
 		await expect(expireCheckoutSession({ secretKey: KEY, fetch: f }, 'cs_test/../x')).rejects.toBeInstanceOf(StripeApiError);
+		expect(calls).toEqual([]);
+	});
+});
+
+/** A fetch that answers each request by its method and path (no query), recording every call; a route missing is a test bug. */
+function routedFetch(routes: Record<string, (init: RequestInit, url: URL) => { status: number; body: unknown }>) {
+	const calls: { method: string; url: string; init: RequestInit }[] = [];
+	const f = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+		const url = new URL(String(input));
+		const key = `${init!.method} ${url.pathname}`;
+		calls.push({ method: init!.method!, url: String(input), init: init! });
+		const route = routes[key];
+		if (!route) throw new Error(`no fake route for ${key}`);
+		const { status, body } = route(init!, url);
+		return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+	});
+	return { f: f as unknown as typeof fetch, calls };
+}
+const paidInvoice = { status: 200, body: { object: 'list', has_more: false, data: [{ id: 'in_Paid1', amount_paid: 4900, status: 'paid' }] } };
+const paidPayment = { status: 200, body: { object: 'list', has_more: false, data: [{ id: 'inpay_1', status: 'paid', payment: { type: 'payment_intent', payment_intent: 'pi_Paid1' } }] } };
+
+describe('orphanCancelAndRefund (a subscription whose account is gone)', () => {
+	it('reads the subscription, cancels it now, lists its paid invoices and their payments, and refunds each whole under a key per payment', async () => {
+		const { f, calls } = routedFetch({
+			'GET /v1/subscriptions/sub_Orphan1': () => ({ status: 200, body: { id: 'sub_Orphan1', status: 'active' } }),
+			'DELETE /v1/subscriptions/sub_Orphan1': () => ({ status: 200, body: { id: 'sub_Orphan1', status: 'canceled' } }),
+			'GET /v1/invoices': () => paidInvoice,
+			'GET /v1/invoice_payments': () => paidPayment,
+			'POST /v1/refunds': () => ({ status: 200, body: { id: 're_1', object: 'refund', amount: 4900, status: 'succeeded' } })
+		});
+		expect(await orphanCancelAndRefund({ secretKey: KEY, fetch: f }, 'sub_Orphan1', ACCOUNT)).toEqual({ cancelled: true, refunds: 1, refundedMinor: 4900 });
+		expect(calls.map((c) => c.method + ' ' + c.url)).toEqual([
+			'GET https://api.stripe.com/v1/subscriptions/sub_Orphan1',
+			'DELETE https://api.stripe.com/v1/subscriptions/sub_Orphan1?invoice_now=false&prorate=false',
+			'GET https://api.stripe.com/v1/invoices?subscription=sub_Orphan1&status=paid&limit=100',
+			'GET https://api.stripe.com/v1/invoice_payments?invoice=in_Paid1&status=paid&limit=100',
+			'POST https://api.stripe.com/v1/refunds'
+		]);
+		const refund = calls[4]!.init;
+		expect(form(refund)).toEqual({
+			payment_intent: 'pi_Paid1',
+			reason: 'requested_by_customer',
+			'metadata[wm_reason]': 'account_deleted',
+			'metadata[billing_account_id]': ACCOUNT
+		});
+		expect(headers(refund)).toMatchObject({ 'Idempotency-Key': 'wm-orphan-refund-pi_Paid1', 'Stripe-Version': STRIPE_API_VERSION });
+		// Nothing that could name the person is sent.
+		expect(String(refund.body)).not.toMatch(/@|email/);
+	});
+
+	it('does not cancel one already ended (a redelivery after the cancel), and refunds a charge payment by its charge', async () => {
+		const { f, calls } = routedFetch({
+			'GET /v1/subscriptions/sub_Orphan1': () => ({ status: 200, body: { id: 'sub_Orphan1', status: 'canceled' } }),
+			'GET /v1/invoices': () => paidInvoice,
+			'GET /v1/invoice_payments': () => ({ status: 200, body: { data: [{ status: 'paid', payment: { type: 'charge', charge: 'ch_Paid1' } }] } }),
+			'POST /v1/refunds': () => ({ status: 200, body: { id: 're_1', amount: 4900, status: 'pending' } })
+		});
+		expect(await orphanCancelAndRefund({ secretKey: KEY, fetch: f }, 'sub_Orphan1', ACCOUNT)).toEqual({ cancelled: false, refunds: 1, refundedMinor: 4900 });
+		expect(calls.some((c) => c.method === 'DELETE')).toBe(false);
+		expect(form(calls.at(-1)!.init).charge).toBe('ch_Paid1');
+		expect(headers(calls.at(-1)!.init)['Idempotency-Key']).toBe('wm-orphan-refund-ch_Paid1');
+	});
+
+	it('takes a payment refunded already or charged back as done, and a trial (nothing paid) as cancelled only', async () => {
+		for (const code of ['charge_already_refunded', 'charge_disputed', 'refund_disputed_payment']) {
+			const { f } = routedFetch({
+				'GET /v1/subscriptions/sub_Orphan1': () => ({ status: 200, body: { status: 'canceled' } }),
+				'GET /v1/invoices': () => paidInvoice,
+				'GET /v1/invoice_payments': () => paidPayment,
+				'POST /v1/refunds': () => ({ status: 400, body: { error: { type: 'invalid_request_error', code } } })
+			});
+			expect(await orphanCancelAndRefund({ secretKey: KEY, fetch: f }, 'sub_Orphan1', ACCOUNT)).toEqual({ cancelled: false, refunds: 0, refundedMinor: 0 });
+		}
+		const { f, calls } = routedFetch({
+			'GET /v1/subscriptions/sub_Trial1': () => ({ status: 200, body: { status: 'trialing' } }),
+			'DELETE /v1/subscriptions/sub_Trial1': () => ({ status: 200, body: { status: 'canceled' } }),
+			'GET /v1/invoices': () => ({ status: 200, body: { data: [{ id: 'in_Zero1', amount_paid: 0 }] } })
+		});
+		expect(await orphanCancelAndRefund({ secretKey: KEY, fetch: f }, 'sub_Trial1', ACCOUNT)).toEqual({ cancelled: true, refunds: 0, refundedMinor: 0 });
+		expect(calls.some((c) => c.url.includes('/v1/refunds'))).toBe(false);
+	});
+
+	it('takes a subscription Stripe doesn’t have as nothing to cancel, and still refunds what its invoices were paid', async () => {
+		const { f, calls } = routedFetch({
+			'GET /v1/subscriptions/sub_Gone1': () => ({ status: 404, body: { error: { type: 'invalid_request_error', code: 'resource_missing' } } }),
+			'GET /v1/invoices': () => ({ status: 200, body: { data: [] } })
+		});
+		expect(await orphanCancelAndRefund({ secretKey: KEY, fetch: f }, 'sub_Gone1', ACCOUNT)).toEqual({ cancelled: false, refunds: 0, refundedMinor: 0 });
+		expect(calls.some((c) => c.method === 'DELETE')).toBe(false);
+	});
+
+	it('throws on any other failure (so the webhook answers non-2xx), a malformed answer, more pages, or a bad id, never calling with one', async () => {
+		const base = {
+			'GET /v1/subscriptions/sub_Orphan1': () => ({ status: 200, body: { status: 'active' } }),
+			'DELETE /v1/subscriptions/sub_Orphan1': () => ({ status: 200, body: { status: 'canceled' } }),
+			'GET /v1/invoices': () => paidInvoice,
+			'GET /v1/invoice_payments': () => paidPayment,
+			'POST /v1/refunds': () => ({ status: 200, body: { amount: 4900, status: 'succeeded' } })
+		};
+		const failing: Record<string, () => { status: number; body: unknown }>[] = [
+			{ 'DELETE /v1/subscriptions/sub_Orphan1': () => ({ status: 500, body: { error: { type: 'api_error' } } }) },
+			{ 'POST /v1/refunds': () => ({ status: 402, body: { error: { type: 'card_error', code: 'balance_insufficient' } } }) },
+			{ 'POST /v1/refunds': () => ({ status: 200, body: { status: 'failed' } }) },
+			{ 'GET /v1/invoices': () => ({ status: 200, body: { data: [], has_more: true } }) },
+			{ 'GET /v1/invoice_payments': () => ({ status: 200, body: { data: [{ payment: { type: 'payment_intent', payment_intent: 'pi_../x' } }] } }) },
+			{ 'GET /v1/invoice_payments': () => ({ status: 200, body: { data: [{ payment: { type: 'out_of_band_payment' } }] } }) },
+			{ 'GET /v1/subscriptions/sub_Orphan1': () => ({ status: 401, body: { error: { type: 'invalid_request_error' } } }) }
+		];
+		for (const over of failing) {
+			await expect(orphanCancelAndRefund({ secretKey: KEY, fetch: routedFetch({ ...base, ...over }).f }, 'sub_Orphan1', ACCOUNT)).rejects.toBeInstanceOf(StripeApiError);
+		}
+		const { f, calls } = routedFetch(base);
+		await expect(orphanCancelAndRefund({ secretKey: KEY, fetch: f }, 'sub_../x', ACCOUNT)).rejects.toBeInstanceOf(StripeApiError);
 		expect(calls).toEqual([]);
 	});
 });

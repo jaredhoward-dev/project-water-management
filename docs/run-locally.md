@@ -641,8 +641,10 @@ pnpm dev:billing:replay subscription-deleted --account <id> --new-id
 ```
 
 Each prints the API's status and answer (`applied`, `recorded`, `duplicate`,
-`stale`, `conflict`, `unknown_account`). Without `--account`, the fixtures' placeholder
-account answers `unknown_account`. The script signs only with a `dev-only-`
+`stale`, `conflict`, `unknown_account`, `orphan_refunded`). Without `--account`, the fixtures' placeholder
+account is one that doesn't exist: a live subscription or a completed checkout answers
+`orphan_refunded` (the mock "cancels and refunds" it, with no network; billing.md § The
+route), anything else `unknown_account` or `recorded`. The script signs only with a `dev-only-`
 key and posts only to localhost.
 
 To grant a plan by hand (the operator's staff grant: an invoiced customer, a
