@@ -629,9 +629,10 @@
 		margin: 0.25rem 0;
 		padding-left: 1.4rem;
 	}
-	/* Each donor's row frames it on the map, as a search result does (MapSearch.svelte .hit). */
+	/* Each donor's row frames it on the map, as a search result does (MapSearch.svelte .hit).
+	   24px, not 1.5rem: the root is 14px, so 1.5rem is 21px, under WCAG 2.5.8's target size. */
 	.donor-pick {
-		min-height: 1.5rem;
+		min-height: 24px;
 		padding: 0.1rem 0.25rem;
 		margin-left: -0.25rem;
 		border: 0;
