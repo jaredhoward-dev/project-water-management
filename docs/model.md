@@ -6965,7 +6965,18 @@ each **pending the hydrologist**, listed in
   isn't restricted by storage (there is none to read; the run warns), only
   by the EWR trigger. Ids that don't fit the network (a "dam" without one,
   a unit that isn't a farm, a site that isn't a gauge) are left out with a
-  warning; a rule left with no unit isn't applied.
+  warning; a rule left with no unit isn't applied. A rule that breaks the
+  field table isn't applied at all (no restriction column; the run warns
+  and names the field, and the API refuses it on save): a count out of its
+  range, a date that isn't a month-day or is listed twice, a lift date that
+  is also a review date, a `belowPct` outside (0, 1] or not strictly
+  falling, a cut outside 0–1, on a part that isn't one, or below the milder
+  level's on any part, a `basis` other than the three, `damNodeIds` absent,
+  empty or naming an id twice under `dams` (or given with another basis),
+  and `nodeIds` empty or naming an id twice. A list that is well formed but
+  names ids that don't fit is the case above: those ids are left out, and a
+  `dams` rule left with no dam runs at level 0 from storage (verify/
+  probes `drought-rule-*`, settled from `runModel`).
 - *Decided on review dates, held between them.* The triggers are read on a
   review date and applied to the season's end (§2.15a), and DWS
   restrictions are reviewed at set points, not daily, so the level is a

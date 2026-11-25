@@ -850,9 +850,64 @@ def unsupported(doc: dict) -> list[str]:
 DEMAND_PARTS = ("crops", "domestic", "municipal", "industrial", "livestock", "irrigation", "external", "other")
 
 
+def _month_day_ok(s) -> bool:
+    if not isinstance(s, str) or len(s) != 5 or s[2] != "-" or s == "02-29":
+        return False
+    try:
+        _dt.date(2001, int(s[:2]), int(s[3:]))
+    except ValueError:
+        return False
+    return True
+
+
+def _share(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+
+
+def drought_rule_breaks_table(raw) -> bool:
+    """§2.7i: a rule that breaks the field table isn't applied at all (the run warns), as against an id that
+    doesn't fit the network, which is left out. Settled from runModel (probes `drought-rule-*`)."""
+    rev = raw.get("reviewDates") or []
+    lift = raw.get("liftDates") or []
+    if not 1 <= len(rev) <= 12 or len(lift) > 12:
+        return True
+    if not all(_month_day_ok(x) for x in rev + lift) or len(set(rev)) < len(rev) or len(set(lift)) < len(lift):
+        return True
+    if set(rev) & set(lift):
+        return True
+    levels = raw.get("levels") or []
+    if not 1 <= len(levels) <= 6:
+        return True
+    prev_b, prev_c = None, {}
+    for L in levels:
+        b = L.get("belowPct")
+        if not _share(b) or not 0 < b <= 1 or (prev_b is not None and not b < prev_b):
+            return True
+        cuts = L.get("cuts") or {}
+        if any(k not in DEMAND_PARTS or not _share(v) or not 0 <= v <= 1 for k, v in cuts.items()):
+            return True
+        if any(cuts.get(k, 0.0) < v for k, v in prev_c.items()):
+            return True
+        prev_b, prev_c = b, cuts
+    basis = raw.get("basis") or "total"
+    if basis not in ("total", "dams", "own"):
+        return True
+    dams = raw.get("damNodeIds")
+    if basis == "dams":
+        if not dams or len(set(dams)) < len(dams):
+            return True
+    elif dams is not None:
+        return True
+    nodes = raw.get("nodeIds")
+    if nodes is not None and (not nodes or len(set(nodes)) < len(nodes)):
+        return True
+    return False
+
+
 def drought_rule(raw, farms: list[dict], users: list[dict], by_id: dict, cap0: dict):
-    """settings.droughtRestriction as the run reads it, or None when it isn't applied (absent, or no unit left)."""
-    if not raw:
+    """settings.droughtRestriction as the run reads it, or None when it isn't applied (absent, breaking its
+    table, or no unit left)."""
+    if not raw or drought_rule_breaks_table(raw):
         return None
     levels = []
     for L in raw.get("levels") or []:

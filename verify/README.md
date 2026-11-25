@@ -44,7 +44,7 @@ returns. It imports the engine by path and the example catchments from
 ## Running it
 
 ```bash
-pnpm test:verify                                   # the guard: ~11 min locally on 4 workers (examples, probes, 12 random + 12 dense networks, 290 mutants)
+pnpm test:verify                                   # the guard: ~11 min locally on 4 workers (examples, probes, 12 random + 12 dense networks, 293 mutants)
 VERIFY_TEST_RANDOM=200 VERIFY_TEST_DENSE=200 pnpm test:verify   # what CI runs: agreement on 200 of each
 VERIFY_SHARD=2/3 pnpm test:verify                  # one of CI's 3 shards: every 3rd mutant from the 2nd (shard 1 also runs the agreement sweep)
 python3 verify/diff.py --random 100 --dense 100 --seed 1000     # the report; --keep DIR keeps the inputs and outputs, --verbose lists engine-only series
@@ -64,7 +64,7 @@ no network. CI runs it as the `verify` job (`.github/workflows/ci.yml`), in
 case is `model.py`'s run plus `diff.compare` over every column and day
 (about half each; 0.1–2 s a case), while the engine runs all ~90 default
 cases in one tsx process in about 5 s. The mutation self-test is the bulk:
-290 mutants, each running the cases in order until its first disagreement
+293 mutants, each running the cases in order until its first disagreement
 (about a third of them on average), about 35 min on one core, against about
 3 min for the agreement sweep of 200 + 200 networks. So the engine runs,
 the agreement sweep and the mutants run on `VERIFY_WORKERS` processes
@@ -584,11 +584,15 @@ of a seed is unchanged), with probes and mutants:
   The EWR trigger runs only in a scenario (§2.9g), so a project rule's
   `ewrTrigger` is ignored, and snapshot resumes stay out (verify/ runs fresh
   runs only). Probes `drought-first-review`, `-first-lift`, `-filling`,
-  `-own` (a share exactly at `belowPct`), `-dams`; 24 mutants. What the docs
-  left open (the output columns that stay unrestricted, `limitBound` on the
+  `-own` (a share exactly at `belowPct`), `-dams`, `-rule-dams-empty`,
+  `-rule-dams-twice`, `-rule-nodes-twice`; 27 mutants. What the docs left
+  open (the output columns that stay unrestricted, `limitBound` on the
   unrestricted shortfall, a junior user's % and a project rule's trigger
-  ignored) was settled from `runModel` and written into §2.7i. No
-  disagreement with the engine was found.
+  ignored, and that a rule breaking its field table isn't applied at all
+  while an id that doesn't fit is left out) was settled from `runModel` and
+  written into §2.7i. CI's 200 + 200 networks found the last one: `model.py`
+  had run a `dams` rule with an empty or repeated `damNodeIds` (the
+  generator draws both) where the engine applies no rule; no engine change.
 
 ## Phase 2b (not covered yet)
 
@@ -657,10 +661,10 @@ empty, and no other disagreement is allowed.
 ## The mutation self-test
 
 Agreement only means something if the cases exercise the rules. So
-`test_verify.py` breaks `model.py` one documented rule at a time (290
-mutants; phase 2b's 67 are listed under its features in `mutants.py`:
+`test_verify.py` breaks `model.py` one documented rule at a time (293
+mutants; phase 2b's 70 are listed under its features in `mutants.py`:
 the daily A-pan record's 7, the demand factors by part and dated windows' 8,
-land cover's 9, development during a run's 19 and drought restrictions' 24). Phase 1's 23 (the band-and-room order mutant went in engine 1.70.0, whose order is the one it tested): the receiver's room ignored; one
+land cover's 9, development during a run's 19 and drought restrictions' 27). Phase 1's 23 (the band-and-room order mutant went in engine 1.70.0, whose order is the one it tested): the receiver's room ignored; one
 reserve pool for all rules (N6); the room without the dam's losses, or
 counting what the receiver sent; no soil-water store; zero runs as recorded;
 accumulations not spread, or tested over the whole run; raw CHIRPS; the

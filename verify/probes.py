@@ -2185,7 +2185,10 @@ def drought(kind: str) -> dict:
     each review read both ways (total basis); `own`: the same under `own`,
     each unit its own dam, the lower one starting exactly at a level's
     belowPct (not below it); `dams`: the `dams` basis reading the upper dam
-    alone, cutting it only (a user and a gauge in its lists left out)."""
+    alone, cutting it only (a user and a gauge in its lists left out);
+    `rule-dams-empty`, `rule-dams-twice`, `rule-nodes-twice`: a rule that
+    breaks its field table (no dam under `dams`, an id listed twice) isn't
+    applied at all, unlike an id that doesn't fit the network."""
     start = dt.date(2019, 10, 1)
     n = 366
     rain = _wave(start, n, 2, 0.9)
@@ -2214,6 +2217,13 @@ def drought(kind: str) -> dict:
     elif kind == "dams":
         # A dam that isn't listed, and ids that aren't farm dams or farms, left out.
         rule.update(basis="dams", damNodeIds=["g", "u"], nodeIds=["g", "u", "o"])
+    elif kind == "rule-dams-empty":
+        # A rule that breaks its table isn't applied at all (no restriction column), unlike an id left out.
+        rule.update(basis="dams", damNodeIds=[])
+    elif kind == "rule-dams-twice":
+        rule.update(basis="dams", damNodeIds=["g", "g"])
+    elif kind == "rule-nodes-twice":
+        rule["nodeIds"] = ["f", "f"]
     s["droughtRestriction"] = rule
     s["allocationMode"] = "cap"
     f_kw: dict = dict(areaKm2=4, damCapacityM3=25000, damInitialPct=0.3, pctRunoffToDam=0.5, damAreaFullM2=8000)
@@ -2530,6 +2540,9 @@ PROBES = {
     "drought-filling": drought("filling"),
     "drought-own": drought("own"),
     "drought-dams": drought("dams"),
+    "drought-rule-dams-empty": drought("rule-dams-empty"),
+    "drought-rule-dams-twice": drought("rule-dams-twice"),
+    "drought-rule-nodes-twice": drought("rule-nodes-twice"),
     # The forecast-conditioned outlook's member (issue #620 step 6).
     "forecast-member-rescaled": forecast_member_rescaled(),
     # Future climate (issue #621, §2.17): the op on a dam, then on the per-unit rules (the MAPs by the annual
