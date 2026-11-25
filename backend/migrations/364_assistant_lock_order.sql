@@ -16,15 +16,22 @@
 --      membership) and waited on the foreign key's share lock on that same row.
 --
 -- The order now, for every transaction that can take the counter lock:
---   (a) the parent rows its writes reference (project, billing_account,
---       app_user), FOR KEY SHARE, or exclusively for a deletion;
+--   (a) the parent rows its writes reference, in the order a deletion locks
+--       them: app_user, then project, then billing_account, FOR KEY SHARE (or
+--       exclusively, for a deletion);
 --   (b) the counter lock;
 --   (c) the counted rows (reservation, usage, day, counters).
--- So the charge locks its project, the project's account and its person FOR
+-- So the charge locks its person, its project and the project's account FOR
 -- KEY SHARE, then takes the counter lock (when it has a cost to count), and
 -- only then its reservation and rows; the settle (in a begin and in the purge)
--- does the same for the expired reservations' parents before it deletes any;
--- the begin locks its own parents before the settle. A deletion locks the rows
+-- does the same for the parents of the reservations expired in its lock
+-- queries' snapshot, before its DELETE; the begin locks its own parents before
+-- the settle. The person comes first because a person's deletion locks the
+-- app_user row (the DELETE itself) before its trigger locks the billing
+-- account: a transaction holding the account and then asking for the person
+-- would deadlock with it. A team's deletion locks the team row (which nothing
+-- here locks), then its account, and sets its projects' team to NULL (no key
+-- change, so no conflict with KEY SHARE). A deletion locks the rows
 -- it deletes before any trigger takes the counter lock: app_user's and team's
 -- new BEFORE DELETE triggers lock their billing account first, so no cascade
 -- order (they fire in trigger name order, that is oid order) can take the
@@ -50,12 +57,15 @@ CREATE OR REPLACE FUNCTION assistant_settle_expired() RETURNS integer
 	BEGIN
 		-- 364: something to settle writes counted rows, so the parent rows they reference first, then the counter lock.
 		IF EXISTS (SELECT 1 FROM assistant_reservation WHERE expires_at <= now()) THEN
+			-- People, projects, accounts: a deletion's order. The set is the one these queries see; the reservations
+			-- the DELETE below finds are those or fewer (begins are serialised by 264's lock, charges only remove),
+			-- unless a project moved account in between, whose new account is then not locked here.
+			PERFORM 1 FROM app_user u WHERE u.id IN (SELECT r.user_id FROM assistant_reservation r WHERE r.expires_at <= now())
+				ORDER BY u.id FOR KEY SHARE;
 			PERFORM 1 FROM project p WHERE p.id IN (SELECT r.project_id FROM assistant_reservation r WHERE r.expires_at <= now())
 				ORDER BY p.id FOR KEY SHARE;
 			PERFORM 1 FROM billing_account a WHERE a.id IN (SELECT p.billing_account_id FROM assistant_reservation r JOIN project p ON p.id = r.project_id
 				WHERE r.expires_at <= now()) ORDER BY a.id FOR KEY SHARE;
-			PERFORM 1 FROM app_user u WHERE u.id IN (SELECT r.user_id FROM assistant_reservation r WHERE r.expires_at <= now())
-				ORDER BY u.id FOR KEY SHARE;
 			PERFORM assistant_counter_lock();
 		END IF;
 		WITH gone AS (
@@ -167,10 +177,10 @@ CREATE OR REPLACE FUNCTION app_assistant_begin(
 		-- 264's locks, in its order: every begin's sums (tokens and dollars) are taken one at a time.
 		PERFORM pg_advisory_xact_lock(hashtext('assistant_usage:all'));
 		PERFORM pg_advisory_xact_lock(hashtext('assistant_usage:' || p_project::text));
-		-- 364: the parent rows this begin's own inserts reference, before the settle can take the counter lock.
+		-- 364: the parent rows this begin's own inserts reference (person, project, account), before the settle can take the counter lock.
+		PERFORM 1 FROM app_user WHERE id = v_user FOR KEY SHARE;
 		PERFORM 1 FROM project WHERE id = p_project FOR KEY SHARE;
 		PERFORM 1 FROM billing_account WHERE id = (SELECT billing_account_id FROM project WHERE id = p_project) FOR KEY SHARE;
-		PERFORM 1 FROM app_user WHERE id = v_user FOR KEY SHARE;
 		PERFORM assistant_settle_expired();
 		DELETE FROM assistant_rate WHERE user_id = v_user AND window_start <= now() - interval '1 hour';
 		INSERT INTO assistant_rate (user_id) VALUES (v_user) ON CONFLICT (user_id) DO NOTHING;
@@ -322,10 +332,10 @@ CREATE OR REPLACE FUNCTION app_assistant_charge(
 		END IF;
 		-- 364: the parent rows this charge's rows (and the counters' rows) reference, then the counter lock when the
 		-- charge has a cost to count, and only then the reservation, usage and day rows.
+		PERFORM 1 FROM app_user WHERE id = v_user FOR KEY SHARE;
 		PERFORM 1 FROM project WHERE id = p_project FOR KEY SHARE;
 		SELECT billing_account_id INTO v_account FROM project WHERE id = p_project;
 		PERFORM 1 FROM billing_account WHERE id = v_account FOR KEY SHARE;
-		PERFORM 1 FROM app_user WHERE id = v_user FOR KEY SHARE;
 		IF v_account IS NOT NULL AND coalesce(p_cost_usd_micros, 0) <> 0 THEN
 			PERFORM assistant_counter_lock();
 		END IF;

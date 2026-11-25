@@ -308,20 +308,26 @@ the counter lock; and an account's deletion locked its `billing_account` row
 and waited for the counter lock, while a charge holding it inserted the
 account's first month counter row and waited on that row's foreign key
 lock. Every transaction that can take the counter lock now takes, in order:
-(a) the parent rows its writes reference (project, billing account, person)
-`FOR KEY SHARE`, or exclusively when it deletes them; (b) the counter lock;
+(a) the parent rows its writes reference, in a deletion's order: the person,
+then the project, then the billing account, `FOR KEY SHARE` (or exclusively
+when it deletes them); (b) the counter lock;
 (c) the counted rows (reservation, usage, day, counters). The charge locks its
-project, its account and its person, then the counter lock when it has a cost
+person, its project and its account, then the counter lock when it has a cost
 to count (one with no cost or no account never takes it), then its
-reservation; the settle (in a begin or the purge) locks the expired
-reservations' parents, then the counter lock, only when something has
-expired; the begin locks its own parents before the settle. Deleting a person
+reservation; the settle (in a begin or the purge) locks the parents of the
+reservations expired in its lock queries' snapshot, then the counter lock,
+only when something has expired; the begin locks its own parents before the settle. The person comes first because deleting a
+person locks the `app_user` row before its trigger locks the billing account,
+so a transaction holding the account and then asking for the person would
+deadlock with it. Deleting a person
 or a team locks its billing account first (a `BEFORE DELETE` trigger), so the
 cascade order can't take the counter lock before that row; billing writers
 already lock the account `FOR UPDATE` before a subscription change. Results
 are unchanged. Tests: `assistant/lockOrder.db.test.ts` runs each deadlock's
 interleaving on two connections, watching `pg_locks`, and expects both to
-commit (both failed with `deadlock detected` before 364).
+commit (each failed with `deadlock detected` before its fix: a begin's settle
+holding the account while a person's deletion holds the person was the
+fourth case).
 
 **Not built yet** ([followups.md](./followups.md#billing-issue-641)): Haiku
 on Free.
