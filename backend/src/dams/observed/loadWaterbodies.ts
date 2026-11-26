@@ -14,7 +14,7 @@ import type pg from 'pg';
 import { geometryAreaM2 } from '../../geo/area.js';
 import { checkGeometry, type Geometry } from '../../geo/geojson.js';
 import { bboxOf } from '../../geo/loadQuaternaries.js';
-import { recordReferenceOrigin, type ReferenceOrigin } from '../../geo/referenceOrigin.js';
+import { forgetEmptiedOrigins, recordReferenceOrigin, type ReferenceOrigin } from '../../geo/referenceOrigin.js';
 import { WATERBODY_UID } from './handover.js';
 
 export interface WaterbodyRecord {
@@ -105,6 +105,8 @@ export async function replaceWaterbodies(client: pg.ClientBase, dataset: string,
 			);
 		}
 		await recordReferenceOrigin(client, 'waterbodies', dataset, origin);
+		// Keyed by code across datasets: the rows above may have emptied an older dataset, whose record goes with it.
+		await forgetEmptiedOrigins(client, 'waterbodies', dataset);
 		await client.query('COMMIT');
 		return records.length;
 	} catch (e) {
