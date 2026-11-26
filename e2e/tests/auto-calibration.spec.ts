@@ -17,11 +17,12 @@ test('fitting GR4J fills the form, and only Save stores it', async ({ page, owne
 	await expect(fit.getByLabel('Objective')).toHaveValue('kgePrime');
 	await openFold(fit, 'fit-search');
 	await fit.getByLabel('Model runs per fit').fill('60');
-	// 5 starts of the whole record by default (CR-2), then the two validation fits.
+	// 5 starts of the whole record by default (CR-2), then the split-sample validation fit; the seeded record has fewer
+	// than 4 qualifying water years, so the dry → wet test is skipped and not counted (engine plannedFits, #894).
 	await expect(fit.getByLabel('Starts')).toHaveValue('5');
-	await expect(fit.getByText('420 runs in all.')).toBeVisible();
+	await expect(fit.getByText('360 runs in all.')).toBeVisible();
 	await fit.getByLabel('Starts').fill('3');
-	await expect(fit.getByText('300 runs in all.')).toBeVisible();
+	await expect(fit.getByText('240 runs in all.')).toBeVisible();
 	await fit.getByRole('button', { name: 'Fit automatically', exact: true }).click();
 
 	const scores = fit.getByRole('table', { name: /^Fit, and validation/ });
