@@ -46,7 +46,8 @@ import {
 	type KnownMatch,
 	type MatchedBy,
 	type MatchNode,
-	type ParsedRow
+	type ParsedRow,
+	idNumberProblem
 } from './parse.js';
 import { runUseNodes, type RunUseTransfer } from './runUse.js';
 import { allocationUnitsHidden, comparisonTotals, loadVolumes, readsAllocationHolders, readsAllocationUnits, volumeTotals } from './viewerUnits.js';
@@ -134,13 +135,20 @@ const CreateBody = z
 	.superRefine((b, ctx) => {
 		const problem = storageOnlyProblem(b);
 		if (problem) ctx.addIssue({ code: 'custom', message: problem, path: ['waterUse'] });
+		const id = idNumberProblem(b);
+		if (id) ctx.addIssue({ code: 'custom', message: id });
 	});
 const PatchBody = z
 	.object(FIELDS)
 	.partial()
 	.strict()
 	.refine((b) => Object.keys(b).length > 0, 'send at least one field')
-	.refine(datesInOrder, { message: 'valid from is after valid to', path: ['validFrom'] });
+	.refine(datesInOrder, { message: 'valid from is after valid to', path: ['validFrom'] })
+	// An ID number never reaches the database, typed in or imported (parse.ts idNumberProblem).
+	.superRefine((b, ctx) => {
+		const id = idNumberProblem(b);
+		if (id) ctx.addIssue({ code: 'custom', message: id });
+	});
 
 const IMPORT_FIELDS = {
 	kind: z.enum(['warms_extract', 'csv']),

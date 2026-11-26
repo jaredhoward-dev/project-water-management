@@ -3581,7 +3581,9 @@ database:
   cell, telephone, fax or email column, before anything is stored, and says
   which columns to delete. A 13-digit number in the holder, reference,
   property or farm column is a row problem, so a mislabelled ID column can't
-  slip in as a name.
+  slip in as a name. Hand entry (`POST`/`PATCH …/allocations`) refuses a
+  13-digit number in the holder, reference, property or a condition the same
+  way (`idNumberProblem`).
 - The registered user's **name** is the only personal field kept, in
   `allocation_holder`, readable by editors and owners and by the linked farmer
   for their own farm; **viewers never read it** (RLS, decision D3). The

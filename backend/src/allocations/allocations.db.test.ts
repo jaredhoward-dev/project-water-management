@@ -224,6 +224,41 @@ describe('entering allocations by hand', () => {
 		expect((await farmer.call('GET', `/projects/${projectId}/allocations`)).status).toBe(403);
 		expect((await stranger.call('GET', `/projects/${projectId}/allocations`)).status).toBe(404);
 	});
+
+	it('refuses an ID number typed in by hand, as the import does: nothing stored, and a valid body still saves', async () => {
+		const base = { nodeId: null, authorisation: 'licence', waterSource: 'surface', volumeM3PerYear: 1 };
+		const ID = '8001015009087';
+		const count = async () => ((await asOwner('SELECT count(*)::int AS n FROM allocation WHERE project_id = $1', [projectId])) as { n: number }[])[0]!.n;
+		const messages = (res: { body: { details?: { message: string }[] } }) => (res.body.details ?? []).map((d) => d.message).join(' ');
+		const before = await count();
+		for (const [field, body, label] of [
+			['holder', { holder: ID }, 'holder'],
+			['reference', { reference: '800101 5009 087' }, 'reference'],
+			['propertyRef', { propertyRef: ID }, 'property'],
+			['conditions', { conditions: ['Meter monthly', ID] }, 'a condition']
+		] as const) {
+			const res = await editor.call('POST', `/projects/${projectId}/allocations`, { ...base, ...body });
+			expect(res.status, field).toBe(400);
+			expect(messages(res)).toContain(`${label} looks like an ID number`);
+		}
+		expect(await count()).toBe(before);
+		// Positive control: the same body with a name saves, and a PATCH of a name goes through.
+		const ok = await editor.call('POST', `/projects/${projectId}/allocations`, { ...base, holder: 'Example Holdings', reference: 'Letter 12', propertyRef: '123/456' });
+		expect(ok.status, JSON.stringify(ok.body)).toBe(201);
+		const aid = ok.body.allocation.id as string;
+		expect((await editor.call('PATCH', `/projects/${projectId}/allocations/${aid}`, { reference: 'Letter 13' })).status).toBe(200);
+		// A PATCH with an ID number is refused and changes nothing.
+		const bad = await editor.call('PATCH', `/projects/${projectId}/allocations/${aid}`, { holder: ID });
+		expect(bad.status).toBe(400);
+		expect(messages(bad)).toContain('holder looks like an ID number');
+		expect((await editor.call('PATCH', `/projects/${projectId}/allocations/${aid}`, { propertyRef: ID })).status).toBe(400);
+		const [row] = (await asOwner(
+			'SELECT a.property_ref AS "propertyRef", a.reference, h.user_display AS holder FROM allocation a LEFT JOIN allocation_holder h ON h.allocation_id = a.id WHERE a.id = $1',
+			[aid]
+		)) as { propertyRef: string; reference: string; holder: string | null }[];
+		expect(row).toEqual({ propertyRef: '123/456', reference: 'Letter 13', holder: 'Example Holdings' });
+		expect((await editor.call('DELETE', `/projects/${projectId}/allocations/${aid}`)).status).toBe(204);
+	});
 });
 
 describe('what a viewer reads before the owners allow each volume (162, decision D3)', () => {
