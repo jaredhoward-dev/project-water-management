@@ -234,6 +234,8 @@ describe('GET /auth/me/export', () => {
 	it('gives the scenarios the person was added to (scenario_member), and not another member’s (positive control)', async () => {
 		const [helper, applicant] = (await Promise.all(['XHelper', 'XApplicant'].map((n) => signUp(n)))) as [User, User];
 		for (const u of [helper, applicant]) expect((await owner.call('POST', `/projects/${projectId}/members`, { email: u.email, role: 'contributor' })).status).toBe(201);
+		// Contributors share an application only within their party (049 app_share_allowed).
+		await asOwner(`UPDATE project_member SET party = 'Alpha Farms' WHERE project_id = $1 AND user_id = ANY($2)`, [projectId, [helper.id, applicant.id]]);
 		const [run] = await asOwner('SELECT id FROM model_run WHERE project_id = $1 ORDER BY created_at LIMIT 1', [projectId]);
 		// As the schema owner, acting as the applicant (the scenario trigger wants a signed-in user).
 		const client = new pg.Client({ connectionString: process.env.TEST_MIGRATION_DATABASE_URL });
