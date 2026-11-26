@@ -1228,7 +1228,9 @@ cumulativeImpact(baseline, singles, combined): CumulativeReport
   other; a `series.scale` writes
   the series (two scalings stack, and whose climate assumption it is isn't
   for either to settle); a `climate.delta` writes every series, `apanMm`
-  and `pe` (engine 1.107.0); a unit's `irrigationEfficiency` writes every
+  and `pe` (engine 1.107.0), and needs no write on an added unit: a
+  `node.add` or `node.insert` can't bring a `mapMm` (issue #888), so the
+  climate scales no new unit's MAP in one order only; a unit's `irrigationEfficiency` writes every
   planting on the unit, and a crop's `irrigationEfficiency` or
   `irrigationSystemId` every planting of the crop (engine ≥ 1.72.0 puts
   those plantings on a system; a planting another scenario adds would get it

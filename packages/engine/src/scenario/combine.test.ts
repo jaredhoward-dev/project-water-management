@@ -10,7 +10,7 @@ import type { ModelInput, NetworkNode } from '../project';
 import { orderFreeDifference, sameOutput } from '../testing/invariants';
 import { combineScenarios, scenarioConflicts, type CombineScenario } from './combine';
 import { applyScenario } from './overrides';
-import type { ScenarioOp } from './ops';
+import { validateScenarioOps, type ScenarioOp } from './ops';
 
 function node(id: string, over: Partial<NetworkNode> = {}): NetworkNode {
 	return {
@@ -177,6 +177,35 @@ describe('combineScenarios: conflicts are refused, never merged', () => {
 		expect(scenarioConflicts(base(), [sc('a', [{ op: 'demand.scale', factor: 0.5, nodeIds: ['A'] }]), sc('b', addFarm)])).toEqual([]);
 		// Two scenarios each adding a farm don't meet.
 		expect(scenarioConflicts(base(), [sc('a', addFarm), sc('b', [{ op: 'node.add', node: node('M', { name: 'Other farm', downstreamNodeId: 'G' }) }])])).toEqual([]);
+	});
+
+	it('a climate change and a unit another scenario adds: the new unit can carry no MAP, so no order decides one (issue #888)', () => {
+		// scaleRainMaps scales every unit's mapMm the model has when a climate.delta applies, and climate.delta writes
+		// no per-unit entity: were a new unit able to bring a MAP, it would be scaled in one order only. It can't:
+		// validateScenarioOps drops the key, applyScenario refuses it, and no node.set field writes it.
+		const mapped = node('N', { name: 'New farm', downstreamNodeId: 'B', mapMm: 700, mapSource: 'test' } as Partial<NetworkNode>);
+		const add: ScenarioOp = { op: 'node.add', node: mapped };
+		const insert: ScenarioOp = { op: 'node.insert', node: { ...mapped, downstreamNodeId: 'G' }, upstreamNodeIds: ['B'] };
+		const v = validateScenarioOps([add, insert]);
+		expect(v.errors).toEqual([]);
+		for (const o of v.ops) expect('mapMm' in (o as Extract<ScenarioOp, { op: 'node.add' }>).node).toBe(false);
+		for (const o of [add, insert]) expect(applyScenario(base(), [o]).problems.join(' ')).toContain('mapMm');
+		expect(validateScenarioOps([{ op: 'node.set', nodeId: 'A', field: 'mapMm', value: 700 }]).errors).toEqual(['ops[0].field: is not a hydrological unit field a scenario can set']);
+		// So a climate change and an added unit are disjoint: no conflict, and the same MAPs and run in either order.
+		const climate: ScenarioOp[] = [{ op: 'climate.delta', rainFactorByMonth: Array(12).fill(1.1), evapFactorByMonth: Array(12).fill(1.05), label: 'synthetic', source: 'synthetic factors (test)' }];
+		const b = deepFreeze({ ...base(), model: { ...base().model, nodes: base().model.nodes.map((n) => (n.id === 'A' ? { ...n, mapMm: 600, mapSource: 'test' } : n)) } });
+		const addFarm: ScenarioOp[] = [v.ops[0]!, { op: 'cropArea.set', nodeId: 'N', cropId: 'c1', areaM2: 100_000 }];
+		const ab = combineScenarios(b, [sc('a', climate), sc('b', addFarm)]);
+		const ba = combineScenarios(b, [sc('b', addFarm), sc('a', climate)]);
+		expect(ab.conflicts).toEqual([]);
+		expect(ba.conflicts).toEqual([]);
+		const maps = (x: ModelInput) => Object.fromEntries(x.model.nodes.map((n) => [n.id, n.mapMm ?? null]));
+		expect(maps(ab.input!)).toEqual(maps(ba.input!));
+		expect(maps(ab.input!).A).toBeCloseTo(660, 9);
+		expect(maps(ab.input!).N).toBeNull();
+		expect(orderFreeDifference(runModel(ab.input!), runModel(ba.input!))).toBeNull();
+		// Positive control: two climates still meet.
+		expect(scenarioConflicts(b, [sc('a', climate), sc('b', climate)]).length).toBeGreaterThan(0);
 	});
 
 	it("a transfer changed whose end another scenario removes", () => {

@@ -246,7 +246,9 @@ function touches(model: ProjectModel, ops: readonly ScenarioOp[], index: number)
 			break;
 		case 'climate.delta':
 			// Every rain and evaporation series (`series:*` meets any one), the monthly A-pan and PE rows it scales, and
-			// the MAPs (no other op writes one): two climates, or a climate and a scaling, would stack.
+			// the MAPs (no other op writes one): two climates, or a climate and a scaling, would stack. A unit a
+			// node.add or node.insert adds carries no MAP (not a field it may bring, issue #888), so the climate
+			// reaches no new unit's MAP in one order only.
 			w('series:*');
 			w('settings:apanMm');
 			w('settings:pe');
