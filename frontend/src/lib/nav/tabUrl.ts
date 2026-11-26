@@ -1,7 +1,7 @@
-// The Network and Data tabs' URL rule (issue #933, docs/ui.md § The URL on the Network and Data tabs):
+// The Network and Data tabs' URL rule (issue #933, docs/ui.md § Network):
 //
-// - a pick (a node on the map or in its list, a series to chart) replaces the history entry, so Back
-//   leaves the tab rather than stepping through every pick;
+// - a pick (a node on the map or in its list, a series to chart) is a history step, as everywhere
+//   (ui-playbook.md § 2, issue #521);
 // - closing a panel removes its parameter, and a pick drops the parameters it makes meaningless;
 // - a link inside the tab is built from the current URL, so it keeps every other parameter.
 //
@@ -51,4 +51,16 @@ export function nodeSheetHref(url: ReadonlyURL, id: string, section: string | nu
 /** The farm drawer in place of the node sheet: `edit=` and the sheet's `section=` go, `farm=` comes. */
 export function farmDrawerHref(url: ReadonlyURL, id: string): string {
 	return hrefWith(url, { edit: null, section: null, farm: id });
+}
+
+/**
+ * Where the rest of a Demands grid row is set, from the current URL: a unit's crops in its farm drawer on
+ * Crops & demand (`tab=crops&farm=`), anything else in its node's sheet on the Network, on its demand
+ * section (`tab=network&edit=&node=&section=demand`). The grid (`grid=`) gives way, and the other tab's
+ * panel parameters go, so the link opens one thing.
+ */
+export function demandEditHref(url: ReadonlyURL, kind: string, nodeId: string): string {
+	return kind === 'crops'
+		? hrefWith(url, { tab: 'crops', farm: nodeId, grid: null, edit: null, section: null })
+		: hrefWith(url, { tab: 'network', edit: nodeId, node: nodeId, section: 'demand', grid: null, farm: null });
 }

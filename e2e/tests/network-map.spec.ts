@@ -408,24 +408,21 @@ async function inside(inner: import('@playwright/test').Locator, outer: import('
 	return !!a && !!b && a.x >= b.x - 1 && a.y >= b.y - 1 && a.x + a.width <= b.x + b.width + 1 && a.y + a.height <= b.y + b.height + 1;
 }
 
-test('a pick is kept in the URL but replaces the history entry: Back leaves the tab, a reload keeps the last', async ({ page, owner }) => {
+test('a pick is kept in the URL: Back steps through the picks and a reload keeps the last', async ({ page, owner }) => {
 	void owner;
 	const project = await seedRunnableProject(page.request, 'Network pick URL');
 	const [, upper, lower] = project.model.nodes.map((n) => n.id as string);
-	// Arrive from the Summary, so Back has somewhere to go that isn't the Network (issue #933).
-	await page.goto(`/projects/${project.id}?tab=overview`);
 	await page.goto(`/projects/${project.id}?tab=network`);
-	const entries = await page.evaluate(() => history.length);
 	await nodeList(page).getByRole('button', { name: /^Upper farm/ }).click();
 	await expect(page).toHaveURL(new RegExp(`[?&]node=${upper}`));
 	await nodeList(page).getByRole('button', { name: /^Lower farm/ }).click();
 	await expect(page).toHaveURL(new RegExp(`[?&]node=${lower}`));
 	await expect(card(page).getByRole('heading', { name: 'Lower farm' })).toBeVisible();
-	expect(await page.evaluate(() => history.length)).toBe(entries);
 	await page.goBack();
-	await expect(page).toHaveURL(/[?&]tab=overview/);
+	await expect(page).toHaveURL(new RegExp(`[?&]node=${upper}`));
+	await expect(card(page).getByRole('heading', { name: 'Upper farm' })).toBeVisible();
+	await expect(nodeList(page).getByRole('button', { name: /^Upper farm/ })).toHaveAttribute('aria-pressed', 'true');
 	await page.goForward();
-	await expect(page).toHaveURL(new RegExp(`[?&]node=${lower}`));
 	await expect(card(page).getByRole('heading', { name: 'Lower farm' })).toBeVisible();
 	await page.reload();
 	await expect(card(page).getByRole('heading', { name: 'Lower farm' })).toBeVisible();

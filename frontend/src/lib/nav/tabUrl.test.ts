@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { farmDrawerHref, feedCardClosedHref, hrefWith, nodeSheetHref, seriesPickHref } from './tabUrl';
+import { demandEditHref, farmDrawerHref, feedCardClosedHref, hrefWith, nodeSheetHref, seriesPickHref } from './tabUrl';
 
 const at = (s: string) => new URL(s, 'https://example.test');
 const query = (href: string) => Object.fromEntries(new URLSearchParams(href.split('?')[1]?.split('#')[0] ?? ''));
@@ -43,5 +43,16 @@ describe('nodeSheetHref', () => {
 describe('farmDrawerHref', () => {
 	it('swaps the sheet (edit= and its section=) for the farm drawer', () => {
 		expect(query(farmDrawerHref(at('/projects/p?tab=network&edit=n1&node=n1&section=irrigation'), 'n1'))).toEqual({ tab: 'network', node: 'n1', farm: 'n1' });
+	});
+});
+
+describe('demandEditHref', () => {
+	it('opens a non-crop row’s node sheet on its demand section, on the Network, from the current URL', () => {
+		const href = demandEditHref(at('/projects/p?tab=crops&grid=demands&dunit=ls&run=r1'), 'object', 'n1');
+		expect(href.startsWith('/projects/p?')).toBe(true);
+		expect(query(href)).toEqual({ tab: 'network', edit: 'n1', node: 'n1', section: 'demand', dunit: 'ls', run: 'r1' });
+	});
+	it('opens a crops row’s farm drawer on Crops & demand, dropping a sheet’s edit= and section=', () => {
+		expect(query(demandEditHref(at('/projects/p?tab=network&grid=demands&edit=x&section=routing'), 'crops', 'n1'))).toEqual({ tab: 'crops', farm: 'n1' });
 	});
 });

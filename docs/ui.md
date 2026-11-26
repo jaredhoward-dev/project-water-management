@@ -3450,9 +3450,9 @@ there is no form to open, so the empty map says so in one line ("The link
 opened a hydrological unit's form, but this network has no hydrological
 units yet, so it shows the map", `network-old-node-link`) until a node is
 added. `node=<id>` is the picked
-node: a pick in the All hydrological units list or on the drawing writes it
-(replacing the history entry, so Back leaves the tab rather than stepping
-through the picks; a reload or a shared link keeps it, playbook § 2),
+node: a pick in the All hydrological units list or on the drawing writes it (a new
+history entry, so Back steps back through the picks; a reload or a shared
+link keeps it, playbook § 2),
 opening a node's sheet writes it with `edit=`
 (so closing the sheet leaves the map on that node), removing the node drops
 it, and a note's link on the Summary lands on it (`notes.ts` `noteHref`).
@@ -3463,11 +3463,11 @@ the node table does (`removeQuestions.ts` `nodeRemovedFocus`).
 
 **The URL rule on the Network and Data tabs** (issue #933, `lib/nav/tabUrl.ts`):
 
-- **A pick replaces the history entry.** Picking a node (`node=`) or a series
-  to chart (`series=`) is in the URL, so a reload and a shared link keep it,
-  but Back leaves the tab rather than stepping back through every pick.
-  Opening something (a node's sheet, a grid, the farm drawer, a drawer a link
-  names) is still a history entry, so Back closes it.
+- **A pick is a history step**, as on every page (ui-playbook.md § 2, issue
+  #521): picking a node (`node=`) or a series to chart (`series=`) is in the
+  URL, so a reload and a shared link keep it, and Back returns to the pick
+  before. Opening something (a node's sheet, a grid, the farm drawer) is a
+  history entry too, so Back closes it.
 - **Closing a panel removes its parameter, in place.** Closing the node sheet
   drops `edit=` and its `section=`; the farm drawer opened from the sheet
   takes `edit=` and `section=` with it (`farmDrawerHref`); closing the Data
@@ -3479,7 +3479,10 @@ the node table does (`removeQuestions.ts` `nodeRemovedFocus`).
 - **Links inside a tab are built from the current URL**, keeping every other
   parameter: the node table's "set by month" cell opens the unit's sheet on
   its routing section from wherever the page is (`nodeSheetHref`, which
-  drops only `grid=`, since the sheet opens over the map in the grid's place).
+  drops only `grid=`, since the sheet opens over the map in the grid's place),
+  and a [Demands grid](#demands-grid) row's link to where the rest of it is set
+  (`demandEditHref`: `tab=crops&farm=` for crops, else
+  `tab=network&edit=&node=&section=demand`, the grid giving way).
 
 - **Map** (the A2 board), a page of its own:
   - **Header** (with no nodes yet too): "Network" and one line on what it is
@@ -6106,8 +6109,9 @@ user's demand could only be read one node form at a time.
   whatever unit the object's form shows); a per-unit object's and the
   crops' are made from other values, so they are text. Everything else (the
   sizing, the schedule, the water source, the priority and rank) stays in
-  the node form, which a row's **Edit** opens (`?tab=network&edit=<node>`,
-  closing the modal); the crops' **Edit** opens the unit's
+  the node form, which a row's **Edit** opens on its demand section
+  (`tab=network&edit=<node>&section=demand`, built from the current URL by
+  `lib/nav/tabUrl.ts` `demandEditHref`, closing the modal; issue #933); the crops' **Edit** opens the unit's
   [farm drawer](#farm-drawer) on Crops & demand. Edits go into the shared
   `ModelEditor` and are saved with the modal's save row.
 - **Show demands in** (above the table, `network/demandUnits.ts`): the unit
@@ -6834,10 +6838,9 @@ with the table the data needs).
   (`agoText` in `lib/format/age.ts`; those two days used to read "1 months" / "1 years").
 - **Picking a series**: clicking a row (or its **View** button) charts it
   through the URL (`series=<id>`, `seriesPickHref`), so the link can be shared
-  and a reload keeps it; the pick replaces the history entry, so Back leaves
-  the tab rather than stepping through the picks, and it drops `view=`,
-  `rain=` and `feed=`, which belonged to the link that arrived ([the URL
-  rule](#network), issue #933). Without `series=` the observed flow
+  and Back returns to the series before; the pick drops `view=`, `rain=` and
+  `feed=`, which belonged to the link that arrived ([the URL rule](#network),
+  issue #933). Without `series=` the observed flow
   a run reads is charted, else the main rainfall, else the first. A
   `series=` naming a series no longer stored (a note's or a run's link to one
   deleted since) is dropped from the address (`goto` with `replace`) and a
@@ -7155,7 +7158,7 @@ stretches found in each loaded series (engine `checkSeries`; its dates day
 first, "6 Oct 2020: -0.4 m³/s", from engine 1.99.0, issue #586), each naming
 its series as a link-styled button (*Chart Logger* to a screen reader,
 `aria-pressed` while charted) that charts it as its row's **View** does,
-a pick that replaces the history entry like a row's (issue #586: the check named the series and went nowhere; issue #933), plus the
+a history entry (issue #586: the check named the series and went nowhere), plus the
 catchment-rain checks for missing data recorded as 0 (issue #2): a **Zero rain
 run** badge for long zero stretches in the wet season, and a **Low vs CHIRPS**
 badge for water years far below the usual catchment / CHIRPS share (engine

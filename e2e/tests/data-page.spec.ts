@@ -65,7 +65,7 @@ test('the series are grouped, the series behind come first in their group and ar
 	await expect(seriesRows(page).nth(0).getByRole('cell').nth(1)).toHaveText(/^\d{1,2} [A-Z][a-z]{2} \d{4}$/); // day first (issue #521)
 });
 
-test('picking a series charts it through the URL, replacing the history entry: a reload keeps it, a shared link opens it, a stale one falls back', async ({ page, owner }) => {
+test('picking a series charts it through the URL: Back returns to the one before, a shared link opens it, a stale one falls back', async ({ page, owner }) => {
 	void owner;
 	const project = await createProject(page.request, 'Data pick');
 	await seedFreshnessMix(page.request, project.id);
@@ -77,18 +77,16 @@ test('picking a series charts it through the URL, replacing the history entry: a
 	await expect(seriesChart(page).getByRole('figure')).toContainText('Rainfall — catchment · Gauge R1');
 	await expect(seriesRow(page, 'Gauge R1').getByRole('button', { name: 'View', exact: true })).toHaveAttribute('aria-pressed', 'true');
 
-	// A click on the row, then View on another: each replaces the history entry, so Back leaves the tab (issue #933).
+	// A click on the row, then View on another: each is a history entry.
 	// (On its kind's name: the rowheader's middle holds the CHIRPS version select, which keeps its own meaning.)
-	const entries = await page.evaluate(() => history.length);
 	await seriesRow(page, 'CHIRPS cell').getByText('Rainfall — CHIRPS', { exact: true }).click();
 	await expect(page).toHaveURL(new RegExp(`[?&]series=${ids['CHIRPS cell']}`));
 	await expect(seriesChart(page).getByRole('figure')).toContainText('Rainfall — CHIRPS · CHIRPS cell');
 	await seriesRow(page, 'Logger L1').getByRole('button', { name: 'View', exact: true }).click();
 	await expect(page).toHaveURL(new RegExp(`[?&]series=${ids['Logger L1']}`));
 	await expect(seriesRow(page, 'Logger L1').getByRole('button', { name: 'View', exact: true })).toHaveAttribute('aria-pressed', 'true');
-	expect(await page.evaluate(() => history.length)).toBe(entries);
-	await page.reload();
-	await expect(seriesRow(page, 'Logger L1').getByRole('button', { name: 'View', exact: true })).toHaveAttribute('aria-pressed', 'true');
+	await page.goBack();
+	await expect(seriesRow(page, 'CHIRPS cell').getByRole('button', { name: 'View', exact: true })).toHaveAttribute('aria-pressed', 'true');
 	await expect(page.getByRole('heading', { level: 1, name: 'Data' })).toBeVisible();
 
 	// A shared link opens on its series, with no note (positive control)…
@@ -593,8 +591,7 @@ test('Data checks: each series named charts it; the heading is named alone; the 
 	await expect(checks.getByRole('heading', { level: 2, name: 'Data checks', exact: true })).toBeVisible();
 	await expect(checks.getByRole('button', { name: 'About the data checks' })).toBeVisible();
 
-	// A check names its series as a control that charts it, as the row's View does: a pick, replacing the history entry.
-	const entries = await page.evaluate(() => history.length);
+	// A check names its series as a control that charts it, as the row's View does: a history entry, Back returns.
 	const item = checks.getByRole('listitem').filter({ hasText: 'Negative values' });
 	const chart = item.getByRole('button', { name: 'Chart Logger' });
 	await expect(chart).toHaveAttribute('aria-pressed', 'false');
@@ -603,7 +600,8 @@ test('Data checks: each series named charts it; the heading is named alone; the 
 	await expect(seriesRow(page, 'Logger').getByRole('button', { name: 'View', exact: true })).toHaveAttribute('aria-pressed', 'true');
 	await expect(chart).toHaveAttribute('aria-pressed', 'true');
 	await expect(seriesChart(page)).toBeInViewport();
-	expect(await page.evaluate(() => history.length)).toBe(entries);
+	await page.goBack();
+	await expect(seriesRow(page, 'Gauge R1').getByRole('button', { name: 'View', exact: true })).toHaveAttribute('aria-pressed', 'true');
 	await expectNoViolations(page);
 
 	// On a phone each swatch stays on one line with its words ("no data" wrapped away from its colour).

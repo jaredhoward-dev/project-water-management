@@ -1,7 +1,7 @@
 // The URL rule on the Network and Data tabs (issue #933, frontend/src/lib/nav/tabUrl.ts, docs/ui.md § Network):
-// a pick replaces the history entry, closing a panel removes its parameter, links are built from the current URL.
-// The picks' own history steps are in network-map.spec.ts and data-page.spec.ts; the closed Data feeds card
-// dropping `rain=` is in data-page.spec.ts.
+// a pick is a history step (as everywhere, issue #521) that drops the parameters it makes meaningless, closing a
+// panel removes its parameter, links are built from the current URL. The picks' own history steps are in
+// network-map.spec.ts and data-page.spec.ts; the closed Data feeds card dropping `rain=` is in data-page.spec.ts.
 import type { Page } from '@playwright/test';
 import { createProject, seedRunnableProject } from '../support/api.ts';
 import { openData, seedFreshnessMix, seriesRow } from '../support/data.ts';
@@ -50,18 +50,18 @@ test('removing a unit from its sheet hands the focus to the list row now in its 
 	await expect(nodeList(page).getByRole('button', { name: /^Upper farm/ })).toBeFocused();
 });
 
-test('charting another series drops view= and rain=, and replaces the history entry', async ({ page, owner }) => {
+test('charting another series drops view= and rain=, as a history step: Back returns to the link that arrived', async ({ page, owner }) => {
 	void owner;
 	const project = await createProject(page.request, 'Series pick drops');
 	await seedFreshnessMix(page.request, project.id);
 	await openData(page, project.id, '&rain=units&view=2020-01-01~2020-02-01');
-	const entries = await page.evaluate(() => history.length);
 	await seriesRow(page, 'Logger L1').getByRole('button', { name: 'View', exact: true }).click();
 	await expect(page).toHaveURL(/[?&]series=/);
 	await expect(page).not.toHaveURL(/[?&]view=/);
 	await expect(page).not.toHaveURL(/[?&]rain=/);
 	await expect(page).toHaveURL(/[?&]tab=series/);
-	expect(await page.evaluate(() => history.length)).toBe(entries);
+	await page.goBack();
+	await expect(page).toHaveURL(/[?&]view=2020-01-01~2020-02-01/);
 });
 
 test('columns hidden in the preview belong to their view: another view shows its columns whole', async ({ page, owner }) => {

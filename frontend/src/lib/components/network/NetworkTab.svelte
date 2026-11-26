@@ -308,7 +308,7 @@
 
 	let selectedId = $state<string | null>(null);
 	// `node=<id>` is the node picked on the map (a note's link, notes.ts noteHref, lands on it too):
-	// a pick from the list or the drawing writes it (replacing the history entry), so a reload and a shared link keep the
+	// a pick from the list or the drawing writes it, so a reload, a shared link and Back keep the
 	// pick (playbook § 2, as Dams' `dam=`). With none, nothing is picked. The grid modal's table
 	// keeps its pick to itself.
 	const nodeParam = $derived(only ? null : page.url.searchParams.get('node'));
@@ -318,12 +318,11 @@
 		untrack(() => (selectedId = id ?? editing?.id ?? null));
 	});
 
-	/** Picks a node on the map: it replaces the history entry, so Back leaves the tab rather than stepping
-	 *  through every pick (issue #933, lib/nav/tabUrl.ts); a reload and a shared link still keep it. */
+	/** Picks a node on the map: a new history entry, so Back steps back through the picks (playbook § 2, issue #521). */
 	function pick(id: string) {
 		selectedId = id;
 		if (only || nodeParam === id) return;
-		void goto(hrefWith(page.url, { node: id }), { replace: true, reset: false });
+		void goto(hrefWith(page.url, { node: id }), { reset: false });
 	}
 
 	function select(id: string) {

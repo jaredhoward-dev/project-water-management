@@ -281,15 +281,13 @@
 		if ((e.target as Element).closest('button, a, input, select, summary, [role="menu"]')) return;
 		choose(id);
 	}
-	/** Chart a series: in the URL, so it can be shared and a reload keeps it, replacing the history entry so Back leaves
-	 *  the tab rather than stepping through the picks (issue #933, lib/nav/tabUrl.ts). The pick drops `view=`, `rain=`
-	 *  and `feed=`, which belonged to the link that arrived. The chart, under the table, comes into view unless
-	 *  `quiet` (an upload charting what it stored). */
-	function choose(id: string, quiet = false) {
+	/** Chart a series: a URL change, so it can be shared and Back returns; the chart, under the table, comes into view.
+	 *  The pick drops `view=`, `rain=` and `feed=`, which belonged to the link that arrived (issue #933, lib/nav/tabUrl.ts). */
+	function choose(id: string, replaceState = false) {
 		if (id === selectedId && seriesParam === id) return;
 		goneSeries = false;
-		void goto(seriesPickHref(page.url, id), { reset: false, replace: true }).then(() => {
-			if (!quiet) showChart();
+		void goto(seriesPickHref(page.url, id), { reset: false, replace: replaceState }).then(() => {
+			if (!replaceState) showChart();
 		});
 	}
 	/** Scroll the chart just into view (its foot to the window's, less the save bar) unless it already is. */
