@@ -5,7 +5,11 @@
 //   1. The kill switch: with ALERTS_ENABLED=false every waiting delivery is
 //      skipped (app_alert_skip_all), so nothing floods out when it's turned
 //      back on.
-//   2. Immediate: claim pending deliveries (app_alert_claim), which applies
+//   2. Immediate: claim pending deliveries (app_alert_claim), which first
+//      moves each waiting delivery to the queue the person's choice *now*
+//      says (370, issue #868: the mode at send time wins, so a switch to
+//      daily after an alert was queued puts it in the digest, and a switch
+//      to right away sends a waiting digest line now), then applies
 //      the daily cap: past DAILY_CAP immediate mails since the last 06:00
 //      in the project's time zone, the rest wait for the digest.
 //   3. Digest: after 06:00 where the catchment is (project.time_zone,

@@ -48,6 +48,9 @@ const tokenIn = (m: Mail) => m.text.match(/\/alerts\/unsubscribe#t=([A-Za-z0-9_-
 const rules = (u: User, list: { kind: string; nodeId?: string | null; feedId?: string | null; threshold: number; enabled: boolean }[], pid = projectId) =>
 	u.call('PUT', `/projects/${pid}/alert-rules`, { rules: list });
 const damRules = (threshold: number, enabled = true) => farms.map((f) => ({ kind: 'dam_below', nodeId: f.id, threshold, enabled }));
+/** `u` chooses to get `kind` once a day: a digest line queued for them stays one (the mode at send time wins, #868). */
+const chooseDaily = async (u: User, pid: string, kind: string) =>
+	expect((await u.call('PUT', `/me/alerts/${pid}`, { items: [{ kind, mode: 'daily_digest' }] })).status).toBe(200);
 const rowsAs = async <T = Record<string, unknown>>(u: User, sql: string, params: unknown[] = []) =>
 	withUser(u.id, async (db) => (await db.query<T & Record<string, unknown>>(sql, params)).rows);
 
@@ -557,6 +560,7 @@ describe('the digest’s size limit', () => {
 	async function queueDigest(n: number) {
 		const u = await signUp('Adigest');
 		expect((await owner.call('POST', `/projects/${projectId}/members`, { email: u.email, role: 'editor' })).status).toBe(201);
+		await chooseDaily(u, projectId, 'dam_below');
 		const [rule] = await asOwner(`INSERT INTO alert_rule (project_id, kind, node_id, threshold) VALUES ($1, 'dam_below', $2, 0.5) RETURNING id`, [projectId, one.id]);
 		await asOwner(
 			`WITH e AS (
@@ -1160,6 +1164,7 @@ describe('the project’s local day', () => {
 		const u = await signUp('Adigestzone');
 		for (const pid of [sa, kiri]) {
 			expect((await owner.call('POST', `/projects/${pid}/members`, { email: u.email, role: 'editor' })).status).toBe(201);
+			await chooseDaily(u, pid, 'ewr_forecast_fail');
 			// An EWR forecast alert: an editor gets it by default (job_dead is off for editors).
 			const [rule] = await asOwner(`INSERT INTO alert_rule (project_id, kind, threshold) VALUES ($1, 'ewr_forecast_fail', 3) RETURNING id`, [pid]);
 			const [e] = await asOwner(`INSERT INTO alert_event (rule_id, project_id, state, value, detail) VALUES ($1, $2, 'cleared', 5, '{"days":5,"of":14,"from":"2026-09-12","to":"2026-09-25","madeOn":"2026-09-11"}') RETURNING id`, [rule.id, pid]);
@@ -1251,6 +1256,7 @@ describe('a failed send is logged without personal data', () => {
 		const { id: pid } = await makeProject(owner, 'Digest send fails');
 		const u = await signUp('Adigestfail');
 		expect((await owner.call('POST', `/projects/${pid}/members`, { email: u.email, role: 'editor' })).status).toBe(201);
+		await chooseDaily(u, pid, 'ewr_forecast_fail');
 		const [rule] = await asOwner(`INSERT INTO alert_rule (project_id, kind, threshold) VALUES ($1, 'ewr_forecast_fail', 3) RETURNING id`, [pid]);
 		const [e] = await asOwner(`INSERT INTO alert_event (rule_id, project_id, state, value, detail) VALUES ($1, $2, 'cleared', 5, '{"days":5,"of":14,"from":"2026-09-12","to":"2026-09-25","madeOn":"2026-09-11"}') RETURNING id`, [rule.id, pid]);
 		// Queued at 05:30 SAST on the 26th; 06:30 SAST is past that digest day's 06:00.
@@ -1414,5 +1420,61 @@ describe('a firing event follows its figure, and stops with its rule', () => {
 		await sendAlerts();
 		expect(mailsAbout(name).map((m) => m.subject)).toEqual([`Data feed failing — ${name}`]);
 		await asOwner(`DELETE FROM job WHERE project_id = $1`, [pid]);
+	});
+});
+
+describe('the mode at send time wins (issue #868)', () => {
+	const EWR = '{"days":5,"of":14,"from":"2026-09-12","to":"2026-09-25","madeOn":"2026-09-11"}';
+	async function setUp(name: string) {
+		const { id: pid } = await makeProject(owner, name);
+		const u = await signUp(`A${name.replace(/\W/g, '').toLowerCase()}`);
+		expect((await owner.call('POST', `/projects/${pid}/members`, { email: u.email, role: 'editor' })).status).toBe(201);
+		const [rule] = await asOwner(`INSERT INTO alert_rule (project_id, kind, threshold) VALUES ($1, 'ewr_forecast_fail', 3) RETURNING id`, [pid]);
+		const [e] = await asOwner(`INSERT INTO alert_event (rule_id, project_id, state, value, detail) VALUES ($1, $2, 'cleared', 5, $3) RETURNING id`, [rule.id, pid, EWR]);
+		const row = async () => (await asOwner(`SELECT status, via, reason FROM alert_delivery WHERE event_id = $1 AND user_id = $2`, [e.id, u.id]))[0];
+		const choose = async (mode: string) => expect((await u.call('PUT', `/me/alerts/${pid}`, { items: [{ kind: 'ewr_forecast_fail', mode }] })).status).toBe(200);
+		return { pid, u, e, row, choose };
+	}
+
+	it('an alert queued to go right away, after a switch to once a day, waits for the next digest (positive control: unswitched, it goes at once)', async () => {
+		// Positive control: queued as immediate and still immediate, it goes at the next tick.
+		const ctl = await setUp('Mode control');
+		await asOwner(`INSERT INTO alert_delivery (event_id, user_id, project_id, mode) VALUES ($1, $2, $3, 'immediate')`, [ctl.e.id, ctl.u.id, ctl.pid]);
+		await sendAlerts();
+		expect(await ctl.row()).toMatchObject({ status: 'sent', via: 'immediate' });
+
+		const s = await setUp('Mode to daily');
+		await asOwner(`INSERT INTO alert_delivery (event_id, user_id, project_id, mode) VALUES ($1, $2, $3, 'immediate')`, [s.e.id, s.u.id, s.pid]);
+		await s.choose('daily_digest');
+		await sendAlerts();
+		expect(mailsTo(s.u)).toEqual([]);
+		expect(await s.row()).toMatchObject({ status: 'digest', reason: null });
+		// The next morning's digest carries it.
+		await sendAlerts({ now: new Date(Date.now() + 30 * 3600_000) });
+		expect(await s.row()).toMatchObject({ status: 'sent', via: 'digest' });
+		expect(mailsTo(s.u).map((m) => m.subject)).toEqual(['Your alerts for Mode to daily — IC-WBT']);
+	});
+
+	it('a digest line, after a switch to right away, goes out at the next tick on its own; a line over the daily cap stays in the digest', async () => {
+		const s = await setUp('Mode to immediate');
+		await s.choose('daily_digest');
+		await asOwner(`INSERT INTO alert_delivery (event_id, user_id, project_id, mode, status) VALUES ($1, $2, $3, 'daily_digest', 'digest')`, [s.e.id, s.u.id, s.pid]);
+		// Positive control: still daily, it waits (queued after this morning's 06:00).
+		await sendAlerts();
+		expect(await s.row()).toMatchObject({ status: 'digest' });
+		await s.choose('immediate');
+		await sendAlerts();
+		expect(await s.row()).toMatchObject({ status: 'sent', via: 'immediate' });
+		const mails = mailsTo(s.u);
+		expect(mails).toHaveLength(1);
+		expect(mails[0]!.subject).not.toMatch(/^Your alerts for/);
+
+		// Over the cap is the cap's doing, not the person's choice: it stays for the digest.
+		const c = await setUp('Mode capped');
+		await asOwner(`INSERT INTO alert_delivery (event_id, user_id, project_id, mode, status, reason) VALUES ($1, $2, $3, 'immediate', 'digest', 'over the daily cap')`, [c.e.id, c.u.id, c.pid]);
+		// At the default cap and with no mail sent today, moving it back to the immediate queue would send it.
+		await sendAlerts();
+		expect(await c.row()).toMatchObject({ status: 'digest', reason: 'over the daily cap' });
+		await settlePendingNotices(c.pid);
 	});
 });

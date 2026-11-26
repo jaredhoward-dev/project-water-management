@@ -6092,7 +6092,13 @@ Email alerts (roadmap WP-2.13; [api.md § Alerts](./api.md#alerts),
     turning each past `cap` immediate mails since the last 06:00 in its
     project's time zone (at `now`; `alert_digest_start`, 059_local_day) into
     `digest`; a delivery left `sending` past its lease becomes `failed`,
-    never re-sent.
+    never re-sent. First (370, issue #868: the mode at send time wins) it
+    moves each `pending` delivery whose recipient now chooses
+    `daily_digest` to `digest`, and each `digest` line whose recipient now
+    chooses `immediate` to `pending` (claimed in the same call), except a
+    line the cap put there (`reason` "over the daily cap"); the rows are
+    locked `SKIP LOCKED`, so a row another worker holds waits for the next
+    tick. `mode` keeps what they had chosen at fan-out.
   - `app_alert_claim_digest(now, people, lines, lease)`: each person's
     first `lines` due digest lines (queued before the latest 06:00 in their
     project's time zone at `now`), for up to `people` people; their due

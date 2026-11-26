@@ -1124,7 +1124,10 @@ flowchart LR
    the job holds no network I/O, and its writes commit with its "done".
 3. **Send** (`alerts/send.ts`, the last step of every tick, so after the
    job committed). The kill switch first: `ALERTS_ENABLED=false` skips every
-   waiting delivery. Then `app_alert_claim` claims pending deliveries,
+   waiting delivery. Then `app_alert_claim` moves each waiting delivery to
+   the queue its recipient's choice now says (the mode at send time wins,
+   370: right away → pending, once a day → digest; a line the cap put in the
+   digest stays) and claims pending deliveries,
    turning those past the daily cap (5 since the last 06:00 in the project's
    time zone, 059_local_day) into
    digest lines; after 06:00 there `app_alert_claim_digest` claims each person's
