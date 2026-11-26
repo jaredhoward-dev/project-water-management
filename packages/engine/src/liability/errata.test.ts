@@ -35,7 +35,8 @@ describe('ENGINE_ERRATA (generated from docs/engine-errata.md)', () => {
 		expect(ENGINE_ERRATA.length).toBeGreaterThan(0);
 		for (const x of ENGINE_ERRATA) {
 			expect(x.appliesWhen + x.summary + x.source, x.id).not.toMatch(/\*\*|`|\]\(/);
-			expect(x.source, x.id).toMatch(/engine-audit\.md|model\.md/);
+			// scenarios.md: how an application's changes are classed is documented there (ER-32, ER-33).
+			expect(x.source, x.id).toMatch(/engine-audit\.md|model\.md|scenarios\.md/);
 		}
 	});
 
