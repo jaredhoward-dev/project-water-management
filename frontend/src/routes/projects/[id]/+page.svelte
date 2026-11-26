@@ -106,7 +106,7 @@
 	import { headerSlot } from '#lib/components/workspace/headerSlot.svelte.js';
 	import { sectionContext } from '#lib/components/workspace/context.js';
 	import { GRID_TAB, isGridId, isTabGridId, movedGridHref, withParam, withoutParam } from '#lib/workspace/overlays.js';
-	import { inFlightFor, withCreatedRun, type RunInFlight } from '#lib/components/runs/runInFlight.js';
+	import { failureForPage, inFlightFor, withCreatedRun, type RunFailure, type RunInFlight } from '#lib/components/runs/runInFlight.js';
 	import {
 		ALL_TABS,
 		addsData,
@@ -366,12 +366,20 @@
 	 * and coming back finds it: Run model stays disabled and the progress carries on, and no second run starts.
 	 */
 	let tabRun = $state<RunInFlight | null>(null);
+	/** That run failed while its project's Runs & results wasn't open: said on the notice line until dismissed or the next run. */
+	let tabRunFailure = $state<RunFailure | null>(null);
+	const tabRunError = $derived(tabRunFailure?.projectId === projectId ? tabRunFailure.text : null);
 	function tabRunStarted(flight: RunInFlight) {
 		tabRun = flight;
+		tabRunFailure = null;
 		const clear = () => {
 			if (tabRun === flight) tabRun = null;
 		};
-		flight.done.then(clear, clear);
+		flight.done.then(clear, (err: unknown) => {
+			clear();
+			// Read where the person is when it fails: on that project's Runs & results the tab says it itself.
+			tabRunFailure = failureForPage(flight, err, { projectId, tab });
+		});
 	}
 	/** Any run going on this project, the page's or the tab's: no other starts until it ends. */
 	const runGoing = $derived(rerunning || inFlightFor(tabRun, projectId) !== null);
@@ -470,6 +478,7 @@
 	async function startRun(label?: string, forecast = false) {
 		rerunning = true;
 		rerunError = null;
+		tabRunFailure = null;
 		// Started on Calibration, the run opens there, on How the shown run fits, so the calibration loop (fit, run,
 		// read the fit) stays on one page (issue #586 round 3); from anywhere else, in Runs & results.
 		const here = runOpensHere;
@@ -1155,7 +1164,7 @@
 	{@const behind = !banner && behindRun.length > 0 && tab !== 'runs'}
 	{@const paused = pausedNotice(project, basePath())}
 	{@const trial = trialNotice(project, basePath())}
-	{#if !canEdit || banner || behind || rerunError || paused || trial}
+	{#if !canEdit || banner || behind || rerunError || tabRunError || paused || trial}
 		<div class="notice-line" data-testid="notice-line">
 			{#if trial}
 				<!-- 349: the person's reverse trial ends within 3 days (billing/trialEnding.ts); an information note, not an error. -->
@@ -1204,6 +1213,13 @@
 				</span>
 			{/if}
 			{#if rerunError}<span class="note err" role="alert">The run didn’t start: {rerunError}</span>{/if}
+			{#if tabRunError}
+				<!-- A run started on Runs & results failed while the person was elsewhere (issue #923, runs/runInFlight.ts). -->
+				<span class="note err" role="alert" data-testid="tab-run-failed">
+					<span class="note-text">The run from Runs &amp; results failed: {tabRunError}</span>
+					<button type="button" class="btn btn-ghost btn-sm" onclick={() => (tabRunFailure = null)}>Dismiss</button>
+				</span>
+			{/if}
 		</div>
 	{/if}
 {/snippet}

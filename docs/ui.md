@@ -10825,7 +10825,12 @@ read it before.
   progress line and its seconds carry on from the start, and the run opens
   when it ends; ended while another tab is open, it only joins the list (no
   `?run=` written into that tab's address). The header's Re-run model and
-  Warnings' Run now wait for it too. Under it, Run readiness
+  Warnings' Run now wait for it too. A run that fails while that project's
+  Runs & results isn't open (another tab, or another project) is said on the
+  project's notice line ("The run from Runs & results failed: …",
+  `tab-run-failed`, an alert, `failureForPage`) until **Dismiss** or the
+  next run; failed with the tab open, the tab says it under its run form
+  instead. Under it, Run readiness
   names the land units with no rain of their own (no station, rain gauge or
   CHIRPS of their own, no MAP with a gauge MAP; issue #615): they run on the
   catchment rain, so their share follows their area, with a link to

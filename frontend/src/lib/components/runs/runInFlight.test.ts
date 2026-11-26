@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { Run, RunMeta } from '#lib/api/index.js';
-import { elapsedSeconds, inFlightFor, withCreatedRun, type RunInFlight } from './runInFlight';
+import { ApiError } from '#lib/api/client.js';
+import { elapsedSeconds, failureForPage, inFlightFor, withCreatedRun, type RunInFlight } from './runInFlight';
+import { RUN_GONE } from './runList';
 
 const meta = (id: string) => ({ id, label: id }) as unknown as RunMeta;
 const created = (id: string, removedRunIds: string[] = []) => ({ run: { ...meta(id), summary: { days: 1 } } as unknown as Run, removedRunIds });
@@ -38,5 +40,21 @@ describe('inFlightFor', () => {
 	it("never another project's run, nor none", () => {
 		expect(inFlightFor(flight, 'p2')).toBeNull();
 		expect(inFlightFor(null, 'p1')).toBeNull();
+	});
+});
+
+describe('failureForPage', () => {
+	const flight: RunInFlight = { projectId: 'p1', startedAt: 0, done: new Promise(() => {}) };
+	it("says nothing while the project's Runs & results is open: the tab says it", () => {
+		expect(failureForPage(flight, new Error('Engine failed'), { projectId: 'p1', tab: 'runs' })).toBeNull();
+	});
+	it('names the failure on another tab of the project', () => {
+		expect(failureForPage(flight, new Error('Engine failed'), { projectId: 'p1', tab: 'network' })).toEqual({ projectId: 'p1', text: 'Engine failed' });
+	});
+	it("keeps it for the run's project when another project is open, even on its Runs & results", () => {
+		expect(failureForPage(flight, 'boom', { projectId: 'p2', tab: 'runs' })).toEqual({ projectId: 'p1', text: 'boom' });
+	});
+	it('says a gone run in words, not the bare not found', () => {
+		expect(failureForPage(flight, new ApiError(404, 'not found'), { projectId: 'p1', tab: 'overview' })?.text).toBe(RUN_GONE);
 	});
 });

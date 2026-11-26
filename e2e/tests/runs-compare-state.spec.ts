@@ -1,6 +1,6 @@
 // Selection and URL state on Runs & results and Compare runs when the page moves under a pick still out: a run
 // shown from the cache while another run's results are loading, a run that finishes after its tab was left, and a
-// compare card's project pick left waiting when Back changes the pair; a run still going when its tab is opened again.
+// compare card's project pick left waiting when Back changes the pair; a run still going when its tab is opened again, and one that fails while another tab is open.
 import { createProject, createRun, seedRunnableProject } from '../support/api.ts';
 import { runCard, runSelect } from '../support/compare.ts';
 import { sections } from '../support/data.ts';
@@ -113,6 +113,45 @@ test('back on Runs & results while its run still goes, Run model waits, the prog
 	await expect(runsList(page).getByRole('listitem')).toHaveCount(2);
 	await expect(page.getByRole('button', { name: 'Run model', exact: true })).toBeEnabled();
 	expect(posts).toBe(1);
+});
+
+test('a run from Runs & results that fails while another tab is open says so on the notice line until dismissed', async ({ page, owner }) => {
+	void owner;
+	const project = await seedRunnableProject(page.request, 'Run fails elsewhere');
+	await createRun(page.request, project.id, 'Baseline');
+	await openRuns(page, project.id);
+
+	// Hold the run, then fail it once the person is on another tab (issue #923).
+	let release = () => {};
+	const held = new Promise<void>((r) => (release = r));
+	const listPath = `/projects/${project.id}/runs`;
+	await page.route(
+		(url) => url.pathname.endsWith(listPath),
+		async (route) => {
+			if (route.request().method() !== 'POST') return route.fallback();
+			await held;
+			return route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'The engine stopped' }) });
+		}
+	);
+	await page.getByRole('button', { name: 'Run model' }).click();
+	await expect(page.getByRole('button', { name: 'Running model…' })).toBeDisabled();
+	await sections(page).getByRole('link', { name: 'Network' }).click();
+	await expect(page).toHaveURL(/\?tab=network$/);
+	const failed = page.waitForResponse((r) => new URL(r.url()).pathname.endsWith(listPath) && r.request().method() === 'POST');
+	release();
+	await failed;
+
+	// The page says it, on the tab the person is on, and the run's project is free to run again.
+	const notice = page.getByTestId('tab-run-failed');
+	await expect(notice).toHaveText(/The run from Runs & results failed: The engine stopped/);
+	await expect(notice).toHaveAttribute('role', 'alert');
+	await sections(page).getByRole('link', { name: 'Runs & results' }).click();
+	await expect(page.getByRole('button', { name: 'Run model', exact: true })).toBeEnabled();
+	await expect(notice).toBeVisible();
+
+	// Dismiss acknowledges it.
+	await notice.getByRole('button', { name: 'Dismiss' }).click();
+	await expect(notice).toHaveCount(0);
 });
 
 test('Back on Compare runs drops a project picked for a card that had no run to choose', async ({ page, owner }) => {

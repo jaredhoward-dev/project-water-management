@@ -2,6 +2,7 @@
 // `rerunning`, so leaving the tab and coming back finds the run still going: Run model stays disabled and the
 // progress line and its seconds carry on, and the finished run is opened only if the tab is open then.
 import type { Run, RunMeta } from '#lib/api/index.js';
+import { runErrorText } from './runList';
 
 /** What api.runs.create answers. */
 export interface RunCreated {
@@ -34,4 +35,20 @@ export function elapsedSeconds(startedAt: number, now: number): number {
 /** The run in flight the project's Runs tab should show: only one started on this project. */
 export function inFlightFor(flight: RunInFlight | null, projectId: string): RunInFlight | null {
 	return flight && flight.projectId === projectId ? flight : null;
+}
+
+/** A run Runs & results started failed while the person was elsewhere: the project page says so until dismissed. */
+export interface RunFailure {
+	projectId: string;
+	text: string;
+}
+
+/**
+ * Where a run started on Runs & results failed, what the project page shows (issue #923): nothing while that
+ * project's Runs & results is open, since the tab says it under its run form; anywhere else (another tab of the
+ * project, or another project) the failure in words (runErrorText: a gone run as RUN_GONE), for that project only.
+ */
+export function failureForPage(flight: RunInFlight, err: unknown, at: { projectId: string; tab: string }): RunFailure | null {
+	if (at.projectId === flight.projectId && at.tab === 'runs') return null;
+	return { projectId: flight.projectId, text: runErrorText(err) };
 }
