@@ -69,6 +69,12 @@ describe('runDownloadItems', () => {
 		expect(new Set(items.map((i) => i.url)).size).toBe(items.length);
 	});
 
+	it("hands both workbooks the project's time zone, which dates the credits (issue #860)", () => {
+		const items = runDownloadItems(exportUrls('/api'), P, R, [{ id: N, name: 'Upper farm', kind: 'farm' }], null, 'America/St_Johns');
+		expect(items[0]!.workbook).toEqual({ apiBase: '/api', projectId: P, runId: R, timeZone: 'America/St_Johns' });
+		expect(items[4]!.workbook).toEqual({ apiBase: '/api', projectId: P, runId: R, auditNodeId: N, timeZone: 'America/St_Johns' });
+	});
+
 	it('adds the two all-farms fragmentation tables after the catchment when the run has farms', () => {
 		const items = runDownloadItems(exportUrls('/api'), P, R, [{ id: N, name: 'Upper farm' }], {});
 		expect(items.map((i) => i.label)).toEqual([

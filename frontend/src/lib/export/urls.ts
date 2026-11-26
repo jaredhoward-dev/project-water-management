@@ -31,6 +31,8 @@ export interface WorkbookRequest {
 	runId: string;
 	/** Build this farm's audit workbook instead of the run's ($lib/spreadsheet/audit, issue #68). */
 	auditNodeId?: string;
+	/** The project's time zone: the day the run's data-source credits are dated (issue #860); absent, the default zone. */
+	timeZone?: string;
 }
 
 /** The all-farms tables the run menu offers (farms.csv?key=…), and what a preview of one needs. */
@@ -108,14 +110,16 @@ export function runDownloadItems(
 	projectId: string,
 	runId: string,
 	nodes: readonly { id: string; name: string; kind?: string }[] = [],
-	farms: { onPreview?: (item: FarmTableItem) => void } | null = null
+	farms: { onPreview?: (item: FarmTableItem) => void } | null = null,
+	timeZone?: string
 ): DownloadItem[] {
+	const zone = timeZone ? { timeZone } : {};
 	return [
 		{
 			label: 'Workbook (.xlsx)',
 			url: `workbook:${urls.run(projectId, runId)}`,
 			hint: 'Every table in one file: summary, daily sheets per hydrological unit, curtailment, EWR grid, inputs',
-			workbook: { apiBase: urls.apiBase, projectId, runId }
+			workbook: { apiBase: urls.apiBase, projectId, runId, ...zone }
 		},
 		{ label: 'Run summary (CSV)', url: urls.runSummary(projectId, runId), hint: 'Per-unit table, catchment and calibration' },
 		{ label: 'Daily series — catchment (CSV)', url: urls.runDaily(projectId, runId), hint: 'Natural flow, outflow, EWR, rain…' },
@@ -133,7 +137,7 @@ export function runDownloadItems(
 							label: `Audit workbook — ${n.name} (.xlsx)`,
 							url: `audit:${urls.runDaily(projectId, runId, n.id)}`,
 							hint: 'Its daily water balance as live Excel formulas beside the model’s numbers, to recompute it independently',
-							workbook: { apiBase: urls.apiBase, projectId, runId, auditNodeId: n.id }
+							workbook: { apiBase: urls.apiBase, projectId, runId, auditNodeId: n.id, ...zone }
 						}
 					]
 				: [])

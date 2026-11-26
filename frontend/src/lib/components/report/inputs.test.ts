@@ -380,6 +380,15 @@ describe('the gap-filling product and the rain credits in the report (issue #604
 		expect(reportRainCredits({ createdAt: '2026-10-27T09:00:00Z', forecastRainSource: 'chirps_gefs', summary: {} })).toEqual([]);
 	});
 
+	it("dates the credits by the run's day in the project's zone, not UTC's (issue #860)", () => {
+		const gapRain = { products: [{ product: 'imerg_late', version: 'V07', present: true }] };
+		// 23:30 UTC on 26 October: the 27th in Johannesburg (the default), still the 26th in St John's.
+		const at = (timeZone?: string) => reportRainCredits({ createdAt: '2026-10-26T23:30:00Z', summary: { gapRain } }, timeZone)[0]!.lines[0];
+		expect(at()).toContain('accessed 2026-10-27,');
+		expect(at('Africa/Johannesburg')).toContain('accessed 2026-10-27,');
+		expect(at('America/St_Johns')).toContain('accessed 2026-10-26,');
+	});
+
 	it('credits AgERA5 and NASA POWER after the rain products when GR4J read their reference ET (issue #604 R5-E)', () => {
 		const c = reportRainCredits({ createdAt: '2026-10-30T09:00:00Z', et0Products: ['agera5_et0', 'power_et0'], summary: {} });
 		expect(c.map((x) => x.name)).toEqual(['AgERA5 reference evapotranspiration', 'NASA POWER reference evapotranspiration']);

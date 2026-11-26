@@ -12,6 +12,7 @@ import { withUser, type Db } from '../db/tx.js';
 import { ApiError } from '../http/errors.js';
 import { allocationUnitsHidden, redactRunAllocations } from '../allocations/viewerUnits.js';
 import { requireRole, UUID } from '../projects/access.js';
+import { localDate } from '../projects/timeZone.js';
 import { loadProjectDocument } from '../projects/document.js';
 import { listNominations, runEvidence } from '../runs/evidence.js';
 import { seriesHash } from '../runs/execute.js';
@@ -92,9 +93,10 @@ interface RunRow {
  * The credits a run's catchment values owe (issue #604 R4-E): ERA5-Land's and
  * IMERG Late's when the run read them, ECMWF's for its ECMWF forecast,
  * AgERA5's and NASA POWER's for the reference ET GR4J read (R5-E). The day
- * the data were read: the run's creation day.
+ * the data were read: the run's creation day in the project's time zone, not
+ * UTC's (issue #860).
  */
-const runCredits = (run: RunRow) => runRainCredits(run, new Date(run.createdAt).toISOString().slice(0, 10));
+const runCredits = (run: RunRow, timeZone: string) => runRainCredits(run, localDate(new Date(run.createdAt), timeZone));
 
 async function loadRun(db: Db, projectId: string, runId: string): Promise<RunRow> {
 	if (!UUID.test(runId)) throw new ApiError(404, 'not found');
@@ -280,7 +282,7 @@ export const exportRoutes = new Hono<AuthEnv>()
 			return csvDownload(
 				c,
 				// The catchment's file holds the rain columns and the runoff GR4J made from the reference ET, so it credits their sources (issue #604 R4-E, R5-E).
-				() => withRunComments(run.legacy, provenance(run, dam), withWithheldNote(withheld, dailyCsvLines(run.startDate, columns, range)), q.nodeId ? [] : runCredits(run)),
+				() => withRunComments(run.legacy, provenance(run, dam), withWithheldNote(withheld, dailyCsvLines(run.startDate, columns, range)), q.nodeId ? [] : runCredits(run, timeZone)),
 				exportFilename(name, parts, 'csv', timeZone),
 				csvTooLarge(NARROW)
 			);
@@ -346,6 +348,7 @@ export const exportRoutes = new Hono<AuthEnv>()
 					startDate: run.startDate,
 					endDate: run.endDate,
 					createdAt: new Date(run.createdAt).toISOString(),
+					timeZone,
 					notes: run.notes,
 					notesUpdatedAt: run.notesUpdatedAt ? new Date(run.notesUpdatedAt).toISOString() : null,
 					notesUpdatedBy: run.notesUpdatedBy,
@@ -403,7 +406,7 @@ export const exportRoutes = new Hono<AuthEnv>()
 				c,
 				// Catchment rain's run columns (rain used, its source) take the gap-filling products' values: credited (issue #604 R4-E);
 				// the daily reference ET its products' (R5-E).
-				() => (reading ? withRunComments(reading.run.legacy, provenance(reading.run), withChangedNote(reading.changed, lines()), seriesCredits(reading.columns.inputKey, runCredits(reading.run))) : lines()),
+				() => (reading ? withRunComments(reading.run.legacy, provenance(reading.run), withChangedNote(reading.changed, lines()), seriesCredits(reading.columns.inputKey, runCredits(reading.run, timeZone))) : lines()),
 				exportFilename(name, [s.name ? `${s.kind}-${s.name}` : s.kind], 'csv', timeZone),
 				csvTooLarge(NARROW)
 			);

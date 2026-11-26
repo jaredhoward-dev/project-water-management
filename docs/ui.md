@@ -11761,7 +11761,7 @@ read it before.
   filled which days** (`summary.gapRain.segments`, the days `rain_source` 5
   and 6 mark, each IMERG run with its version; the first 8, the rest behind
   **Show all N runs of days**), and the credits of the products the run read,
-  word for word, read on the run's day,
+  word for word, read on the run's day in the project's time zone (issue #860),
   **Rain for each unit** for a run with `settings.unitRain` per unit
   (`UnitRainPanel`, its own chunk, `#res-unit-rain`, helpers in
   `runs/unitRain.ts`; shown only when the summary carries

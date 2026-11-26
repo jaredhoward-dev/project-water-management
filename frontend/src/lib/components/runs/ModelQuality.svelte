@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { projectDay } from '#lib/components/project/project.js';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	// Model quality: how well one run fits the record (issue #586). The hydrograph and the flow-duration curve, the
 	// checks-only gauges' flows, calibration with its check and where the parameters came from, the runoff model,
@@ -63,6 +64,7 @@
 		runs,
 		series = null,
 		projectSettings = null,
+		timeZone,
 		referenceGauge = null,
 		flowUnit = $bindable('m³/s'),
 		settled = $bindable(false)
@@ -80,6 +82,8 @@
 		series?: readonly { id: string; kind: string; siteNodeId?: string | null }[] | null;
 		/** The project's settings, read for the calibration window asked for when the run kept no settings snapshot (an older run). */
 		projectSettings?: { calibrationStart?: string | null; calibrationEnd?: string | null } | null;
+		/** The project's time zone: the day the run's data-source credits are dated (issue #860); absent, the default zone. */
+		timeZone?: string;
 		/** The project's reference gauge areas (settings.referenceGauge, no model input): its record, scaled, is compared at the outlet. */
 		referenceGauge?: ReferenceGauge | null;
 		/** The page's flow unit, for every flow chart on it: bind it to share the switch with charts outside Model quality. */
@@ -528,7 +532,7 @@
 					<!-- The rain products' credits only: the reference ET's (et0Products, issue #604 R5-E) belong to the report and exports, not to the rain gaps. -->
 					<Lazy load={loadGapRainRunPanel}>
 						{#snippet children(GapRainRunPanel)}
-							<GapRainRunPanel info={summary.gapRain!} credits={runRainCredits({ ...run, et0Products: undefined }, run.createdAt.slice(0, 10))} />
+							<GapRainRunPanel info={summary.gapRain!} credits={runRainCredits({ ...run, et0Products: undefined }, projectDay(run.createdAt, timeZone))} />
 						{/snippet}
 					</Lazy>
 				</div>
