@@ -969,6 +969,19 @@
 							is too narrow to read as the spread of the projections.
 						</p>
 					{/if}
+					{#if fy.boundary}
+						<p class="banner-amber" data-testid="evidence-future-boundary-stale">
+							{#if fy.boundary === 'changed'}
+								The catchment boundary has been drawn again since these change factors were read over it, so they are of the old boundary. Run the future yield again before
+								issuing this section.
+							{:else if fy.boundary === 'none'}
+								The catchment boundary these change factors were read over has since been removed from the map, so this section can’t be issued until one is drawn and the future
+								yield is run again.
+							{:else}
+								This result was stored before the catchment boundary it was read over was recorded, so whether the boundary has changed since can’t be said.
+							{/if}
+						</p>
+					{/if}
 					{#if !fy.complete}
 						<p class="banner-amber" data-testid="evidence-future-partial">
 							The change factors rest on part of their 30-year windows: the data copy holds only some of their years (each case’s count is in the factor table below). That isn’t the

@@ -61,11 +61,11 @@ import { verifiedRuns } from '../runs/stamp.js';
 import { loadDamObservations } from './damObservations.js';
 import { futureYieldEnabled, latestFutureYield } from '../future/store.js';
 
-/** § 8's input: the stored result, `notRun` when none, null while FUTURE_YIELD is off. */
+/** § 8's input: the stored result and whether the boundary changed since (issue #889), `notRun` when none, null while FUTURE_YIELD is off. */
 async function loadFutureYield(db: Db, projectId: string, applicationRunId: string, baselineRunId: string): Promise<EvidenceInput['futureYield']> {
 	if (!futureYieldEnabled()) return null;
 	const row = await latestFutureYield(db, projectId, applicationRunId, baselineRunId);
-	return row ? { result: row.result, createdAt: row.createdAt, createdBy: row.createdBy } : { notRun: true };
+	return row ? { result: row.result, createdAt: row.createdAt, createdBy: row.createdBy, boundary: row.boundary } : { notRun: true };
 }
 import { listNominations } from '../runs/evidence.js';
 

@@ -4390,6 +4390,7 @@ by a `future_yield` job as its acting editor. `job.kind` accepts
 | `method` | `delta-1` |
 | `result` | the engine's `FutureYieldResult` (factor table included), an object of at most 1 MB |
 | `engine_version`, `created_by`, `created_at` | the engine that ran the pairs; the session's user and time (stamped by the guard) |
+| `boundary_sha256` | SHA-256 (hex) of the catchment boundary's geometry as canonical JSON when the job read the factors over it, as `climate_factors.boundary_sha256` (390_future_yield_boundary, issue #889); null for rows written before 390. The API and the evidence report compare it with the boundary now (`future/store.ts futureYieldBoundary`) |
 
 Insert and delete only (no `UPDATE` grant); the job keeps the newest 3 per
 pair. RLS: viewers and above read; an applicant reads the rows of their own

@@ -346,6 +346,9 @@ export function heldWindowClimate(years: readonly ClimateYear[], from: number, t
 	return { climate: { prMm: mean('prMm'), tasmaxC: mean('tasmaxC'), tasminC: mean('tasminC') }, years: held.length };
 }
 
+/** Whether climateDeltaFactors weighs a cell: a finite positive weight and a finite latitude. The rest take no part in the factors. */
+export const climateCellWeighted = (c: { weight: number; lat: number }): boolean => Number.isFinite(c.weight) && c.weight > 0 && Number.isFinite(c.lat);
+
 /**
  * The 24 change factors of one model × SSP × horizon for a catchment (issue
  * #621, docs/model.md §2.17): per calendar month, rain = the cells'
@@ -357,7 +360,7 @@ export function heldWindowClimate(years: readonly ClimateYear[], from: number, t
  * warning.
  */
 export function climateDeltaFactors(cells: readonly ClimateCell[]): ClimateFactors {
-	const used = cells.filter((c) => Number.isFinite(c.weight) && c.weight > 0 && Number.isFinite(c.lat));
+	const used = cells.filter(climateCellWeighted);
 	if (!used.length) throw new Error('no grid cell with a positive weight: the catchment lies outside the climate grid');
 	const warnings: string[] = [];
 	const ratio = (what: string, base: number[], fut: number[]) =>

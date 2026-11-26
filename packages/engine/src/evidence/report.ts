@@ -381,8 +381,12 @@ export function evidenceChecks(input: EvidenceInput): EvidenceCheck[] {
 		const pending = futureCaveatPending(fy.caveat);
 		const problems = [
 			...(pending ? ['NASA’s own caveat on engineering use of the projections isn’t quoted yet (the technical note it is to be quoted from could not be found)'] : []),
-			...(fy.complete ? [] : ['the change factors rest on part of their 30-year windows (the copy holds only some of the years), which isn’t the method'])
+			...(fy.complete ? [] : ['the change factors rest on part of their 30-year windows (the copy holds only some of the years), which isn’t the method']),
+			// Issue #889: read over a boundary the project no longer has. `unrecorded` (stored before the hash was kept) is printed, not held.
+			...(fy.boundary === 'changed' ? ['the catchment boundary has been drawn again since the change factors were read over it'] : []),
+			...(fy.boundary === 'none' ? ['the catchment boundary the change factors were read over has since been removed from the map'] : [])
 		];
+		const stale = fy.boundary === 'changed' || fy.boundary === 'none';
 		add({
 			id: 'futureYield',
 			label: '§ 8 Future yield rests on the whole method and quotes its caveat',
@@ -392,7 +396,8 @@ export function evidenceChecks(input: EvidenceInput): EvidenceCheck[] {
 			blocksIssue: true,
 			fix: [
 				...(pending ? ['Quote NASA’s caveat verbatim from the current NEX-GDDP-CMIP6 technical note (evidence/future.ts FUTURE_YIELD_CAVEAT, with its address and the date read) and deploy'] : []),
-				...(fy.complete ? [] : ['Load every year of the windows into the copy (deployment.md § NEX-GDDP-CMIP6), then run the future yield again'])
+				...(fy.complete ? [] : ['Load every year of the windows into the copy (deployment.md § NEX-GDDP-CMIP6), then run the future yield again']),
+				...(stale ? [fy.boundary === 'none' ? 'Draw or upload the catchment boundary on the Map tab, then run the future yield again' : 'Run the future yield again, so its factors are read over the boundary as it is now'] : [])
 			].join('; then ') + '.'
 		});
 	}
@@ -406,7 +411,8 @@ export function futureYieldSection(found: EvidenceInput['futureYield']): Evidenc
 	if ('notRun' in found)
 		return { status: 'notRun', note: 'Not assessed: the future yield hasn’t been run on these two runs. An editor runs it from the evidence report (Future yield › Run), then the report is built again.', caveat };
 	const r = structuredClone(found.result);
-	return { status: 'ok', createdAt: found.createdAt, createdBy: found.createdBy, complete: futureFactorsComplete(r.factors), caveat, ...r };
+	const boundary = found.boundary && found.boundary !== 'same' ? { boundary: found.boundary } : {};
+	return { status: 'ok', createdAt: found.createdAt, createdBy: found.createdBy, complete: futureFactorsComplete(r.factors), caveat, ...boundary, ...r };
 }
 
 // ---------------------------------------------------------------------------

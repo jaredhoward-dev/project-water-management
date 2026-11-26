@@ -2328,6 +2328,23 @@ describe('§ 8 future yield (evidence-23, issue #621)', () => {
 		expect(check.fix).toContain('Load every year of the windows into the copy');
 	});
 
+	it('holds it from issue when the boundary changed or went since, and prints an unrecorded one without holding it (issue #889)', () => {
+		// The same boundary: no key, as before (a pack drafted from it keeps the manifest it had).
+		expect('boundary' in evidenceReport(input({ futureYield: { ...found, boundary: 'same' } })).futureYield!).toBe(false);
+		const changed = evidenceReport(input({ futureYield: { ...found, boundary: 'changed' } }));
+		expect(changed.futureYield).toMatchObject({ status: 'ok', boundary: 'changed' });
+		const c = changed.checks.find((x) => x.id === 'futureYield')!;
+		expect(c).toMatchObject({ passed: false, blocksIssue: true });
+		expect(c.detail).toBe('the catchment boundary has been drawn again since the change factors were read over it.');
+		expect(c.fix).toBe('Run the future yield again, so its factors are read over the boundary as it is now.');
+		const gone = evidenceReport(input({ futureYield: { ...found, boundary: 'none' } })).checks.find((x) => x.id === 'futureYield')!;
+		expect(gone.passed).toBe(false);
+		expect(gone.fix).toContain('Draw or upload the catchment boundary on the Map tab');
+		const unrecorded = evidenceReport(input({ futureYield: { ...found, boundary: 'unrecorded' } }));
+		expect(unrecorded.futureYield).toMatchObject({ boundary: 'unrecorded' });
+		expect(unrecorded.checks.find((x) => x.id === 'futureYield')!.passed).toBe(true);
+	});
+
 	it('says Not assessed when none was run, and is null for baseline evidence or while it is off', () => {
 		const r = evidenceReport(input({ futureYield: { notRun: true } }));
 		expect(r.futureYield).toMatchObject({ status: 'notRun', note: expect.stringMatching(/^Not assessed: the future yield hasn’t been run/) });

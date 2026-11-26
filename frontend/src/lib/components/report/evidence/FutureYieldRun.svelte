@@ -7,7 +7,8 @@
 	// newest job comes with GET …/future-yield, so a reload or another tab
 	// picks it up. Cancel stops a waiting job at once and a running one at its
 	// next step, before it stores anything (POST …/future-yield/:jobId/cancel,
-	// 284_cancel_future_jobs). Never on a pack: a pack freezes § 8 as it was drafted.
+	// 284_cancel_future_jobs). Says when the catchment boundary changed or went
+	// since the result was read over it (issue #889). Never on a pack: a pack freezes § 8 as it was drafted.
 	import { onDestroy, untrack } from 'svelte';
 	import { api, type FutureYieldState } from '#lib/api/index.js';
 	import { fmtProjectDay } from '#lib/components/project/project.js';
@@ -105,6 +106,13 @@
 			runs, in the background.
 		{/if}
 	</p>
+	{#if assessed && fy?.result && !status?.busy && (fy.result.boundary === 'changed' || fy.result.boundary === 'none')}
+		<p class="alert alert-warning" data-testid="evidence-future-boundary">
+			{fy.result.boundary === 'none'
+				? 'The catchment boundary this result’s change factors were read over has since been removed from the Map tab. Draw or upload one there, then run it again.'
+				: 'The catchment boundary has changed since this result’s change factors were read over it. Run it again to read them over the new one; until then the pack can’t be issued.'}
+		</p>
+	{/if}
 	{#if status?.busy}
 		<div class="job">
 			<p class="small" role="status" data-testid="evidence-future-job">{status.text}</p>

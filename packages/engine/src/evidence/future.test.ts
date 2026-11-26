@@ -239,6 +239,24 @@ describe('the factor table from the copy’s cells', () => {
 		expect(futureFactorsComplete(t)).toBe(false);
 		expect(() => buildFutureFactorTable([{ model: 'SYN-A', cells: [{ ...cell, ssp585: [year(2036)] }] }], meta)).toThrow('the climate record holds no year of the window 2066–2095');
 	});
+
+	it('counts the years over the weighted cells only, as climateDeltaFactors weighs them (issue #889)', () => {
+		const whole = { lat: -33.7, weight: 1, historical: years(1985, 2014), ssp245: years(2036, 2095, 0.9, 1), ssp585: years(2036, 2095, 0.8, 2) };
+		// A zero-weight cell holding part of each window: it takes no part in the factors, so not in the count either.
+		const zero = { lat: -33.95, weight: 0, historical: years(2013, 2014), ssp245: [year(2036, 0.5), year(2066, 0.5)], ssp585: [year(2036, 0.5), year(2066, 0.5)] };
+		const t = buildFutureFactorTable([{ model: 'SYN-A', cells: [whole, zero] }], meta);
+		const alone = buildFutureFactorTable([{ model: 'SYN-A', cells: [whole] }], meta);
+		expect(t.cases.map((c) => c.years)).toEqual(alone.cases.map(() => ({ baseline: 30, future: 30 })));
+		expect(t.cases.map((c) => c.rainFactorByMonth)).toEqual(alone.cases.map((c) => c.rainFactorByMonth));
+		expect(futureFactorsComplete(t)).toBe(true);
+		// Nor does one holding no year of a window refuse the case.
+		const empty = { ...zero, ssp585: [] };
+		expect(buildFutureFactorTable([{ model: 'SYN-A', cells: [whole, empty] }], meta).cases).toEqual(alone.cases);
+		// A weighted cell still counts: one with part of the windows makes the table incomplete.
+		const part = buildFutureFactorTable([{ model: 'SYN-A', cells: [whole, { ...zero, weight: 0.2 }] }], meta);
+		expect(part.cases[0]!.years).toEqual({ baseline: 2, future: 1 });
+		expect(futureFactorsComplete(part)).toBe(false);
+	});
 });
 
 describe('the caveat', () => {
