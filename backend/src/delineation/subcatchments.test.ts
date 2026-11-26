@@ -4,7 +4,7 @@ import { geometryAreaM2, ringAreaM2 } from '../geo/area.js';
 import { pointInGeometry, type Geometry } from '../geo/geojson.js';
 import { openDem } from './dem.js';
 import { delineate, DelineationRefused, worldPx } from './delineate.js';
-import { DAM_CELL, FIXTURE_CELL_M, fixtureLonLat, OUTLET_CELL, PAN, valleyUnitRing } from './fixture.js';
+import { DAM_CELL, FIXTURE_CELL_M, FIXTURE_TILE, FIXTURE_X0, FIXTURE_Y0, FIXTURE_ZOOM, fixtureLonLat, OUTLET_CELL, PAN, valleyUnitRing, widerEast } from './fixture.js';
 import { accumulate, OUT } from './flow.js';
 import { LARGER_FACTOR } from './place.js';
 import { cellRowAreaM2, channelKm2Text, damOutflow, delineateUnits, fitMethod, mercatorLat, METHOD_MAX_CHARS, mostDrained, offChannelOutflow, ownsLand, riverBelow, partition, placementText, RASTER_MAX_CROSSINGS, rasterize, START_METHOD_VERSION, startMethod, type PlacedBy, type UnitPoint } from './subcatchments.js';
@@ -370,6 +370,28 @@ describe('delineateUnits (synthetic DEM)', () => {
 			{ id: 'second', reason: expect.stringMatching(/^ends at the outlet, as another unit’s boundary does/), placedBy: 'unit' },
 			{ id: 'away', reason: 'lies outside the catchment above the outlet (or off the elevation model)', placedBy: 'unit' }
 		]);
+	});
+
+	it('divides at the clicks when their box’s centre has no tile: the tile side from a tile in the box (issue #874)', async () => {
+		// The DEM's bounds run two tiles past its data; a click there moves the clicks' box's centre onto a missing tile.
+		const holed = widerEast(dem);
+		// Placed exactly (a click past the data snaps to no channel and is refused off_channel, a separate matter).
+		const far: UnitPoint = { id: 'far', role: 'dam', exact: true, geometry: { type: 'Point', coordinates: at(900, 300) } };
+		const centreCol = Math.floor((DAM_CELL.x + 900) / 2 / FIXTURE_TILE);
+		expect(await holed.tile(FIXTURE_ZOOM, FIXTURE_X0 + centreCol, FIXTURE_Y0 + 1)).toBeNull();
+		const r = await delineateUnits(holed, { outlet: 'lowest', boundary: null, points: [point('dam', DAM_CELL.x, DAM_CELL.y + 1), point('low', OUTLET_CELL.x, OUTLET_CELL.y), far] });
+		// Positive control: the same clicks on data alone divide the same way.
+		const ref = await delineateUnits(dem, { outlet: 'lowest', boundary: null, points: [point('dam', DAM_CELL.x, DAM_CELL.y + 1), point('low', OUTLET_CELL.x, OUTLET_CELL.y)] });
+		expect(r.units.map((u) => u.id)).toEqual(ref.units.map((u) => u.id));
+		near(r.catchment.areaM2, ref.catchment.areaM2, 1e-6);
+		expect(r.dropped.map((d) => d.id)).toEqual(['far']);
+	});
+
+	it('refuses clicks whose box holds no tile at all as no data', async () => {
+		const holed = widerEast(dem);
+		const e = await delineateUnits(holed, { outlet: 'lowest', boundary: null, points: [point('a', 600, 300), point('b', 700, 320)] }).catch((x: unknown) => x);
+		expect(e).toBeInstanceOf(DelineationRefused);
+		expect((e as DelineationRefused).code).toBe('no_data');
 	});
 
 	it('finds the outlet inside a boundary when none is given', async () => {

@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { pointInRing } from '../geo/geojson.js';
-import { openDem } from './dem.js';
+import { openDem, type Dem } from './dem.js';
 import {
 	boundsText,
 	delineate,
@@ -12,6 +12,8 @@ import {
 	fitDelineationMethod,
 	METHOD_VERSION,
 	SNAP_RADIUS_M,
+	TILE_PROBE_MAX,
+	tileInBox,
 	tooLargeText,
 	type DelineationMethodFacts
 } from './delineate.js';
@@ -220,6 +222,28 @@ describe('the e2e copy of the fixture’s points', () => {
 		const ring = (name: string) => JSON.parse(new RegExp(`${name}: \\[number, number\\]\\[\\] = (\\[.*\\]);`).exec(text)![1]!);
 		expect(ring('FIXTURE_UPPER_UNIT')).toEqual(valleyUnitRing(0, DAM_CELL.y + 5, 2, 10));
 		expect(ring('FIXTURE_LOWER_UNIT')).toEqual(valleyUnitRing(DAM_CELL.y + 5, 400, 2, 10));
+	});
+});
+
+describe('tileInBox (issue #874)', () => {
+	const dem = openDem(fileURLToPath(new URL('../../fixtures/dem/synthetic-dem.pmtiles', import.meta.url)));
+	const [w, s, e, n] = [fixtureLonLat(0, 0)[0], fixtureLonLat(0, FIXTURE_CELLS)[1], fixtureLonLat(FIXTURE_CELLS, 0)[0], fixtureLonLat(0, 0)[1]];
+
+	it('takes a tile from the box when its centre has none, and null when the box holds none', async () => {
+		// From the fixture's last 50 columns to 600 columns past its east edge: the centre lies where no tile is.
+		const past = fixtureLonLat(FIXTURE_CELLS + 600, 0)[0];
+		const box: [number, number, number, number] = [fixtureLonLat(FIXTURE_CELLS - 50, 0)[0], s, past, n];
+		expect((await tileInBox(dem, FIXTURE_ZOOM, box))?.size).toBe(256);
+		expect(await tileInBox(dem, FIXTURE_ZOOM, [fixtureLonLat(FIXTURE_CELLS + 10, 0)[0], s, past, n])).toBeNull();
+		// Positive control: inside the data, the tile under the centre.
+		expect((await tileInBox(dem, FIXTURE_ZOOM, [w, s, e, n]))?.size).toBe(256);
+	});
+
+	it('asks at most TILE_PROBE_MAX tiles of a box with none', async () => {
+		let asked = 0;
+		const empty: Dem = { info: () => dem.info(), tile: async () => (asked++, null) };
+		expect(await tileInBox(empty, 12, [10, -40, 40, -10])).toBeNull();
+		expect(asked).toBeLessThanOrEqual(TILE_PROBE_MAX);
 	});
 });
 

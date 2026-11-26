@@ -1749,7 +1749,15 @@ to a point on a river. The design, the method and its accuracy are in
   point outside the DEM, one with no terrain channel within 150 m, or
   one almost nothing drains to. Since `delineate-6` the land beside missing data is
   the data's edge, not a sink every cell beside it drained into, which
-  had hidden such catchments (issue #390).
+  had hidden such catchments (issue #390). A request that reads a box rather
+  than one point (Start or Divide from a boundary, Sub-catchments from
+  clicks, a DEM rivers tile) takes the DEM's tile side from any tile in that
+  box, the one under its centre first (`tileInBox`, `delineate.ts`): a centre
+  in a hole of the data (an extract without its ocean tiles, say) is no
+  reason to refuse when the data round it is fine, and only a box holding no
+  tile at all is refused as no data (issue #874; the DEM grid since #862).
+  Delineate, a fixed outlet and Trace a dam still read the tile under their
+  point, which must have data.
   A catchment past the largest window is refused as too large: "Click
   further upstream for a smaller catchment, divide the river with
   Sub-catchments, one per click …", or, when the nearby river reach drains

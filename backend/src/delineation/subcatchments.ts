@@ -26,6 +26,7 @@ import {
 	readWindow,
 	SNAP_RADIUS_M,
 	TARGET_ZOOM,
+	tileInBox,
 	TIME_BUDGET_MS,
 	toLonLat,
 	toPx,
@@ -689,9 +690,12 @@ export async function delineateUnits(
 	for (const r of [...boundaryRings, clicks]) for (const [lo, la] of r) (lonMin = Math.min(lonMin, lo)), (lonMax = Math.max(lonMax, lo)), (latMin = Math.min(latMin, la)), (latMax = Math.max(latMax, la));
 	const centre: Position = fixedOutlet ?? [(lonMin + lonMax) / 2, (latMin + latMax) / 2];
 	if (!inside(centre)) throw new DelineationRefused('outside', `${lowest ? 'The clicks are' : 'The outlet is'} outside the elevation model (${info.label} covers ${boundsText(info.bounds)}).`);
-	const probe = toPx(centre[0], centre[1], 2 ** z);
-	const here = await dem.tile(z, Math.floor(probe[0]), Math.floor(probe[1]));
-	if (!here) throw new DelineationRefused('no_data', `The elevation model has no data at ${lowest ? 'the clicks' : 'the outlet'}.`);
+	// The tile side: the outlet's own tile, which must have data; else a tile in the boundary's or clicks' box (within the DEM's
+	// bounds), the one under its centre first, since the centre may fall in a hole of the data that the box's parts don't.
+	const here = fixedOutlet
+		? await tileInBox(dem, z, [fixedOutlet[0], fixedOutlet[1], fixedOutlet[0], fixedOutlet[1]])
+		: await tileInBox(dem, z, [Math.max(lonMin, w), Math.max(latMin, s), Math.min(lonMax, e), Math.min(latMax, n)], centre);
+	if (!here) throw new DelineationRefused('no_data', `The elevation model has no data ${fixedOutlet ? 'at the outlet' : lowest ? 'around the clicks' : 'inside the boundary'}.`);
 	const size = here.size;
 	const W = worldPx(z, size);
 	const [gx, gy] = toPx(centre[0], centre[1], W);

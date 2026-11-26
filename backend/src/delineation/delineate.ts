@@ -198,6 +198,29 @@ export const toLonLat = (x: number, y: number, W: number): Position => [
 	Math.round(((Math.atan(Math.sinh(Math.PI * (1 - (2 * y) / W))) * 180) / Math.PI) * 1e7) / 1e7
 ];
 
+/** At most this many tiles are looked up for a box's tile side (tileInBox): far more than any box the delineation reads holds. */
+export const TILE_PROBE_MAX = 1024;
+/**
+ * A tile of the DEM at zoom z inside the box [w, s, e, n] (degrees), to learn the DEM's tile side and that the box has data:
+ * the one under `prefer` (default the box's centre), else the first the box holds, north to south, west to east. The tile
+ * under a box's centre may be missing though the data around it is fine (an extract with holes, a coast), so it is never
+ * the only one asked (issues #862, #874). Tile indices at z don't depend on the side. Null when the box holds no tile, or
+ * spans more than TILE_PROBE_MAX tiles without one.
+ */
+export async function tileInBox(dem: Dem, z: number, [w, s, e, n]: readonly [number, number, number, number], prefer?: Position): Promise<{ size: number; z: Float32Array } | null> {
+	const t = 2 ** z;
+	const tx = (lon: number) => Math.min(t - 1, Math.max(0, Math.floor(toPx(lon, 0, t)[0])));
+	const ty = (lat: number) => Math.min(t - 1, Math.max(0, Math.floor(toPx(0, lat, t)[1])));
+	const [pl, pa] = prefer ?? [(w + e) / 2, (s + n) / 2];
+	let tile = await dem.tile(z, tx(pl), ty(pa));
+	let asked = 1;
+	for (let y = ty(n); !tile && y <= ty(s); y++) {
+		for (let x = tx(w); !tile && x <= tx(e) && asked < TILE_PROBE_MAX; x++, asked++) tile = await dem.tile(z, x, y);
+		if (asked >= TILE_PROBE_MAX) break;
+	}
+	return tile;
+}
+
 /** The DEM's elevations over [x0, x0+n) × [y0, y0+n) global pixels at zoom z (NaN where it has no tile). */
 export async function readWindow(dem: Dem, z: number, size: number, x0: number, y0: number, n: number): Promise<Grid> {
 	const grid: Grid = { nx: n, ny: n, z: new Float64Array(n * n).fill(Number.NaN) };
