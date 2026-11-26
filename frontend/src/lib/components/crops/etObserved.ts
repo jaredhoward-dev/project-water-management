@@ -222,10 +222,14 @@ export function etCsv(data: EtObserved): string {
 			p.skip ?? ''
 		])
 	);
-	const run = data.run ? `run "${data.run.label}"` : 'no run';
 	// A raw first line, not a cell: the credit holds a comma, and a quoted cell wouldn't start with `#`. It starts
-	// with `#`, so a spreadsheet never reads it as a formula.
-	const line = `# ${data.name}: actual ET ${credits} · compared with ${run} · volumes on the run's planted area`.replace(/\s+/g, ' ');
+	// with `#`, so its first cell is never a formula; the unit's name and the run's label are typed by editors, so
+	// their commas, quotes and control characters are percent-encoded (decodeURIComponent reads them back): else
+	// a name like `x,=HYPERLINK(…)` would open a cell of its own that a spreadsheet runs (docs/security.md "CSV exports
+	// defuse spreadsheet formulas"; groupedCsv.ts commentLine encodes a whole line the same way).
+	const own = (s: string) => s.replace(/[%,"\x00-\x1f\x7f-\x9f\u2028\u2029]/g, encodeURIComponent);
+	const run = data.run ? `run "${own(data.run.label)}"` : 'no run';
+	const line = `# ${own(data.name)}: actual ET ${credits} · compared with ${run} · volumes on the run's planted area`.replace(/\s+/g, ' ');
 	return `${line}\r\n${toCsv([head, ...rows])}`;
 }
 

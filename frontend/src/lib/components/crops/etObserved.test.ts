@@ -153,6 +153,17 @@ describe('etObserved', () => {
 		expect(rows.map((r) => r.dekad)).toEqual(['21–31 Jan 2020', '11–20 Jan 2020', '1–10 Jan 2020']);
 	});
 
+	it("keeps the CSV's first line one cell whatever the unit and run are called (formula injection, docs/security.md § CSV exports)", () => {
+		const name = 'North,=HYPERLINK("https://evil.example","x"),"=1+1"';
+		const label = 'r,@SUM(1)';
+		const first = etCsv(data(undefined, { name, run: { ...data().run!, label } })).split('\r\n')[0]!;
+		// The credit's own commas still split it, so every cell after the first must not be a formula.
+		for (const cell of first.split(',').slice(1)) expect(cell).not.toMatch(/^\s*"?[=+\-@]/);
+		expect(first).not.toContain('"=');
+		expect(decodeURIComponent(first)).toContain(`# ${name}: actual ET`);
+		expect(decodeURIComponent(first)).toContain(`run "${label}"`);
+	});
+
 	it('writes the CSV with the credit on its own first line, then a row per dekad', () => {
 		const csv = etCsv(data());
 		const lines = csv.split('\r\n');
