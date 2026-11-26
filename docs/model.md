@@ -8804,7 +8804,7 @@ exclude, so the run also scores days the fit never saw; settings excluding the
 fit's exclusions and those years are the fit's own days. Exclusions, and a
 record's own missing periods, are compared by the days they leave out: a
 reworded reason, another order, a water year written as its dates or one
-period split in two is no change (before this, any edit to a reason read as
+period split in two is no change (before engine 1.122.0, any edit to a reason read as
 `otherPeriod` and "The calibration exclusions have changed since the fit"). A forcing change since the fit
 (PE, CHIRPS, rain-source settings, and from engine 0.40.0 a daily A-pan series
 added, replaced or removed, §2.3a) doesn't change it: the question here is

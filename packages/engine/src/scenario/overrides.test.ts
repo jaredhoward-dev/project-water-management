@@ -14,7 +14,7 @@ import type { AllocationEntry } from '../allocations/compare';
 import { scrambleOrder } from '../testing/fuzz';
 import { checkAll } from '../testing/invariants';
 import { FARMER_K } from '../views/farmView';
-import { MASKED_RULE, MASKED_RULE_AGGREGATE, applyScenario, cloneData, classifyOp, classifyScenario, scenarioSteps, type ScenarioMask } from './overrides';
+import { MASKED_RULE, MASKED_RULE_AGGREGATE, applyScenario, cloneData, classifyOp, classifyScenario, scenarioSteps, seepageAbove, type ScenarioMask } from './overrides';
 import { structureIssues } from './structure';
 import { combineScenarios } from './combine';
 import { storedControlTexts, validateScenarioOps, type ScenarioOp } from './ops';
@@ -1615,14 +1615,16 @@ describe('later ops (engine ≥ 1.35.0): moving and inserting nodes', () => {
 		expect(applyScenario(b, [{ op: 'transfer.set', transferId: 'r1', field: 'lossReturnPct', value: 1.5 }]).problems[0]).toMatch(/lossReturnPct/);
 		const gone = applyScenario(ok.input, [{ op: 'node.remove', nodeId: 'A' }]);
 		expect(gone.problems).toEqual([]);
-		expect(gone.input.model.transfers[0]).toMatchObject({ lossReturnPct: 0, lossReturnNodeId: null });
-		// A drained into the outflow gauge, which no seepage can rejoin below (offtakeReturnAt asks for a farm): none returns, as before issue #853.
-		expect(gone.applied[0]!.notes.join()).toMatch(/seepage no longer returns to the river \(it rejoined below "Farm A", and "Outlet gauge", which it drained into, isn't a farm/);
+		// A drained into the outflow gauge (engine ≥ 1.122.0, issue #853): the seepage rejoins at the nearest point above A on
+		// the off-take's path, here the off-take itself at C, so it still reaches the gauge; its share is kept.
+		expect(gone.input.model.transfers[0]).toMatchObject({ lossReturnPct: 0.5, lossReturnNodeId: null });
+		expect(gone.applied[0]!.notes.join()).toMatch(/seepage now rejoins the river at the off-take \(it rejoined below "Farm A"\), so it reaches the same unit below/);
 		expect(checkAll(gone.input)).toBeNull();
 	});
 
-	// Issue #853: removing a unit an off-take's seepage rejoins below re-points that seepage one unit lower, so the
-	// water stays in the river; zeroing it sent it out of the catchment and scored the drop below as the proposal's.
+	// Issue #853: removing a unit an off-take's seepage rejoins below re-points that seepage to the nearest point above it
+	// on the off-take's path, so the water reaches the unit below as before; zeroing it sent it out of the catchment and
+	// scored the drop below as the proposal's. (Re-pointing it below the next unit would carry it past that unit.)
 	/** C → A → D → G and B → G; r1, another party's off-take at C for B, returns all its canal losses below A. */
 	const seepageBelowA = (withR1 = true): ModelInput => {
 		const b = base();
@@ -1635,25 +1637,26 @@ describe('later ops (engine ≥ 1.35.0): moving and inserting nodes', () => {
 	const total = (out: { series: RunSeries[] }, nodeId: string, key: string) =>
 		(out.series.find((x) => x.nodeId === nodeId && x.key === key)?.values ?? []).reduce((a, v) => a + v, 0);
 
-	it('node.remove of the unit an off-take’s seepage rejoins below re-points it one unit lower, and the water stays in the river (issue #853)', () => {
+	it('node.remove of the unit an off-take’s seepage rejoins below re-points it above, and the water still reaches the unit below (issue #853)', () => {
 		const b = seepageBelowA();
 		expect(applyScenario(b, []).problems).toEqual([]);
 		const gone = applyScenario(b, [{ op: 'node.remove', nodeId: 'A' }]);
 		expect(gone.problems).toEqual([]);
-		expect(gone.input.model.transfers.find((t) => t.id === 'r1')).toMatchObject({ lossReturnNodeId: 'D', lossReturnPct: 1, lossPct: 0.2 });
-		expect(gone.applied[0]!.notes.join()).toMatch(/seepage now rejoins the river below "Farm D" \(it rejoined below "Farm A"\)/);
+		// C drained into A, so the seepage now joins C's outflow, which reaches D (not D's outflow, which would bypass D).
+		expect(gone.input.model.transfers.find((t) => t.id === 'r1')).toMatchObject({ lossReturnNodeId: null, lossReturnPct: 1, lossPct: 0.2 });
+		expect(gone.applied[0]!.notes.join()).toMatch(/seepage now rejoins the river at the off-take \(it rejoined below "Farm A"\)/);
 		// The invariants, the water account's balance among them, hold on the scenario's input.
 		expect(checkAll(gone.input)).toBeNull();
 		const out = runModel(gone.input);
 		expect(out.summary.warnings.join(' ')).not.toMatch(/seepage|r1/);
-		const returned = total(out, 'D', 'offtake_loss_return');
+		const returned = total(out, 'C', 'offtake_loss_return');
 		expect(returned).toBeGreaterThan(0);
 		// Against today's zeroing: the same water reaches the outlet, rather than leaving the catchment as a loss.
 		const zeroed = cloneData(gone.input);
 		Object.assign(zeroed.model.transfers.find((t) => t.id === 'r1')!, { lossReturnNodeId: null, lossReturnPct: 0 });
 		const lost = runModel(zeroed);
 		expect(total(out, 'G', 'outflow') - total(lost, 'G', 'outflow')).toBeCloseTo(returned, 3);
-		expect(total(lost, 'D', 'offtake_loss_return')).toBe(0);
+		expect(total(lost, 'C', 'offtake_loss_return')).toBe(0);
 	});
 
 	it('node.remove re-points a hidden off-take’s seepage without the applicant’s view revealing it exists (issue #853)', () => {
@@ -1664,7 +1667,7 @@ describe('later ops (engine ≥ 1.35.0): moving and inserting nodes', () => {
 		const without = applyScenario(seepageBelowA(false), remove, { mask: mask(['t1']) });
 		expect(hidden.problems).toEqual([]);
 		// The seepage still rejoins one unit lower in the input the run reads.
-		expect(hidden.input.model.transfers.find((t) => t.id === 'r1')).toMatchObject({ lossReturnNodeId: 'D', lossReturnPct: 1 });
+		expect(hidden.input.model.transfers.find((t) => t.id === 'r1')).toMatchObject({ lossReturnNodeId: null, lossReturnPct: 1 });
 		// What the applicant reads is the same as with no such off-take at all: notes, problems, and the op's class.
 		expect(hidden.applied.map((a) => a.notes)).toEqual(without.applied.map((a) => a.notes));
 		expect(hidden.problems).toEqual(without.problems);
@@ -1672,7 +1675,19 @@ describe('later ops (engine ≥ 1.35.0): moving and inserting nodes', () => {
 		expect(hidden.applied[0]!.notes.join()).not.toMatch(/seepage|off-take/);
 		expect(classifyOp(remove[0]!, ['A', 'D'], seepageBelowA())).toBe(classifyOp(remove[0]!, ['A', 'D'], seepageBelowA(false)));
 		// Positive control: unmasked, the caller sees the off-take and is told where its seepage went.
-		expect(applyScenario(seepageBelowA(), remove).applied[0]!.notes.join()).toMatch(/seepage now rejoins the river below "Farm D"/);
+		expect(applyScenario(seepageBelowA(), remove).applied[0]!.notes.join()).toMatch(/seepage now rejoins the river at the off-take/);
+	});
+
+	it('seepageAbove picks the last farm on the off-take’s path before the removed unit, past gauges, or the source (issue #853)', () => {
+		const at = (id: string, kind: NetworkNode['kind'], down: string | null) => [id, { ...node(id, { downstreamNodeId: down }), kind }] as const;
+		// S → E (farm) → H (gauge) → [A removed] → D: E is the last farm above A; only a gauge lies between E and A.
+		const byId = new Map<string, NetworkNode>([at('S', 'farm', 'E'), at('E', 'farm', 'H'), at('H', 'gauge', 'D'), at('D', 'farm', null)]);
+		expect(seepageAbove('S', new Set(['H']), byId)).toBe('E');
+		// No farm between the source and the removed unit: the source itself (null), even past a gauge.
+		expect(seepageAbove('E', new Set(['H']), byId)).toBeNull();
+		expect(seepageAbove('S', new Set(['S']), byId)).toBeNull();
+		// The path never reaches the removed unit: none.
+		expect(seepageAbove('D', new Set(['H']), byId)).toBeUndefined();
 	});
 
 	it('sizes an off-take by a diversion curve (engine 1.113.0): the curve first, the sizing last; the sizing before the curve is skipped', () => {
