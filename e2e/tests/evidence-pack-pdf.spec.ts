@@ -208,10 +208,12 @@ test('a viewer kept from the volumes reads that the bundle alone is withheld whe
 	await viewer.page.goto(`/projects/${project.id}/packs/${pack.id}`);
 	await expect(viewer.page.locator('main[data-report-ready="true"]')).toBeVisible();
 	await expect(viewer.page.getByTestId('pack-bundle-withheld')).toContainText('The reproduction bundle also holds runs this page doesn’t print');
-	// The manifest isn't withheld: the pack's own runs carry no volume.
+	// The pack's own runs carry no volume: the manifest is served with page 1's boards as verdicts only, so it is no longer the hashed one (#870).
 	await expect(viewer.page.getByTestId('pack-volumes-withheld')).toHaveCount(0);
+	await expect(viewer.page.getByTestId('pack-verdicts-only')).toContainText('this page shows their verdicts only');
 	// The owner reads every volume: no note.
 	await page.goto(`/projects/${project.id}/packs/${pack.id}`);
 	await expect(page.locator('main[data-report-ready="true"]')).toBeVisible();
 	await expect(page.getByTestId('pack-bundle-withheld')).toHaveCount(0);
+	await expect(page.getByTestId('pack-verdicts-only')).toHaveCount(0);
 });

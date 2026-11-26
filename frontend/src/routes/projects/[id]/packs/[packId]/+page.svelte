@@ -222,9 +222,11 @@
 	let manifestUrl = $state<string | null>(null);
 	/** Kept from each farm's registered volume (D3, #523 G1): no bundle, and a manifest that isn't the hashed one, so neither downloads. */
 	const withheld = $derived(detail?.volumesWithheld ?? false);
+	/** #870: redacted only to the boards' verdicts (the pack's own runs carry no volume), so the bundle isn't withheld for it. */
+	const verdictsOnly = $derived(detail?.manifestVerdictsOnly ?? false);
 	/** The bundle's download (the API redirects to a signed GET); an issued pack has one. */
 	/** The bundle alone may be refused (bundle-3: an alternative's or the background's run carries a volume the pack's own runs don't). */
-	const bundleWithheld = $derived(withheld || (detail?.bundleWithheld ?? false));
+	const bundleWithheld = $derived((withheld && !verdictsOnly) || (detail?.bundleWithheld ?? false));
 	const bundleUrl = $derived(pack?.bundleSha256 && !bundleWithheld ? api.packs.bundleUrl(projectId, pack.id) : null);
 	$effect(() => {
 		if (!detail || detail.volumesWithheld) {
@@ -304,7 +306,13 @@
 				{#if pack.bundleSha256}Reproduction bundle SHA-256 <span class="mono hash" data-testid="pack-bundle-sha">{pack.bundleSha256}</span> (re-run it with
 					<span class="mono">pnpm reproduce:pack</span>). <HelpTip key="reproduction-bundle" label="About the reproduction bundle" />{/if}
 			</p>
-			{#if withheld}
+			{#if verdictsOnly}
+				<p class="alert alert-info small" role="note" data-testid="pack-verdicts-only">
+					Page 1’s licence-impact figures in m³ rest on figures this project shows to its editors and owners only, so this page shows their verdicts only, and the
+					manifest, no longer the hashed one, doesn’t download here. An editor or owner can give it to you; the hash above and the verify page check it.
+				</p>
+			{/if}
+			{#if withheld && !verdictsOnly}
 				<p class="alert alert-info small" role="note" data-testid="pack-volumes-withheld">
 					The manifest and the reproduction bundle hold each farm’s registered volume, which this project shows to its editors and owners only, so they don’t
 					download here, and Appendix A.1 and the run summaries below leave those volumes out. An editor or owner can give you both; the hashes above and the verify
