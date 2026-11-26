@@ -11,14 +11,37 @@
 import { type Cell, pyStr } from './cells';
 
 function cellText(v: Cell): string {
-	// A cell holding a single whole number: str(int(v)) for a float, str(v) for an int; the same text.
+	// str(int(v)) for a whole float, else str(v). A whole number past 1e16 is all its digits here, where pyStr would write 1e+16 (issue #895).
+	if (typeof v === 'number' && Number.isInteger(v)) return BigInt(v).toString();
 	return pyStr(v);
 }
 
+/**
+ * int() of a run of Python's \\d: any Unicode decimal digit (Nd). Nd digits
+ * come in runs of ten from 0 to 9, so a digit's value is its distance from
+ * the start of its run, mod 10.
+ */
+function digitsValue(run: string): number {
+	let n = 0;
+	for (const ch of run) {
+		const cp = ch.codePointAt(0)!;
+		let d = cp - 48;
+		if (d < 0 || d > 9) {
+			let start = cp;
+			while (ND.test(String.fromCodePoint(start - 1))) start--;
+			d = (cp - start) % 10;
+		}
+		n = n * 10 + d;
+	}
+	return n;
+}
+
+const ND = /^\p{Nd}$/u;
+
 function listed(text: string): number[] {
 	const months = new Set<number>();
-	for (const m of text.match(/\d+/g) ?? []) {
-		const n = Number(m);
+	for (const m of text.match(/\p{Nd}+/gu) ?? []) {
+		const n = digitsValue(m);
 		if (n >= 1 && n <= 12) months.add(n);
 	}
 	return [...months].sort((a, b) => a - b);

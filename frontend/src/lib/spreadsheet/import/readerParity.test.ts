@@ -11,7 +11,7 @@
 // differently. The strings here avoid those; ./stringDecoding.test.ts pins
 // each one to openpyxl's committed output and lists exactly which cells differ
 // from SheetJS.
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { XlDateTime, XlDuration } from './cells';
 import { readWorkbookWithSheetJS, readerDifference } from './sheetjsReference';
@@ -176,5 +176,45 @@ describe('streaming reader parity with SheetJS', () => {
 		const { difference, streamed } = await compare(edgePackage({ workbookPr: '<workbookPr date1904="1"/>' }));
 		expect(difference).toBeNull();
 		expect(streamed.cell('Edge', 2, 2)).toEqual(new XlDateTime('2014-01-02', 0));
+	});
+});
+
+// Built-in number formats by id, as openpyxl 3.1.5 decides date vs number
+// (issue #895). The ids are every built-in id below 60 a cell style can name
+// (0–58; 23–36 and 50–58 are locale formats Excel keeps out of styles.xml),
+// with a serial in each cell. openpyxl reads a cell as a date only when its
+// style's numFmtId is in its BUILTIN_FORMATS and that format is a date
+// format; SheetJS's table also has 56 (a time format), so there it was a
+// time. OPENPYXL_DATE_IDS is what openpyxl 3.1.5 reads from this very
+// workbook: DUMP_895=<file.xlsx> writes the bytes this test builds, to
+// re-check with openpyxl.load_workbook(<file>, data_only=True) when the pin
+// moves.
+const FORMAT_IDS = Array.from({ length: 59 }, (_, i) => i);
+const OPENPYXL_DATE_IDS = [14, 15, 16, 17, 18, 19, 20, 21, 22, 45, 46, 47];
+const SHEETJS_ONLY_DATE_IDS = [56];
+
+function builtinFormatsPackage() {
+	const xfs = FORMAT_IDS.map((id) => `<xf numFmtId="${id}"/>`).join('');
+	const styles = `<?xml version="1.0"?><styleSheet xmlns="${MAIN_NS}"><cellXfs count="${FORMAT_IDS.length}">${xfs}</cellXfs></styleSheet>`;
+	const rows = FORMAT_IDS.map((id, i) => `<row r="${i + 1}"><c r="A${i + 1}" s="${i}"><v>40179.25</v></c></row>`).join('');
+	return workbookPackage({ sheets: [['Formats', worksheet(rows)]], styles });
+}
+
+describe('built-in number formats decided as openpyxl does (issue #895)', () => {
+	it('reads a serial as a date only under openpyxl\'s built-in date formats; id 56 is a number', async () => {
+		const bytes = builtinFormatsPackage();
+		if (process.env.DUMP_895) writeFileSync(process.env.DUMP_895, bytes);
+		const streamed = new B023Workbook(await readWorkbook(bytes));
+		const dates = FORMAT_IDS.filter((id) => typeof streamed.cell('Formats', 1, id + 1) !== 'number');
+		expect(dates).toEqual(OPENPYXL_DATE_IDS);
+		expect(streamed.cell('Formats', 1, 57)).toBe(40179.25);
+		expect(streamed.cell('Formats', 1, 15)).toEqual(new XlDateTime('2010-01-01', 21_600_000));
+		expect(streamed.cell('Formats', 1, 47)).toEqual(new XlDuration(40179.25));
+	});
+
+	it('differs from SheetJS only at the ids SheetJS\'s table adds', async () => {
+		const reference = new B023Workbook((await readWorkbookWithSheetJS(builtinFormatsPackage())).source);
+		const sheetjsDates = FORMAT_IDS.filter((id) => typeof reference.cell('Formats', 1, id + 1) !== 'number');
+		expect(sheetjsDates).toEqual([...OPENPYXL_DATE_IDS, ...SHEETJS_ONLY_DATE_IDS].sort((a, b) => a - b));
 	});
 });

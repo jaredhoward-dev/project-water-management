@@ -38,4 +38,20 @@ describe('month lists', () => {
 		expect(monthList(7.5)).toEqual([5, 7]);
 		expect(monthList(1112)).toEqual([]);
 	});
+
+	// Python's \d is any Unicode decimal digit and int() reads it (issue #895); the expected
+	// values are extract_project.py month_list()'s under Python 3.14.
+	it("reads any Unicode decimal digit, as Python's \\d and int() do", () => {
+		expect(monthList('\u0661\u0660,\u0967\u0968,3')).toEqual([3, 10, 12]); // Arabic-Indic 10, Devanagari 12
+		expect(monthList('１１,２')).toEqual([2, 11]); // fullwidth
+		expect(monthList('\u{1D7D9}\u{1D7D0}')).toEqual([12]); // double-struck 1 after bold 2: adjacent runs of ten
+		expect(substringExtraMonths('１１,')).toEqual([]); // the workbook's FIND looks for ASCII "1,"
+	});
+
+	it('reads a whole number past 1e16 as all its digits, as str(int(v)) does', () => {
+		expect(monthList(1e16)).toEqual([]);
+		expect(monthList(10000000000000001)).toEqual([]);
+		expect(substringExtraMonths(1e16)).toEqual([]);
+		expect(monthList(-3)).toEqual([3]);
+	});
 });

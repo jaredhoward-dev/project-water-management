@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Report } from './report';
 import { syntheticB023 } from './testWorkbook';
-import { readTransfers } from './transfers';
+import { isZeroFormula, readTransfers } from './transfers';
 import { B023Workbook } from './workbook';
 
 const read = (b = syntheticB023()) => {
@@ -64,5 +64,26 @@ describe('readTransfers', () => {
 		const b = syntheticB023().set('Transfers', 'N12', null).set('Transfers', 'N5', 'Transfer to:').set('Transfers', 'O5', 'Farm B').set('Transfers', 'O12', null);
 		expect(read(b).transfers.map((t) => t.to)).toEqual(['Farm B']);
 		expect(() => read(syntheticB023().set('Transfers', 'N15', null))).toThrow("[Transfers] config rows not found: ['rate']");
+	});
+});
+
+// extract_project.py is_zero_formula()'s answers under Python 3.14 (issue #895): its \s and
+// strip() take Python's whitespace (no-break and other Unicode spaces, the C0 separators),
+// and its 0 is the ASCII digit only.
+describe('isZeroFormula', () => {
+	it('matches a constant 0 with Python\'s whitespace around it', () => {
+		const cases: [string | number, boolean][] = [
+			['=0', true],
+			['\u00a0=\u20030\u3000', true],
+			['=\u00a00.0\u2028', true],
+			['0\x1c', true],
+			['\x85=0', true],
+			['= 0 ', true],
+			['=\u0660', false],
+			['=0.5', false],
+			[0, true],
+			[1, false]
+		];
+		expect(cases.map(([v]) => isZeroFormula(v))).toEqual(cases.map(([, z]) => z));
 	});
 });
