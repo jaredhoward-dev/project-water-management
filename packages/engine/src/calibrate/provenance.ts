@@ -140,15 +140,37 @@ const keptForFit = (kept: readonly string[] | null | undefined, seriesId: string
 };
 
 /**
- * The days a list of exclusions (or missing periods) leaves out, as merged
- * inclusive epoch-day ranges, sorted: what scoring reads of the list. Two
- * lists that leave out the same days are equal however they are written: a
- * reworded reason, another order, a water year as its dates, or one period
- * split in two.
+ * The window a fit scored, as inclusive epoch days (null = open on that side,
+ * the record's own start or end), read as a run reads the settings' window
+ * (prepare.ts): an invalid date is no bound, and a reversed window scores the
+ * whole record.
  */
-function excludedDaysKey(list: readonly CalibrationExclusion[] | null | undefined): [number, number][] {
-	const ranges = exclusionRanges(list)
-		.map((r) => [toEpochDay(r.start), toEpochDay(r.end)] as [number, number])
+type ScoredWindow = { from: number | null; to: number | null };
+function scoredWindow(start: unknown, end: unknown): ScoredWindow {
+	const day = (v: unknown) => (isIsoDate(v) ? v : null);
+	const a = day(start);
+	const b = day(end);
+	if (a && b && a > b) return { from: null, to: null };
+	return { from: a ? toEpochDay(a) : null, to: b ? toEpochDay(b) : null };
+}
+
+const OPEN_WINDOW: ScoredWindow = { from: null, to: null };
+
+/**
+ * The days a list of exclusions (or missing periods) leaves out inside the
+ * window a fit scored, as merged inclusive epoch-day ranges, sorted: what
+ * scoring reads of the list. The list is first sanitized as a run sanitizes it
+ * (sanitizeExclusions: an invalid entry, which a run drops with a warning,
+ * leaves out nothing here either), and days outside `window` are dropped, as
+ * no score reads them. Two lists that leave out the same scored days are equal
+ * however they are written: a reworded reason, another order, a water year as
+ * its dates, one period split in two, an invalid entry, or a period wholly
+ * outside the window.
+ */
+function excludedDaysKey(list: unknown, window: ScoredWindow = OPEN_WINDOW): [number, number][] {
+	const ranges = exclusionRanges(sanitizeExclusions(list, []))
+		.map((r) => [Math.max(toEpochDay(r.start), window.from ?? -Infinity), Math.min(toEpochDay(r.end), window.to ?? Infinity)] as [number, number])
+		.filter(([a, b]) => a <= b)
 		.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
 	const out: [number, number][] = [];
 	for (const [a, b] of ranges) {
@@ -159,16 +181,18 @@ function excludedDaysKey(list: readonly CalibrationExclusion[] | null | undefine
 	return out;
 }
 
-/** The two lists leave out the same days (excludedDaysKey). */
-const sameExcludedDays = (a: readonly CalibrationExclusion[] | null | undefined, b: readonly CalibrationExclusion[] | null | undefined) =>
-	sameJson(excludedDaysKey(a), excludedDaysKey(b));
+/** The two lists leave out the same scored days (excludedDaysKey). */
+const sameExcludedDays = (a: unknown, b: unknown, window: ScoredWindow) => sameJson(excludedDaysKey(a, window), excludedDaysKey(b, window));
 
-/** settings.flowMissing as the days each record leaves out, without the records that leave none out: two that leave out the same days compare equal. */
-const nonEmpty = (fm: Record<string, CalibrationExclusion[]> | null | undefined): Record<string, [number, number][]> =>
+/**
+ * settings.flowMissing as the scored days each record leaves out, without the records that leave none out: two that
+ * leave out the same scored days compare equal.
+ */
+const nonEmpty = (fm: Record<string, unknown> | null | undefined, window: ScoredWindow): Record<string, [number, number][]> =>
 	Object.fromEntries(
-		Object.entries(fm ?? {})
-			.filter(([, l]) => Array.isArray(l) && l.length > 0)
-			.map(([k, l]) => [k, excludedDaysKey(l)] as const)
+		Object.entries(fm && typeof fm === 'object' ? fm : {})
+			.map(([k, l]) => [k, Array.isArray(l) ? excludedDaysKey(l, window) : []] as const)
+			.filter(([, days]) => days.length > 0)
 			.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
 	);
 
@@ -589,18 +613,18 @@ export interface FitContext {
 }
 
 /** The settings exclude exactly the fit's exclusions and the water years its rule left out (date ranges compared). */
-function withRuleYears(settings: Partial<ProjectSettings>, record: FitRecord): boolean {
+function withRuleYears(settings: Partial<ProjectSettings>, record: FitRecord, window: ScoredWindow): boolean {
 	const rule = record.auto?.ruleExclusions ?? [];
 	if (!rule.length) return false;
-	return sameExcludedDays(settings.calibrationExclusions, [...(record.exclusions ?? []), ...rule]);
+	return sameExcludedDays(settings.calibrationExclusions, [...(Array.isArray(record.exclusions) ? record.exclusions : []), ...rule], window);
 }
 
 /** Whether any water year an automated fit's rule left out is still scored under these exclusions. */
-function ruleYearsScored(exclusions: readonly CalibrationExclusion[], ruleYears: readonly CalibrationExclusion[]): boolean {
+function ruleYearsScored(exclusions: unknown, ruleYears: readonly CalibrationExclusion[], window: ScoredWindow): boolean {
 	if (!ruleYears.length) return false;
 	// Merged, so a year the settings leave out in two pieces is left out.
-	const kept = excludedDaysKey(exclusions);
-	return excludedDaysKey(ruleYears).some(([a, b]) => !kept.some(([ka, kb]) => ka <= a && kb >= b));
+	const kept = excludedDaysKey(exclusions, window);
+	return excludedDaysKey(ruleYears, window).some(([a, b]) => !kept.some(([ka, kb]) => ka <= a && kb >= b));
 }
 
 /** The fit record for a report, as Apply stores it. */
@@ -1221,14 +1245,20 @@ export function fitRecordStatus(settings: Partial<ProjectSettings>, record: FitR
 	// The flow generation method (issue #553): Per unit is the only one since engine 1.109.0 (issue #658), so a fit made
 	// under Fragmentation, now retired, was made on other rain.
 	const methodChanged = fitFlowMethod(record) === 'fragmentation';
+	// Exclusions and missing periods are compared by the days they leave out inside the window the fit scored (a
+	// changed window is windowChanged), sanitized as a run reads them.
+	const fitWindow = scoredWindow(record.calibrationStart, record.calibrationEnd);
+	const ruleYearsKept = withRuleYears(settings, record, fitWindow);
 	return {
 		editedParams: editedParams(settings, record),
 		otherModel: (record.model as string) !== 'gr4j',
 		windowChanged: (settings.calibrationStart ?? null) !== record.calibrationStart || (settings.calibrationEnd ?? null) !== record.calibrationEnd,
 		// Settings that exclude the fit's exclusions and the years its rule left out (§2.10j) are the fit's own days too.
 		// A record's own missing periods (engine ≥ 1.102.0) are the fit's days too: absent on either side is none.
-		exclusionsChanged: (!sameExcludedDays(settings.calibrationExclusions, record.exclusions) && !withRuleYears(settings, record)) || !sameJson(nonEmpty(settings.flowMissing), nonEmpty(record.flowMissing)),
-		...(!withRuleYears(settings, record) && ruleYearsScored(settings.calibrationExclusions ?? [], record.auto?.ruleExclusions ?? []) ? { ruleYearsScored: true } : {}),
+		exclusionsChanged:
+			(!sameExcludedDays(settings.calibrationExclusions, record.exclusions, fitWindow) && !ruleYearsKept) ||
+			!sameJson(nonEmpty(settings.flowMissing, fitWindow), nonEmpty(record.flowMissing, fitWindow)),
+		...(!ruleYearsKept && ruleYearsScored(settings.calibrationExclusions, record.auto?.ruleExclusions ?? [], fitWindow) ? { ruleYearsScored: true } : {}),
 		// Compared resolved on both sides, so a stored field left at its default is no change.
 		// A fit at a gauge (engine ≥ 1.41.0) read no gauged range, so a change of the outlet records' ratings is none to it.
 		// The kept outliers and flat stretches (engine ≥ 1.102.0) decide the suspect days as the flags' treatments do.
