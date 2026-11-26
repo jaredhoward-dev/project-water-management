@@ -298,6 +298,35 @@ describe('changing the notice', () => {
 		expect((await asOwner('SELECT note FROM run_publication WHERE id = $1', [cur.id]))[0].note).not.toBe('raced');
 	});
 
+	// Issue #861: publishRun reads a body with no restriction as "none" (api.md § Publication). No app
+	// path sends one while a restriction is in force: the Edit notice form PATCHes the whole notice from
+	// the current one, the Publish dialog starts from it too (PublicationPanel.svelte draftFrom → parseDraft,
+	// round trip pinned in frontend publication.test.ts), and an auto publish carries it (autoRun.db.test.ts).
+	it('keeps the restriction in force when only the notice’s words, the note or the run change, as the app sends them (issue #861)', async () => {
+		const pid = await makeProject(owner, 'Notice words');
+		const restricted = { level: 'restricted', pct: 20, notice: { en: 'Irrigate at night only.' } };
+		const first = await publish(owner, await run(owner, pid), { restriction: restricted }, pid);
+		expect(first.status).toBe(201);
+		const at = `/projects/${pid}/publication/${first.body.publication.id}`;
+		const current = async () => (await owner.call('GET', `/projects/${pid}/publication`)).body.current;
+		// The note alone leaves the restriction as it was.
+		expect((await owner.call('PATCH', at, { note: 'Staff only' })).status).toBe(200);
+		expect((await current()).restriction).toEqual(restricted);
+		// New words from the Edit notice form: the whole notice, its level and percentage as they stand.
+		const cur = await current();
+		const reworded = { ...cur.restriction, notice: { en: 'Irrigate between 18:00 and 06:00 only.' } };
+		expect((await owner.call('PATCH', at, { restriction: reworded, nextExpectedOn: cur.nextExpectedOn })).status).toBe(200);
+		expect((await current()).restriction).toEqual({ level: 'restricted', pct: 20, notice: { en: 'Irrigate between 18:00 and 06:00 only.' } });
+		// A new run from the Publish dialog, which starts from the current notice.
+		const before = await current();
+		const again = await publish(owner, await run(owner, pid), { restriction: before.restriction, nextExpectedOn: before.nextExpectedOn }, pid);
+		expect(again.status).toBe(201);
+		expect(again.body.publication.restriction).toEqual(before.restriction);
+		// Positive control: only an explicit level lifts it.
+		expect((await owner.call('PATCH', `/projects/${pid}/publication/${again.body.publication.id}`, { restriction: { level: 'none' } })).status).toBe(200);
+		expect((await current()).restriction).toEqual({ level: 'none', pct: null, notice: {} });
+	});
+
 	it('never lets the app change what was published, only the notice', async () => {
 		const cur = (await viewer.call('GET', `/projects/${projectId}/publication`)).body.current;
 		for (const sql of ["UPDATE run_publication SET catchment_view = '{}' WHERE id = $1", 'UPDATE run_publication SET published_at = now() WHERE id = $1']) {
