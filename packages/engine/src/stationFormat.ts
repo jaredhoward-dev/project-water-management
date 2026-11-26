@@ -262,7 +262,7 @@ function parseValue(raw: unknown, missing: ReadonlySet<string>, decimalComma: bo
 	if (missing.has(s.toLowerCase())) return null;
 	// Under a decimal comma a dot is a thousands separator only where it groups whole thousands (1.234,5): a lone
 	// decimal point (1.5, 0.254) is refused, never read with its dot dropped as 15 or 254 mm.
-	if (decimalComma && s.includes('.') && !/^[+-]?\d{1,3}(\.\d{3})+(,\d*)?$/.test(s)) return undefined;
+	if (decimalComma && s.includes('.') && !/^[+-]?[1-9]\d{0,2}(\.\d{3})+(,\d*)?$/.test(s)) return undefined;
 	const t = decimalComma ? s.replace(/\./g, '').replace(',', '.') : s;
 	return /^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/.test(t) ? Number(t) : undefined;
 }
