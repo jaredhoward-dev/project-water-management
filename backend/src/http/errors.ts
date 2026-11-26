@@ -229,6 +229,10 @@ export const ERROR_CODES = [
  *     #897), no longer match that ensemble (the engine's pairedRefusal: another
  *     runoff model, period, or a monthly PE under a varied pan coefficient).
  *     The workspace's uncertainty panel shows the message.
+ *   seats_below_editors (409): POST /teams/:id/plan/seats, with
+ *     BILLING_ENFORCED on, asking for fewer seats than the team's editors in
+ *     use (app_team_seats_in_use); params { seats, editors }. The English
+ *     team Plan and usage page shows the message.
  */
 export const MACHINE_ERROR_CODES = [
 	'render_token_refused',
@@ -269,7 +273,8 @@ export const MACHINE_ERROR_CODES = [
 	'email_unverified',
 	'email_disposable',
 	'team_move_admin',
-	'paired_baseline_mismatch'
+	'paired_baseline_mismatch',
+	'seats_below_editors'
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number] | (typeof MACHINE_ERROR_CODES)[number];
 
