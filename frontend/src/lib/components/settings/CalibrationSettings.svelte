@@ -780,6 +780,7 @@
 	<div class="sub-card" data-testid="fit-now-card">
 	<FitPanel
 		projectId={project.id}
+		revision={project.updatedAt}
 		x2Open={draft.x2Open}
 		settings={() => $state.snapshot(s) as unknown as ProjectSettings}
 		model={() => (editor?.dirty ? editor.snapshot() : undefined)}
@@ -848,6 +849,7 @@
 				<AutoFitPanel
 					bind:this={autoFit}
 					projectId={project.id}
+					revision={project.updatedAt}
 					{savedRules}
 					formRules={s.calibrationRules}
 					formDirty={dirty}

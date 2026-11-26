@@ -207,6 +207,27 @@ describe('ruleCaseWaterYears (issue #894): the water years each case fits on, be
 	});
 });
 
+describe('planAutoCalibration’s caseEvaluations (issue #913): the model runs each case’s fit plans', () => {
+	it('counts the dry → wet test on a long record and not on a short one, as each case’s own fit runs', () => {
+		const counts: Record<number, number> = {};
+		for (const years of [2, 8]) {
+			const input = synthetic(TRUTH, {}, years);
+			const plan = planAutoCalibration(input);
+			const { starts, budget } = plan.rules.run;
+			counts[years] = plan.caseEvaluations;
+			for (let i = 0; i < plan.cases.length; i++) {
+				const job = prepareAutoCase(input, plan, i);
+				if (!('finish' in job)) throw new Error(`case ${i} could not start: ${job.error}`);
+				// The estimate is the case's fit, optimisation for optimisation.
+				expect(plan.caseEvaluations).toBe(job.count * job.budget);
+			}
+			// Every start and the split-sample test; the dry → wet test only with four qualifying water years.
+			expect(plan.caseEvaluations).toBe(budget * (starts + (years === 8 ? 2 : 1)));
+		}
+		expect(counts[2]).toBeLessThan(counts[8]!);
+	});
+});
+
 describe('a case fitted in steps (prepareAutoCase), as the server’s jobs fit it', () => {
 	it('gives runAutoCase’s case to the bit, its fit paused and resumed across fresh set-ups', () => {
 		const input = synthetic(TRUTH, { run: { seed: 5, starts: 2, budget: 60 }, cases: { bounds: ['wide', 'typical'], objectives: ['kgePrime'] } });

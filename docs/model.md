@@ -11253,7 +11253,11 @@ tick is handed back for the next tick, its attempt given back.
 *What is refused.* Before anything is queued, the work is estimated from the
 model's size (the run's days, its nodes, the units with an area and the GR4J
 warm-up) × the model runs it makes, reading no clock
-(`calibration/estimate.ts`), so the same project and rules always get the
+(`calibration/estimate.ts`); a case makes one budget of runs per optimisation
+its fit plans (`plannedFits`: the starts, the split-sample test, the dry → wet
+test only when the case's record has 4 qualifying water years, and the fit
+without the WR2012 penalty where it applies; `planAutoCalibration`'s
+`caseEvaluations`, issue #913), so the same project and rules always get the
 same answer. Its constants are an upper envelope of fit evaluations measured
 on 92 networks (the largest 0.75 of it), carried to an arm64 Lambda at
 1 024 MB by a factor of 4, so it errs long. Only what can't be cut is refused

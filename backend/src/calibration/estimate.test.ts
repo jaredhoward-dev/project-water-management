@@ -132,6 +132,7 @@ describe('planCalibration', () => {
 	it('refuses a run of the rules past its whole limit, just past it, saying how long and how many model runs', () => {
 		const input = sized(1000, 2, 400);
 		const plan = planAutoCalibration(input);
+		// Under 4 water years, so each case makes its 2 starts and the split-sample test, no dry → wet test (issue #913).
 		const total = calibrationSeconds(plan, modelSize(input), AUTO_JOB_SECONDS_MAX);
 		const ok = (max: number) => {
 			try {
@@ -142,7 +143,7 @@ describe('planCalibration', () => {
 		};
 		expect(ok(total)).toBe('ok 2');
 		expect(ok(total * 0.999)).toBe(
-			`refused: the rules would take up to about ${Math.ceil(total / 3600)} hours on the server (2 fits of ${400 * (2 + 2)} model runs each), more than a run of the rules may take (${(total * 0.999) / 3600} hours): lower the model runs per fit, the starts or the fits in the calibration rules`
+			`refused: the rules would take up to about ${Math.ceil(total / 3600)} hours on the server (2 fits of ${400 * (2 + 1)} model runs each), more than a run of the rules may take (${(total * 0.999) / 3600} hours): lower the model runs per fit, the starts or the fits in the calibration rules`
 		);
 	});
 
