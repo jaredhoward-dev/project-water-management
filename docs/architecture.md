@@ -3370,7 +3370,14 @@ sequenceDiagram
   settled in one transaction. A reservation never settled (its Lambda was
   killed) expires `ASSISTANT_TURN_SECONDS` + 120 s after it began, past the
   Lambda's timeout, and is then charged in full (Bedrock may have billed all
-  of it), at the next begin or the job tick. The begin takes a reservation of
+  of it), at the next begin or the job tick. A charge that arrives after its
+  reservation was charged that way finds no reservation for its id and
+  charges its tokens again (counted twice, never too little, by design);
+  `app_assistant_charge` says so in its `reservation_missing` column
+  (388_assistant_charge_missing_reservation), and the backend logs a warn
+  `assistant_charge_no_reservation` with the reservation id and the turn's
+  input and output tokens, nothing personal, so how often it happens can be
+  counted in the logs (issue #880). The begin takes a reservation of
   at most 3600 s, so `ASSISTANT_TURN_SECONDS` is capped at 3480
   (`config.ts` `MAX_TURN_SECONDS`; a longer value, set for a slow local
   model, had made every message a 500). So the month's spend plus every

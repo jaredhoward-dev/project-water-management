@@ -3831,7 +3831,10 @@ page holds the conversation and sends it with each turn.
   cost (a model the table hasn't) adds 1 to `unpriced_turns` instead. The
   4-argument form stays for a backend released before 324: the same charge
   with no cache tokens, unpriced. A reservation charged in full at its
-  expiry is unpriced too. So the month's cost is exact when
+  expiry is unpriced too. The 7-argument form also returns
+  `reservation_missing` (388): true when it was given a reservation id no
+  row has (one already charged at its expiry), so the backend can log the
+  double count (architecture.md § Assistant). So the month's cost is exact when
   `unpriced_turns` is 0, and a floor otherwise. The local providers (mock,
   Ollama) cost 0.
 - `assistant_usage` is read-only to `water_app`: one SELECT policy,
