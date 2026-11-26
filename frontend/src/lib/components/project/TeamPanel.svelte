@@ -41,6 +41,9 @@
 	const current = $derived(project.team?.id ?? '');
 	// Only teams you may add projects to (member or admin); a team viewer can't.
 	const movable = $derived(teams?.filter((t) => hasTeamRole(t.role, 'member')) ?? null);
+	// Taking it out of its team, or into another, is the team's admins' (issue #900): an owner who is a plain
+	// member of the team, or not in it, only sees why.
+	const teamAdmin = $derived(!project.team || project.team.role === 'admin');
 	const targetName = $derived(target ? (teams?.find((t) => t.id === target)?.name ?? 'the team') : 'Personal');
 
 	async function move(e: SubmitEvent) {
@@ -77,7 +80,9 @@
 		<p class="owner-line"><strong>Personal project.</strong> Only the people listed under Members can open it.</p>
 	{/if}
 
-	{#if isOwner}
+	{#if isOwner && !teamAdmin}
+		<p class="muted small">Only an admin of {project.team?.name ?? 'its team'} can move it out of the team.</p>
+	{:else if isOwner}
 		{#if error}<div class="alert alert-error" role="alert">{error}</div>{/if}
 		<form class="form-row move" onsubmit={move}>
 			<div class="field grow">

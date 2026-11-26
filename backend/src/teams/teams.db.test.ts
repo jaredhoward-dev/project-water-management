@@ -108,6 +108,45 @@ describe('moving projects between teams', () => {
 		expect(moved.body.project.team).toBeNull();
 		expect(moved.body.project.role).toBe('owner');
 	});
+
+	// Issue #900 (392_team_project_move_admin): taking a project out of a team, or into another, needs admin on the
+	// team it leaves. Before, a plain member who created a team project (its direct owner) could take it out, so the
+	// team's admins lost it, and keep it after leaving the team.
+	it('refuses a plain team member, or an outside direct owner, taking a team project out of the team; an admin may', async () => {
+		const admin = await signUp('MoveAdmin');
+		const member = await signUp('MoveMember');
+		const outside = await signUp('MoveOutside');
+		const teamId = (await admin.call('POST', '/teams', { name: 'Keeps its projects' })).body.team.id;
+		await admin.call('POST', `/teams/${teamId}/members`, { email: member.email, role: 'member' });
+		// The member's own team, where they are admin: moving into it is no way round.
+		const otherTeam = (await member.call('POST', '/teams', { name: 'Member’s own' })).body.team.id;
+		const pid = (await member.call('POST', '/projects', { name: 'Member made it', teamId })).body.project.id;
+		expect((await member.call('GET', `/projects/${pid}`)).body.project.role).toBe('owner');
+		expect((await admin.call('POST', `/projects/${pid}/members`, { email: outside.email, role: 'owner' })).status).toBe(201);
+
+		for (const [who, to] of [[member, null], [member, otherTeam], [outside, null]] as const) {
+			const r = await who.call('PATCH', `/projects/${pid}`, { teamId: to });
+			expect(r.status).toBe(403);
+			expect(r.body.code).toBe('team_move_admin');
+			// The trigger agrees, even if the route's check were missed.
+			await expect(withUser(who.id, (db) => db.query('UPDATE project SET team_id = $2 WHERE id = $1', [pid, to]))).rejects.toThrow(
+				/admin of the team/
+			);
+		}
+		expect((await admin.call('GET', `/projects/${pid}`)).body.project.team.id).toBe(teamId);
+		// The member still edits it, and leaving the team still takes it (leaveProjects.ts).
+		expect((await member.call('PATCH', `/projects/${pid}`, { name: 'Renamed by its maker' })).status).toBe(200);
+
+		// Positive control: a team admin may move it to another team they contribute to, and out.
+		await member.call('POST', `/teams/${otherTeam}/members`, { email: admin.email, role: 'member' });
+		const moved = await admin.call('PATCH', `/projects/${pid}`, { teamId: otherTeam });
+		expect(moved.status).toBe(200);
+		expect(moved.body.project.team.id).toBe(otherTeam);
+		// Now the member is admin of the team it is in, so they may take it out.
+		const out = await member.call('PATCH', `/projects/${pid}`, { teamId: null });
+		expect(out.status).toBe(200);
+		expect(out.body.project.team).toBeNull();
+	});
 });
 
 // 008_team_viewer: a read-only team role. Team viewers read every team

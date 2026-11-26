@@ -2195,6 +2195,20 @@ In short:
   `teams/leave-projects.db.test.ts` (the removed creator loses access, an
   admin owns it, the keep-owner trigger holds, a concurrent leave, the
   positive control).
+- **Only a team admin takes a project out of its team** (issue #900,
+  392_team_project_move_admin). Moving a project to personal, or to another
+  team, needs admin on the team it is in, besides project owner and member
+  or admin of the team it goes to. Before, a plain member who created a
+  team project (its direct owner), or an outside person the team shared it
+  with as a direct owner, could take it out: the team's admins lost it, and
+  the member could then leave the team and keep it, which defeated the
+  decision above. `project_update`'s WITH CHECK sees only the new row, so a
+  BEFORE UPDATE OF `team_id` trigger (`project_team_move_guard`, invoker
+  rights, water_app only, so a team's deletion still sets its projects'
+  team to null) refuses it, and `PATCH /projects/:id` checks first with
+  `403 team_move_admin`. Moving a personal project into a team is
+  unchanged. Tests: `teams/teams.db.test.ts` (the member and the outside
+  owner refused through the route and SQL, a team admin allowed).
 - **Your own id in any case is you.** The member routes (`DELETE
   /teams/:id/members/:userId`, `DELETE /projects/:id/members/:userId`)
   compare the id case-insensitively with the caller's, as the team's MFA

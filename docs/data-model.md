@@ -3488,7 +3488,15 @@ would otherwise become the direct owner of a project inside a team they can
 only read. `project_insert` and `project_update` enforce this (008);
 `project_update` only gates a *change* of team, so a direct editor can still
 edit a project whose team they only view. A viewer copying a team project gets
-a personal copy.
+a personal copy. **Taking a project out of a team, or into a different one,
+also needs admin on the team it leaves** (issue #900,
+392_team_project_move_admin): a plain member who created it, or an outside
+person the team made a direct owner, owns it directly but may not take it from
+the team's admins (nor keep it by moving it out and then leaving). RLS's WITH
+CHECK can't see the old team, so the BEFORE UPDATE OF `team_id` trigger
+`project_team_move_guard` refuses it for water_app (not for the owner role, so
+`ON DELETE SET NULL` still works), and `PATCH /projects/:id` answers
+`403 team_move_admin` first.
 
 **Leaving a team takes its projects with it** (operator decision,
 2026-11-24; `backend/src/teams/leaveProjects.ts`). When someone leaves a
