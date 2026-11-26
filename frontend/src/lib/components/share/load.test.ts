@@ -62,6 +62,23 @@ describe('loadShare', () => {
 		const failed = await loadShare(fakeApi({ series: async () => Promise.reject(new ApiError(500, 'The server had a problem')) }), TOKEN);
 		expect(failed).toMatchObject({ state: 'ready', months: null, chartFailed: true });
 	});
+
+	it('is a dead link when the link is revoked between the view and the chart (the series’ 404, then the view’s)', async () => {
+		let views = 0;
+		const api = fakeApi({
+			view: async () => (++views === 1 ? VIEW : Promise.reject(new ApiError(404, 'not found'))),
+			series: async () => Promise.reject(new ApiError(404, 'not found'))
+		});
+		expect(await loadShare(api, TOKEN)).toEqual({ state: 'dead' });
+		expect(views).toBe(2);
+		// The re-check failing for another reason (no signal) leaves the view, saying the chart couldn't load.
+		let again = 0;
+		const offline = fakeApi({
+			view: async () => (++again === 1 ? VIEW : Promise.reject(new ApiError(0, 'x'))),
+			series: async () => Promise.reject(new ApiError(404, 'not found'))
+		});
+		expect(await loadShare(offline, TOKEN)).toMatchObject({ state: 'ready', months: null, chartFailed: true });
+	});
 });
 
 describe('loadScenarioShare (WP-3.15)', () => {

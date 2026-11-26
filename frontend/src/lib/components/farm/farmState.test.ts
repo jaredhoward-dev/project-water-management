@@ -110,6 +110,20 @@ describe('FarmState', () => {
 		}
 	});
 
+	it('says why a WUA viewer’s preview is withheld (403 farm_preview_withheld), and keeps the saved copies', async () => {
+		// A copy on this machine from before (saved copies are one user's: readSaved clears another's): the farm is still there, so it stays.
+		writeSaved('u1', P, N, vaalbankFixture());
+		const s = new FarmState(
+			fakeApi({ role: 'viewer', view: async () => Promise.reject(new ApiError(403, 'x', undefined, 'farm_preview_withheld')) }),
+			() => 'u1'
+		);
+		await s.load(P, N);
+		expect(s.phase).toEqual({ kind: 'withheld' });
+		expect(s.view).toBeNull();
+		expect(s.updating).toBe(false);
+		expect(readSaved('u1', P, N)?.view.farm.name).toBe('Vaalbank (example)');
+	});
+
 	it('forgets the copy of the unit shown last once the catchment no longer lists it, and shows one it does list', async () => {
 		const OLD = 'n-unlinked';
 		const old = vaalbankFixture();

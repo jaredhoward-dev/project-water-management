@@ -43,6 +43,8 @@ const CODES: Record<string, Msg> = {
 	note_delete_denied: msg('Only the person who wrote a note, or the WUA, can delete it.'),
 	note_comment_closed: msg('This application isn’t open for comment right now.'),
 	note_audience_denied: msg('You can’t post a comment here.'),
+	// A WUA viewer's preview of a farm while a cap or full-allocation run is published (#523 I): not "no longer yours".
+	farm_preview_withheld: msg('This hydrological unit’s published figures are worked out from a registered water volume, which this project shows only to its editors and owners. Ask one of them to let you see registered volumes.'),
 	unsubscribe_link_gone: msg('This link doesn’t work any more.'),
 	feedback_link_gone: msg('This link doesn’t work any more.'),
 	export_throttled: msg('You downloaded your data a moment ago. Try again in {wait}.'),

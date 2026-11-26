@@ -15390,7 +15390,9 @@ published.
   `worstFirst`), each with its notice level, received %, dam %, or "Not published yet" (while a card's
   figures load it says "Updating…", and when neither they nor a saved copy
   can be had, "We couldn’t load your hydrological unit", never a blank
-  line), and goes straight to the only one. `/farm/[projectId]` is one farm (`?node=` and a
+  line; a farm whose figures answer 403/404, unlinked since the list loaded,
+  leaves the list and its saved copy goes, as a project the list's own
+  403/404 leaves out: `farm/load.ts` `cardOnFailure`), and goes straight to the only one. `/farm/[projectId]` is one farm (`?node=` and a
   switcher when the farmer has several there: a row of links above the name
   for up to 4 farms; past that, folded under "Your hydrological units in this catchment
   (N farms)", so the name and the WUA's notice stay on the first screen,
@@ -15689,7 +15691,11 @@ published.
 - **States.** Skeleton cards with a hidden status and "Slow signal?" after
   3 s; no publication; an error with Try again (a contact line after the
   second failure, never raw error text); access removed (403/404), which
-  also clears the saved copy; and a link to a unit that isn't the farmer's
+  also clears the saved copy; a WUA viewer kept from registered volumes
+  previewing while a cap or full-allocation run is published (`403
+  farm_preview_withheld`, #523 I): the `withheld` state, saying why
+  (worded from the code, `apiError.ts`), clearing nothing, since the farm
+  is still there; and a link to a unit that isn't the farmer's
   (`?node=` the catchment's list doesn't hold, while it holds others): "This
   hydrological unit isn’t linked to your account. If it should be, contact
   …", never "no longer" (it may never have been theirs), with **Your
@@ -16355,7 +16361,11 @@ signed in or out, for someone outside the project, on a phone first.
   one 560 px card. `share-links.spec.ts` pins both layouts and axe in both
   themes.
 - **States:** loading; a dead link ("This link has expired or was
-  withdrawn. Ask whoever sent it for a new one.") for every `404`; a link
+  withdrawn. Ask whoever sent it for a new one.") for every `404`, the
+  flow chart's included: the series answer the same 404 for "not shown for
+  privacy" and a dead link, so a chart-less answer asks the view again, and
+  a link revoked or expired since the page loaded is dead, not private
+  (`share/load.ts`); a link
   without its token ("This page needs the whole link…"); and an error with
   Try again. Every string is in `lib/components/share/share.ts`, the chart
   in `share/chart.ts`, the loading rules in `share/load.ts`, all
