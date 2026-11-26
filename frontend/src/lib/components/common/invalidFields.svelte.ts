@@ -44,6 +44,15 @@ export class InvalidFields {
 		return this.#epoch;
 	}
 
+	/**
+	 * The reset counter a field with this id follows: `epoch` here; a registry that keeps some fields out of an outer
+	 * form's resets (ForwardingInvalidFields' local fields) answers per field. NumberInput reads it.
+	 */
+	epochFor(id: string): number {
+		void id;
+		return this.epoch;
+	}
+
 	/** Record (or update) an invalid field under its instance's `key`. NumberInput calls it. */
 	set(key: string, field: InvalidField): void {
 		this.#fields.set(key, field);

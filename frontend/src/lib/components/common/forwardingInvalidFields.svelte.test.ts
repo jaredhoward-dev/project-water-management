@@ -34,4 +34,39 @@ describe('ForwardingInvalidFields', () => {
 		inner.reset();
 		expect(inner.epoch).not.toBe(e1);
 	});
+
+	it('keeps a field the form never saves out of the outer registry, in its own list only (issue #922)', () => {
+		const outer = new InvalidFields();
+		const inner = new ForwardingInvalidFields(outer, (id) => id === 'f-budget');
+		inner.set('a', field);
+		inner.set('b', { ...field, id: 'f-penalty', label: 'WR2012 MAR penalty weight' });
+		expect(inner.fields.map((f) => f.id)).toEqual(['f-budget', 'f-penalty']);
+		expect(outer.fields.map((f) => f.id)).toEqual(['f-penalty']);
+		inner.delete('a');
+		inner.delete('b');
+		expect(inner.count).toBe(0);
+		expect(outer.count).toBe(0);
+	});
+
+	it('keeps a local field off the outer registry’s resets: only its own reset puts it back (issue #922)', () => {
+		const outer = new InvalidFields();
+		const inner = new ForwardingInvalidFields(outer, (id) => id === 'f-budget');
+		const local0 = inner.epochFor('f-budget');
+		const shared0 = inner.epochFor('f-penalty');
+		outer.reset();
+		expect(inner.epochFor('f-budget')).toBe(local0);
+		expect(inner.epochFor('f-penalty')).not.toBe(shared0);
+		const shared1 = inner.epochFor('f-penalty');
+		inner.reset();
+		expect(inner.epochFor('f-budget')).not.toBe(local0);
+		expect(inner.epochFor('f-penalty')).not.toBe(shared1);
+	});
+
+	it('answers its plain epoch for any field of a plain registry', () => {
+		const plain = new InvalidFields();
+		const e0 = plain.epochFor('x');
+		plain.reset();
+		expect(plain.epochFor('x')).toBe(plain.epoch);
+		expect(plain.epochFor('x')).not.toBe(e0);
+	});
 });
