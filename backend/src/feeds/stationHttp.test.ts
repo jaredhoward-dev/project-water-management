@@ -193,6 +193,27 @@ describe('stationHttp: a host that asked us to wait', () => {
 		await expect(stationHttp({ requester: other.requester, throttle }).get({ url: 'https://other.example.org/x', headers: {} })).resolves.toMatchObject({ text: 'ok' });
 	});
 
+	it('a request refused while the host is paused names a Retry-After only when the source gave one (issue #898)', async () => {
+		const throttle: StationThrottle = new Map();
+		const ok = fake(() => res(200, {}, 'ok'));
+		// No Retry-After: our own 60 s pause holds the host, and the local refusal says the source gave none.
+		await stationHttp({ requester: fake(() => res(429)).requester, throttle }).get({ url: 'https://a.example.com/x', headers: {} }).catch(() => {});
+		expect(throttle.get('a.example.com')).toMatchObject({ sourceRetryAfter: false });
+		const local = await stationHttp({ requester: ok.requester, throttle }).get({ url: 'https://a.example.com/y', headers: {} }).catch((e) => e);
+		expect(local).toBeInstanceOf(FeedThrottledError);
+		expect(local).toMatchObject({ status: 429, retryAfterSeconds: null });
+		expect(local.message).toMatch(/gave no Retry-After/);
+		// With one: the local refusal names the time left of the wait the source asked for.
+		await stationHttp({ requester: fake(() => res(503, { 'retry-after': '300' })).requester, throttle }).get({ url: 'https://b.example.com/x', headers: {} }).catch(() => {});
+		expect(throttle.get('b.example.com')).toMatchObject({ sourceRetryAfter: true });
+		const asked = await stationHttp({ requester: ok.requester, throttle }).get({ url: 'https://b.example.com/y', headers: {} }).catch((e) => e);
+		expect(asked).toMatchObject({ status: 503 });
+		expect(asked.retryAfterSeconds).toBeGreaterThan(290);
+		expect(asked.retryAfterSeconds).toBeLessThanOrEqual(300);
+		expect(asked.message).toMatch(/\(Retry-After: (29\d|300) s\)/);
+		expect(ok.calls).toHaveLength(0);
+	});
+
 	it('pauses a 503 without Retry-After for the default, and never past the cap', async () => {
 		const throttle: StationThrottle = new Map();
 		await stationHttp({ requester: fake(() => res(503)).requester, throttle }).get({ url: 'https://a.example.com/x', headers: {} }).catch(() => {});

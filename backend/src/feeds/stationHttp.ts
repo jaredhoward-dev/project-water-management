@@ -48,8 +48,13 @@ export const MAX_HOPS = 3;
 
 export class StationAddressError extends FeedUnavailableError {}
 
-/** Per host, until when (epoch ms) no station request asks it, after a 429 or 503. */
-export type StationThrottle = Map<string, { until: number; status: 429 | 503 }>;
+/**
+ * Per host, until when (epoch ms) no station request asks it, after a 429 or
+ * 503, and whether the source named that wait (a usable Retry-After) or it is
+ * our own default: a refusal here reports the time left as the source's
+ * Retry-After only when it gave one (issue #898, as http.ts ThrottleState).
+ */
+export type StationThrottle = Map<string, { until: number; status: 429 | 503; sourceRetryAfter: boolean }>;
 /**
  * Shared by every live station client in one process, so a warm fetcher Lambda keeps a host's Retry-After across
  * feeds and invocations. Apart from http.ts's CHC/DWS map: the hosts never overlap (stationUrl.ts OWN_UPSTREAM_HOSTS).
@@ -154,7 +159,7 @@ export function stationHttp(
 		const p = throttle.get(host);
 		if (!p) return;
 		const left = p.until - Date.now();
-		if (left > 0) throw new FeedThrottledError(p.status, Math.ceil(left / 1000));
+		if (left > 0) throw new FeedThrottledError(p.status, p.sourceRetryAfter ? Math.ceil(left / 1000) : null);
 		throttle.delete(host);
 	};
 	const requester = opts.requester ?? nodeRequester(opts.lookup ?? guardedLookup());
@@ -209,7 +214,7 @@ export function stationHttp(
 					const h = res.headers['retry-after'];
 					const after = retryAfterSeconds(Array.isArray(h) ? h[0]! : (h ?? null));
 					const pause = Math.min(THROTTLE_MAX_SECONDS, after ?? THROTTLE_DEFAULT_SECONDS);
-					if (pause > 0) throttle.set(target.host, { until: Date.now() + pause * 1000, status });
+					if (pause > 0) throttle.set(target.host, { until: Date.now() + pause * 1000, status, sourceRetryAfter: after !== null });
 					throw new FeedThrottledError(status, after);
 				}
 				if (status !== 200) {

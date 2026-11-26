@@ -212,8 +212,14 @@ export function retryAfterSeconds(value: string | null, now = Date.now()): numbe
 	return Number.isFinite(at) ? Math.max(0, Math.ceil((at - now) / 1000)) : null;
 }
 
-/** Per host, the pause a 429, 503 or 403 started: until when (epoch ms) a live fetch doesn't ask it. */
-export type ThrottleState = Map<string, { until: number; status: 429 | 503 | 403 }>;
+/**
+ * Per host, the pause a 429, 503 or 403 started: until when (epoch ms) a live
+ * fetch doesn't ask it, and whether the source named that wait (a usable
+ * Retry-After) or it is our own default. A fetch refused here reports the time
+ * left as the source's Retry-After only when the source gave one, so the feed
+ * panel never says the source asked for a wait it didn't (issue #898).
+ */
+export type ThrottleState = Map<string, { until: number; status: 429 | 503 | 403; sourceRetryAfter: boolean }>;
 /**
  * Shared by every client in one process, so a warm fetcher Lambda remembers a
  * throttled or refusing host across invocations: the fetches queued behind
@@ -339,7 +345,7 @@ export function liveHttp(
 		const p = throttle.get(host);
 		if (!p) return;
 		const left = p.until - Date.now();
-		if (left > 0) throw p.status === 403 ? new FeedRefusedError() : new FeedThrottledError(p.status, Math.ceil(left / 1000));
+		if (left > 0) throw p.status === 403 ? new FeedRefusedError() : new FeedThrottledError(p.status, p.sourceRetryAfter ? Math.ceil(left / 1000) : null);
 		throttle.delete(host);
 	};
 	const get = async (
@@ -402,12 +408,12 @@ export function liveHttp(
 			await res.body?.cancel();
 			const after = retryAfterSeconds(res.headers.get('retry-after'));
 			const pause = Math.min(THROTTLE_MAX_SECONDS, after ?? THROTTLE_DEFAULT_SECONDS);
-			if (pause > 0) throttle.set(target.host, { until: Date.now() + pause * 1000, status: res.status });
+			if (pause > 0) throttle.set(target.host, { until: Date.now() + pause * 1000, status: res.status, sourceRetryAfter: after !== null });
 			throw new FeedThrottledError(res.status, after);
 		}
 		if (res.status === 403) {
 			await res.body?.cancel();
-			throttle.set(target.host, { until: Date.now() + REFUSED_PAUSE_SECONDS * 1000, status: 403 });
+			throttle.set(target.host, { until: Date.now() + REFUSED_PAUSE_SECONDS * 1000, status: 403, sourceRetryAfter: false });
 			throw new FeedRefusedError();
 		}
 		if (res.status !== 200 && res.status !== 206) {
