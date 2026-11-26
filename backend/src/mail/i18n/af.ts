@@ -169,6 +169,14 @@ export const af: Partial<Record<MailKey, string>> = {
 	'mail.alert.digest.more.one': '…en nog {more} waarskuwing. Maak die opvanggebied oop om dit te sien.',
 	// …and {more} more alerts. Open the catchment to see them all.
 	'mail.alert.digest.more.other': '…en nog {more} waarskuwings. Maak die opvanggebied oop om hulle almal te sien.',
+	// {n} older alert for this catchment was left out of this summary, because one day’s summaries list at most {limit} alerts across all your catchments. Open the catchment to see it.
+	'mail.alert.digest.leftOut.one': '{n} ouer waarskuwing vir hierdie opvanggebied is uit hierdie opsomming weggelaat, omdat een dag se opsommings hoogstens {limit} waarskuwings vir al jou opvanggebiede saam lys. Maak die opvanggebied oop om dit te sien.',
+	// {n} older alerts for this catchment were left out of this summary, because one day’s summaries list at most {limit} alerts across all your catchments. Open the catchment to see them.
+	'mail.alert.digest.leftOut.other': '{n} ouer waarskuwings vir hierdie opvanggebied is uit hierdie opsomming weggelaat, omdat een dag se opsommings hoogstens {limit} waarskuwings vir al jou opvanggebiede saam lys. Maak die opvanggebied oop om hulle te sien.',
+	// Alerts for {n} other catchment of yours were left out of today’s summaries, because one day’s summaries list at most {limit} alerts across all your catchments. Open your catchments in the app to see them.
+	'mail.alert.digest.catchmentsLeftOut.one': 'Waarskuwings vir {n} ander opvanggebied van jou is uit vandag se opsommings weggelaat, omdat een dag se opsommings hoogstens {limit} waarskuwings vir al jou opvanggebiede saam lys. Maak jou opvanggebiede in die app oop om hulle te sien.',
+	// Alerts for {n} other catchments of yours were left out of today’s summaries, because one day’s summaries list at most {limit} alerts across all your catchments. Open your catchments in the app to see them.
+	'mail.alert.digest.catchmentsLeftOut.other': 'Waarskuwings vir {n} ander opvanggebiede van jou is uit vandag se opsommings weggelaat, omdat een dag se opsommings hoogstens {limit} waarskuwings vir al jou opvanggebiede saam lys. Maak jou opvanggebiede in die app oop om hulle te sien.',
 	// You get this daily summary because you chose daily alerts for {project}, or had more than {cap} alert emails in a day.
 	'mail.alert.digest.why': 'Jy kry hierdie daaglikse opsomming omdat jy daaglikse waarskuwings vir {project} gekies het, of op een dag meer as {cap} waarskuwings-e-posse gekry het.',
 	// Stop all alert emails for this catchment
