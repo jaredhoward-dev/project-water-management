@@ -4061,7 +4061,7 @@ through one function, which is the **only writer of subscription status**.
 
 | Table | Holds |
 | --- | --- |
-| `billing_event` | One row per event acted on: (`provider` (`mock`, `manual`, `stripe`), `event_id`) primary key, `type`, `received_at`, `account_id` (set null when the account goes; indexed), `outcome` (`applied`, `recorded`, `conflict`, `unknown_account`; 327 added `stale`; 352 `orphan_pending` and `orphan_refunded`). **Owner-only**: RLS on, no policy, no privilege for `water_app`; only `app_billing_apply` and 352's orphan functions write it. Indexed on `received_at`, which the tick's purge reads: rows received more than 90 days ago are deleted (327 `app_purge_billing_events`, worker context only, never under 4 days, past Stripe's 3-day redelivery window) |
+| `billing_event` | One row per event acted on: (`provider` (`mock`, `manual`, `stripe`), `event_id`) primary key, `type`, `received_at`, `account_id` (set null when the account goes; indexed), `outcome` (`applied`, `recorded`, `conflict`, `unknown_account`; 327 added `stale`; 352 `orphan_pending` and `orphan_refunded`). 399 added `external_ref`: the subscription id an applied-type event named (null for the record-only types), so a delete that arrives before its subscription keeps the late `created` from going live; a partial index on (`provider`, `external_ref`) over the deletes. **Owner-only**: RLS on, no policy, no privilege for `water_app`; only `app_billing_apply` and 352's orphan functions write it. Indexed on `received_at`, which the tick's purge reads: rows received more than 90 days ago are deleted (327 `app_purge_billing_events`, worker context only, never under 4 days, past Stripe's 3-day redelivery window) |
 | `subscription.billing_interval` (332) | How often the subscription bills (`month`, `year`), from the payload's `interval`: absent keeps the stored value, `null` clears it, anything else is `invalid`. The plan page works out the subscription's total from it ([billing.md § Billing interval and editor count](./billing.md#billing-interval-and-editor-count)) |
 | `subscription.last_event_at` (327) | The provider's time (`eventCreated`) of the newest event applied to the subscription; null before 327, for the staff grant, and while no event carried a time. Bookkeeping for ordering, not in "Download my data" |
 
@@ -4088,7 +4088,9 @@ cancelAtPeriodEnd, externalRef, interval?, eventCreated? }` (`interval`: `month`
 - `conflict`, changing nothing: the ref belongs to another account; a live
   status would make a second live subscription on the account under another
   ref (the one-live index, 323); or a live status for a ref already
-  `canceled` or `expired` (a late or out-of-order update after its delete).
+  `canceled` or `expired` (a late or out-of-order update after its delete),
+  or for a ref not held yet whose `subscription.deleted` is already recorded
+  (399: the delete arrived first).
   The exception (344): a live Pro or Team subscription from `mock` or
   `stripe` ends the account's reverse trial (`manual` + `trialing`) in the
   same transaction, `expired` with its end moved to now and logged in

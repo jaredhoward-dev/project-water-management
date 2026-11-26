@@ -15,7 +15,10 @@
 //
 // The account is the subscription's (or session's, or invoice's
 // subscription_details') metadata `billing_account_id`, which checkout sets;
-// the plan is its metadata `plan_code`. An event without them is `invalid`.
+// the plan is its metadata `plan_code`. An event with no billing_account_id
+// at all is about an object this app never made (a dashboard invoice, a
+// payment link): `ignored`, like an unknown type. One with a malformed
+// account, or no plan_code, is `invalid`.
 // The seats are its metadata `seats_included` plus the items' extra seats
 // (seatsOf, below), and the interval its items' prices' recurring.interval
 // (intervalOf).
@@ -62,6 +65,14 @@ const STATUS: Record<string, SubscriptionStatus | 'record'> = {
 	incomplete: 'record',
 	paused: 'record'
 };
+
+/**
+ * Whether the metadata names an account at all. An object with no billing_account_id is one this app never made
+ * (a dashboard invoice, a payment link's session, a subscription made by hand): its event is `ignored`, answered
+ * 200, since a retry can't change it and a 400 would have Stripe redeliver it for 3 days. A billing_account_id
+ * that is there but isn't a uuid is still `invalid`.
+ */
+const namesAccount = (metadata: unknown): boolean => isObj(metadata) && metadata.billing_account_id !== undefined && metadata.billing_account_id !== null;
 
 function accountOf(metadata: unknown): string | null {
 	const id = isObj(metadata) ? str(metadata.billing_account_id) : null;
@@ -182,6 +193,7 @@ function normalise(body: unknown): NormaliseResult {
 	if (!object) return { kind: 'invalid', why: 'no data.object' };
 
 	if (type.startsWith('customer.subscription.')) {
+		if (!namesAccount(object.metadata)) return { kind: 'ignored', eventId, type };
 		const payload = subscriptionPayload(object);
 		if (typeof payload === 'string') return { kind: 'invalid', why: payload };
 		if (type === 'customer.subscription.deleted') return { kind: 'event', event: { eventId, type: 'subscription.deleted', payload: { ...payload, status: 'canceled' } } };
@@ -191,6 +203,7 @@ function normalise(body: unknown): NormaliseResult {
 	}
 
 	if (type === 'checkout.session.completed') {
+		if (!namesAccount(object.metadata)) return { kind: 'ignored', eventId, type };
 		const accountId = accountOf(object.metadata);
 		if (!accountId) return { kind: 'invalid', why: 'no billing_account_id in the session metadata' };
 		const sub = object.subscription;
@@ -202,6 +215,7 @@ function normalise(body: unknown): NormaliseResult {
 	// B2B invoice from the staff tool (billing/invoice.ts), which has no subscription, the invoice's own.
 	const parent = isObj(object.parent) && isObj(object.parent.subscription_details) ? object.parent.subscription_details : null;
 	const details = parent ?? (isObj(object.subscription_details) ? object.subscription_details : null);
+	if (!namesAccount(details?.metadata) && !namesAccount(object.metadata)) return { kind: 'ignored', eventId, type };
 	const accountId = accountOf(details?.metadata) ?? accountOf(object.metadata);
 	if (!accountId) return { kind: 'invalid', why: 'no billing_account_id in the invoice’s subscription or invoice metadata' };
 	const sub = details?.subscription ?? object.subscription;
