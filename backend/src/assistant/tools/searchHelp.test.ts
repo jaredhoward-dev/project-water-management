@@ -1,6 +1,6 @@
 // search_help's ranking (issue #610), over a small invented index and the real one.
 import { describe, expect, it } from 'vitest';
-import { HELP_INDEX, MAX_HITS, queryWords, searchHelpIndex, searchHelpTool, SNIPPET_CHARS, type HelpIndexEntry } from './searchHelp.js';
+import { HELP_INDEX, MAX_HITS, normWithMap, queryWords, searchHelpIndex, searchHelpTool, SNIPPET_CHARS, type HelpIndexEntry } from './searchHelp.js';
 import type { ToolContext } from '../types.js';
 
 const index: HelpIndexEntry[] = [
@@ -19,6 +19,22 @@ describe('searchHelpIndex', () => {
 
 	it('drops stop words and accents from the query', () => {
 		expect(queryWords('What is the Ramírez dam?')).toEqual(['ramirez', 'dam']);
+	});
+
+	it('cuts the snippet at the match even when text before it grows when normalised (issue #879)', () => {
+		// 60 "…" (each "..." normalised) and an "ﬁ" ligature before the word: the normalised copy runs 121 characters ahead.
+		const before = 'Earlier… '.repeat(60) + 'ﬁll. ' + 'x'.repeat(200);
+		const text = `${before} Seepage leaves the dam. ${'y'.repeat(800)}`;
+		const hit = searchHelpIndex('seepage', 1, [{ kind: 'guide', id: 's', title: 'Other', url: '/s', text }])[0]!;
+		const start = text.indexOf('Seepage') - 150;
+		expect(hit.text).toBe(`…${text.slice(start, start + SNIPPET_CHARS)}…`);
+		expect(hit.text.slice(151).startsWith('Seepage')).toBe(true);
+	});
+
+	it('maps every normalised index back to its character in the original', () => {
+		const { out, from } = normWithMap('Ré…ﬁx 💧A');
+		expect(out).toBe('re...fix 💧a');
+		expect(from).toEqual([0, 1, 2, 2, 2, 3, 3, 4, 5, 6, 6, 8, 9]);
 	});
 
 	it('finds real help: GR4J, the EWR, calibration exclusions; each hit short', () => {

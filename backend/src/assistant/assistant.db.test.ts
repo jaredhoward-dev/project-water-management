@@ -536,6 +536,32 @@ describe('reservations: nobody passes a cap (264_assistant_reservation)', () => 
 		expect((await reservations()).map((r) => r.id)).toEqual([live.reservationId]);
 	});
 
+	it('logs a charge whose reservation is gone, ids and tokens only (388, issue #880); a settled one, or none, logs nothing', async () => {
+		const warn = vi.spyOn(console, 'warn');
+		const noReservation = () => warn.mock.calls.map((c) => String(c[0])).filter((line) => line.includes('assistant_charge_no_reservation'));
+		// Positive control: a live reservation settles, and a charge with no reservation id at all, log nothing.
+		const live = await begin(viewer, projectId);
+		expect(await chargeTurn(viewer.id, projectId, live.reservationId, 40, 2)).not.toBeNull();
+		expect(await chargeTurn(viewer.id, projectId, null, 10, 1)).not.toBeNull();
+		expect(noReservation()).toEqual([]);
+		// One already converted (expired, charged in full by a begin or the tick) charges again, by design, and logs it.
+		const gone = await begin(viewer, projectId);
+		await asOwner('DELETE FROM assistant_reservation WHERE id = $1', [gone.reservationId]);
+		expect(await chargeTurn(viewer.id, projectId, gone.reservationId, 700, 3)).not.toBeNull();
+		expect((await usageRows())[0]).toMatchObject({ input: 750, output: 6 });
+		const lines = noReservation();
+		expect(lines).toHaveLength(1);
+		expect(JSON.parse(lines[0]!)).toEqual({ event: 'assistant_charge_no_reservation', reservationId: gone.reservationId, inputTokens: 700, outputTokens: 3 });
+		expect(lines[0]).not.toContain(viewer.id);
+		expect(lines[0]).not.toContain(viewer.email);
+		// The function says so itself.
+		const { rows } = await withUser(viewer.id, (db) =>
+			db.query<{ reservation_missing: boolean }>('SELECT reservation_missing FROM app_assistant_charge($1, $2, 1, 0, 0, 0, NULL)', [projectId, gone.reservationId])
+		);
+		expect(rows[0]!.reservation_missing).toBe(true);
+		warn.mockRestore();
+	});
+
 	it('lets nobody read the reservations, and nobody settle another’s (positive control: its owner does)', async () => {
 		const turn = await begin(viewer, projectId);
 		await expect(withUser(viewer.id, (db) => db.query('SELECT * FROM assistant_reservation'))).rejects.toMatchObject({ code: '42501' });

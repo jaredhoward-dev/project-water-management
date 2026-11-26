@@ -240,7 +240,10 @@ export const UNPRICED: TurnCost = { cacheReadTokens: 0, cacheWriteTokens: 0, cos
 
 /**
  * Charge a finished turn's tokens and cost to the caller's row and settle its
- * reservation (null: a charge with no reservation, this month). Returns this
+ * reservation (null: a charge with no reservation, this month). A reservation
+ * id no row has (it expired and was charged in full already) charges again,
+ * counted twice by design (264), and logs `assistant_charge_no_reservation`
+ * with the id and the tokens only (388). Returns this
  * month's tokens after it, or null if the charge failed (logged as
  * `assistant_charge_failed`, not thrown: the answer is already sent; the
  * assistant's charge-failed alarm reads that line, infra/alarms.tf). A
@@ -261,15 +264,14 @@ export async function chargeTurn(
 	const cacheWrite = Math.min(input - cacheRead, count(cost.cacheWriteTokens));
 	try {
 		return await withUser(userId, async (db) => {
-			const { rows } = await db.query<UsedRow>('SELECT project_used, user_used, total_used FROM app_assistant_charge($1, $2, $3, $4, $5, $6, $7)', [
-				projectId,
-				reservationId,
-				input,
-				count(outputTokens),
-				cacheRead,
-				cacheWrite,
-				cost.costUsdMicros === null ? null : count(cost.costUsdMicros)
-			]);
+			const { rows } = await db.query<UsedRow & { reservation_missing: boolean | null }>(
+				'SELECT project_used, user_used, total_used, reservation_missing FROM app_assistant_charge($1, $2, $3, $4, $5, $6, $7)',
+				[projectId, reservationId, input, count(outputTokens), cacheRead, cacheWrite, cost.costUsdMicros === null ? null : count(cost.costUsdMicros)]
+			);
+			if (rows[0]?.reservation_missing) {
+				// Counted twice, never too little (264): the expired reservation was charged in full already.
+				logEvent('warn', { event: 'assistant_charge_no_reservation', reservationId, inputTokens: input, outputTokens: count(outputTokens) });
+			}
 			return monthUsed(rows[0]);
 		});
 	} catch (err) {

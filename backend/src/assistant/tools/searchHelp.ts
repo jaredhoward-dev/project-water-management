@@ -42,11 +42,33 @@ const occurrences = (hay: string, w: string) => {
 	return n;
 };
 
+/**
+ * `norm(text)` one character at a time, with each normalised character's
+ * index in `text` (`from`, one longer than `out`, ending at text.length).
+ * Normalising can change the length ("…" becomes "...", "ﬁ" "fi", an accent
+ * goes), so an index found in the normalised copy is mapped back through
+ * `from` before cutting the original (issue #879).
+ */
+export function normWithMap(text: string): { out: string; from: number[] } {
+	let out = '';
+	const from: number[] = [];
+	for (let i = 0; i < text.length; ) {
+		const ch = String.fromCodePoint(text.codePointAt(i)!);
+		const n = norm(ch);
+		for (let k = 0; k < n.length; k++) from.push(i);
+		out += n;
+		i += ch.length;
+	}
+	from.push(text.length);
+	return { out, from };
+}
+
 /** The text around the first word found, about SNIPPET_CHARS long. */
 function snippet(text: string, words: readonly string[]): string {
 	if (text.length <= SNIPPET_CHARS) return text;
-	const lower = norm(text);
-	const at = Math.min(...words.map((w) => lower.indexOf(w)).filter((i) => i >= 0), text.length);
+	const { out: lower, from } = normWithMap(text);
+	const found = words.map((w) => lower.indexOf(w)).filter((i) => i >= 0);
+	const at = found.length ? from[Math.min(...found)]! : text.length;
 	const start = at === text.length ? 0 : Math.max(0, at - 150);
 	return `${start ? '…' : ''}${text.slice(start, start + SNIPPET_CHARS)}${start + SNIPPET_CHARS < text.length ? '…' : ''}`;
 }
