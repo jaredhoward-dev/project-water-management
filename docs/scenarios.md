@@ -1223,9 +1223,9 @@ cumulativeImpact(baseline, singles, combined): CumulativeReport
   base: a `node.remove` re-links the nodes draining into it, so it writes
   their downstream link too; an op on a transfer, patch, borehole, demand
   object or registered volume uses its node(s); a `demand.scale` without
-  `nodeIds` writes every farm's (or user's) demand, and meets a farm (or
-  user) another scenario adds, which it would cut in one order and not the
-  other; a `series.scale` writes
+  `nodeIds` writes every farm's (or user's) demand, and (engine 1.123.0)
+  meets a farm (or user) another scenario adds, which it would cut in one
+  order and not the other; a `series.scale` writes
   the series (two scalings stack, and whose climate assumption it is isn't
   for either to settle); a `climate.delta` writes every series, `apanMm`
   and `pe` (engine 1.107.0), and needs no write on an added unit: a

@@ -193,6 +193,13 @@ export const KNOWN_LIMITATIONS: readonly Limitation[] = [
 		"status": "Built, provisional, pending the hydrologist"
 	},
 	{
+		"id": "PR1",
+		"source": "finding",
+		"severity": "Low (paired bands on a baseline whose ensemble was stored on an older engine; engine 1.123.0)",
+		"title": "After an engine release, a paired band re-runs the baseline's kept sets on the new engine but keeps the old engine's choice of which sets to keep",
+		"status": "Built, provisional, pending the hydrologist"
+	},
+	{
 		"id": "Q3",
 		"source": "quirk",
 		"severity": null,

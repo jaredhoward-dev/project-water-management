@@ -332,5 +332,35 @@ export const ENGINE_ERRATA: readonly Erratum[] = [
 		"appliesWhen": "An application whose node.remove removes one of the applicant's units that a transfer rule comes from or goes to (or, engine ≥ 1.114.0, sends a split share to) when the rule also reaches another party's unit (its other end, or the unit its seepage rejoins below); the removal drops that rule",
 		"summary": "The removal was classed as the applicant's proposal though the rule it drops reaches another party's unit: the evidence pack showed no red \"Baseline assumptions changed\" callout and its \"No baseline assumption is changed\" check passed, so the pack could be issued",
 		"source": "scenarios.md § Classification: proposal or baseline assumption; present at the first recorded engine, 1.15.0 (issue #852)"
+	},
+	{
+		"id": "ER-34",
+		"keyedOn": "run",
+		"firstAffected": "0.0.0",
+		"fixedIn": "1.123.0",
+		"severity": "Medium",
+		"appliesWhen": "A paired uncertainty band (runPairedEnsemble: the B − A band of a run comparison and an evidence pack's paired figures) on a baseline run whose ensemble was stored on an older engine than the one that ran the pairs (an engine release between the baseline's ensemble and the paired job)",
+		"summary": "The other run's members ran on the newer engine but the baseline side was the ensemble's stored figures from the older one, so the band subtracted across two engines: it carried the engine's own changes as if the application made them, and the same inputs on both runs did not give zero",
+		"source": "model.md §2.10e (paired bands); run-comparison.md; present at the first recorded engine, 1.15.0 (issue #897)"
+	},
+	{
+		"id": "ER-35",
+		"keyedOn": "run",
+		"firstAffected": "1.30.0",
+		"fixedIn": "1.123.0",
+		"severity": "Medium",
+		"appliesWhen": "An evidence report on a project with a declared uncertainty rule (settings.evidenceUncertaintyRule) whose baseline has a complete ensemble started through the API with its own free parameters (fewer than the model's default set) and otherwise the rule's options",
+		"summary": "declaredRuleMismatches didn't compare the parameters varied, so that ensemble could be cited as the declared rule's: the pack printed a band over fewer parameters, narrower than the rule's, as the declared rule's band, and listed it as not departing from the rule",
+		"source": "model.md §2.10e (the declared rule and the cited ensemble; Parameters varied)"
+	},
+	{
+		"id": "ER-36",
+		"keyedOn": "run",
+		"firstAffected": "1.59.0",
+		"fixedIn": "1.123.0",
+		"severity": "Low",
+		"appliesWhen": "A cumulative impact (combineScenarios) where one scenario has a demand.scale without nodeIds (every farm's, or every other water user's, demand) and another adds a unit of that kind (node.add or node.insert)",
+		"summary": "The combination was accepted rather than refused as a conflict, though the cut reached the added unit only when the scaling applied after the add: the combined run, and with it the combined change and the interaction column, depended on the order the applications were given",
+		"source": "scenarios.md § Engine: combineScenarios and cumulativeImpact (conflicts)"
 	}
 ];

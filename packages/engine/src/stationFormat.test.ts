@@ -6,6 +6,7 @@ import {
 	localToInstant,
 	previewStationAnswer,
 	readStationAnswer,
+	STATION_MAX_DAY_MM,
 	type StationFormat,
 	stationDays,
 	StationFormatError,
@@ -436,6 +437,16 @@ describe('decimal commas and delimiters', () => {
 		// A dot is still a thousands separator where it groups whole thousands.
 		const r = readStationAnswer('Datum;Neerslag\n01/03/2024;1.234,5\n02/03/2024;-1.000', f);
 		expect(r.readings.map((x) => x.value)).toEqual([1234.5, -1000]);
+	});
+	it('refuses a 0.254 mm bucket’s answer mis-set to a decimal comma: 1.016 reads as 1016 mm, past the day cap', () => {
+		const f: StationFormat = { format: 'csv', delimiter: ';', decimalComma: true, time: 'Datum', value: 'Neerslag', timeFormat: 'DD/MM/YYYY', resolution: 'daily' };
+		const r = readStationAnswer('Datum;Neerslag\n01/03/2024;1.016\n02/03/2024;0', f);
+		expect(r.readings[0]!.value).toBe(1016);
+		expect(() => stationDays(r, f, '2024-03-01', '2024-03-02', LATER)).toThrow(/2024-03-01 adds up to 1016 mm, more than any day’s rain: check the scale, the decimal mark/);
+		// 1.000 groups into thousands too: a day at the cap is refused, one just under it is kept.
+		expect(() => stationDays(readStationAnswer('Datum;Neerslag\n01/03/2024;1.000', f), f, '2024-03-01', '2024-03-01', LATER)).toThrow(/1000 mm/);
+		expect(stationDays(readStationAnswer('Datum;Neerslag\n01/03/2024;999,9', f), f, '2024-03-01', '2024-03-01', LATER).values).toEqual([999.9]);
+		expect(STATION_MAX_DAY_MM).toBe(1000);
 	});
 });
 

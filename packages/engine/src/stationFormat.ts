@@ -82,8 +82,13 @@ export const STATION_DEFAULT_TIME_ZONE = 'Africa/Johannesburg';
 export const STATION_DEFAULT_MISSING = ['', 'nan', 'null', 'none', 'n/a', '-9999', '-999'];
 /** The most readings one answer may hold (a year of one-minute readings is 525 600). */
 export const STATION_MAX_READINGS = 600_000;
-/** The largest believable day's rain, mm (the world record is ~1 825 mm); above it the scale is wrong. */
-export const STATION_MAX_DAY_MM = 2000;
+/**
+ * A day's rain this large or larger is refused, mm: about half the world's 24-hour record (~1 825 mm), so a day
+ * at it means the scale or the decimal mark is wrong. Lower than the 2000 mm the gridded reads cap at (engine
+ * 1.123.0): under a decimal comma a 0.254 mm bucket's 1.016 (four tips) reads as 1016 mm, which
+ * 2000 let through; any value a dot groups into thousands is ≥ 1000, so this refuses it at scale 1.
+ */
+export const STATION_MAX_DAY_MM = 1000;
 
 const DAY_MS = 86_400_000;
 const HOUR_MS = 3_600_000;
@@ -591,8 +596,10 @@ export function stationDays(r: StationReadings, f: StationFormat, from: string, 
 		if (broken[i]) v = null;
 		else if (counts[i] === 0) v = f.noReadingsMeans === 'zero' && anyReadings ? 0 : null;
 		else v = Math.round(sums[i]! * 1e4) / 1e4;
-		if (v !== null && v > STATION_MAX_DAY_MM) {
-			throw new StationFormatError(`${fromEpochDay(a + i)} adds up to ${Math.round(v)} mm, more than any day’s rain: check the scale and whether the values are a running total`);
+		if (v !== null && v >= STATION_MAX_DAY_MM) {
+			throw new StationFormatError(
+				`${fromEpochDay(a + i)} adds up to ${Math.round(v)} mm, more than any day’s rain: check the scale, the decimal mark and whether the values are a running total`
+			);
 		}
 		if (v === null) gaps++;
 		else daysWithData++;

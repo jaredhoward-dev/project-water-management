@@ -5434,7 +5434,8 @@ gauge or a rainfall station's own web API (issue #784), merged into one series e
     pattern, default `YYYY-MM-DD`); `maxDaysPerRequest` 1–366 (default 31); `revisionDays` 0–60 (default 7);
     `format`: how to read the answer, the engine's `StationFormat` (`packages/engine/src/stationFormat.ts`: `json` or
     `csv`, records path or CSV layout, time and value fields, `timeFormat`, `timeZone`, `daily` or `subdaily`
-    readings and their day boundary, `scale`, `missing` markers, `noReadingsMeans`); `staleAfterDays` 1–3650
+    readings and their day boundary, `scale`, `missing` markers, `decimalComma`, `noReadingsMeans`; a day of 1000 mm or
+    more fails the read, engine 1.123.0, `STATION_MAX_DAY_MM`); `staleAfterDays` 1–3650
     (default 3); `startDate` not before 2000-01-01 (`STATION_FIRST_DAY`; an older record is an upload);
   - `credential` (`station_api` only, write-only): `{ secret, user? }` (secret 1–4096 characters; `user` ≤ 256 for
     Basic). The API seals it to the fetcher's public key, bound to the feed's id, its URL's origin and how the key is
