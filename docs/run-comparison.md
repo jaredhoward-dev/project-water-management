@@ -50,7 +50,10 @@ evidence, pinned, workbook comparison), e.g. "Baseline · 2026-09-23 15:06 · 19
 latest · pinned". Switching a side to another project picks that project's
 newest run that isn't already the other side. The URL holds the choice
 (`/compare?a=<projectId>:<runId>&b=<projectId>:<runId>`), so a comparison can be
-bookmarked or shared with anyone who can see both projects.
+bookmarked or shared with anyone who can see both projects. A project
+picked for a card that has no run to choose (or whose runs failed to load)
+waits in that card only until the URL changes: Back, Forward or a link drops
+it, so a card always names the pair the comparison below shows.
 
 If a project has fewer than two runs, the page explains what to do: run the
 model, change something, and run it again, or pick a run from another project
