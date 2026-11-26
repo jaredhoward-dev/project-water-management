@@ -34,7 +34,7 @@ const line = (page: Page, i: number) => lines(page).nth(i).getByTestId('map-clic
 /** Enter Sub-catchments: Delineate, then its choice. */
 async function startClicks(page: Page) {
 	await page.getByTestId('map-tools').getByRole('button', { name: 'Delineate', exact: true }).click();
-	await page.getByTestId('map-delineate-clicks').check();
+	await page.getByTestId('map-delineate-clicks').click(); // click(), not check(): the tick lands in the click bar that replaces this one
 	await expect(page.getByTestId('map-click-bar')).toBeVisible();
 }
 const mapReady = (page: Page) => expect(page.locator('.map-wrap[data-status="ready"]')).toBeVisible();
@@ -95,7 +95,7 @@ test('an editor clicks the river at the dam, then below and above it: each click
 	await page.getByTestId('map-tools').getByRole('button', { name: 'Delineate', exact: true }).focus();
 	await page.keyboard.press('Enter');
 	await expect(page.getByTestId('map-draw-bar')).toContainText('Delineating a catchment');
-	await page.getByTestId('map-delineate-clicks').check();
+	await page.getByTestId('map-delineate-clicks').click();
 	await expect(page.getByTestId('map-tools').getByRole('button', { name: 'Delineate', exact: true })).toHaveAttribute('aria-pressed', 'true');
 	await expect(bar(page)).toBeVisible();
 	await expect(page.getByTestId('map-draw-bar')).toHaveCount(0);
@@ -431,8 +431,15 @@ test('on a phone the panel sits above the map, nothing scrolls inside itself, an
 	const inner = await bar(page).evaluate((el) => [el, ...el.querySelectorAll('*')].filter((e) => e.scrollHeight > e.clientHeight + 1 && ['auto', 'scroll'].includes(getComputedStyle(e).overflowY)).length);
 	expect(inner).toBe(0);
 	await expectNoViolations(page);
-	// One catchment, above a point: asks first (clicks would be lost), then Delineate's point.
-	await bar(page).getByTestId('map-delineate-one').check();
+	// One catchment, above a point: asks first (clicks would be lost). Kept, the clicks stay and so does the tick on
+	// Sub-catchments (it stayed on One catchment, with the clicks panel still up); dropped, Delineate's point.
+	// click(), not check(): the tick goes on only once the switch happens, when this bar is gone.
+	await bar(page).getByTestId('map-delineate-one').click();
+	await page.getByRole('alertdialog', { name: 'Drop these clicks?' }).getByRole('button', { name: 'Keep clicking' }).click();
+	await expect(lines(page)).toHaveCount(2);
+	await expect(bar(page).getByTestId('map-delineate-clicks')).toBeChecked();
+	await expect(bar(page).getByTestId('map-delineate-one')).not.toBeChecked();
+	await bar(page).getByTestId('map-delineate-one').click();
 	await page.getByRole('alertdialog', { name: 'Drop these clicks?' }).getByRole('button', { name: 'Drop them' }).click();
 	await expect(bar(page)).toHaveCount(0);
 	await expect(page.getByTestId('map-draw-bar')).toContainText('Delineating a catchment');
