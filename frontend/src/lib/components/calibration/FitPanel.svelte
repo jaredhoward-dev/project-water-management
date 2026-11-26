@@ -76,6 +76,7 @@
 	import { startStepwiseFit } from '#lib/calibration/runner.js';
 	import { calibrationPriorOf, fitBoundsOf, priorKey, priorUnavailable, priorUseHint, priorWeightError, PRIOR_USE_LABEL, PRIOR_USES } from '#lib/calibration/prior.js';
 	import { afterText, fitPlanOf, locationSettings, stepRows } from '#lib/calibration/zones.js';
+	import { unappliedFitCaveats } from '#lib/calibration/unappliedFit.js';
 	import type { FitSession } from '#lib/calibration/fitSession.svelte.js';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import NumberInput from '#lib/components/common/NumberInput.svelte';
@@ -131,9 +132,11 @@
 
 	const uid = $props.id();
 	// The panel's number fields that hold text they can't take: such a field keeps the stored value, so Fit would run on
-	// a number the field no longer shows. Counted here to hold the button, and still in the page's registry (the save
-	// bar, the leave guard, Discard), as before.
-	const invalid = provideInvalidFields(new ForwardingInvalidFields(useInvalidFields()));
+	// a number the field no longer shows. Counted here to hold the button. A saved setting's field shown here (the WR2012
+	// MAR penalty's, penaltyFields) still counts in the page's registry (the save bar, the leave guard, Discard); Fit's
+	// own fields (runs per fit, starts, seed, penalty weight: the session's, never saved) don't (issue #922).
+	const OWN_FIELDS = ['budget', 'starts', 'seed', 'prior-w'];
+	const invalid = provideInvalidFields(new ForwardingInvalidFields(useInvalidFields(), (f) => OWN_FIELDS.some((k) => f.id === `${uid}-${k}`)));
 	const seedProblem = $derived(seedError(session.seed));
 	// Several searches from different seeds: nearly equal scores with scattered
 	// parameters show what the record can't pin down (calibration research CR-2).
@@ -283,7 +286,19 @@
 	const steps = $derived(session.steps && session.steps.length > 1 ? stepRows(session.steps, nodes) : null);
 	// The headline's step, shown in full below the steps (the last of a one-step fit).
 	const headlineStep = $derived(session.steps?.find((x) => x.headline) ?? session.steps?.[session.steps.length - 1] ?? null);
-	// A report for another model than the form now shows can't be applied.
+	// What changed in the form since the fit ran, while its result isn't applied (issue #920): the engine's fit record
+	// status of each step's record as Apply would make it, against the form now. Once applied, the form's fit record
+	// says the same in the calibration header.
+	const staleCaveats = $derived.by(() => {
+		const ran = session.ran;
+		const done = session.steps;
+		if (!report || !ran || !done?.length || session.applied || readonly) return [];
+		try {
+			return unappliedFitCaveats(done, ran, settings(), model?.()?.nodes ?? nodes);
+		} catch {
+			return [];
+		}
+	});
 
 	function start() {
 		const { budget, seed, starts, objective, validate, priorUse, priorWeight } = session;
@@ -633,6 +648,14 @@
 							{/if}
 						{/each}
 					</section>
+				{/if}
+				{#if staleCaveats.length}
+					<div class="alert alert-warning small" data-testid="fit-stale">
+						<p>The form has changed since this fit ran, so its scores describe other settings. Fit again, or put the settings back, before applying it:</p>
+						<ul>
+							{#each staleCaveats as c (c)}<li>{c}</li>{/each}
+						</ul>
+					</div>
 				{/if}
 				<h5>{steps && headlineStep ? `Step ${steps.find((x) => x.what === 'Headline')?.step ?? steps.length}: ${headlineStep.name}, the headline` : 'Result'}</h5>
 				<p class="small muted">

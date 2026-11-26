@@ -9847,9 +9847,13 @@ calibration's line points at *How the shown run fits* for NSE and PBIAS.
   parameter to fit." or "Fix the model runs per fit under Search first."
   (the penalty weight, starts and seed the same way). A number field
   holding text it can't take keeps the stored value, so it holds the
-  button too (the panel's own invalid-fields registry, which still counts
-  them in the page's, `common/forwardingInvalidFields.svelte.ts`): the fit
-  never runs on a number the field no longer shows. **Cancel** takes the
+  button too (the panel's own invalid-fields registry,
+  `common/forwardingInvalidFields.svelte.ts`): the fit never runs on a
+  number the field no longer shows. Only a saved setting's field shown in
+  the panel (the WR2012 MAR penalty's) also counts in the page's registry,
+  its save bar and leave guard; Fit's own fields (model runs per fit,
+  starts, seed and the prior's penalty weight, kept in the `FitSession`,
+  never saved) count in the panel's only (issue #922). **Cancel** takes the
   button's place while the data loads and the fit runs, and works in
   both; the focus moves between the two as they swap
   (`fit-blocker-focus.spec.ts`). The button is on the
@@ -9982,6 +9986,17 @@ calibration's line points at *How the shown run fits* for NSE and PBIAS.
     stored until Save. The result stays shown, its button then reading
     **Apply to form again**, and the unsaved settings take over the leave
     guard from the fit.
+  - **A form changed since the fit** (issue #920): while the result isn't
+    applied, the panel runs the engine's `fitRecordStatus` for each step's
+    record as Apply would make it against the form as it stands
+    (`lib/calibration/unappliedFit.ts` `unappliedFitCaveats`; the
+    parameters left out, since the form holds the old ones until Apply).
+    A changed calibration window, exclusions, calibration record, site,
+    quality flags or forcing settings put a warning over the result
+    (`data-testid="fit-stale"`) listing its caveats, each prefixed with the
+    location in a stepwise fit, so the scores aren't read against settings
+    they weren't made on. Once applied, the form's fit record says the same
+    in the calibration header.
   - **The fit's plan and steps** (engine 1.110.0, issue #659; #555,
     model.md §2.10n): the card reads the plan from the form and the network
     as they stand (`zones.ts` `fitPlanOf`, the engine's `locationFitPlan`).

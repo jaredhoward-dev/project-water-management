@@ -34,4 +34,17 @@ describe('ForwardingInvalidFields', () => {
 		inner.reset();
 		expect(inner.epoch).not.toBe(e1);
 	});
+
+	it('keeps a field the form never saves out of the outer registry, in its own list only (issue #922)', () => {
+		const outer = new InvalidFields();
+		const inner = new ForwardingInvalidFields(outer, (f) => f.id === 'f-budget');
+		inner.set('a', field);
+		inner.set('b', { ...field, id: 'f-penalty', label: 'WR2012 MAR penalty weight' });
+		expect(inner.fields.map((f) => f.id)).toEqual(['f-budget', 'f-penalty']);
+		expect(outer.fields.map((f) => f.id)).toEqual(['f-penalty']);
+		inner.delete('a');
+		inner.delete('b');
+		expect(inner.count).toBe(0);
+		expect(outer.count).toBe(0);
+	});
 });
