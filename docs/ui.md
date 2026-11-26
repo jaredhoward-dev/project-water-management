@@ -9767,7 +9767,14 @@ calibration's line points at *How the shown run fits* for NSE and PBIAS.
   seed 1", `lib/calibration/fit.ts` `searchSummary`; **Change** opens them in
   place, a `<details>` with the `app.css` `.fold` style, and the line says
   *needs fixing* while a field inside can't be taken), then **Fit
-  automatically** with "*n* runs in all." beside it, so the button is on the
+  automatically** with "*n* runs in all." beside it (over several
+  locations, "*n* runs in all over *k* locations."): one budget per
+  optimisation of the engine's own plan (`plannedFits`, the rule
+  `calibrate()` builds its optimisations from; `fit.ts` `planRuns`), with the
+  fit without the WR2012 penalty at the headline's step only. The record
+  isn't loaded before Fit, so the estimate still counts a dry → wet test the
+  record may be too short for; the engine's `calibrationPlan(input, opts)`
+  gives the exact plan once it is (issue #865). The button is on the
   first screen of the section at 1440×900 (`fit-panel-layout.spec.ts`). The
   seed's, starts' and second record's explanations are under the page's
   *Explain each setting* switch. It takes

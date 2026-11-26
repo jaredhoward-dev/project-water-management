@@ -11,7 +11,7 @@ import { GR4J_NO_PET } from '../runoff/pet';
 import { runoffForcing, simulateRunoff } from '../runoff/simulate';
 import { randomInput } from '../testing/fuzz';
 import { checkAll } from '../testing/invariants';
-import { calibrate, prepareCalibration, prepareCalibrationFits, startSeed, startsNotes, validationNotes, type CalibrateOptions, type DifferentialTest, type FitOutcome, type ValidationTest } from './calibrate';
+import { calibrate, calibrationPlan, plannedFits, prepareCalibration, prepareCalibrationFits, startSeed, startsNotes, validationNotes, type CalibrateOptions, type DifferentialTest, type FitOutcome, type ValidationTest } from './calibrate';
 import type { DdsState } from './dds';
 import { MAX_STARTS } from './params';
 import { BOOTSTRAP_LEVEL, BOOTSTRAP_RESAMPLES, CLIMATOLOGY_HALF_WINDOW } from './bootstrap';
@@ -333,6 +333,8 @@ describe('calibrate', () => {
 		const plan = new Set<string>();
 		const report = calibrate(synthetic({ x1: 420, x2: 0, x3: 85, x4: 2.3 }, 8), { budget: 150, seed: 2, onProgress: (p) => void plan.add(`${p.stage} ${p.optimisation}/${p.optimisations}`) });
 		expect([...plan]).toEqual(['full 1/3', 'split 2/3', 'dsst 3/3']);
+		// The plan before the fit (issue #865) is the one its progress events count.
+		expect(calibrationPlan(synthetic({ x1: 420, x2: 0, x3: 85, x4: 2.3 }, 8), { budget: 150, seed: 2 }).map((p) => p.stage)).toEqual(['full', 'split', 'dsst']);
 		const ss = report.splitSample!;
 		expect(ss.calibration.end < ss.validation.start).toBe(true);
 		expect(ss.calibration.scores.days + ss.validation.scores.days).toBe(report.fit.scores.days);
@@ -365,12 +367,39 @@ describe('calibrate', () => {
 		}
 	}, 60_000);
 
+	describe('plannedFits (issue #865): the optimisations a fit makes, before it starts', () => {
+		const base = { starts: 1, validate: true, dsst: true, penalty: false, unpriored: false };
+		const stages = (s: Partial<typeof base>) => plannedFits({ ...base, ...s }).map((p) => (p.start ? `${p.stage} ${p.start.start}/${p.start.starts}` : p.stage));
+		it('plans the whole record, then the split-sample and dry → wet tests', () => {
+			expect(stages({})).toEqual(['full', 'split', 'dsst']);
+		});
+		it('leaves out a dry → wet test the record is too short for', () => {
+			expect(stages({ dsst: false })).toEqual(['full', 'split']);
+			expect(stages({ dsst: false, penalty: true })).toEqual(['full', 'split', 'unpenalised']);
+		});
+		it('plans an unpenalised fit only where the WR2012 penalty applies', () => {
+			expect(stages({ penalty: true })).toEqual(['full', 'split', 'dsst', 'unpenalised']);
+			expect(stages({ penalty: false, dsst: false })).toEqual(['full', 'split']);
+		});
+		it('plans no validation fits without validation, whatever the record', () => {
+			expect(stages({ validate: false })).toEqual(['full']);
+			expect(stages({ validate: false, penalty: true })).toEqual(['full', 'unpenalised']);
+		});
+		it('plans each start, and one fit without the prior per start last, with the starts clamped as the fit clamps them', () => {
+			expect(stages({ starts: 2, penalty: true, unpriored: true })).toEqual(['full 1/2', 'full 2/2', 'split', 'dsst', 'unpenalised', 'unpriored 1/2', 'unpriored 2/2']);
+			expect(plannedFits({ ...base, starts: 0 }).filter((p) => p.stage === 'full')).toEqual([{ stage: 'full' }]);
+			expect(plannedFits({ ...base, starts: 99 }).filter((p) => p.stage === 'full')).toHaveLength(MAX_STARTS);
+		});
+	});
+
 	it('says plainly when the record can’t test wet years', () => {
 		const plan = new Set<string>();
 		const report = calibrate(synthetic({ x1: 420, x2: 0, x3: 85, x4: 2.3 }, 2.5), { budget: 60, onProgress: (p) => void plan.add(`${p.stage} ${p.optimisation}/${p.optimisations}`) });
 		expect(report.differential).toBeNull();
 		// The progress events' plan leaves the skipped dry → wet fit out, so the bar doesn't jump.
 		expect([...plan]).toEqual(['full 1/2', 'split 2/2']);
+		// And the plan before the fit leaves it out too (issue #865).
+		expect(calibrationPlan(synthetic({ x1: 420, x2: 0, x3: 85, x4: 2.3 }, 2.5), { budget: 60 })).toEqual([{ stage: 'full' }, { stage: 'split' }]);
 		expect(report.notes.join(' ')).toMatch(/too few to fit on dry years and test on wet ones.*weakly constrained/);
 	});
 

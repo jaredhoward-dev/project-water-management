@@ -7,6 +7,7 @@ import {
 	fitRecordFromReport,
 	withoutForecastTail,
 	OBJECTIVE_LABELS,
+	plannedFits,
 	waterYearLabel,
 	type CalibrationBounds,
 	type CalibrationPrior,
@@ -138,11 +139,24 @@ export function rankedByText(d: Pick<DifferentialTest, 'rankedBy'>): string {
 }
 
 /**
- * Runs the fit will make: one optimisation per start, two more with validation, plus one without the WR2012 penalty
- * when it is on, and one per start without the regional prior when asked (`unpriored`).
+ * Runs the fit will make: one budget per optimisation of the engine's own plan (plannedFits, the rule calibrate()
+ * builds its optimisations from, issue #865): one per start, the split-sample and dry → wet tests with validation,
+ * one without the WR2012 penalty where it applies, and one per start without the regional prior when asked
+ * (`unpriored`). `dsst`: the record has the 4 water years a dry → wet test needs; the record isn't loaded before Fit,
+ * so the estimate counts it unless told otherwise, and the progress bar then follows the engine's exact plan.
  */
-export const totalRuns = (budget: number, validate: boolean, penalty = false, starts = 1, unpriored = false) =>
-	budget * (starts + (validate ? 2 : 0) + (penalty ? 1 : 0) + (unpriored ? starts : 0));
+export const totalRuns = (budget: number, validate: boolean, penalty = false, starts = 1, unpriored = false, dsst = true) =>
+	budget * plannedFits({ starts, validate, dsst, penalty, unpriored }).length;
+
+/**
+ * Runs a fit over its calibration locations will make (issue #865): each step's totalRuns, with the unpenalised fit
+ * at the headline's step only, since the WR2012 MAR penalty applies at the headline location alone (engine 1.110.0).
+ * No steps (no network yet) is one step at the headline.
+ */
+export function planRuns(steps: readonly { headline?: boolean }[] | null | undefined, budget: number, validate: boolean, penalty: boolean, starts: number, unpriored: boolean, dsst = true): number {
+	const list = steps?.length ? steps : [{ headline: true }];
+	return list.reduce((n, st) => n + totalRuns(budget, validate, penalty && !!st.headline, starts, unpriored, dsst), 0);
+}
 
 export const STAGE_LABEL: Record<CalibrationStage, string> = {
 	full: 'Fitting the whole record',
