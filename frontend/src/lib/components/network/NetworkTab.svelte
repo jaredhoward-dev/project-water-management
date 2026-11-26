@@ -46,6 +46,7 @@
 	import { describeUser } from './users';
 	import { flowPathOrder, makeOutlet, moveTo, renumber } from './reorder';
 	import { countByNode, linkedNote, removeMessage } from './farmerLinks';
+	import { nodeRemovedFocus } from './removeQuestions';
 	import Lazy from '#lib/components/common/Lazy.svelte';
 	import { fillHeader } from '#lib/components/workspace/headerSlot.svelte.js';
 
@@ -359,9 +360,12 @@
 		const question = removeMessage({ isFarm, areas, transfers: refs, cover, boreholes, demandObjects, farmers: farmerCount ? (farmerCount[id] ?? 0) : null, upstream, into });
 		const kind = node ? KIND_WORD[node.kind] : 'node';
 		if (question && !(await confirmDialog({ title: `Remove “${name}”?`, message: question, confirmLabel: `Remove ${kind}`, danger: true }))) return;
-		// The row after it in the table (else the one before) takes the focus once it is gone.
-		const at = nodes.findIndex((n) => n.id === id);
-		const next = nodes[at + 1] ?? nodes[at - 1] ?? null;
+		// Where the focus goes once it is gone (removeQuestions.ts): the row after it in the table (else the one before).
+		const focusIds = nodeRemovedFocus(
+			view,
+			nodes.map((n) => n.id),
+			nodes.findIndex((n) => n.id === id)
+		);
 		editor.removeNode(id);
 		if (selectedId === id) selectedId = null;
 		if (editParam === id) sheetOpen = false;
@@ -370,11 +374,13 @@
 		// The button that was pressed has gone (the row's ✕, or the sheet with its Remove and the
 		// card's Edit it would hand the focus back to): put the focus somewhere that still is.
 		await tick();
-		const target =
-			view === 'table'
-				? (next && document.getElementById(`node-name-${next.id}`)) || document.getElementById('net-add-node')
-				: document.getElementById('all-nodes-h') ?? document.getElementById('net-empty-add');
-		target?.focus();
+		for (const fid of focusIds) {
+			const el = document.getElementById(fid);
+			if (el) {
+				el.focus();
+				break;
+			}
+		}
 	}
 
 	// --- reordering (display order only; the model runs in topological order) ---
@@ -675,7 +681,8 @@
 						and the EWR applies), then add the hydrological units and gauges that drain into it.
 					{/if}
 				</p>
-				{#if !readonly}<button type="button" class="btn btn-primary" onclick={add}>Add outflow gauge</button>{/if}
+				<!-- id: where the focus lands after the table's last row is removed (removeQuestions.ts nodeRemovedFocus). -->
+				{#if !readonly}<button type="button" class="btn btn-primary" id="net-table-empty-add" onclick={add}>Add outflow gauge</button>{/if}
 			</div>
 		{:else}
 		<p class="muted small intro">

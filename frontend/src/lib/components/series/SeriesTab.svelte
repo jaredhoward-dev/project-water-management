@@ -219,6 +219,12 @@
 			void goto(withoutParam(page.url, 'series'), { reset: false, replace: true });
 		});
 	});
+	// The note is about the default charted in the dead link's place: once the URL names a stored series by any
+	// route (a row's View, an upload through Add data charting what it stored, Back or Forward), it no longer
+	// applies. Only View cleared it, so an upload left it saying "showing <the upload> instead".
+	$effect(() => {
+		if (seriesParam && list.some((s) => s.id === seriesParam)) untrack(() => (goneSeries = false));
+	});
 	// How the Series details show its product (series/details.ts): a CHIRPS select, the words, or no field.
 	const viewingProduct = $derived(viewing ? productField(viewing) : null);
 
