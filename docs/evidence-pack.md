@@ -758,7 +758,15 @@ freezes it whole. When the boundary on the map isn't that one, § 8 says so
 `unrecorded`, a row stored before 390; absent when it is the same), as the
 draft's Run board does, and the `futureYield` check holds the pack back from
 issue on `changed` or `none` until the future yield is run again
-(`unrecorded` is printed, not held). An application
+(`unrecorded` is printed, not held). The note and its hold came within
+report format `evidence-26`, with no new format, and that is safe because
+nothing reads the format to decide which checks a pack had: issue reads
+the checks frozen in the pack's own manifest (`report.checks`,
+`backend/src/evidence/packs.ts`), and the format number decides only what
+of § 5 a viewer may be shown (`namesEveryUnit` before `evidence-15`,
+`gatesTotalsOnUnits` before `evidence-18`). A pack drafted before keeps its
+document and its checks, without either; one drafted after carries the hold
+among its own checks. An application
 whose own ops already assume a climate (`climate.delta`) is refused. It is
 **off** unless `FUTURE_YIELD=on` ([deployment.md § NEX-GDDP-CMIP6
 (one-off)](./deployment.md#nex-gddp-cmip6-one-off)): off, no report has § 8
