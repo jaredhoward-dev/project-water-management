@@ -1794,6 +1794,13 @@ the worker mails each recipient ([§ below](#how-alert-mail-is-sent)).
   the limit, never sent later. A person's digest lines go to one worker
   (a per-person advisory lock, 357), so two workers at once never split
   them over two emails.
+- **The mode at send time wins** (issue #868, 370): a delivery goes by the
+  person's choice when the worker claims it, not the one they had when it
+  was queued. An alert waiting to go right away, from someone who has since
+  chosen once a day, goes in the next digest instead; a digest line from
+  someone who has since chosen right away goes out at the next tick, on its
+  own (under the daily cap as ever). A line the cap put in the digest stays
+  there.
 - The mail is built **as its recipient**, under RLS, when it is sent: their
   access and choice are checked again then (a member removed since the
   event, or who turned the alert off, gets nothing; nor does anyone once an

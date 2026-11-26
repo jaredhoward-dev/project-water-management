@@ -34,6 +34,8 @@ const rowsAs = async <T = Record<string, unknown>>(u: User, sql: string, params:
 
 /** A dam event on the farm, delivered to `u` now (`mode` immediate) or in a digest. */
 async function delivered(u: User, mode: 'immediate' | 'daily_digest' = 'immediate'): Promise<string> {
+	// A digest line stays one only while the person still chooses daily (the mode at send time wins, #868).
+	if (mode === 'daily_digest') expect((await u.call('PUT', `/me/alerts/${projectId}`, { items: [{ kind: 'dam_below', mode }] })).status).toBe(200);
 	const [e] = await asOwner(`INSERT INTO alert_event (rule_id, project_id, state, value, detail) VALUES ($1, $2, 'cleared', 0.2, $3) RETURNING id`, [
 		ruleId,
 		projectId,
