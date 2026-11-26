@@ -170,6 +170,9 @@ export const emailAuthRoutes = new Hono<AuthEnv>()
 			// per purpose and consuming it just deleted it. The address's sign-in
 			// lockout is lifted (the link proved the inbox).
 			await db.query('SELECT app_login_succeeded(email) FROM app_user WHERE id = $1', [userId]);
+			// A pending change of address (347) dies with the old password, as at change-password: whoever asked for
+			// it with a stolen session can't move the account to their inbox after the owner reset it.
+			await db.query('DELETE FROM email_change WHERE user_id = $1', [userId]);
 			await markVerified(db, userId);
 			return updated[0]?.email ?? null;
 		});

@@ -280,8 +280,16 @@ falls through to the first when it was the last. Neither is granted to
 - **Enrolment needs the password.** `…/totp/enrol` and `…/email/enrol`
   check the current password through the sign-in lockout, as changing the
   password does, so a stolen session can't put its own factor on the
-  account and lock its owner out. Turning a factor off needs a code (from
-  the app, by email, or a recovery code).
+  account and lock its owner out. Adding a **second** factor beside one
+  already on also needs a session that signed in (or stepped up) with a
+  code (`403 mfa_step_up` otherwise, at …/enrol and …/confirm,
+  `requireCodeForAnotherFactor`): a password-only session lives its 7 days
+  after the first factor goes on, and with the password it could otherwise
+  add a factor of its own and, by confirming it, become two-step without
+  ever giving the owner's factor's code. Turning a factor off needs a code (from
+  the app, by email, or a recovery code). Tests:
+  `auth/mfa-email.db.test.ts` "adding a second factor needs a session that
+  gave a code" (each order, a pending app, positive controls).
 - **Code throttle.** Every code check (sign-in, confirm, turn off, new
   codes) counts on the account's `mfa_throttle` row first, in its own
   transaction under a row lock, like `login_throttle`: the 5th wrong code in
@@ -604,6 +612,12 @@ account is signed out, as a password change does; the browser that confirms
 keeps a fresh session if it is signed in to that account. A
 disposable new address is refused only with `BILLING_ENFORCED` on, as at
 sign-up ([billing.md § Verified email on Free](./billing.md#verified-email-on-free)).
+A pending change dies when the owner secures the account: changing the
+password, a password reset and "sign out everywhere" each delete the
+account's `email_change` row, so a link someone asked for with a stolen
+session and the password (to their own inbox) can't move the account to
+them afterwards (`auth/email-change.db.test.ts` "a pending change dies when
+the owner secures the account", with a positive control).
 
 ## Password reset, email verification and invites
 
