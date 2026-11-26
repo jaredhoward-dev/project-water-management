@@ -128,7 +128,9 @@ EXTRACT_FORMAT = 1
 
 
 def num(v: Any, default: float = 0.0) -> float:
-    """Excel treats blanks as 0 in arithmetic."""
+    """Excel treats blanks as 0 in arithmetic. Text that float() reads as NaN or infinity ("nan", "inf") is
+    text that isn't a number, like any other: json.dumps would write it as a bare NaN or Infinity token,
+    which isn't JSON."""
     if v is None or v == "":
         return default
     if isinstance(v, bool):
@@ -136,9 +138,10 @@ def num(v: Any, default: float = 0.0) -> float:
     if isinstance(v, (int, float)):
         return float(v)
     try:
-        return float(str(v).strip())
+        x = float(str(v).strip())
     except ValueError:
         return default
+    return x if math.isfinite(x) else default
 
 
 # Whitespace and control characters (C0, DEL, C1): a cell's line breaks (Alt+Enter), tabs and

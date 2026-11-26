@@ -18,6 +18,9 @@ describe('extractCalibration', () => {
 		const at = (v: string | null) => extractCalibration(wbOf(syntheticB023().set('Flow Calibration Cfg', 'D22', v)));
 		expect(at(null).rainThresholdMm).toBe(0);
 		expect(() => at('n/a')).toThrow("[Flow Calibration Cfg] rCalibration_RainThreshold: expected a number, got 'n/a'");
+		// float() reads these, but they aren't numbers to the workbook nor JSON (test_num.py).
+		expect(() => at('nan')).toThrow("[Flow Calibration Cfg] rCalibration_RainThreshold: expected a number, got 'nan'");
+		expect(() => at('inf')).toThrow(InvalidWorkbookError);
 	});
 
 	it('no longer reads the legacy runoff model’s cells (engine 1.0.0): text in one does not stop the import', () => {

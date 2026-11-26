@@ -131,6 +131,14 @@ class Summary(unittest.TestCase):
         self.assertEqual((r["apan_oct"], r["apan_agree"], r["apan_other_totals"]), (str(APAN[0] + 5), "1", str(sum(APAN))))
         self.assertIn("1 with modules that disagree (the majority row kept): Z30A", out)
 
+    def test_a_tie_keeps_the_first_by_file_name_whatever_folder_it_is_in(self):
+        # By full path a/Z3RR5.DAT comes first; by file name Z3RR4.DAT does, as the docs say.
+        self.put("net/b/Z3RR4.DAT", rr("Irrig Z30A", [v + 5 for v in APAN], 4))
+        self.put("net/a/Z3RR5.DAT", rr("Irrig Z30A", APAN, 5))
+        _, rows, _ = self.run_main()
+        r = rows["Z30A"]
+        self.assertEqual((r["apan_oct"], r["apan_files"], r["apan_other_totals"]), (str(APAN[0] + 5), "Z3RR4.DAT", str(sum(APAN))))
+
     def test_no_module_file(self):
         (self.root / "net").mkdir()
         buf = io.StringIO()

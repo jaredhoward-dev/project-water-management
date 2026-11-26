@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import math
 import re
 import sys
 from typing import Any
@@ -68,9 +69,12 @@ def _num(v: Any) -> float:
     if isinstance(v, (int, float)):
         return v
     try:
-        return float(str(v).strip())
+        x = float(str(v).strip())
     except ValueError as exc:
         raise ValueError(f"expected a number, got {v!r}") from exc
+    if not math.isfinite(x):  # "nan", "inf": not a number to the workbook, and not JSON
+        raise ValueError(f"expected a number, got {v!r}")
+    return x
 
 
 def extract_calibration(wb) -> dict[str, Any]:

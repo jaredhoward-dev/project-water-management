@@ -564,7 +564,10 @@ What the port does beyond the Python:
   from the source dam), a destination with no rate, the M1 month lists, a
   blank share under the Specific method, an element type other than Farm or
   Gauge, a [Farm spec] farm not in [Network], and number cells holding text or
-  errors (read as 0 or blank, as in the Python). It never changes a value.
+  errors (read as 0 or blank, as in the Python; text that Python's `float()`
+  reads as NaN or infinity, such as `nan` or `inf`, counts as text too, since
+  JSON has no token for either, and in [Flow Calibration Cfg] it stops the
+  import like other text). It never changes a value.
 - **Typed errors**: not a b023 workbook (the named ranges it lacks), an
   unsupported build (AppSettings `zAppVer` other than b02x), a file over 150 MB
   or 250 sheets, and the Python's own stops (non-consecutive dates, an unknown

@@ -176,7 +176,10 @@ def summarise(files, roots=()):
             if not mods:
                 continue
             counts = Counter(m["values"] for m in mods)
-            top, n = max(counts.items(), key=lambda kv: (kv[1], -[m["values"] for m in mods].index(kv[0])))
+            # A tie goes to the row whose module file name sorts first, wherever its folder is (the files
+            # were walked by full path); sorted() is stable, so one file name in two folders keeps path order.
+            by_name = [m["values"] for m in sorted(mods, key=lambda m: m["file"])]
+            top, n = max(counts.items(), key=lambda kv: (kv[1], -by_name.index(kv[0])))
             totals[name] = sum(top)
             rec[f"{name}_total_mm"] = _fmt(sum(top))
             for m, v in zip(MONTHS, top):

@@ -238,19 +238,30 @@ export function pyRepr(v: Cell | readonly (Cell | number)[]): string {
 
 // --- the importer's own coercions (extract_project.py num / clean / is_name) ----
 
-/** extract_project.py num(): Excel treats blanks as 0 in arithmetic; anything unreadable becomes `fallback`. */
+/**
+ * Python float() of a cell's text, or null where it raises or reads a NaN or
+ * an infinity ("nan", "inf"): those are text that isn't a number to the
+ * importers, since JSON has no token for them (Python's json.dumps wrote a
+ * bare NaN, JSON.stringify null).
+ */
+function finiteFloat(v: Cell): number | null {
+	const n = pyFloat(pyStr(v));
+	return n !== null && Number.isFinite(n) ? n : null;
+}
+
+/** extract_project.py num(): Excel treats blanks as 0 in arithmetic; anything unreadable (NaN and infinity text too) becomes `fallback`. */
 export function num(v: Cell, fallback = 0): number {
 	if (v === null || v === '') return fallback;
 	if (typeof v === 'boolean') return v ? 1 : 0;
 	if (typeof v === 'number') return v;
-	return pyFloat(pyStr(v)) ?? fallback;
+	return finiteFloat(v) ?? fallback;
 }
 
 /** Whether num() read a real number from the cell (not a blank, and not text or an error it replaced). */
 export function isNumeric(v: Cell): boolean {
 	if (typeof v === 'number' || typeof v === 'boolean') return true;
 	if (v === null || v === '') return false;
-	return pyFloat(pyStr(v)) !== null;
+	return finiteFloat(v) !== null;
 }
 
 /** extract_project.py clean(): str(v or ''), runs of whitespace and control characters collapsed to one space, stripped. */
