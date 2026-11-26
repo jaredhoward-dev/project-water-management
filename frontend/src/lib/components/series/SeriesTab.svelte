@@ -29,6 +29,7 @@
 	import { page } from '$app/state';
 	import { fillHeader } from '#lib/components/workspace/headerSlot.svelte.js';
 	import { withParam, withoutParam } from '#lib/workspace/overlays.js';
+	import { seriesPickHref } from '#lib/nav/tabUrl.js';
 	import {
 		agreementOptions,
 		checkSeries,
@@ -280,12 +281,15 @@
 		if ((e.target as Element).closest('button, a, input, select, summary, [role="menu"]')) return;
 		choose(id);
 	}
-	/** Chart a series: a URL change, so it can be shared and Back returns; the chart, under the table, comes into view. */
-	function choose(id: string, replaceState = false) {
+	/** Chart a series: in the URL, so it can be shared and a reload keeps it, replacing the history entry so Back leaves
+	 *  the tab rather than stepping through the picks (issue #933, lib/nav/tabUrl.ts). The pick drops `view=`, `rain=`
+	 *  and `feed=`, which belonged to the link that arrived. The chart, under the table, comes into view unless
+	 *  `quiet` (an upload charting what it stored). */
+	function choose(id: string, quiet = false) {
 		if (id === selectedId && seriesParam === id) return;
 		goneSeries = false;
-		void goto(withParam(page.url, 'series', id), { reset: false, replace: replaceState }).then(() => {
-			if (!replaceState) showChart();
+		void goto(seriesPickHref(page.url, id), { reset: false, replace: true }).then(() => {
+			if (!quiet) showChart();
 		});
 	}
 	/** Scroll the chart just into view (its foot to the window's, less the save bar) unless it already is. */

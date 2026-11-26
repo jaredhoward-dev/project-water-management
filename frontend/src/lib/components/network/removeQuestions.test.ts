@@ -76,7 +76,10 @@ describe('nodeRemovedFocus', () => {
 	it('names no row for a node it did not find', () => {
 		expect(nodeRemovedFocus('table', ['a'], -1)).toEqual(['net-add-node', 'net-table-empty-add']);
 	});
-	it('on the map: the list heading, else its empty state’s Add', () => {
-		expect(nodeRemovedFocus('map', ['a', 'b'], 1)).toEqual(['all-nodes-h', 'net-empty-add']);
+	it('on the map: the list row now in its place, as the table does, then the list heading, else its empty state’s Add', () => {
+		expect(nodeRemovedFocus('map', ['a', 'b', 'c'], 0)[0]).toBe('node-list-b');
+		expect(nodeRemovedFocus('map', ['a', 'b', 'c'], 2)[0]).toBe('node-list-b');
+		expect(nodeRemovedFocus('map', ['a', 'b'], 1)).toEqual(['node-list-a', 'all-nodes-h', 'net-empty-add']);
+		expect(nodeRemovedFocus('map', ['a'], 0)).toEqual(['all-nodes-h', 'net-empty-add']);
 	});
 });

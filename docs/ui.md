@@ -3445,14 +3445,41 @@ the **node table** is a grid (**Tables → Hydrological unit table**, `grid=node
 [grid modal](#grid-modal) showing `NetworkTab` with `only="table"`), and a
 node's **full form** opens in a sheet over the map from its row's **Edit** in
 All hydrological units (`edit=<id>`). Old links still land: `view=table` becomes `grid=nodes`,
-`view=node` becomes `edit=<node or the first>`. `node=<id>` is the picked
-node: a pick in the All hydrological units list or on the drawing writes it (a new
-history entry, so Back steps back through the picks; a reload or a shared
-link keeps it, playbook § 2), opening a node's sheet writes it with `edit=`
+`view=node` becomes `edit=<node or the first>`; on a network with no node yet
+there is no form to open, so the empty map says so in one line ("The link
+opened a hydrological unit's form, but this network has no hydrological
+units yet, so it shows the map", `network-old-node-link`) until a node is
+added. `node=<id>` is the picked
+node: a pick in the All hydrological units list or on the drawing writes it
+(replacing the history entry, so Back leaves the tab rather than stepping
+through the picks; a reload or a shared link keeps it, playbook § 2),
+opening a node's sheet writes it with `edit=`
 (so closing the sheet leaves the map on that node), removing the node drops
 it, and a note's link on the Summary lands on it (`notes.ts` `noteHref`).
 With none, nothing is picked. The grid modal's node table keeps its pick to
-itself.
+itself. Removing a node from its sheet hands the focus to the All
+hydrological units row now in its place (the next, else the one before), as
+the node table does (`removeQuestions.ts` `nodeRemovedFocus`).
+
+**The URL rule on the Network and Data tabs** (issue #933, `lib/nav/tabUrl.ts`):
+
+- **A pick replaces the history entry.** Picking a node (`node=`) or a series
+  to chart (`series=`) is in the URL, so a reload and a shared link keep it,
+  but Back leaves the tab rather than stepping back through every pick.
+  Opening something (a node's sheet, a grid, the farm drawer, a drawer a link
+  names) is still a history entry, so Back closes it.
+- **Closing a panel removes its parameter, in place.** Closing the node sheet
+  drops `edit=` and its `section=`; the farm drawer opened from the sheet
+  takes `edit=` and `section=` with it (`farmDrawerHref`); closing the Data
+  feeds card drops the arrival link's `rain=` and `feed=`
+  (`feedCardClosedHref`), so a reload doesn't reopen a closed proposal; and a
+  parameter a pick makes meaningless goes with the pick: charting another
+  series drops `view=` (the flagged period of the series a Warnings link
+  named), `rain=` and `feed=` (`seriesPickHref`).
+- **Links inside a tab are built from the current URL**, keeping every other
+  parameter: the node table's "set by month" cell opens the unit's sheet on
+  its routing section from wherever the page is (`nodeSheetHref`, which
+  drops only `grid=`, since the sheet opens over the map in the grid's place).
 
 - **Map** (the A2 board), a page of its own:
   - **Header** (with no nodes yet too): "Network" and one line on what it is
@@ -6806,8 +6833,11 @@ with the table the data needs).
   badge.) Ages read "2 months ago" from 60 days and "2 years ago" from 730
   (`agoText` in `lib/format/age.ts`; those two days used to read "1 months" / "1 years").
 - **Picking a series**: clicking a row (or its **View** button) charts it
-  through the URL (`series=<id>`, `withParam`), so the link can be shared
-  and Back returns to the series before. Without `series=` the observed flow
+  through the URL (`series=<id>`, `seriesPickHref`), so the link can be shared
+  and a reload keeps it; the pick replaces the history entry, so Back leaves
+  the tab rather than stepping through the picks, and it drops `view=`,
+  `rain=` and `feed=`, which belonged to the link that arrived ([the URL
+  rule](#network), issue #933). Without `series=` the observed flow
   a run reads is charted, else the main rainfall, else the first. A
   `series=` naming a series no longer stored (a note's or a run's link to one
   deleted since) is dropped from the address (`goto` with `replace`) and a
@@ -7125,7 +7155,7 @@ stretches found in each loaded series (engine `checkSeries`; its dates day
 first, "6 Oct 2020: -0.4 m³/s", from engine 1.99.0, issue #586), each naming
 its series as a link-styled button (*Chart Logger* to a screen reader,
 `aria-pressed` while charted) that charts it as its row's **View** does,
-a history entry (issue #586: the check named the series and went nowhere), plus the
+a pick that replaces the history entry like a row's (issue #586: the check named the series and went nowhere; issue #933), plus the
 catchment-rain checks for missing data recorded as 0 (issue #2): a **Zero rain
 run** badge for long zero stretches in the wet season, and a **Low vs CHIRPS**
 badge for water years far below the usual catchment / CHIRPS share (engine
@@ -7243,7 +7273,9 @@ series.
 
 A **View** select above the table (issue #613, `preview.ts` `previewViews`,
 `columnsForView`, `areaViewColumns`; help `preview.view`) picks the column set,
-and the column picker then lists, and hides, only that view's columns:
+and the column picker then lists, and hides, only that view's columns
+(columns hidden belong to the view they were hidden in: switching views shows
+the new view's columns whole, issue #933):
 **All** (the default: every column above, unchanged); **each land unit** (listed under *Units with land*) by
 name, in the model's order, showing only what its rain is made of, side by
 side: *<station> raw*, *<station> adjusted to <unit> (× r)* with r to three
@@ -7434,7 +7466,8 @@ editors run one now and read the map's proposals, viewers read.
   is drawn, it is scrolled to the top and held while the page settles, and
   focused. `?rain=boundary` and `?rain=units` then open the add card on that
   proposal once per arrival (closing it while the URL still asks doesn't
-  open it again; a reload does), its heading taking the focus once loaded;
+  open it again), and closing the card removes the parameter in place, so a
+  reload doesn't reopen it either (issue #933), its heading taking the focus once loaded;
   a viewer gets neither, and lands on the panel's heading. The old
   `?tab=settings#set-feeds` links are forwarded here by Settings (issue #586,
   Round 1).

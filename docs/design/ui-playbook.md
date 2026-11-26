@@ -1840,7 +1840,10 @@ Interaction details that bit:
   Allocations added one, so Back did different things on neighbouring pages
   (issue #521). The rule: a run, unit, dam or feature the user picks, and a
   filter or sort chosen from a control, pushes (`goto` without
-  `replace`), so Back returns to the pick before. A search typed into a
+  `replace`), so Back returns to the pick before. The exception is the
+  Network and Data tabs (issue #933, `lib/nav/tabUrl.ts`, ui.md § Network):
+  a node picked on the map or a series charted replaces the entry, so Back
+  leaves the tab, and a panel closed there removes its parameter. A search typed into a
   box is one step: its first change after the box takes the focus pushes,
   the rest replace (the project list, Runs' label filter, History's
   Parameter filter, one `SearchStep` each from `lib/nav/searchStep.ts`:
