@@ -6094,10 +6094,17 @@ Email alerts (roadmap WP-2.13; [api.md § Alerts](./api.md#alerts),
     `digest`; a delivery left `sending` past its lease becomes `failed`,
     never re-sent.
   - `app_alert_claim_digest(now, people, lines, lease)`: each person's
-    newest `lines` due digest lines (queued before the latest 06:00 in their
-    project's time zone at `now`), for up to `people` people; their older due
+    first `lines` due digest lines (queued before the latest 06:00 in their
+    project's time zone at `now`), for up to `people` people; their due
     lines past that are marked `skipped` ("over the digest limit"), so
-    nothing piles up for the next digest. 051 took the boundary itself
+    nothing piles up for the next digest. Since 371 (issue #869) the lines
+    are ranked by turns across the person's projects (each project's newest,
+    then each one's second newest, newest first within a turn) rather than
+    newest first overall, so one busy project can't take the whole limit,
+    and each claimed row carries `left_out`: how many of that person's lines
+    of that project this claim skipped, which the project's digest email
+    states (371 dropped and recreated the function for the new result
+    column; the first five columns are unchanged). 051 took the boundary itself
     (06:00 SAST for every project); 059 moved it to each project's zone.
     357 claims each person under a transaction-scoped advisory *try* lock
     (`'alert_digest:' || user_id`), taken before any of their lines is read:

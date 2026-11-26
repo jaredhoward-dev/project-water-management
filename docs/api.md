@@ -1790,8 +1790,18 @@ the worker mails each recipient ([§ below](#how-alert-mail-is-sent)).
   `ALERTS_DAILY_CAP`). The rest, and everything a person chose to get daily,
   go out in one **digest** per catchment after 06:00 there. A digest lists at most 20 alerts (the newest), then
   "…and N more" pointing at the app; those are marked sent with it. At most
-  200 lines a person are taken per digest; older ones are dropped as over
-  the limit, never sent later. A person's digest lines go to one worker
+  200 lines a person, across all their catchments, are taken per digest run
+  (it keeps the inbox bounded); the rest are dropped as over the limit,
+  never sent later. The 200 are shared by turns, not taken newest first
+  across catchments: each catchment's newest line, then each one's second
+  newest, and so on (371, issue #869), so a busy catchment never pushes a
+  quieter one's digest out: a catchment with 5 lines keeps all 5 while a busy
+  one fills the other 195. Every catchment with due lines keeps at least one
+  while a person has no more than 200 of them. A catchment that lost lines
+  to the limit says how many in its own digest ("35 older alerts for this
+  catchment were left out of this summary, because one day's summaries list
+  at most 200 alerts across all your catchments"), after "…and N more"; that
+  count is of the lines dropped, not rechecked against the reader's access. A person's digest lines go to one worker
   (a per-person advisory lock, 357), so two workers at once never split
   them over two emails.
 - The mail is built **as its recipient**, under RLS, when it is sent: their

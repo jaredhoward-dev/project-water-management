@@ -40,6 +40,8 @@ export interface Claimed {
 	project_id: string;
 	kind: AlertKind;
 	node_id: string | null;
+	/** Digest claims only: how many of this person's lines of this project the claim skipped as over the limit (371). */
+	left_out?: number;
 }
 
 export interface SendResult {
@@ -58,7 +60,13 @@ const LEASE = '10 minutes';
  * marked sent (in the digest), and never sent again.
  */
 export const DIGEST_MAX_LINES = 20;
-/** Lines claimed per person for one digest (app_alert_claim_digest); older ones are skipped as over the limit. */
+/**
+ * Lines claimed per person for one digest run, across all their catchments
+ * (app_alert_claim_digest). Ranked by turns (each catchment's newest, then
+ * each one's next, 371), so a busy catchment never pushes a quiet one out;
+ * the lines past it are skipped as over the limit, and each catchment's
+ * digest says how many of its own were (left_out, issue #869).
+ */
 export const DIGEST_CLAIM_LINES = 200;
 
 
@@ -320,7 +328,8 @@ async function deliverDigest(lines: Claimed[], secret: string, r: SendResult): P
 				{ pageUrl: unsubscribePageUrl(token), oneClickUrl: oneClickUrl(token) },
 				dailyCap(),
 				rest.counted.length,
-				await feedbackLinks(db, used[0]!.event_id, true, secret)
+				await feedbackLinks(db, used[0]!.event_id, true, secret),
+				{ n: first.left_out ?? 0, limit: DIGEST_CLAIM_LINES }
 			);
 			return { mail, used, skipped };
 		});
@@ -404,7 +413,7 @@ export async function sendAlerts({ now = new Date(), limit = 100 }: { now?: Date
 	for (const c of due) await deliver(c, secret, r);
 
 	const { rows: digest } = await withoutUser((db) =>
-		db.query<Claimed>(`SELECT event_id, user_id, project_id, kind, node_id FROM app_alert_claim_digest($1, $2, $3, $4::interval)`, [now, limit, DIGEST_CLAIM_LINES, LEASE])
+		db.query<Claimed>(`SELECT event_id, user_id, project_id, kind, node_id, left_out FROM app_alert_claim_digest($1, $2, $3, $4::interval)`, [now, limit, DIGEST_CLAIM_LINES, LEASE])
 	);
 	const groups = new Map<string, Claimed[]>();
 	for (const c of digest) {
