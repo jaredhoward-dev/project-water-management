@@ -172,6 +172,8 @@ export interface GrantRequest {
 	reason: string;
 	by: string;
 	replace: boolean;
+	/** Editor seats in all (374); absent or null: the plan's included seats. */
+	seats?: number | null;
 }
 
 export interface Granted {
@@ -203,8 +205,8 @@ export function grantPlan(client: pg.ClientBase, req: GrantRequest): Promise<Gra
 		const owned = await ownedAccount(client, req.target, true);
 		const accountId = owned.accountId!;
 		const { rows: granted } = await client.query<{ id: string }>(
-			`SELECT app_staff_grant_plan($2, $3, CASE WHEN $1::text IS NULL THEN NULL ELSE ${UNTIL_SQL} END, $4, $5, $6) AS id`,
-			[req.until, accountId, req.plan, req.reason, req.by, req.replace]
+			`SELECT app_staff_grant_plan($2, $3, CASE WHEN $1::text IS NULL THEN NULL ELSE ${UNTIL_SQL} END, $4, $5, $6, $7) AS id`,
+			[req.until, accountId, req.plan, req.reason, req.by, req.replace, req.seats ?? null]
 		);
 		const subscriptionId = granted[0]!.id;
 		const { rows } = await client.query<{ until: string | null }>(

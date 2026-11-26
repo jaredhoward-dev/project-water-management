@@ -5506,7 +5506,9 @@ Every step is an ordinary app action by an owner unless it says "operator".
        that South African date and ends at the next SAST midnight (`NULL`:
        until revoked, a founding user's; a 30-day trial is `now() +
        interval '30 days'`); the reason (1–500 characters); who grants it
-       (1–100 characters); and `p_replace`. With an end the plan page says
+       (1–100 characters); `p_replace`; and, optionally, the editor seats
+       in all (374; omitted or `NULL`: the plan's included seats, Team 3;
+       more only on Team, e.g. `…, false, 6)`). With an end the plan page says
        it ends and the renewal notice never picks it up. A live **Stripe**
        subscription on the account is always refused, with `p_replace` or
        without: cancel it in Stripe, let the webhook end it, then grant. A

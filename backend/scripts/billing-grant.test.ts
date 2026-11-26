@@ -14,7 +14,8 @@ describe('parseArgs', () => {
 			until: '2027-03-31',
 			reason: 'Founding user',
 			by: 'op',
-			replace: false
+			replace: false,
+			seats: null
 		});
 		expect(parseArgs(['--reason', 'INV-1', '--replace', T.toUpperCase(), 'team', '--by', 'James'], 'op')).toEqual({
 			mode: 'grant',
@@ -23,7 +24,8 @@ describe('parseArgs', () => {
 			until: null,
 			reason: 'INV-1',
 			by: 'James',
-			replace: true
+			replace: true,
+			seats: null
 		});
 	});
 

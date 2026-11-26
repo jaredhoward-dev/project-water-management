@@ -1,7 +1,7 @@
 // The operator's staff grant of a plan (330_staff_grant, issue #641 "Staff
 // overrides"; docs/billing.md § Staff grants), locally:
 //
-//   pnpm dev:billing:grant <email|team-id> <plan> [--until YYYY-MM-DD] --reason "…" [--replace] [--by <name>]
+//   pnpm dev:billing:grant <email|team-id> <plan> [--until YYYY-MM-DD] [--seats n] --reason "…" [--replace] [--by <name>]
 //   pnpm dev:billing:grant <email|team-id> --revoke --reason "…" [--by <name>]
 //   pnpm dev:billing:grant <email|team-id> --list
 //
@@ -21,15 +21,15 @@ import { loadDevEnv } from '../src/config/devEnv.js';
 export { isCalendarDate, type Target };
 
 export type GrantArgs =
-	| { mode: 'grant'; target: Target; plan: string; until: string | null; reason: string; by: string; replace: boolean }
+	| { mode: 'grant'; target: Target; plan: string; until: string | null; reason: string; by: string; replace: boolean; seats: number | null }
 	| { mode: 'revoke'; target: Target; reason: string; by: string }
 	| { mode: 'list'; target: Target };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const VALUE_FLAGS = new Set(['--until', '--reason', '--by']);
+const VALUE_FLAGS = new Set(['--until', '--reason', '--by', '--seats']);
 const BARE_FLAGS = new Set(['--revoke', '--list', '--replace']);
 export const USAGE = [
-	'usage: pnpm dev:billing:grant <email|team-id> <plan> [--until YYYY-MM-DD] --reason "…" [--replace] [--by <name>]',
+	'usage: pnpm dev:billing:grant <email|team-id> <plan> [--until YYYY-MM-DD] [--seats n] --reason "…" [--replace] [--by <name>]',
 	'       pnpm dev:billing:grant <email|team-id> --revoke --reason "…" [--by <name>]',
 	'       pnpm dev:billing:grant <email|team-id> --list'
 ].join('\n');
@@ -68,7 +68,7 @@ export function parseArgs(argv: string[], defaultBy: string): GrantArgs | string
 	}
 	if (bare.has('--revoke')) {
 		if (plan) return `unexpected argument ${plan}: --revoke ends the account’s grant, whatever its plan`;
-		if (flags.has('--until') || bare.has('--replace')) return '--revoke takes no --until or --replace';
+		if (flags.has('--until') || flags.has('--seats') || bare.has('--replace')) return '--revoke takes no --until, --seats or --replace';
 		if (!reason) return 'give the reason with --reason (it goes into the grant log, which the account can read)';
 		return { mode: 'revoke', target, reason, by };
 	}
@@ -76,8 +76,11 @@ export function parseArgs(argv: string[], defaultBy: string): GrantArgs | string
 	if (extra) return `unexpected argument ${extra}`;
 	const until = flags.get('--until') ?? null;
 	if (until !== null && !isCalendarDate(until)) return '--until is a date, YYYY-MM-DD (the grant lasts through that day, SAST)';
+	const seatsText = flags.get('--seats');
+	if (seatsText !== undefined && !/^[1-9][0-9]{0,5}$/.test(seatsText)) return '--seats is a whole number of editor seats in all (at least the plan includes)';
+	const seats = seatsText === undefined ? null : Number(seatsText);
 	if (!reason) return 'give the reason with --reason (it goes into the grant log, which the account can read)';
-	return { mode: 'grant', target, plan: plan.toLowerCase(), until, reason, by, replace: bare.has('--replace') };
+	return { mode: 'grant', target, plan: plan.toLowerCase(), until, reason, by, replace: bare.has('--replace'), seats };
 }
 
 /** Run one command on the schema owner's connection `url`; returns the lines to print (the operator's terminal). */

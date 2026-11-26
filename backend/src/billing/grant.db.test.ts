@@ -182,6 +182,23 @@ describe('app_staff_grant_plan', () => {
 		expect(await read(member)).toEqual([]);
 	});
 
+	it('grants a team its included seats by default and more with --seats, which a new grant changes; refuses seats the plan doesn’t sell', async () => {
+		const admin = await person('GrantSeatsAdmin');
+		const teamId = (await admin.call('POST', '/teams', { name: 'Grant seats WUA' })).body.team.id as string;
+		const seatsNow = async () => (await admin.call('GET', `/teams/${teamId}/plan`)).body.subscription.seats as number;
+		await run([teamId, 'team', '--until', '2099-12-31', '--reason', 'B2B invoice INV-2']);
+		expect(await seatsNow()).toBe(3);
+		await run([teamId, 'team', '--until', '2099-12-31', '--seats', '6', '--reason', 'B2B invoice INV-3', '--replace']);
+		expect(await seatsNow()).toBe(6);
+		const [acct] = await asOwner('SELECT id FROM billing_account WHERE team_id = $1', [teamId]);
+		const grant = (plan: string, seats: number) => failure(asOwner('SELECT app_staff_grant_plan($1, $2, NULL, $3, $4, true, $5)', [acct.id, plan, 'x', 'op', seats]));
+		expect(await grant('team', 2)).toMatch(/^22023: the team plan includes 3 seats/);
+		expect(await grant('pro', 2)).toMatch(/^22023: the pro plan sells no extra seats/);
+		expect(await seatsNow()).toBe(6);
+		expect(parseArgs(['a@example.com', 'team', '--seats', '0', '--reason', 'x'], 'op')).toMatch(/--seats is a whole number/);
+		expect(parseArgs(['a@example.com', '--revoke', '--seats', '4', '--reason', 'x'], 'op')).toMatch(/--revoke takes no/);
+	});
+
 	it('refuses a bad plan, a past end, a blank reason, and an unknown person or account', async () => {
 		const account = await accountOf(outsider);
 		const grant = (plan: string, until: string | null, reason: string) =>
