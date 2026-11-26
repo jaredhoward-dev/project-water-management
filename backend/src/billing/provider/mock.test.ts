@@ -2,7 +2,7 @@
 // with the dev key, for its kind and until it expires; the events it makes
 // are ones the real normaliser accepts, for the account and plan it names.
 import { describe, expect, it } from 'vitest';
-import { cancelAtPeriodEndEvent, invoicePaidEvent, mockSubscriptionRef, paidEvents, readMockSession, signedDelivery, signMockSession, type MockSession } from './mock.js';
+import { cancelAtPeriodEndEvent, invoicePaidEvent, mockSubscriptionRef, newMockSubscriptionRef, paidEvents, readMockSession, signedDelivery, signMockSession, type MockSession } from './mock.js';
 import { verifySignature } from './signature.js';
 import { normaliseStripeEvent } from './stripe.js';
 
@@ -49,7 +49,11 @@ describe('mock sessions', () => {
 describe('mock events', () => {
 	it('pays: the session completed, then an active subscription for the account and plan, a month long', () => {
 		const [done, created] = paidEvents(checkout, NOW).map((e) => normaliseStripeEvent(e));
-		expect(done).toMatchObject({ kind: 'event', event: { type: 'checkout.completed', payload: { accountId: ACCOUNT, externalRef: mockSubscriptionRef(ACCOUNT) } } });
+		expect(done).toMatchObject({ kind: 'event', event: { type: 'checkout.completed', payload: { accountId: ACCOUNT, externalRef: expect.stringMatching(/^sub_mock_[0-9a-f]{24}$/) } } });
+		// The session and the subscription name the same new id (#929), never the old per-account one.
+		const ref = (done as unknown as { event: { payload: { externalRef: string } } }).event.payload.externalRef;
+		expect(created).toMatchObject({ event: { payload: { externalRef: ref } } });
+		expect(ref).not.toBe(mockSubscriptionRef(ACCOUNT));
 		expect(created).toMatchObject({
 			kind: 'event',
 			event: {
@@ -62,7 +66,7 @@ describe('mock events', () => {
 					periodStart: '2026-11-23T12:00:00.000Z',
 					periodEnd: '2026-12-23T12:00:00.000Z',
 					cancelAtPeriodEnd: false,
-					externalRef: `sub_mock_${ACCOUNT.replace(/-/g, '')}`
+					externalRef: ref
 				}
 			}
 		});
@@ -110,6 +114,12 @@ describe('mock events', () => {
 		expect(before.kind === 'event' && 'interval' in before.event.payload).toBe(false);
 	});
 
+	it('gives each checkout a new subscription id (#929): re-subscribing never reuses one that ended', () => {
+		const ref = (events: Record<string, unknown>[]) => (events[1]!.data as { object: { id: string } }).object.id;
+		expect(ref(paidEvents(checkout, NOW))).not.toBe(ref(paidEvents(checkout, NOW)));
+		expect(newMockSubscriptionRef()).not.toBe(newMockSubscriptionRef());
+	});
+
 	it('gives each event its own id', () => {
 		const ids = [...paidEvents(checkout, NOW), ...paidEvents(checkout, NOW)].map((e) => e.id);
 		expect(new Set(ids).size).toBe(4);
@@ -127,6 +137,12 @@ describe('mock events', () => {
 			event: { type: 'subscription.updated', payload: { status: 'active', cancelAtPeriodEnd: true, externalRef: mockSubscriptionRef(ACCOUNT), periodEnd: '2026-12-23T12:00:00.000Z' } }
 		});
 		expect(cancelAtPeriodEndEvent({ ...portal, subscription: null }, NOW)).toBeNull();
+		// The subscription's own id when the token names it (#929); a grant (manual) has nothing to cancel (#941).
+		const sub = portal.subscription!;
+		expect(normaliseStripeEvent(cancelAtPeriodEndEvent({ ...portal, subscription: { ...sub, provider: 'mock', externalRef: 'sub_mock_feed' } }, NOW))).toMatchObject({
+			event: { payload: { externalRef: 'sub_mock_feed', cancelAtPeriodEnd: true } }
+		});
+		expect(cancelAtPeriodEndEvent({ ...portal, subscription: { ...sub, provider: 'manual', externalRef: 'in_mock_1' } }, NOW)).toBeNull();
 	});
 
 	it('signs a delivery the webhook’s check accepts', () => {

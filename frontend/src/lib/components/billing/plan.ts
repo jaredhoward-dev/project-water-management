@@ -3,6 +3,7 @@
 // shadow mode: usage is counted against the plan's limits, nothing is charged
 // or refused, so a count past its limit is said, never blocked. The workspace
 // is English; plan data never reaches a farmer page.
+import { PLAN_ENDED_GRACE_DAYS } from '@water-management/engine/plans';
 import type { AccountPlan, BillingInterval, LiveCatchment, LiveCatchments, Plan, Subscription } from '#lib/api/types.js';
 import { fmtDate, fmtNum } from '#lib/format/number.js';
 
@@ -385,7 +386,7 @@ export function keepPickerIntro(list: LiveCatchments, enforced: boolean, whose: 
 	const others = 'feeds, alerts and automatic runs';
 	let when: string;
 	if (list.catchments.some((c) => c.pausedAt)) when = `On the others, ${others} are paused.`;
-	else if (!enforced) when = `Once plan limits apply, ${others} pause on the others 14 days after the plan ended.`;
+	else if (!enforced) when = `Once plan limits apply, ${others} pause on the others ${PLAN_ENDED_GRACE_DAYS} days after the plan ended.`;
 	else when = list.pausesFrom ? `From ${fmtDate(list.pausesFrom)}, ${others} pause on the others.` : `Soon, ${others} pause on the others.`;
 	return `${head} ${when} ${lost}`;
 }

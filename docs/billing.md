@@ -1251,19 +1251,30 @@ simulate, as #641's "Local-first" asks (`billing/mockCheckout.ts`):
 Each button is named for what it simulates (*Simulate: pays*, …):
 
 - **Pays**: `checkout.session.completed` and `customer.subscription.created`
-  (active, a month or a year from now, subscription id `sub_mock_<account>`,
-  with Team's extra seats as a second item),
+  (active, a month or a year from now, a new subscription id
+  `sub_mock_<24 hex>` for each checkout, as Stripe makes one per session
+  paid, so re-subscribing never meets the "ended stays ended" conflict of a
+  reused id (399; #929), with Team's extra seats as a second item),
   each signed with the dev key and posted to `POST /billing/webhook/mock`
   in-process: the real route, so `app_billing_apply` writes the
   subscription, as with Stripe. Then `303` to the plan page with
-  `?checkout=done`.
+  `?checkout=done`, only when the webhook took each event (`applied`,
+  `recorded`, `duplicate`, `ignored`). A `conflict`, `stale` or
+  `unknown_account` is still a `200` (Stripe mustn't retry it) but changed
+  nothing: the page says *Nothing changed* with the webhook's answer
+  (`409`), as when a second checkout link still valid is paid after the
+  first (#929).
 - **Declines**: the page again, saying the card was declined, nothing sent
   (Stripe's hosted page keeps the person there too).
 - **Cancels**: `303` back with `?checkout=cancelled`, nothing sent.
 
 The mock portal shows the subscription by its plan's name and offers *Cancel
 at the end of the period* (`customer.subscription.updated` with
-`cancel_at_period_end`, through the webhook the same way) and a link back.
+`cancel_at_period_end` on that subscription's own id, read through
+`app_billing_live_subscription_ref`, through the webhook the same way) and a
+link back. A grant (`manual`: a paid B2B invoice's or a staff grant) shows
+its invoices only, with no cancel, as Stripe's portal would for an invoice
+with no subscription; a hand-made cancel of one is `409` (#941).
 The *This page has expired* page (a stale or forged token) and the
 *Something went wrong* page (the webhook refused an event) each link back to
 the plan page.
@@ -1487,7 +1498,9 @@ Built but off: nothing is paused unless `BILLING_ENFORCED` is on.
   trial's end (342, `app_reverse_trial_expire`) is a lapse like any other,
   so it starts the same grace. Auto-calibration on new data isn't paused:
   it refits a model, which is modelling, and Free never limits modelling.
-- **The grace.** For 14 days nothing changes. After them, with billing
+- **The grace.** For 14 days nothing changes (`PLAN_ENDED_GRACE_DAYS` in
+  `packages/engine/src/plans.ts`, which the workspace's words read;
+  `planFigures.db.test.ts` pins it to the functions' `interval '14 days'`). After them, with billing
   enforced, the tick pauses every live catchment past Free's limit and keeps
   one: the one the owner chose (`billing_account.kept_project_id`, set by
   `app_billing_keep_catchment(project)`, the account's person or a team

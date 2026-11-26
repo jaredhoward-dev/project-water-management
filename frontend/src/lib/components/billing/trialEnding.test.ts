@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { PLAN_ENDED_GRACE_DAYS } from '@water-management/engine/plans';
 import { TRIAL_NOTICE_MS, trialEndingText } from './trialEnding';
 
 const NOW = Date.parse('2026-12-05T10:00:00.000Z');
@@ -25,6 +26,8 @@ describe('trialEndingText (the reverse trial’s ending notice)', () => {
 		expect(text).toMatch(/^Your Pro trial ends on \d{1,2} Dec 2026\./);
 		expect(text).toContain('nothing is charged, nothing is deleted');
 		expect(text).toContain('pause only after 14 days');
+		// The grace from the plan figures (#941), never typed.
+		expect(text).toContain(`pause only after ${PLAN_ENDED_GRACE_DAYS} days`);
 		expect(text).toMatch(/Upgrade to keep Pro\.$/);
 	});
 });

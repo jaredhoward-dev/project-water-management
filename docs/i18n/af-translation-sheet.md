@@ -18,4 +18,23 @@ How to write the Afrikaans:
 - The farm pages use plain words, not a modeller’s; `docs/design/farmer-view.md` §5.1 lists the words to use and the ones to avoid.
 - Numbers, dates and units are formatted by the app; don’t translate them.
 
-0 strings: 0 on the site, 0 in emails, 0 in the glossary.
+3 strings: 3 on the site, 0 in emails, 0 in the glossary.
+
+## The site (farm pages, sign-in pages, account)
+
+### landing.pricing
+
+The public pricing page (/welcome/pricing): the three plans, Free, Pro and Team (plan names stay as they are), with their prices in rand and what each includes. Modelling is never limited on any plan; the plans differ in the AI assistant, live operations (data feeds, automatic runs, alerts and farm views), server PDF reports and issued evidence packs (signed model results for a water-use licence application). Plain and honest, no sales talk. {price}, {month} and {year} are amounts like “R 899”; {n} is a number.
+
+| Id | English | Context | Afrikaans |
+| --- | --- | --- | --- |
+| `0b1ca392` | Unlimited server PDF reports |  |  |
+| `683c2ba3` | Scheduled report emails |  |  |
+
+### error
+
+A message from the server when something couldn’t be done, shown in a red box on the sign-in, account, alert and farm pages. Plain and short; say what to do next where it helps.
+
+| Id | English | Context | Afrikaans |
+| --- | --- | --- | --- |
+| `37a743bb` | This plan’s catchments with automatic updates are all in use. Ask the person who manages the plan to switch one off or choose another plan, then try again. |  |  |

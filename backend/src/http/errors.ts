@@ -1,6 +1,7 @@
 import type { Context } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { ZodError } from 'zod';
+import { freeLiveCatchments } from '@water-management/engine/plans';
 import { safeError, stackFrames } from '../logging/safeError.js';
 import { logEvent } from '../logging/logEvent.js';
 
@@ -297,9 +298,14 @@ export const ROLE_CONFLICT_MESSAGE =
 export const PLAN_LIMIT_SEATS_MESSAGE =
 	'every editor seat on this team’s plan is in use: a team admin can add seats on the team’s Plan and usage page, or make someone a viewer';
 
-/** 402 plan_limit's words for Free's one live catchment (338_live_catchments): fixed, never the database's text. */
-export const PLAN_LIMIT_LIVE_MESSAGE =
-	'Free runs one catchment live (data feeds, automatic runs, alerts and published farm views): switch them off in the other catchment, or compare plans';
+/** 402 plan_limit's words for Free's live catchments (338_live_catchments) at `n` (#941: the plan figures' count): fixed, never the database's text. */
+export const planLimitLiveMessage = (n: number): string =>
+	n === 1
+		? 'Free runs one catchment live (data feeds, automatic runs, alerts and published farm views): switch them off in the other catchment, or compare plans'
+		: `Free runs ${n} catchments live (data feeds, automatic runs, alerts and published farm views): switch them off in one of the others, or compare plans`;
+
+/** The same at Free's figure in packages/engine/src/plans.ts. */
+export const PLAN_LIMIT_LIVE_MESSAGE = planLimitLiveMessage(freeLiveCatchments());
 
 /**
  * The plan_limit refusal's numbers, from the DETAIL 334's and 338's guards
@@ -364,7 +370,11 @@ export function handleError(err: unknown, c: Context) {
 	// 334's seat guard and 338's live-catchment guard name themselves: 402 plan_limit, with only the numbers they put in their DETAIL.
 	if (code === PG_CHECK && (err as { constraint?: string }).constraint === 'plan_limit') {
 		const params = planLimitParams(err);
-		const error = params.key === 'live_catchments' ? PLAN_LIMIT_LIVE_MESSAGE : PLAN_LIMIT_SEATS_MESSAGE;
+		// The live message counts the refusal's own limit when it carries one (the plan table's), else the plan figures'.
+		const error =
+			params.key === 'live_catchments'
+				? planLimitLiveMessage(typeof params.limit === 'number' && params.limit >= 1 ? params.limit : freeLiveCatchments())
+				: PLAN_LIMIT_SEATS_MESSAGE;
 		return c.json({ error, code: 'plan_limit' satisfies ErrorCode, params }, 402);
 	}
 	if (code === PG_CHECK) return c.json({ error: 'violates a data rule' }, 409);

@@ -29,3 +29,36 @@ export const assistantTimesFree = (p: PlanFigures): number => Math.round(p.assis
  */
 export const reverseTrialDays = (flag: string | undefined, pro: PlanFigures = planFigures('pro')): number | null =>
 	flag === 'true' && pro.trialDays > 0 ? pro.trialDays : null;
+
+/**
+ * What a plan card lists for its live catchments and reports, from the figures (#941: the cards' lists match them,
+ * never typed): every catchment live or a count, unlimited reports or a count, and scheduled report emails when
+ * the plan has them. The page words each kind.
+ */
+export interface CardLines {
+	live: 'every' | { count: number };
+	reports: 'unlimited' | { count: number };
+	scheduledReports: boolean;
+}
+
+export const cardLines = (p: PlanFigures): CardLines => ({
+	live: p.liveCatchments === null ? 'every' : { count: p.liveCatchments },
+	reports: p.reportsPerMonth === null ? 'unlimited' : { count: p.reportsPerMonth },
+	scheduledReports: p.scheduledReports
+});
+
+/**
+ * Whether `a`'s figures give everything `b`'s do (Team's card says "Everything in Pro", Pro's "Everything in
+ * Free"): as many or more live catchments, reports, packs and assistant, and scheduled reports when `b` has them.
+ */
+export function coversPlan(a: PlanFigures, b: PlanFigures): boolean {
+	const atLeast = (x: number | null, y: number | null) => x === null || (y !== null && x >= y);
+	return (
+		atLeast(a.liveCatchments, b.liveCatchments) &&
+		atLeast(a.reportsPerMonth, b.reportsPerMonth) &&
+		a.packsIncludedPerMonth >= b.packsIncludedPerMonth &&
+		a.packPriceMinor <= b.packPriceMinor &&
+		a.assistantUsdPerMonth >= b.assistantUsdPerMonth &&
+		(a.scheduledReports || !b.scheduledReports)
+	);
+}

@@ -145,11 +145,11 @@ describe('mock and manual: changeSeats', () => {
 			[5, 2],
 			[3, 1]
 		] as const) {
-			const event = seatsChangedEvent(ACCOUNT, sub, 3, seats, NOW);
+			const event = seatsChangedEvent(ACCOUNT, 'sub_mock_abc123', sub, 3, seats, NOW);
 			expect(event.type).toBe('customer.subscription.updated');
 			expect((event.data as { object: { items: { data: unknown[] } } }).object.items.data).toHaveLength(items);
 			const r = normaliseStripeEvent(event);
-			expect(r).toMatchObject({ kind: 'event', event: { type: 'subscription.updated', payload: { accountId: ACCOUNT, seats, planCode: 'team', status: 'active' } } });
+			expect(r).toMatchObject({ kind: 'event', event: { type: 'subscription.updated', payload: { accountId: ACCOUNT, externalRef: 'sub_mock_abc123', seats, planCode: 'team', status: 'active' } } });
 		}
 	});
 

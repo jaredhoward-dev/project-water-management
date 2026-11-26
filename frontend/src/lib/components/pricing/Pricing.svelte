@@ -19,7 +19,7 @@
 	import LanguageSwitch from '#lib/i18n/LanguageSwitch.svelte';
 	import { language, LANGUAGES, plural, t, tn, wordsLang, type Locale } from '#lib/i18n/locale.svelte.js';
 	import { landingPath, PRICING_PATH, pricingPath } from '#lib/auth/session.svelte.js';
-	import { assistantTimesFree, monthsFreeYearly, planFigures, rand, reverseTrialDays } from './pricing';
+	import { assistantTimesFree, cardLines, monthsFreeYearly, planFigures, rand, reverseTrialDays } from './pricing';
 
 	let { lang }: { lang: Locale } = $props();
 
@@ -27,6 +27,9 @@
 	const pro = planFigures('pro');
 	const team = planFigures('team');
 	const trialDays = reverseTrialDays(PUBLIC_REVERSE_TRIAL, pro);
+	// Free's and Pro's live and report lines, from their figures (#941); Team's card says "Everything in Pro" (pricing.test.ts: its figures cover Pro's).
+	const freeLines = cardLines(free);
+	const proLines = cardLines(pro);
 
 	const LIVE = plural({
 		one: 'Live data feeds, automatic runs, alerts and published farm views on {n} catchment',
@@ -102,8 +105,17 @@
 					<p class="who">{t('For study, research and a catchment of your own. Non-commercial use only.')}</p>
 					<ul class="includes">
 						<li>{t('Unlimited catchments, runs, calibration, scenarios and exports')}</li>
-						<li>{tn(LIVE, free.liveCatchments ?? 0)}</li>
-						<li>{tn(REPORTS, free.reportsPerMonth ?? 0)}</li>
+						{#if freeLines.live === 'every'}
+							<li>{t('Live data feeds, automatic runs, alerts and published farm views on every catchment')}</li>
+						{:else}
+							<li>{tn(LIVE, freeLines.live.count)}</li>
+						{/if}
+						{#if freeLines.reports === 'unlimited' && freeLines.scheduledReports}
+							<li data-testid="reports-free">{t('Unlimited server PDF reports, and scheduled report emails')}</li>
+						{:else}
+							<li data-testid="reports-free">{freeLines.reports === 'unlimited' ? t('Unlimited server PDF reports') : tn(REPORTS, freeLines.reports.count)}</li>
+							{#if freeLines.scheduledReports}<li>{t('Scheduled report emails')}</li>{/if}
+						{/if}
 						<li>{t('A small assistant allowance each day and month')}</li>
 						<li>{t('Issued evidence packs at {price} each', { price: rand(free.packPriceMinor) })}</li>
 					</ul>
@@ -120,8 +132,17 @@
 					<p class="who">{t('For one hydrologist, including work for clients.')}</p>
 					<ul class="includes">
 						<li>{t('Everything in Free, for commercial work')}</li>
-						<li>{t('Live data feeds, automatic runs, alerts and published farm views on every catchment')}</li>
-						<li>{t('Unlimited server PDF reports, and scheduled report emails')}</li>
+						{#if proLines.live === 'every'}
+							<li>{t('Live data feeds, automatic runs, alerts and published farm views on every catchment')}</li>
+						{:else}
+							<li>{tn(LIVE, proLines.live.count)}</li>
+						{/if}
+						{#if proLines.reports === 'unlimited' && proLines.scheduledReports}
+							<li data-testid="reports-pro">{t('Unlimited server PDF reports, and scheduled report emails')}</li>
+						{:else}
+							<li data-testid="reports-pro">{proLines.reports === 'unlimited' ? t('Unlimited server PDF reports') : tn(REPORTS, proLines.reports.count)}</li>
+							{#if proLines.scheduledReports}<li>{t('Scheduled report emails')}</li>{/if}
+						{/if}
 						<li>{t('About {n} times Free’s assistant allowance', { n: assistantTimesFree(pro) })}</li>
 						<li>{t('Issued evidence packs at {price} each', { price: rand(pro.packPriceMinor) })}</li>
 					</ul>

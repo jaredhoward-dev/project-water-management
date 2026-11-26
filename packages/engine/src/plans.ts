@@ -86,3 +86,14 @@ export const PLAN_FIGURES: readonly PlanFigures[] = [
 ];
 
 export const planFigures = (code: PlanCode): PlanFigures => PLAN_FIGURES.find((p) => p.code === code)!;
+
+/**
+ * Days after a paid plan ends (or a trial runs out) before the catchments past Free's live limit pause:
+ * the grace of 341's app_plan_pause_sync, 345's keep picker and 346's notices (`interval '14 days'` in
+ * each; backend/src/billing/planFigures.db.test.ts pins them to this). Not the unpaid grace of a failed
+ * payment, which is the provider's dunning.
+ */
+export const PLAN_ENDED_GRACE_DAYS = 14;
+
+/** Free's live catchments, the one figure the workspace's live-limit words count (`liveCatchments`, never null on Free). */
+export const freeLiveCatchments = (): number => planFigures('free').liveCatchments ?? 1;

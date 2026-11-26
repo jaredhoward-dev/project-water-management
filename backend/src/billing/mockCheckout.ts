@@ -13,10 +13,13 @@
 //   POST /billing/mock/checkout?t=…&outcome=…   pays: checkout.session.completed and customer.subscription.created,
 //                                               each signed with the dev key and posted to POST /billing/webhook/mock
 //                                               (the real route, so app_billing_apply writes the subscription), then
-//                                               303 to the plan page; declines: the page again with the card declined
+//                                               303 to the plan page, or, when the webhook didn't take an event (its
+//                                               `conflict`, `stale`, … is still a 200), a page with its actual answer
+//                                               (#929); each checkout pays a new subscription id; declines: the page again with the card declined
 //                                               and nothing sent (as Stripe's hosted page keeps the person there);
 //                                               cancels: 303 back with ?checkout=cancelled, nothing sent
-//   GET  /billing/mock/portal?t=…               the subscription, cancel at the period end, and back
+//   GET  /billing/mock/portal?t=…               the subscription, cancel at the period end, and back; a grant
+//                                               (manual: staff or invoice) shows its invoices only, no cancel (#941)
 //   POST /billing/mock/portal?t=…&action=cancel customer.subscription.updated with cancel_at_period_end, then 303 back
 //
 // The token (provider/mock.ts) is the credential: signed with the dev key,
@@ -74,21 +77,55 @@ function session<K extends MockSession['kind']>(c: Context, kind: K): Extract<Mo
 	return s as Extract<MockSession, { kind: K }>;
 }
 
-/** Post one event to the real webhook route, signed with the dev key; whether it was taken (200). Also the mock's seat change (provider.ts). */
-export async function deliverMockEvent(event: Record<string, unknown>): Promise<boolean> {
+/** The webhook's answers that mean the event took effect (or was already in): anything else changed nothing. */
+const TAKEN = new Set(['applied', 'recorded', 'duplicate', 'ignored']);
+
+/** What the webhook made of one mock event: its `result` (or null for a non-200), and whether that took effect. */
+export interface MockDelivery {
+	taken: boolean;
+	status: number;
+	result: string | null;
+}
+
+/**
+ * Post one event to the real webhook route, signed with the dev key, and read what it made of it (#929):
+ * a `conflict`, `stale` or `unknown_account` is a 200 as Stripe needs it to be (a retry wouldn't change
+ * it), but nothing was applied, so it isn't taken. Also the mock's seat change (provider.ts).
+ */
+export async function deliverMockEvent(event: Record<string, unknown>): Promise<MockDelivery> {
 	const secret = process.env.BILLING_WEBHOOK_SECRET?.trim();
-	if (!secret) return false;
+	if (!secret) return { taken: false, status: 0, result: null };
 	const { body, signature } = signedDelivery(secret, event);
 	const res = await billingWebhookRoutes.request('/webhook/mock', {
 		method: 'POST',
 		headers: { 'content-type': 'application/json', [SIGNATURE_HEADER]: signature },
 		body
 	});
-	return res.status === 200;
+	let result: string | null = null;
+	try {
+		const answer = (await res.json()) as { result?: unknown };
+		if (typeof answer?.result === 'string') result = answer.result;
+	} catch {
+		// Not JSON: no result to show.
+	}
+	return { taken: res.status === 200 && result !== null && TAKEN.has(result), status: res.status, result };
 }
 
-const failed = (c: Context, back: string) =>
-	c.html(page('Something went wrong', `<p class="err" data-mock-error>The webhook refused the event; the backend log says why.</p>\n${backLink(back)}`), 502);
+/** What a result that changed nothing means, in the page's words. */
+const RESULT_WORDS: Record<string, string> = {
+	conflict: 'it conflicts with a subscription already recorded (for example one that has ended), so nothing changed',
+	stale: 'it is older than the last event applied to this subscription, so it was skipped',
+	unknown_account: 'the account it names doesn’t exist any more'
+};
+
+/** The page for an event the webhook didn't take: its actual answer, never "done" (#929). */
+const failed = (c: Context, back: string, d?: MockDelivery) => {
+	const said = d?.result
+		? `<p class="err" data-mock-error data-mock-result="${esc(d.result)}">The webhook answered <code>${esc(d.result)}</code>: ${esc(RESULT_WORDS[d.result] ?? 'nothing changed')}. The backend log says more.</p>`
+		: `<p class="err" data-mock-error>The webhook refused the event${d?.status ? ` (HTTP ${d.status})` : ''}; the backend log says why.</p>`;
+	const answered = d?.status === 200;
+	return c.html(page(answered ? 'Nothing changed' : 'Something went wrong', `${said}\n${backLink(back)}`), answered ? 409 : 502);
+};
 
 const tokenQs = (c: Context) => `t=${encodeURIComponent(tokenOf(c))}`;
 
@@ -127,7 +164,10 @@ export const mockCheckoutRoutes = new Hono()
 		if (outcome === 'cancels') return c.redirect(s.cancelUrl, 303);
 		if (outcome === 'declines') return c.html(checkoutPage(c, s, true), 402);
 		if (outcome !== 'pays') return c.json({ error: 'unknown outcome' }, 400);
-		for (const event of paidEvents(s)) if (!(await deliverMockEvent(event))) return failed(c, pageOf(s.successUrl));
+		for (const event of paidEvents(s)) {
+			const d = await deliverMockEvent(event);
+			if (!d.taken) return failed(c, pageOf(s.successUrl), d);
+		}
 		logEvent('info', { event: 'billing_mock_checkout', outcome, plan: s.planCode });
 		return c.redirect(s.successUrl, 303);
 	})
@@ -140,7 +180,12 @@ export const mockCheckoutRoutes = new Hono()
 		const planName = sub ? (sub.planName ?? sub.planCode) : '';
 		const state = !sub
 			? '<p data-mock-subscription="none">No subscription: there is nothing to manage.</p>'
-			: sub.cancelAtPeriodEnd
+			: sub.provider === 'manual'
+				? // A staff or invoice grant (#941): nothing the mock bills, so nothing to cancel; the portal shows invoices only.
+					`<p data-mock-subscription="manual">Your ${esc(planName)} plan is paid by invoice and runs to ${esc(sub.periodEnd.slice(0, 10))}. Nothing renews here and there is nothing to cancel: ask the operator to change it.</p>
+<h2>Invoices</h2>
+<p data-mock-invoices>Invoices for this plan come by email with your purchase order number (simulated: the mock sends none).</p>`
+				: sub.cancelAtPeriodEnd
 				? `<p data-mock-subscription="ending">Your ${esc(planName)} subscription ends on ${esc(sub.periodEnd.slice(0, 10))}.</p>`
 				: `<p data-mock-subscription="${esc(sub.status)}">Your ${esc(planName)} subscription renews on ${esc(sub.periodEnd.slice(0, 10))}.</p>
 <form method="post" action="?${qs}&amp;action=cancel"><button type="submit" data-action="cancel">Cancel at the end of the period</button></form>`;
@@ -151,8 +196,13 @@ export const mockCheckoutRoutes = new Hono()
 		const s = session(c, 'portal');
 		if (s instanceof Response) return s;
 		if (c.req.query('action') !== 'cancel') return c.json({ error: 'unknown action' }, 400);
+		// A grant (manual) is shown with its invoices only: a hand-made cancel of one is refused, as the page offers none.
+		if (s.subscription?.provider === 'manual') return c.json({ error: 'nothing to cancel here' }, 409);
 		const event = cancelAtPeriodEndEvent(s);
-		if (event && !(await deliverMockEvent(event))) return failed(c, s.returnUrl);
+		if (event) {
+			const d = await deliverMockEvent(event);
+			if (!d.taken) return failed(c, s.returnUrl, d);
+		}
 		logEvent('info', { event: 'billing_mock_portal', action: 'cancel' });
 		c.header('Cache-Control', 'no-store');
 		return c.redirect(s.returnUrl, 303);
