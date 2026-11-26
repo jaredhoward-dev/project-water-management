@@ -52,15 +52,21 @@ const round6 = (v: number) => Math.round(v * 1e6) / 1e6;
  * zoom in), else each cell's centre and elevation, north to south, west to
  * east. A cell the DEM has no tile for, or a no-data cell, is left out.
  */
-export async function demGridPoints(dem: Dem, box: Box, max: number, stride = DEM_GRID_STRIDE): Promise<{ points: DemPoint[]; zoom: number; cellM: number } | null> {
+export async function demGridPoints(dem: Dem, box: Box, max: number, stride = DEM_GRID_STRIDE): Promise<{ points: DemPoint[]; zoom: number; cellM: number | null } | null> {
 	const info = await dem.info();
 	const z = info.maxZoom;
-	// The tile side is the DEM's own; read one tile to learn it (cached by dem.ts).
+	// The tile side is the DEM's own; read a tile in the box to learn it (cached by dem.ts): the one under its centre, else the
+	// first the box holds, since the centre of a box over the data's edge may have none. Never assumed: a guessed side put every
+	// point of a 256 px DEM (the fixture) at the wrong cell, or none at all. Tile indices at z don't depend on the side.
 	const n = 2 ** z;
-	const centreTile = (lon: number, lat: number) => [Math.floor(((lon + 180) / 360) * n), Math.floor(pxY(lat, n))] as const;
-	const [tx, ty] = centreTile((box.w + box.e) / 2, (box.s + box.n) / 2);
-	const probe = await dem.tile(z, tx, ty);
-	const size = probe?.size ?? 512;
+	const tileX = (lon: number) => Math.min(n - 1, Math.max(0, Math.floor(pxX(lon, n))));
+	const tileY = (lat: number) => Math.min(n - 1, Math.max(0, Math.floor(pxY(lat, n))));
+	let probe = await dem.tile(z, tileX((box.w + box.e) / 2), tileY((box.s + box.n) / 2));
+	// The route holds a box to 0.5° a side, a handful of tiles at the DEM's zoom.
+	for (let ty = tileY(box.n); !probe && ty <= tileY(box.s); ty++) for (let tx = tileX(box.w); !probe && tx <= tileX(box.e); tx++) probe = await dem.tile(z, tx, ty);
+	// No tile anywhere in the box: no points, and no cell size to state.
+	if (!probe) return { points: [], zoom: z, cellM: null };
+	const size = probe.size;
 	const world = n * size;
 	const range = sampledPixels(box, world, stride);
 	if (range.count > max) return null;

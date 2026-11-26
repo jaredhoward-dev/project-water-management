@@ -53,9 +53,24 @@ describe('demGridPoints', () => {
 		for (const p of part) expect(allKeys.has(key(p))).toBe(true);
 	});
 
+	it('reads the cells right in a box whose centre has no tile (the edge of the data): the tile size from a tile in the box, never assumed', async () => {
+		// From the fixture's last 100 columns to 300 columns past its east edge: the centre lies where the DEM has no tile, so the
+		// tile under it can't give the tile side (256 here); the fixture's own part must still come back, at its own cells.
+		const [w3, n3] = fixtureLonLat(FIXTURE_CELLS - 100, 100);
+		const [e3, s3] = fixtureLonLat(FIXTURE_CELLS + 300, 300);
+		const box = { w: w3, s: s3, e: e3, n: n3 };
+		const fresh = openDem(fileURLToPath(FIXTURE_FILE));
+		const got = (await demGridPoints(fresh, box, 10_000))!;
+		const all = (await demGridPoints(dem, whole, 10_000))!.points;
+		const inBox = all.filter(([lon, lat]) => lon >= box.w && lon <= box.e && lat >= box.s && lat <= box.n);
+		expect(inBox.length).toBeGreaterThan(10);
+		expect(got.points).toEqual(inBox);
+	});
+
 	it('refuses a box with more points than asked for, and gives none where the DEM has no tile', async () => {
 		expect(await demGridPoints(dem, whole, 100)).toBeNull();
 		const away = await demGridPoints(dem, { w: 30, s: -10, e: 30.05, n: -9.95 }, 10_000);
 		expect(away!.points).toEqual([]);
+		expect(away!.cellM).toBeNull();
 	});
 });
