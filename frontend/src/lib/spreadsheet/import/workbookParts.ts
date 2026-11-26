@@ -136,7 +136,9 @@ const BUILTIN_FORMATS: [number, string][] = [
  * workbook's own formats first, any id (0 included, past 0x188 as written),
  * then in BUILTIN_FORMATS. A style index out of range, or an id in neither
  * table, has no format: a number. Where styles.xml repeats <numFmts> or
- * <cellXfs>, the last block counts, as in openpyxl. openpyxl refuses an s, a
+ * <cellXfs>, the last block counts, as in openpyxl, and only blocks that are
+ * direct children of the root, holding direct-child <numFmt>/<xf>, are read
+ * (issue #915). openpyxl refuses an s, a
  * numFmtId or a numFmt id that int() can't read; so does this.
  */
 export class Styles {
@@ -195,25 +197,30 @@ function formatId(raw: string, what: string): number {
 export function readStyles(bytes: Uint8Array, part: string): Styles {
 	let numFmts: { id: string | undefined; code: string | undefined }[] = [];
 	let xfIds: (string | undefined)[] = [];
-	let inNumFmts = -1;
-	let inXfs = -1;
+	// Only the root's direct children count, and only their direct children,
+	// as openpyxl's Stylesheet.from_tree reads them: a block nested anywhere
+	// else (an extLst, another block) is ignored (issue #915).
+	let block: 'numFmts' | 'cellXfs' | undefined;
 	let depth = 0;
 	scanXml(bytes, part, {
 		open(local, tag, selfClosing) {
-			if (local === 'numFmts') {
-				numFmts = [];
-				if (!selfClosing) inNumFmts = depth;
-			} else if (local === 'cellXfs') {
-				xfIds = [];
-				if (!selfClosing) inXfs = depth;
-			} else if (local === 'numFmt' && inNumFmts >= 0) numFmts.push({ id: tag.attr('numFmtId'), code: tag.attr('formatCode') });
-			else if (local === 'xf' && inXfs >= 0) xfIds.push(tag.attr('numFmtId'));
+			if (depth === 1) {
+				if (local === 'numFmts') {
+					numFmts = [];
+					if (!selfClosing) block = 'numFmts';
+				} else if (local === 'cellXfs') {
+					xfIds = [];
+					if (!selfClosing) block = 'cellXfs';
+				}
+			} else if (depth === 2) {
+				if (local === 'numFmt' && block === 'numFmts') numFmts.push({ id: tag.attr('numFmtId'), code: tag.attr('formatCode') });
+				else if (local === 'xf' && block === 'cellXfs') xfIds.push(tag.attr('numFmtId'));
+			}
 			depth++;
 		},
 		close() {
 			depth--;
-			if (depth === inNumFmts) inNumFmts = -1;
-			if (depth === inXfs) inXfs = -1;
+			if (depth === 1) block = undefined;
 		},
 		text() {},
 		cdata() {}

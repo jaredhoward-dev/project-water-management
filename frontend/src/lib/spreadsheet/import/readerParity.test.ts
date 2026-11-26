@@ -289,6 +289,22 @@ const STYLE_CASES: { name: string; styles: string; s: (string | null)[]; openpyx
 		s: ['0', '1'],
 		openpyxl: ['n', 'd']
 	},
+	{
+		// openpyxl reads <numFmts> and <cellXfs> only as direct children of the root (issue
+		// #915): the later blocks inside an extLst are ignored, not taken as the last block.
+		name: 'nested-blocks-ignored',
+		styles: '<numFmts><numFmt numFmtId="164" formatCode="yyyy"/></numFmts><cellXfs><xf numFmtId="164"/><xf numFmtId="165"/><xf numFmtId="0"/></cellXfs><extLst><ext uri="{00000000-0000-0000-0000-000000000915}"><numFmts><numFmt numFmtId="165" formatCode="yyyy"/></numFmts><cellXfs><xf numFmtId="0"/><xf numFmtId="0"/><xf numFmtId="14"/></cellXfs></ext></extLst>',
+		s: ['0', '1', '2'],
+		openpyxl: ['d', 'n', 'n']
+	},
+	{
+		// …and only their direct <numFmt>/<xf> children; SheetJS took the nested ones.
+		name: 'nested-entries-ignored',
+		styles: '<numFmts><numFmt numFmtId="164" formatCode="0.0"/><extLst><numFmt numFmtId="164" formatCode="yyyy"/></extLst></numFmts><cellXfs><xf numFmtId="0"/><extLst><xf numFmtId="14"/></extLst><xf numFmtId="164"/></cellXfs>',
+		s: ['0', '1', '2'],
+		openpyxl: ['n', 'n', 'n'],
+		sheetjs: ['n', 'd', 'd']
+	},
 	{ name: 'no-cellxfs', styles: '<numFmts><numFmt numFmtId="164" formatCode="yyyy"/></numFmts>', s: [null, '0'], openpyxl: ['n', 'n'] },
 	{ name: 'bad-s', styles: '<cellXfs><xf numFmtId="0"/></cellXfs>', s: ['x'], openpyxl: 'refused' },
 	{ name: 'bad-xf-numfmtid', styles: '<cellXfs><xf numFmtId=""/></cellXfs>', s: ['0'], openpyxl: 'refused' },
