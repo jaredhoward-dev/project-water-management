@@ -341,6 +341,26 @@ in `infra/feeds.tf`):
   storm against the owner's provider account; a 30 s deadline and an 8 MB cap
   per answer; no compression. No conditional GETs: these APIs answer a query,
   not a file.
+- **Why a `Retry-After` past 15 minutes isn't honoured in full (issue #866,
+  the conservative default until the operator decides):** the 15-minute cap
+  is the in-process pause (`http.ts` `THROTTLE_MAX_SECONDS`, shared with CHC
+  and DWS). Past it, the feed's next try is the scheduler's failing backoff
+  (`app_feed_next_attempt`, last defined in `243_feed_next_attempt.sql`: 15
+  minutes × 2ⁿ⁻¹, at most a day), which is computed from the feed's
+  failure count, its last scheduled time and its last error text only;
+  `data_feed` stores no next-allowed time to set from a long `Retry-After`.
+  Honouring one needs that column (or a new rule in the function), which is
+  a migration, so it is not built yet. The cost of not having it is bounded:
+  a fetch stops at the first 429 or 503, so a provider that asks for 6 hours
+  is asked about four single requests early (at roughly 15, 45, 105 and 225
+  minutes) before the backoff passes 6 hours, and a day at most once the
+  backoff tops out. **Revisit** when a provider complains or blocks the
+  owner's account over early retries, a station feed's last error shows
+  repeated 429s with a long `Retry-After`, or the next migration touches
+  `data_feed` anyway: then add a `retry_not_before timestamptz` column set
+  from the `Retry-After` (capped at 24 hours) by the fetch that failed, and
+  have `app_feed_is_due` and `app_feed_next_attempt` take the later of it
+  and the backoff.
 - **Offline:** `FEED_SOURCE=fixtures` (the default) serves a synthetic
   station API on a reserved `station.example` host
   (`backend/src/feeds/stationFixtures.ts`), so dev, CI and e2e never call out.

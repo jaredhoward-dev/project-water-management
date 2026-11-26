@@ -20,7 +20,8 @@
 // - a total deadline, a size cap counted while reading, no compression, and
 //   the person's own header names and values validated before they are sent;
 // - a host that answers HTTP 429 or 503 is asked nothing more for its
-//   Retry-After (60 s without one, at most 15 minutes: http.ts THROTTLE_*),
+//   Retry-After (60 s without one, at most 15 minutes: http.ts THROTTLE_*;
+//   why not longer, docs/data-sources.md § station-api, issue #866),
 //   by any station feed in this process (STATION_THROTTLED), as the CHC and
 //   DWS client does: several feeds' stations often sit on one provider's API,
 //   and a warm fetcher Lambda runs their fetches one after another.
