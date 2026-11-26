@@ -44,6 +44,8 @@ import { BillingUnavailableError, BillingProviderError, type BillingProvider } f
 export const OWNER_ACTIONS = ['billing-grant', 'billing-revoke', 'billing-grants', 'billing-report', 'authority-confirm', 'billing-account', 'billing-invoice'] as const;
 /** What the billing-admin workflow may send (scripts/release/owner-action.mjs WORKFLOW_ACTIONS): every action but the address lookup and the invoice (its PO number may identify a client). */
 export const WORKFLOW_ACTIONS = ['billing-grants', 'billing-grant', 'billing-revoke', 'billing-report', 'authority-confirm'] as const;
+/** The most seats a staff grant gives (app_staff_grant_plan's bound, migration 374). */
+export const MAX_GRANT_SEATS = 100000;
 export type OwnerActionName = (typeof OWNER_ACTIONS)[number];
 
 const uuid = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i).transform((s) => s.toLowerCase());
@@ -78,7 +80,11 @@ export const ownerActionSchema = z.discriminatedUnion('action', [
 			until: day.nullable().optional(),
 			reason: text(500),
 			by,
-			replace: z.boolean().optional()
+			replace: z.boolean().optional(),
+			// Editor seats in all (374), as `--seats n` takes them: a whole number, at least 1; absent or null is the
+			// plan's included seats. The database refuses fewer than included, extra seats on Pro, and more than
+			// MAX_GRANT_SEATS (app_staff_grant_plan), which this bound repeats so a typo fails before anything connects.
+			seats: z.number().int().min(1).max(MAX_GRANT_SEATS).nullable().optional()
 		})
 		.refine(oneTarget),
 	z.strictObject({ action: z.literal('billing-revoke'), via, ...target, reason: text(500), by }).refine(oneTarget),
@@ -134,7 +140,7 @@ const REASONS: Record<OwnerActionErrorCode, string> = {
 	no_billing_account: 'no such billing account, or the account has none, so no grant',
 	live_subscription: 'the account has a live subscription: a Stripe one is cancelled in Stripe first; a manual or mock one needs replace',
 	no_live_grant: 'the account has no live staff grant',
-	invalid: 'the database refused a value (the plan, the end date, the reason or who acts)',
+	invalid: 'the database refused a value (the plan, the seats, the end date, the reason or who acts)',
 	not_editor: 'the person is not an editor or owner of the project, or the reference is empty',
 	billing_unavailable: 'this function has no billing provider that sends invoices (BILLING_PROVIDER=stripe with its key; docs/deployment.md § Owner actions)',
 	billing_provider_error: 'the billing provider failed or refused the invoice; the detail is in CloudWatch',
@@ -196,7 +202,7 @@ const targetOf = (a: TargetFields): Target =>
 				: { kind: 'account', accountId: a.accountId! };
 
 export type OwnerActionResult =
-	| { action: 'billing-grant'; accountId: string; kind: Owner['kind']; plan: string; endsAt: string | null; replaced: boolean }
+	| { action: 'billing-grant'; accountId: string; kind: Owner['kind']; plan: string; seats: number; endsAt: string | null; replaced: boolean }
 	| { action: 'billing-revoke'; accountId: string; kind: Owner['kind']; plan: string }
 	| { action: 'billing-grants'; kind: Owner['kind']; accountId: string | null; planNow: string; log: LogRow[] }
 	| { action: 'billing-grants'; kind: 'all'; grants: LiveGrant[] }
@@ -230,8 +236,8 @@ export async function runOwnerAction(client: pg.ClientBase, a: OwnerAction, deps
 	switch (a.action) {
 		case 'billing-grant': {
 			const t = targetOf(a);
-			const g = await grantPlan(client, { target: t, plan: a.plan, until: a.until ?? null, reason: a.reason, by: a.by, replace: a.replace ?? false });
-			return { action: a.action, accountId: g.accountId, kind: g.kind, plan: g.plan, endsAt: g.endsAt, replaced: g.replaced };
+			const g = await grantPlan(client, { target: t, plan: a.plan, until: a.until ?? null, reason: a.reason, by: a.by, replace: a.replace ?? false, seats: a.seats ?? null });
+			return { action: a.action, accountId: g.accountId, kind: g.kind, plan: g.plan, seats: g.seats, endsAt: g.endsAt, replaced: g.replaced };
 		}
 		case 'billing-revoke': {
 			const t = targetOf(a);

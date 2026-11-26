@@ -672,7 +672,12 @@ the code was written (an election day), which the count can't know.
 **Business days.** Weekdays less South Africa's public holidays
 (`businessDays.ts`): the Public Holidays Act's ten fixed dates, Good Friday
 and Family Day (from Easter, computed), and the Monday after a holiday that
-falls on a Sunday. Without them a weekday-only count runs up to six days
+falls on a Sunday (the Act's s2(1)). When Christmas falls on a Sunday its
+Monday is the Day of Goodwill already, and the President has each time
+declared Tuesday 27 December a holiday under s2A (2011, 2016, 2022; The
+Presidency's statements on gov.za), so the count takes the 27th as one in
+such a year (next 2033) ahead of the declaration: one business day fewer
+only moves a notice earlier (issue #893). Without them a weekday-only count runs up to six days
 long over December and Easter, which at the 40-day edge would make a notice
 late; no dependency is needed for them.
 
@@ -1027,7 +1032,9 @@ verification link, a password reset that proves an unverified inbox, or a
 sign-up through an invite for that address), the backend hashes the
 address's canonical form (`canonicalEmail` in `billing/metrics.ts`:
 lower-cased, `+tag` dropped, Gmail's dots dropped, googlemail.com as
-gmail.com) with SHA-256 and calls `app_reverse_trial_start(hash)` as the
+gmail.com; a local part that starts with `+` is kept whole, since with no
+base address dropping it would fold different people's mailboxes at a
+domain into one, issue #893) with SHA-256 and calls `app_reverse_trial_start(hash)` as the
 person, inside its own savepoint, so a trial that fails never fails the
 verification, the password reset or the invite sign-up around it (logged as
 `reverse_trial_start_failed`, the error's name and code only), and unless
@@ -1694,9 +1701,10 @@ defaults to the operator's login.
   `409 billing_grant_seats` tells a team admin to ask for. Before 374 every
   grant was written with 1 seat (the plan page showed a granted Team as 1
   seat, and enforced, it was held to its 3 included) and there was no way to
-  grant more; the production owner action `billing-grant` doesn't pass
-  seats yet, so a grant past the included seats is the local script's or
-  runbook 21's SQL until it does.
+  grant more. In production the `billing-grant` owner action takes the same
+  seats (`seats`, a whole number from 1 to 100000; the workflow's `seats`
+  input, issue #891; deployment.md § Owner actions), and its answer says the
+  seats granted.
 - **Beside a live subscription.** A live **Stripe** subscription is refused,
   with or without `--replace`: ending it here would leave Stripe billing the
   customer for a plan we no longer show, and `app_billing_apply` never
@@ -1712,7 +1720,13 @@ defaults to the operator's login.
   on Free again, with nothing deleted. "Live" stays 323's status test, so a
   grant can outlive its end by one tick (5 minutes in production; locally,
   until a worker runs). A new grant first expires the account's lapsed one,
-  so a late tick never blocks it.
+  so a late tick never blocks it. Since 387 the tick (and the reverse
+  trial's, `app_reverse_trial_expire()`) goes account by account in id
+  order, taking the account's billing lock (334's advisory lock) before it
+  writes the rows, as every other subscription writer does; before, it met
+  that lock in 341's sync while holding the row, and could deadlock against
+  a webhook ending the same trial (issue #892;
+  `billing/expireLockOrder.db.test.ts`).
 - **Revoke.** `app_staff_revoke_grant(account, reason, by)` cancels the live
   grant now (`period_end` now) and logs a `revoke` row; Free again, nothing
   deleted. It never touches a Stripe or mock subscription.

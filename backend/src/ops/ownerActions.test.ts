@@ -8,7 +8,7 @@ import { NoPersonError } from '../projects/authorityConfirm.js';
 import { InvoiceError } from '../billing/invoice.js';
 import { BillingProviderError, BillingUnavailableError } from '../billing/provider.js';
 import { buildPayload } from '../../../scripts/release/owner-action.mjs';
-import { OwnerActionError, ownerActionCode, ownerActionReason, OWNER_ACTIONS, parseOwnerAction, WORKFLOW_ACTIONS } from './ownerActions.js';
+import { MAX_GRANT_SEATS, OwnerActionError, ownerActionCode, ownerActionReason, OWNER_ACTIONS, parseOwnerAction, WORKFLOW_ACTIONS } from './ownerActions.js';
 
 const TEAM = '0b0e7f4e-2f7c-4a43-9d55-3f1f7a8f1c01';
 const PROJECT = '6a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d';
@@ -55,6 +55,13 @@ describe('parseOwnerAction', () => {
 		expect(refused({ action: 'billing-grant', email: 'a@b.org', plan: 'free', reason: 'r', by: 'x' })).toBe('refused');
 		expect(refused({ action: 'billing-grant', email: 'a@b.org', plan: 'team', until: '2026-02-30', reason: 'r', by: 'x' })).toBe('refused');
 		expect(refused({ action: 'billing-grant', email: 'a@b.org', plan: 'team', reason: 'r', by: 'x', replace: 'yes' })).toBe('refused');
+		// Seats as `--seats n` takes them: a whole number from 1 to the database's bound, never text.
+		for (const seats of [0, -1, 2.5, MAX_GRANT_SEATS + 1, '5', Number.NaN]) {
+			expect(refused({ action: 'billing-grant', teamId: TEAM, plan: 'team', reason: 'r', by: 'x', seats })).toBe('refused');
+		}
+		expect(parseOwnerAction({ action: 'billing-grant', teamId: TEAM, plan: 'team', reason: 'r', by: 'x', seats: MAX_GRANT_SEATS })).toMatchObject({ seats: MAX_GRANT_SEATS });
+		expect(parseOwnerAction({ action: 'billing-grant', teamId: TEAM, plan: 'team', reason: 'r', by: 'x', seats: null })).toMatchObject({ seats: null });
+		expect(refused({ action: 'billing-revoke', teamId: TEAM, reason: 'r', by: 'x', seats: 5 })).toBe('refused');
 		expect(refused({ action: 'billing-revoke', reason: 'r', by: 'x' })).toBe('refused'); // nobody named
 		expect(refused({ action: 'billing-revoke', email: 'a@b.org', teamId: TEAM, reason: 'r', by: 'x' })).toBe('refused'); // both
 		expect(refused({ action: 'billing-revoke', email: 'a@b.org', reason: 'r', by: 'x', plan: 'pro' })).toBe('refused');
@@ -86,6 +93,7 @@ describe('ids only from the workflow (its runs are in a public repo)', () => {
 			via: 'workflow'
 		});
 		expect(parseOwnerAction({ action: 'billing-grant', via: 'workflow', userId: PERSON, plan: 'pro', reason: 'Founding', by: 'octocat', replace: false })).toMatchObject({ userId: PERSON });
+		expect(parseOwnerAction({ action: 'billing-grant', via: 'workflow', teamId: TEAM, plan: 'team', reason: 'PO 8', by: 'octocat', replace: false, seats: 12 })).toMatchObject({ teamId: TEAM, seats: 12 });
 		expect(parseOwnerAction({ action: 'billing-revoke', via: 'workflow', teamId: TEAM, reason: 'ended', by: 'octocat' })).toMatchObject({ teamId: TEAM });
 		expect(parseOwnerAction({ action: 'billing-grants', via: 'workflow', accountId: ACCOUNT })).toEqual({ action: 'billing-grants', via: 'workflow', accountId: ACCOUNT });
 		expect(parseOwnerAction({ action: 'billing-grants', via: 'workflow' })).toEqual({ action: 'billing-grants', via: 'workflow' });
@@ -139,10 +147,11 @@ describe('ids only from the workflow (its runs are in a public repo)', () => {
 	});
 
 	it('accepts every payload the workflow builds (scripts/release/owner-action.mjs), and the workflow offers no other action', () => {
-		const blank = { account_id: '', user_id: '', team_id: '', plan: 'none', until: '', replace: false, reason: '', month: '', project_id: '', reference: '' };
+		const blank = { account_id: '', user_id: '', team_id: '', plan: 'none', until: '', seats: '', replace: false, reason: '', month: '', project_id: '', reference: '' };
 		const cases: Record<string, unknown>[] = [
 			{ action: 'billing-grant', account_id: ACCOUNT, plan: 'team', until: '2027-01-31', reason: 'Invoice INV-0042' },
 			{ action: 'billing-grant', user_id: PERSON, plan: 'pro', reason: 'Founding user', replace: true },
+			{ action: 'billing-grant', team_id: TEAM, plan: 'team', seats: '12', reason: 'Invoice INV-0043' },
 			{ action: 'billing-revoke', team_id: TEAM, reason: 'Pilot ended' },
 			{ action: 'billing-grants' },
 			{ action: 'billing-grants', account_id: ACCOUNT },

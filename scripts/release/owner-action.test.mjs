@@ -27,6 +27,12 @@ test('builds each action’s payload from ids, marked via workflow', () => {
 	assert.deepEqual(build({ action: 'billing-grant', user_id: PERSON, plan: 'pro', reason: 'Founding user', replace: 'true' }), {
 		payload: { action: 'billing-grant', via: 'workflow', userId: PERSON, reason: 'Founding user', by: 'octocat', plan: 'pro', replace: true },
 	});
+	assert.deepEqual(build({ action: 'billing-grant', team_id: TEAM, plan: 'team', seats: ' 12 ', reason: 'Invoice INV-0043' }), {
+		payload: { action: 'billing-grant', via: 'workflow', teamId: TEAM, reason: 'Invoice INV-0043', by: 'octocat', plan: 'team', replace: false, seats: 12 },
+	});
+	assert.deepEqual(build({ action: 'billing-grant', team_id: TEAM, plan: 'team', seats: '', reason: 'r' }), {
+		payload: { action: 'billing-grant', via: 'workflow', teamId: TEAM, reason: 'r', by: 'octocat', plan: 'team', replace: false },
+	});
 	assert.deepEqual(build({ action: 'billing-revoke', team_id: TEAM, reason: 'Pilot ended' }), {
 		payload: { action: 'billing-revoke', via: 'workflow', teamId: TEAM, reason: 'Pilot ended', by: 'octocat' },
 	});
@@ -54,6 +60,10 @@ test('refuses any input containing @, naming the input and never the value', () 
 
 test('refuses malformed ids, dates and text, and inputs the action doesn’t read', () => {
 	assert.match(errors({ action: 'billing-grants', account_id: 'acct_123' }), /account_id is not a uuid/);
+	for (const seats of ['0', '-3', '2.5', '1e3', '012', 'ten', '100001', '1000000']) {
+		assert.match(errors({ action: 'billing-grant', team_id: TEAM, plan: 'team', seats, reason: 'r' }), /seats is not a whole number/, seats);
+	}
+	assert.match(errors({ action: 'billing-revoke', team_id: TEAM, seats: '5', reason: 'r' }), /seats is not used by billing-revoke/);
 	assert.match(errors({ action: 'billing-grant', plan: 'team', reason: 'r' }), /exactly one of/);
 	assert.match(errors({ action: 'billing-grant', account_id: ACCOUNT, team_id: TEAM, plan: 'team', reason: 'r' }), /exactly one of/);
 	assert.match(errors({ action: 'billing-grants', account_id: ACCOUNT, user_id: PERSON }), /at most one of/);

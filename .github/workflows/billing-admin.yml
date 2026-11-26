@@ -23,7 +23,7 @@ name: Owner action (billing, authority)
 # page, the API, a later change), so a person's address in an input would be
 # personal information published (POPIA; docs/security.md § Public repo
 # hygiene). The inputs name a billing account, a person, a team or a project by
-# UUID, plus a plan, dates and the text a customer or the History reads; any
+# UUID, plus a plan, a seat count, dates and the text a customer or the History reads; any
 # input containing `@` is refused (scripts/release/owner-action.mjs, in both
 # jobs: the preflight refuses it before anyone is asked to approve). The
 # payload is marked `via: "workflow"`, and the Lambda's schema refuses an
@@ -43,6 +43,7 @@ name: Owner action (billing, authority)
 # Who acts (billing_grant_log.granted_by) is the GitHub login that started the run.
 #
 #   gh workflow run billing-admin.yml -f action=billing-grant -f account_id=<uuid> -f plan=team -f until=2027-01-31 -f reason="Invoice INV-0042"
+#   gh workflow run billing-admin.yml -f action=billing-grant -f team_id=<uuid> -f plan=team -f seats=12 -f reason="Invoice INV-0043"      (12 editor seats in all)
 #   gh workflow run billing-admin.yml -f action=billing-grant -f user_id=<uuid> -f plan=pro -f reason="Founding user"      (a person with no billing account yet)
 #   gh workflow run billing-admin.yml -f action=billing-revoke -f team_id=<uuid> -f reason="Pilot ended"
 #   gh workflow run billing-admin.yml -f action=billing-grants            (every live grant; give account_id, user_id or team_id for one account's log)
@@ -88,6 +89,11 @@ on:
           - team
       until:
         description: 'Grant: last day, YYYY-MM-DD (SAST); empty: until revoked'
+        required: false
+        type: string
+        default: ''
+      seats:
+        description: 'Grant: editor seats in all, a whole number; empty: the plan’s included seats (more only on Team)'
         required: false
         type: string
         default: ''
@@ -235,7 +241,7 @@ jobs:
           fi
           jq -r "$defs"'
             if .action == "billing-grant" then
-              "Granted \(.plan | plan) to the \(.kind | kind) billing account \(.accountId | id), ending \(.endsAt | when)\(if .replaced == true then ", replacing its live subscription" else "" end)."
+              "Granted \(.plan | plan) with \(.seats | count) editor seats to the \(.kind | kind) billing account \(.accountId | id), ending \(.endsAt | when)\(if .replaced == true then ", replacing its live subscription" else "" end)."
             elif .action == "billing-revoke" then
               "Revoked the \(.plan | plan) grant of the \(.kind | kind) billing account \(.accountId | id); it is on Free now."
             elif .action == "billing-grants" and .kind == "all" then
