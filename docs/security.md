@@ -286,10 +286,13 @@ falls through to the first when it was the last. Neither is granted to
   `requireCodeForAnotherFactor`): a password-only session lives its 7 days
   after the first factor goes on, and with the password it could otherwise
   add a factor of its own and, by confirming it, become two-step without
-  ever giving the owner's factor's code. Turning a factor off needs a code (from
+  ever giving the owner's factor's code. At …/confirm the check runs before
+  the code throttle counts (and again inside the confirm), so a refusal is
+  never counted as a code guess (issue #881). Turning a factor off needs a code (from
   the app, by email, or a recovery code). Tests:
   `auth/mfa-email.db.test.ts` "adding a second factor needs a session that
-  gave a code" (each order, a pending app, positive controls).
+  gave a code" (each order, a pending app or pending codes by email,
+  refusals not counted on the throttle, positive controls).
 - **Code throttle.** Every code check (sign-in, confirm, turn off, new
   codes) counts on the account's `mfa_throttle` row first, in its own
   transaction under a row lock, like `login_throttle`: the 5th wrong code in

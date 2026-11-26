@@ -18,7 +18,19 @@ How to write the Afrikaans:
 - The farm pages use plain words, not a modeller’s; `docs/design/farmer-view.md` §5.1 lists the words to use and the ones to avoid.
 - Numbers, dates and units are formatted by the app; don’t translate them.
 
-2 strings: 0 on the site, 2 in emails, 0 in the glossary.
+5 strings: 3 on the site, 2 in emails, 0 in the glossary.
+
+## The site (farm pages, sign-in pages, account)
+
+### account.two-step
+
+The account page’s “Two-step sign-in” box: after the password, a 6-digit code from an authenticator app on the phone (Google Authenticator, Microsoft Authenticator, Aegis: app names stay as they are) or sent by email. Setting each up (scan a QR code or type a key; or a code by email), the ten recovery codes (each signs in once if no code can be had), new codes, turning one off, and a waiting request to remove it, which a code cancels. “Two-step sign-in” is the feature’s name: one consistent term.
+
+| Id | English | Context | Afrikaans |
+| --- | --- | --- | --- |
+| `1579764d` | To turn on codes by email beside your authenticator app, sign in again with a code from the app. This browser signed in with your password only. |  |  |
+| `17cd71d9` | To set up the authenticator app beside codes by email, sign in again with a code from your email. This browser signed in with your password only. |  |  |
+| `1184ff4b` | Sign in again |  |  |
 
 ## Emails
 

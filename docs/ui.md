@@ -147,7 +147,14 @@ the code the app shows** with **Turn on the authenticator app**. Email's
 (focused) with **Turn on codes by email** and **Send again (in N s)**, which
 counts down the minute the server allows between sends
 (`lib/auth/resendTimer.svelte.ts`; a pending one shows **Finish turning
-on**). The first way turned on brings the ten recovery codes, once, in a
+on**). Adding the second way from a browser that signed in with the
+password only (the API answers `403 mfa_step_up`, security.md § Two-step
+sign-in) asks for no password: a warning, focused, says to sign in again
+with a code from the way that is on, with **Sign in again** (sign out, then
+the sign-in page, back to the Account page after) and **Cancel**; a refusal
+the page didn't expect (the status read before another tab changed it)
+shows the same instead of calling the password wrong
+(`account/addFactor.ts`, issue #882; `account-add-factor-step-up.spec.ts`). The first way turned on brings the ten recovery codes, once, in a
 highlighted box whose heading takes focus: **Download the codes** (a text file, through the download helper loaded on click; if it can’t load, an alert says to copy the codes instead, never to reload, which would lose them), **Copy the codes** (the same text on the clipboard; a status line says whether it worked) and **I’ve
 saved them**; a second way keeps the same set. With either on: **Remove** /
 **Turn off** on its row, a **Recovery codes** part with how many are left

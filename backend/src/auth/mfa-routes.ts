@@ -221,6 +221,9 @@ export const mfaRoutes = new Hono<AuthEnv>()
 	.post('/mfa/totp/confirm', requireUser, async (c) => {
 		const body = Code.parse(await readJson(c));
 		const userId = c.get('userId');
+		// The session check before the throttle counts: a refusal is no code guess (issue #881). It runs again
+		// below, in the confirm's own transaction, for a factor that goes on in between.
+		await withUser(userId, (db) => requireCodeForAnotherFactor(c, db, userId, 'totp'));
 		await throttle(c, userId, '/auth/mfa/totp/confirm');
 		const result = await withUser(userId, async (db) => {
 			const { rows } = await db.query<{ pending: boolean }>('SELECT confirmed_at IS NULL AS pending FROM user_totp WHERE user_id = $1', [userId]);
@@ -271,6 +274,9 @@ export const mfaRoutes = new Hono<AuthEnv>()
 	.post('/mfa/email/confirm', requireUser, async (c) => {
 		const body = Code.parse(await readJson(c));
 		const userId = c.get('userId');
+		// The session check before the throttle counts: a refusal is no code guess (issue #881). It runs again
+		// below, in the confirm's own transaction, for a factor that goes on in between.
+		await withUser(userId, (db) => requireCodeForAnotherFactor(c, db, userId, 'email'));
 		await throttle(c, userId, '/auth/mfa/email/confirm');
 		const result = await withUser(userId, async (db) => {
 			const { rows } = await db.query<{ pending: boolean }>('SELECT confirmed_at IS NULL AS pending FROM user_email_otp WHERE user_id = $1', [userId]);
