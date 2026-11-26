@@ -3315,9 +3315,20 @@ In short:
   tab) is refused as well as `//host`.
 - **CSV exports defuse spreadsheet formulas.** Farm, run and series names are
   user-controlled and the files are opened in Excel by other project members,
-  so any text cell starting with `= + - @`, tab or CR gets a leading `'`
-  (`backend/src/export/csv.ts`, OWASP "CSV injection"), and a cell holding a
-  comma, quote or line break is RFC 4180-quoted. Numbers are written as
+  so any text cell a spreadsheet may read as a formula gets a leading `'`
+  (`backend/src/export/csv.ts` `FORMULA_START`, OWASP "CSV injection"), and a
+  cell holding a comma, quote or line break is RFC 4180-quoted. The rule is
+  one rule everywhere (the frontend's copy is `names.ts` `FORMULA_START`, which
+  `defuse` and the readers' `undefuse` share): a leading `= + - @`, the same
+  after any leading whitespace, a full-width `＝ ＋ － ＠` (OWASP lists them: a
+  formula in some locales), or a leading tab, CR or LF. Leading whitespace
+  counts since issue #902: LibreOffice Calc 26.2's CSV import, with its
+  "Trim spaces" option on, trims an unquoted ` =1+1` and evaluates it (tested
+  headless on 2026-11-26; with the option off, the default, the cell stays
+  text, and ` +1`, ` -1` and ` @SUM(…)` stayed text either way). OWASP's page
+  doesn't mention leading spaces, and Excel, Google Sheets and Numbers weren't
+  tested; the rule doesn't depend on them. The apostrophe keeps ` =1+1` text
+  in the same test. Numbers are written as
   numbers. Export file names are ASCII slugs, so `Content-Disposition` can't be
   injected. `export/export.security.db.test.ts` sweeps every `GET … .csv`
   route in the live route table over a project seeded with formula-looking

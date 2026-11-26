@@ -43,6 +43,17 @@ describe('csv cells', () => {
 		expect(textCell('Dam = full')).toBe('Dam = full');
 	});
 
+	it('defuses a formula after leading whitespace, a leading line feed and the full-width signs (issue #902)', () => {
+		// LibreOffice Calc's CSV import with "Trim spaces" on evaluates an unquoted ` =1+1` (docs/security.md).
+		expect(textCell(' =1+1')).toBe("' =1+1");
+		expect(textCell('  @SUM(A1)')).toBe("'  @SUM(A1)");
+		expect(textCell('\t-2')).toBe("'\t-2");
+		expect(textCell('\n=1')).toBe(`"'\n=1"`);
+		expect(textCell('＝1+1')).toBe("'＝1+1");
+		expect(textCell(' Upper farm')).toBe(' Upper farm');
+		expect(textCell('Farm -2')).toBe('Farm -2');
+	});
+
 	it('writes numbers as numbers and missing values as empty', () => {
 		expect(numCell(-12.5)).toBe('-12.5');
 		expect(numCell(0)).toBe('0');

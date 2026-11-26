@@ -4,7 +4,7 @@
 // unit-tested.
 import { LANGUAGES } from '@water-management/engine/languages';
 import type { FileFormat } from '#lib/components/common/formatHelp.js';
-import { defuse } from '#lib/spreadsheet/export/names.js';
+import { defuse, undefuse } from '#lib/spreadsheet/export/names.js';
 import type { BulkFarmerResult, BulkFarmerRow, FarmerEntry } from '#lib/api/types.js';
 
 export interface FarmOption {
@@ -108,8 +108,8 @@ export function parseFarmerCsv(text: string): ParsedFarmerCsv {
 		const cells = splitLine(l, sep);
 		const row: CsvFarmerRow = { line, email: '', farm: '' };
 		order.forEach((key, i) => {
-			// A leading apostrophe before = + - @ is the one inviteExampleCsv adds (defuse): read the name back without it.
-			if (key && cells[i] !== undefined) row[key] = cells[i]!.replace(/^'(?=[=+\-@])/, '');
+			// The leading apostrophe inviteExampleCsv adds (defuse): read the name back without it.
+			if (key && cells[i] !== undefined) row[key] = undefuse(cells[i]!);
 		});
 		if (!row.locale) delete row.locale;
 		return row;
