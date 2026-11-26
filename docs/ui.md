@@ -10818,7 +10818,14 @@ read it before.
   use the saved network…", with a sentence on what Run forecast does when it
   is offered, in words rather than the button's hover title, #586 D18) is one
   slim line under the header (`#run-note`, the buttons' accessible
-  description), with the progress bar under it. Under it, Run readiness
+  description), with the progress bar under it. A run started here belongs
+  to the project page, not the tab (issue #923, `runs/runInFlight.ts`, as the
+  page's own new-data re-run does): leave Runs & results while it goes and
+  come back, and Run model still reads Running model… (disabled), the
+  progress line and its seconds carry on from the start, and the run opens
+  when it ends; ended while another tab is open, it only joins the list (no
+  `?run=` written into that tab's address). The header's Re-run model and
+  Warnings' Run now wait for it too. Under it, Run readiness
   names the land units with no rain of their own (no station, rain gauge or
   CHIRPS of their own, no MAP with a gauge MAP; issue #615): they run on the
   catchment rain, so their share follows their area, with a link to

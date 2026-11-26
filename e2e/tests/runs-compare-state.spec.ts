@@ -1,6 +1,6 @@
 // Selection and URL state on Runs & results and Compare runs when the page moves under a pick still out: a run
 // shown from the cache while another run's results are loading, a run that finishes after its tab was left, and a
-// compare card's project pick left waiting when Back changes the pair.
+// compare card's project pick left waiting when Back changes the pair; a run still going when its tab is opened again.
 import { createProject, createRun, seedRunnableProject } from '../support/api.ts';
 import { runCard, runSelect } from '../support/compare.ts';
 import { sections } from '../support/data.ts';
@@ -69,6 +69,50 @@ test('a run that finishes after Runs & results was left writes no run into the o
 	await expect(runsList(page).getByRole('listitem')).toHaveCount(2);
 	await page.goBack();
 	await expect(page).toHaveURL(/\?tab=network$/);
+});
+
+test('back on Runs & results while its run still goes, Run model waits, the progress shows and the run opens when it ends', async ({ page, owner }) => {
+	void owner;
+	const project = await seedRunnableProject(page.request, 'Run still going on return');
+	await createRun(page.request, project.id, 'Baseline');
+	await openRuns(page, project.id);
+
+	// Hold the new run on the server's way back while the person leaves the tab and comes back (issue #923).
+	let release = () => {};
+	const held = new Promise<void>((r) => (release = r));
+	const listPath = `/projects/${project.id}/runs`;
+	let posts = 0;
+	await page.route(
+		(url) => url.pathname.endsWith(listPath),
+		async (route) => {
+			if (route.request().method() === 'POST') {
+				posts++;
+				await held;
+			}
+			await route.continue();
+		}
+	);
+	await page.getByRole('button', { name: 'Run model' }).click();
+	await expect(page.getByRole('button', { name: 'Running model…' })).toBeDisabled();
+	await sections(page).getByRole('link', { name: 'Network' }).click();
+	await expect(page).toHaveURL(/\?tab=network$/);
+	await sections(page).getByRole('link', { name: 'Runs & results' }).click();
+
+	// The run is still going: no second run can start, and the progress line says so.
+	await expect(page.getByRole('button', { name: 'Running model…' })).toBeDisabled();
+	await expect(page.getByRole('button', { name: 'Run model', exact: true })).toHaveCount(0);
+	await expect(page.locator('#run-note')).toContainText('Simulating every day of the record');
+	await expect(page.locator('.run-status .progress')).toBeVisible();
+
+	const created = page.waitForResponse((r) => new URL(r.url()).pathname.endsWith(listPath) && r.request().method() === 'POST');
+	release();
+	const runId = ((await (await created).json()) as { run: { id: string } }).run.id;
+
+	// It ended with the tab open: the new run opens here, Run model is back, and only the one run was asked for.
+	await expect(page).toHaveURL(new RegExp(`run=${runId}`));
+	await expect(runsList(page).getByRole('listitem')).toHaveCount(2);
+	await expect(page.getByRole('button', { name: 'Run model', exact: true })).toBeEnabled();
+	expect(posts).toBe(1);
 });
 
 test('Back on Compare runs drops a project picked for a card that had no run to choose', async ({ page, owner }) => {
