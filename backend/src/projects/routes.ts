@@ -379,6 +379,7 @@ export const projectRoutes = new Hono<AuthEnv>()
 			// requires it now, so turning the requirement off needs it (auth/stepUp.ts).
 			await requireRole(db, id, body.teamId !== undefined || body.requireMfa !== undefined ? 'owner' : 'editor');
 			if (body.teamId) await requireTeamContributor(db, body.teamId);
+			if (body.teamId !== undefined) await requireTeamAdminToLeave(db, id, body.teamId);
 			if (body.teamId !== undefined) {
 				// Someone who owns the project only through the current team would
 				// lose access by moving it out; keep them as a direct owner.
@@ -727,4 +728,21 @@ async function assertNotLastOwner(db: import('../db/tx.js').Db, projectId: strin
  */
 async function requireTeamContributor(db: import('../db/tx.js').Db, teamId: string) {
 	await requireTeamRole(db, teamId, 'member', 'team not found');
+}
+
+/**
+ * Taking a project out of its team, or into a different one, needs admin on the team it leaves (issue #900): a plain
+ * member, or an outside person the team shared it with, may own it directly, and moving it would take it from the
+ * team's admins. 392_team_project_move_admin's trigger enforces the same. Not stepped up here: the move is an owner's
+ * action, already stepped up where the project requires it.
+ */
+async function requireTeamAdminToLeave(db: import('../db/tx.js').Db, projectId: string, to: string | null) {
+	const { rows } = await db.query<{ team_id: string | null; role: string | null }>(
+		'SELECT team_id, app_team_role(team_id) AS role FROM project WHERE id = $1',
+		[projectId]
+	);
+	const from = rows[0]?.team_id ?? null;
+	if (from && from !== to && rows[0]?.role !== 'admin') {
+		throw ApiError.coded(403, 'team_move_admin', 'only an admin of the team this project is in can take it out of the team or move it to another');
+	}
 }

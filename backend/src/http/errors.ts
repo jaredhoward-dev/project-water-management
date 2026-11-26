@@ -218,6 +218,11 @@ export const ERROR_CODES = [
  *     by POST …/assistant/messages and by a feed save that switches a feed on
  *     (POST …/feeds, PATCH …/feeds/:feedId). The workspace's assistant and
  *     feeds panels word them, with a Resend for the first.
+ *   team_move_admin (403): PATCH /projects/:id { teamId } taking a project
+ *     out of its team, or into a different one, by someone who isn't an
+ *     admin of the team it is in (a plain member, or an outside person the
+ *     team made a direct owner; issue #900, 392_team_project_move_admin).
+ *     The project settings page is an English workspace page.
  */
 export const MACHINE_ERROR_CODES = [
 	'render_token_refused',
@@ -256,7 +261,8 @@ export const MACHINE_ERROR_CODES = [
 	'billing_grant_seats',
 	'team_plan_not_cancelled',
 	'email_unverified',
-	'email_disposable'
+	'email_disposable',
+	'team_move_admin'
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number] | (typeof MACHINE_ERROR_CODES)[number];
 
