@@ -17,6 +17,7 @@ import os from 'node:os';
 import pg from 'pg';
 import { describeTarget, grantLog, grantPlan, isCalendarDate, revokeGrant, type Target } from '../src/billing/staffGrant.js';
 import { loadDevEnv } from '../src/config/devEnv.js';
+import { MAX_GRANT_SEATS } from '../src/ops/ownerActions.js';
 
 export { isCalendarDate, type Target };
 
@@ -77,7 +78,8 @@ export function parseArgs(argv: string[], defaultBy: string): GrantArgs | string
 	const until = flags.get('--until') ?? null;
 	if (until !== null && !isCalendarDate(until)) return '--until is a date, YYYY-MM-DD (the grant lasts through that day, SAST)';
 	const seatsText = flags.get('--seats');
-	if (seatsText !== undefined && !/^[1-9][0-9]{0,5}$/.test(seatsText)) return '--seats is a whole number of editor seats in all (at least the plan includes)';
+	if (seatsText !== undefined && (!/^[1-9][0-9]{0,5}$/.test(seatsText) || Number(seatsText) > MAX_GRANT_SEATS))
+		return `--seats is a whole number of editor seats in all, from the plan's included seats up to ${MAX_GRANT_SEATS}`;
 	const seats = seatsText === undefined ? null : Number(seatsText);
 	if (!reason) return 'give the reason with --reason (it goes into the grant log, which the account can read)';
 	return { mode: 'grant', target, plan: plan.toLowerCase(), until, reason, by, replace: bare.has('--replace'), seats };

@@ -53,6 +53,9 @@ describe('parseArgs', () => {
 		expect(parseArgs(['a@example.com', '--revoke', '--list'], 'op')).toMatch(/one of/);
 		expect(parseArgs(['a@example.com', 'pro', '--revoke', '--reason', 'x'], 'op')).toMatch(/unexpected argument pro/);
 		expect(parseArgs(['a@example.com', '--revoke', '--replace', '--reason', 'x'], 'op')).toMatch(/no --until, --seats or --replace/);
+		// The database caps a grant at 100 000 seats (374): the script refuses more with the same limit, and accepts the cap.
+		expect(parseArgs(['a@example.com', 'team', '--seats', '100001', '--reason', 'x'], 'op')).toMatch(/up to 100000/);
+		expect(parseArgs(['a@example.com', 'team', '--seats', '100000', '--reason', 'x'], 'op')).toMatchObject({ seats: 100000 });
 		expect(parseArgs(['a@example.com', '--list', '--reason', 'x'], 'op')).toMatch(/--list takes only/);
 		expect(parseArgs(['a@example.com', 'pro', '--reason', 'x'], '')).toMatch(/--by/);
 	});
