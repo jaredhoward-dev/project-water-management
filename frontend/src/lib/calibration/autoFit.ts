@@ -4,13 +4,28 @@
 // (AutoFitPanel.svelte) is thin. The server fits every case, over as many
 // background jobs as each needs, from the saved rules only, and applies the
 // kept fit itself.
-import { canonicalJson, FILTER_LABEL, ruleCaseCount, SELECTION_TEST_LABEL, type CalibrationRules } from '@water-management/engine';
+import { canonicalJson, FILTER_LABEL, ruleCaseCount, ruleCaseWaterYears, SELECTION_TEST_LABEL, type CalibrationRules, type ModelInput } from '@water-management/engine';
 import type { AutoCalibration, AutoCalibrationCase } from '#lib/api/types.js';
 import { fmtNum } from '#lib/format/number.js';
-import { fmtScore, objectiveName, totalRuns } from './fit';
+import { fmtScore, objectiveName, planRuns } from './fit';
 
-/** Model runs the rules make: each case is a full fit with both validation tests (and one without the WR2012 penalty when it is on). */
-export const autoRunsTotal = (rules: CalibrationRules, penalty: boolean) => ruleCaseCount(rules) * totalRuns(rules.run.budget, true, penalty, rules.run.starts);
+/**
+ * Model runs the rules make: each case is one fit at the headline location with validation, planned as the fit
+ * panel's estimate is (planRuns, the engine's plannedFits): the dry → wet test only when the record each case fits on
+ * has the qualifying water years (`waterYears`, engine ruleCaseWaterYears; null = not known, counted), and one fit
+ * without the WR2012 penalty when it is on (issue #894).
+ */
+export const autoRunsTotal = (rules: CalibrationRules, penalty: boolean, waterYears: number | null = null) =>
+	ruleCaseCount(rules) * planRuns([{ headline: true, waterYears }], rules.run.budget, true, penalty, rules.run.starts, false);
+
+/** The rule cases' qualifying water years from the project's saved input (engine ruleCaseWaterYears), or null where the engine refuses it. */
+export function ruleWaterYears(input: ModelInput): number | null {
+	try {
+		return ruleCaseWaterYears(input).length;
+	} catch {
+		return null;
+	}
+}
 
 /**
  * The saved rules differ from the form's (whatever order their keys are in):

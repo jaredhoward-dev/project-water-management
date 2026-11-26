@@ -1029,6 +1029,21 @@ export function validationNotes(
 }
 
 const MIN_DAYS_PER_YEAR = 180;
+
+/** Qualifying water years (MIN_DAYS_PER_YEAR scored days each) the dry → wet test needs: half dry, half wet. */
+export const DSST_MIN_WATER_YEARS = 4;
+
+/**
+ * The water years of the record a fit scores with at least MIN_DAYS_PER_YEAR scored days, ascending: the years the
+ * dry → wet test ranks (dsstSetup), read by the same rule from the same problem (prepareCalibration with these
+ * options), so an estimate made before a fit (issue #894) knows whether the test will run: it runs with
+ * DSST_MIN_WATER_YEARS or more. Throws as calibrate() would on a problem it can't fit.
+ */
+export function qualifyingWaterYears(input: ModelInput, opts: Pick<CalibrateOptions, 'exclusions' | 'model' | 'zone'> = {}): number[] {
+	return waterYears(prepareCalibration(input, opts.exclusions, opts.model, opts.zone), MIN_DAYS_PER_YEAR)
+		.map((y) => y.year)
+		.sort((a, b) => a - b);
+}
 const WET_DRY_CONTRAST = 1.5;
 
 /**
@@ -1262,7 +1277,7 @@ function dsstSetup(pb: CalibrationProblem, opts: CalibrateOptions): DsstSetup {
 	const want: DsstRanking = opts.rankYearsBy ?? (pb.reference ? 'reference' : 'observed');
 	let rankedBy: DsstRanking = 'observed';
 	let rankOf = new Map(years.map((y) => [y.year, y.mean]));
-	if (want === 'reference' && years.length >= 4) {
+	if (want === 'reference' && years.length >= DSST_MIN_WATER_YEARS) {
 		if (!pb.reference) {
 			notes.push('The project has no reference gauge, so the dry → wet test ranks water years by their own observed flow.');
 		} else {
@@ -1280,7 +1295,7 @@ function dsstSetup(pb: CalibrationProblem, opts: CalibrateOptions): DsstSetup {
 		}
 	}
 	years.sort((x, y) => rankOf.get(x.year)! - rankOf.get(y.year)!);
-	if (years.length < 4) return { notes, split: null, years: years.length };
+	if (years.length < DSST_MIN_WATER_YEARS) return { notes, split: null, years: years.length };
 	const k = Math.floor(years.length / 2);
 	const dry = years.slice(0, k);
 	const wet = years.slice(years.length - k);

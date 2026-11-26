@@ -26,6 +26,7 @@
 		type ZoneFitPlanStep,
 		type CalibrationReport,
 		type FitRecord,
+		type ModelInput,
 		type ProjectModel,
 		type ProjectSettings
 	} from '@water-management/engine';
@@ -57,6 +58,8 @@
 		seedError,
 		stageText,
 		planRuns,
+		stepWaterYears,
+		type PlanRunsStep,
 		validationRecordOptions
 	} from '#lib/calibration/fit.js';
 	import { FLOW_KIND_LABEL } from '#lib/components/calibration/metrics.js';
@@ -179,8 +182,49 @@
 	// before any worker starts.
 	const planned = $derived(nodes.length ? fitPlanOf(settings(), nodes) : null);
 	// A ticked outlet with no record yet (a new project is created with the outlet ticked): its step can't be scored.
-	// The engine's plan per location (issue #865): the unpenalised fit at the headline's step only.
-	const runs = $derived(planRuns(planned?.plan, session.budget ?? 0, session.validate, penalty, startsOk ? session.starts! : 1, priorCostOn));
+	// Each location's qualifying water years (issue #894), so the estimate leaves out a dry → wet test a short record
+	// skips: the model input as the server would run it, fetched once when the panel opens (Fit fetches it afresh), read
+	// with the form and the network as they stand by the engine's own rule, a moment after the last edit. Until then,
+	// or where the engine can't set a step up yet, the test is counted.
+	let serverInput = $state.raw<ModelInput | null>(null);
+	$effect(() => {
+		void projectId;
+		if (readonly || !hasObserved) return;
+		let live = true;
+		api.runs.modelInput(projectId).then(
+			(got) => {
+				if (live) serverInput = got;
+			},
+			() => {
+				if (live) serverInput = null;
+			}
+		);
+		return () => {
+			live = false;
+		};
+	});
+	let yearSteps = $state.raw<PlanRunsStep[] | null>(null);
+	$effect(() => {
+		const base = serverInput;
+		const plan = planned?.plan;
+		if (!base || !plan) {
+			yearSteps = null;
+			return;
+		}
+		const form = settings();
+		const net = model?.();
+		const t = setTimeout(() => {
+			try {
+				yearSteps = stepWaterYears(fitInput(base, form, net), plan);
+			} catch {
+				yearSteps = null;
+			}
+		}, 300);
+		return () => clearTimeout(t);
+	});
+	// The engine's plan per location (issue #865): the unpenalised fit at the headline's step only, the dry → wet test
+	// only where the record has the water years for it (issue #894).
+	const runs = $derived(planRuns(yearSteps && yearSteps.length === planned?.plan?.length ? yearSteps : planned?.plan, session.budget ?? 0, session.validate, penalty, startsOk ? session.starts! : 1, priorCostOn));
 	const outletMissing = $derived(!!planned?.plan?.some((st) => st.zoneNodeId === null) && !outletHasRecord);
 	const planError = $derived(
 		planned?.error ?? (outletMissing ? 'The outlet has no flow record yet, so its step can’t be fitted: add one on Data, or untick Calibrate here at the outlet.' : null)

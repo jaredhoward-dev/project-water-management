@@ -27,6 +27,7 @@ import {
 	stageText,
 	totalRuns,
 	planRuns,
+	stepWaterYears,
 	validationRecordOptions,
 	waterYearsText
 } from './fit';
@@ -103,8 +104,8 @@ describe('fitParams', () => {
 });
 
 /** A 3-year gauge record: one farm draining to it (too few water years for the dry → wet test). */
-function threeYearInput(): ModelInput {
-	const days = 3 * 365;
+function threeYearInput(years = 3): ModelInput {
+	const days = years * 365;
 	const rain = Array.from({ length: days }, (_, i) => (i % 11 === 0 ? 30 : i % 4 === 0 ? 2 : 0));
 	const flow = Array.from({ length: days }, (_, i) => 0.05 + 0.4 * Math.exp(-(i % 11) / 2));
 	const node = { sortOrder: 0, pctUpstreamToDam: 0, pctRunoffToDam: 0, damCapacityM3: 0, damInitialPct: 0, damMinPct: 0, divertCapacityM3Day: 0, irrigationEfficiency: 1, returnFlowFraction: 0, damAreaFullM2: null, damAreaExponent: 0.7, damSeepagePerDay: 0 };
@@ -122,6 +123,41 @@ function threeYearInput(): ModelInput {
 		series: { rain_catchment_mm: { startDate: '2005-10-01', values: rain }, flow_observed_m3s: { startDate: '2005-10-01', values: flow } }
 	};
 }
+
+describe('the estimate before Fit knows each location’s water years (issue #894)', () => {
+	it('leaves out the dry → wet test at a step whose record is too short, and counts it where unknown', () => {
+		// Full, split, dsst at 4 or more qualifying water years; full and split at 3.
+		expect(planRuns([{ headline: true, waterYears: 4 }], 1500, true, false, 1, false)).toBe(1500 * 3);
+		expect(planRuns([{ headline: true, waterYears: 3 }], 1500, true, false, 1, false)).toBe(1500 * 2);
+		expect(planRuns([{ headline: true, waterYears: 0 }], 1500, true, true, 1, false)).toBe(1500 * 3);
+		// Not known yet (null or absent): counted, as before.
+		expect(planRuns([{ headline: true, waterYears: null }], 1500, true, false, 1, false)).toBe(1500 * 3);
+		// Per step: a short gauge record and a long headline one.
+		expect(planRuns([{ headline: false, waterYears: 2 }, { headline: true, waterYears: 8 }], 1500, true, true, 1, false)).toBe(1500 * 2 + 1500 * 4);
+		// No validation: neither test is counted however long the record.
+		expect(planRuns([{ headline: true, waterYears: 8 }], 1500, false, false, 1, false)).toBe(1500);
+	});
+
+	it('reads each step’s qualifying water years from the input by the engine’s rule, and the estimate is the fit’s plan', () => {
+		for (const years of [3, 6]) {
+			const input = threeYearInput(years);
+			const [st] = stepWaterYears(input, [{ zoneNodeId: null, headline: true }]);
+			expect(st!.headline).toBe(true);
+			expect(st!.waterYears).toBe(years);
+			// What the panel shows before Fit is what the fit then runs.
+			let n = 0;
+			calibrate(input, { budget: 20, onProgress: (p) => void (n = p.optimisations ?? 1) });
+			expect(planRuns([st!], 20, true, false, 1, false)).toBe(20 * n);
+		}
+	});
+
+	it('leaves a step it can’t set up as not known', () => {
+		const input = threeYearInput();
+		const gone = { ...input, series: { rain_catchment_mm: input.series.rain_catchment_mm! } };
+		expect(stepWaterYears(gone, [{ zoneNodeId: null }])).toEqual([{ zoneNodeId: null, waterYears: null }]);
+		expect(stepWaterYears(input, [{ zoneNodeId: 'nowhere' }])[0]!.waterYears).toBeNull();
+	});
+});
 
 describe('progress', () => {
 	// What the engine sends: optimisation k of n, in calibrate()'s order (calibrate.test.ts pins the plan it sends).
@@ -165,7 +201,8 @@ describe('progress', () => {
 		// Penalty off: no step plans it. No plan yet (no network): one step, at the headline.
 		expect(planRuns([{ headline: false }, { headline: true }], 1500, true, false, 1, false)).toBe(1500 * 6);
 		expect(planRuns(null, 1500, true, true, 1, false)).toBe(1500 * 4);
-		expect(planRuns([], 1500, true, false, 2, true, false)).toBe(1500 * 5);
+		// A record too short for the dry → wet test (issue #894): starts 2, split, no dsst, unpriored 2.
+		expect(planRuns([{ headline: true, waterYears: 3 }], 1500, true, false, 2, true)).toBe(1500 * 5);
 		// Penalty on at the headline: full, split, dsst, unpenalised; at another location: full, split, dsst only.
 		expect(progressFraction(ev('dsst', 100, 3, 3))).toBe(1);
 		// Both skipped: full and split are the whole fit.

@@ -14,7 +14,7 @@ import { ENGINE_VERSION } from '../version';
 import { resolvePe, type CalibrationFlowKind, type ModelInput, type ProjectSettings } from '../project';
 import { mergeSettings } from '../prepare';
 import { runModel } from '../run';
-import { calibrate, prepareCalibration, prepareCalibrationFits, type CalibrateOptions, type CalibrationProgress, type CalibrationReport, type FitOutcome, type FitStepOptions } from './calibrate';
+import { calibrate, prepareCalibration, prepareCalibrationFits, qualifyingWaterYears, type CalibrateOptions, type CalibrationProgress, type CalibrationReport, type FitOutcome, type FitStepOptions } from './calibrate';
 import type { DdsState } from './dds';
 import type { ObjectiveId } from './objectives';
 import { flaggedYearExclusions, type FlaggedYearShare } from './dayFlags';
@@ -168,6 +168,17 @@ export function planAutoCalibration(input: ModelInput): AutoCalibrationPlan {
 		notes,
 		caseEvaluations: rules.run.budget * (rules.run.starts + 2 + (penalty ? 1 : 0))
 	};
+}
+
+/**
+ * The qualifying water years each case of the rules fits on (issue #894): the headline's record once the rules'
+ * flagged-year exclusions are out, as caseSetup gives every case (a pan preset changes the forcing, never the days
+ * scored), so an estimate made before a run knows whether the dry → wet test runs (DSST_MIN_WATER_YEARS). Throws
+ * where planAutoCalibration refuses the rules.
+ */
+export function ruleCaseWaterYears(input: ModelInput): number[] {
+	const plan = planAutoCalibration(input);
+	return qualifyingWaterYears(input, { model: 'gr4j', exclusions: exclusionRanges(plan.ruleExclusions).map(({ start, end }) => ({ start, end })) });
 }
 
 /** Case `i` of a plan as a fit sees it: its input (under its pan preset) and the fit's options, the seed and search the rules'. */
