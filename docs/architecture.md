@@ -3367,7 +3367,10 @@ sequenceDiagram
   settled in one transaction. A reservation never settled (its Lambda was
   killed) expires `ASSISTANT_TURN_SECONDS` + 120 s after it began, past the
   Lambda's timeout, and is then charged in full (Bedrock may have billed all
-  of it), at the next begin or the job tick. So the month's spend plus every
+  of it), at the next begin or the job tick. The begin takes a reservation of
+  at most 3600 s, so `ASSISTANT_TURN_SECONDS` is capped at 3480
+  (`config.ts` `MAX_TURN_SECONDS`; a longer value, set for a slow local
+  model, had made every message a 500). So the month's spend plus every
   reservation never passes a cap, however many turns run at once; turns
   aren't limited to one a person, since the second's budget is only what the
   first left.

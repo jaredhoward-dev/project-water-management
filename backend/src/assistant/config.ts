@@ -19,6 +19,23 @@ export function weightedTokens(inputTokens: number, outputTokens: number): numbe
 	return inputTokens + OUTPUT_TOKEN_WEIGHT * outputTokens;
 }
 
+/**
+ * Seconds past the turn's deadline (cfg.turnSeconds) a reservation lasts
+ * before it is charged in full as unsettled: past the assistant Lambda's
+ * timeout (the deadline + 15 s, infra/assistant.tf), so a turn that ends
+ * normally always settles first, and only a Lambda that died leaves one.
+ */
+export const RESERVATION_MARGIN_SECONDS = 120;
+
+/** The longest reservation app_assistant_begin takes (264, 364: 1 to 3600 s; anything else is invalid_parameter_value). */
+export const MAX_RESERVATION_SECONDS = 3600;
+
+/**
+ * The longest turn: its reservation (turnSeconds + RESERVATION_MARGIN_SECONDS) must be one the begin takes, or every
+ * message fails with a 500 before anything streams. A longer ASSISTANT_TURN_SECONDS (a slow local model) is cut to it.
+ */
+export const MAX_TURN_SECONDS = MAX_RESERVATION_SECONDS - RESERVATION_MARGIN_SECONDS;
+
 export interface AssistantConfig {
 	provider: AssistantProviderName;
 	/** The model id the provider is asked for; empty takes the provider's default. */
@@ -58,6 +75,7 @@ export interface AssistantConfig {
 	 * Seconds one turn may take, every hop and tool call included; past it the
 	 * turn ends with an `assistant_timeout` error event. Below the assistant
 	 * Lambda's timeout, so the turn ends cleanly and its tokens are charged.
+	 * At most MAX_TURN_SECONDS (3480), so its reservation fits app_assistant_begin's cap.
 	 */
 	turnSeconds: number;
 	/** Micro-USD one person may spend a UTC day on a Free account (336_assistant_dollar_caps; enforced only with BILLING_ENFORCED). */
@@ -101,7 +119,7 @@ export function assistantConfig(env: Record<string, string | undefined> = proces
 		maxToolResultChars: int(env.ASSISTANT_MAX_TOOL_RESULT_CHARS, 12_000),
 		maxInputChars: int(env.ASSISTANT_MAX_INPUT_CHARS, 40_000),
 		keepaliveSeconds: int(env.ASSISTANT_KEEPALIVE_SECONDS, 15),
-		turnSeconds: int(env.ASSISTANT_TURN_SECONDS, 100),
+		turnSeconds: Math.min(int(env.ASSISTANT_TURN_SECONDS, 100), MAX_TURN_SECONDS),
 		// Issue #641, accepted 2026-10-29: $0.30 or 20 messages a day on Free, a $30 Free pool a month.
 		freeUsdMicrosPerDay: usdMicros(env.ASSISTANT_FREE_USD_PER_DAY, 0.3),
 		freeMessagesPerDay: int(env.ASSISTANT_FREE_MESSAGES_PER_DAY, 20),
