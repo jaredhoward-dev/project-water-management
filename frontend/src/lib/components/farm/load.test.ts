@@ -96,8 +96,18 @@ describe('cardOnFailure (/farm: a card whose figures fail)', () => {
 		}
 	});
 	it('falls back to the saved copy on no signal or a server failure, else nothing', () => {
-		expect(cardOnFailure(new ApiError(0, 'x'), () => saved)).toEqual({ drop: false, view: saved });
-		expect(cardOnFailure(new ApiError(500, 'x'), () => saved)).toEqual({ drop: false, view: saved });
-		expect(cardOnFailure(new ApiError(500, 'x'), () => null)).toEqual({ drop: false, view: null });
+		expect(cardOnFailure(new ApiError(0, 'x'), () => saved)).toEqual({ drop: false, withheld: false, view: saved });
+		expect(cardOnFailure(new ApiError(500, 'x'), () => saved)).toEqual({ drop: false, withheld: false, view: saved });
+		expect(cardOnFailure(new ApiError(500, 'x'), () => null)).toEqual({ drop: false, withheld: false, view: null });
+	});
+	it('keeps a withheld preview’s card but shows no saved figures as current (#875)', () => {
+		let read = false;
+		const next = cardOnFailure(new ApiError(403, 'x', undefined, 'farm_preview_withheld'), () => ((read = true), saved));
+		expect(next).toEqual({ drop: false, withheld: true, view: null });
+		expect(read).toBe(false);
+		// Positive control: the same status without the code is still a removed farm, dropped.
+		expect(cardOnFailure(new ApiError(403, 'x'), () => saved)).toEqual({ drop: true });
+		// A 404 carrying the code is still removed (classify reads the code only on a 403).
+		expect(cardOnFailure(new ApiError(404, 'x', undefined, 'farm_preview_withheld'), () => saved)).toEqual({ drop: true });
 	});
 });
