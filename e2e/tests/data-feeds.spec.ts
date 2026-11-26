@@ -216,8 +216,11 @@ test('an owner attaches a CHIRPS feed by bounding box, and it fetches the area�
 	await expect(panel.getByRole('alert')).toContainText('The box covers 400 grid cells in 20 rows; at most 100 cells in 25 rows');
 	await expect(box).toBeFocused();
 	await expect(box).toHaveAttribute('aria-invalid', 'true');
-	// The sample box as the hint writes it, typeset minus signs and all.
+	// The sample box as the hint writes it, typeset minus signs and all. Editing the field clears its problem and its
+	// invalid mark at once, as the station API form does (issue #932); Attach checks again.
 	await box.fill('−20.20, 25.10, −20.10, 25.20');
+	await expect(panel.getByRole('alert')).toHaveCount(0);
+	await expect(box).not.toHaveAttribute('aria-invalid', 'true');
 	await panel.getByRole('button', { name: 'Attach feed' }).click();
 
 	const feed = panel.getByRole('list', { name: 'Data feeds' }).getByRole('listitem');

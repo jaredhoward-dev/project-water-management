@@ -3,6 +3,7 @@ import { ApiError } from '#lib/api/client.js';
 import { kindLabel } from '#lib/series/kinds.js';
 import { fmtDay } from '#lib/format/number.js';
 import {
+	editClearsProblem,
 	applyWords,
 	askedFeed,
 	boundaryApplyBody,
@@ -738,5 +739,21 @@ describe('askedFeed: the attach card a ?feed= link opens', () => {
 		expect(askedFeed('dws')).toBe('dws');
 		expect(askedFeed('agera5_et0')).toBe('agera5_et0');
 		for (const v of [null, '', 'chirps', 'AGERA5_ET0', 'agera5_et0 ', 'station_api', 'power_et0']) expect(askedFeed(v)).toBeNull();
+	});
+});
+
+describe('editClearsProblem', () => {
+	it('clears the problem when its own field is edited (issue #932)', () => {
+		expect(editClearsProblem('bbox', 'chirps', 'u1-bbox', 'u1')).toBe(true);
+		expect(editClearsProblem('station', 'dws', 'u1-station', 'u1')).toBe(true);
+		expect(editClearsProblem('start', 'chirps', 'u1-start', 'u1')).toBe(true);
+	});
+
+	it('keeps it for another field, no problem, or the station API form (which steps its own aside)', () => {
+		expect(editClearsProblem('bbox', 'chirps', 'u1-name', 'u1')).toBe(false);
+		expect(editClearsProblem('cells', 'chirps', 'u2-cells', 'u1')).toBe(false);
+		expect(editClearsProblem(null, 'chirps', 'u1-bbox', 'u1')).toBe(false);
+		expect(editClearsProblem('st-url', 'station_api', 'u1-st-url', 'u1')).toBe(false);
+		expect(editClearsProblem('bbox', 'chirps', undefined, 'u1')).toBe(false);
 	});
 });

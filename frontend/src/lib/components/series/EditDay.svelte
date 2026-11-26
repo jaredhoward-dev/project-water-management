@@ -11,7 +11,7 @@
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { fmtDay, fmtNum, parseDay } from '#lib/format/number.js';
 	import { feedMark } from '#lib/series/provenance.js';
-	import { isHandDay, lastDay, readTypedValue, valueOn, type DailyValues } from '#lib/series/editDay.js';
+	import { isHandDay, lastDay, readTypedValue, savedApplies, storedValue, type DailyValues, type SavedDay } from '#lib/series/editDay.js';
 	import { forgetValues } from './valuesCache';
 
 	let {
@@ -42,15 +42,21 @@
 	let error = $state<string | null>(null);
 	let done = $state<string | null>(null);
 	let dayEl: HTMLInputElement | undefined = $state();
+	// The day just saved, until the values reload (storedValue): Stored says the new value, and Save has nothing left.
+	let saved = $state.raw<SavedDay | null>(null);
 
-	const stored = $derived(values && date ? valueOn(values, date) : undefined);
+	const stored = $derived(storedValue(values, date, saved));
 	const inRange = $derived(!!date && date >= series.startDate && date <= end);
 	const typed = $derived(readTypedValue(text));
 	// The stored value as the box shows it (rounded to 6 decimals) is no change either.
 	const unchanged = $derived(typed.ok && stored !== undefined && (typed.value === stored || (stored !== null && text.trim() === exact(stored))));
-	const edited = $derived(isHandDay(series.handDays, date));
+	const edited = $derived(isHandDay(series.handDays, date) || savedApplies(saved, values, date));
 	const fed = $derived(feedMark(series.feed));
-	const disabled = $derived(saving || !values || !inRange || !typed.ok || unchanged || !!series.rebuilding);
+	// Reasons that hold before the press disable the button; saving and "nothing to save" only mark it aria-disabled, so
+	// a press keeps the focus on it (a failed save dropped it to the page; ui-playbook § Don't disable a control while
+	// its own change saves). save() ignores a press while either holds.
+	const blocked = $derived(!values || !inRange || !typed.ok || !!series.rebuilding);
+	const idle = $derived(saving || unchanged);
 
 	/** The day typed: once it reads as a day, that day is picked; until then none is. */
 	function typeDay(typedDay: string) {
@@ -64,23 +70,25 @@
 		date = next;
 		error = null;
 		done = null;
-		const v = values && next ? valueOn(values, next) : undefined;
+		const v = storedValue(values, next, saved);
 		text = v === undefined || v === null ? '' : exact(v);
 	}
 
 	async function save(e: SubmitEvent) {
 		e.preventDefault();
-		if (disabled || !typed.ok) return;
+		if (blocked || idle || !typed.ok || !values) return;
+		const before = values;
+		const value = typed.value;
 		saving = true;
 		error = null;
 		done = null;
 		try {
-			const meta = await api.series.setDay(projectId, series.id, date, typed.value);
+			const meta = await api.series.setDay(projectId, series.id, date, value);
 			forgetValues(projectId, series.id);
-			done = typed.value === null ? `Cleared ${fmtDay(date)}.` : `Saved ${fmtDay(date)}: ${exact(typed.value)} ${series.unit}.`;
+			saved = { values: before, date, value };
+			done = value === null ? `Cleared ${fmtDay(date)}.` : `Saved ${fmtDay(date)}: ${exact(value)} ${series.unit}.`;
 			await onsaved?.(meta);
-			// The button that had the focus is disabled now (nothing left to save), which dropped the focus to the page:
-			// the Day field takes it, its text selected, ready for the next day to correct.
+			// Nothing is left to save: the Day field takes the focus, its text selected, ready for the next day to correct.
 			dayEl?.focus();
 			dayEl?.select();
 		} catch (err) {
@@ -129,7 +137,7 @@
 						aria-describedby={id('stored')}
 					/>
 				</div>
-				<button type="submit" class="btn btn-sm btn-primary save" {disabled}>{saving ? 'Saving…' : inRange && typed.ok && typed.value === null ? 'Clear the day' : 'Save the day'}</button>
+				<button type="submit" class="btn btn-sm btn-primary save" disabled={blocked} aria-disabled={idle ? 'true' : undefined}>{saving ? 'Saving…' : inRange && typed.ok && typed.value === null ? 'Clear the day' : 'Save the day'}</button>
 			</div>
 			<p class="hint muted" id={id('stored')} data-testid="edit-day-stored">
 				{#if dayUnread}

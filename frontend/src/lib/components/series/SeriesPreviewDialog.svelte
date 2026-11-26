@@ -84,7 +84,8 @@
 		open?: boolean;
 		list: SeriesMeta[];
 		values: Record<string, Daily>;
-		settings: ProjectSettings | null;
+		/** Always there: SeriesTab is drawn only once the project (and so its settings) is loaded. */
+		settings: ProjectSettings;
 		focusSeriesId?: string | null;
 		/** Series whose values failed to load, with the error (SeriesTab's loadValues). */
 		failed?: Record<string, string>;
@@ -181,7 +182,7 @@
 	// The first error, as the server or the network gave it (one is enough: they are usually the same).
 	const failedReason = $derived(failedIds.length ? failed[failedIds[0]!] : '');
 
-	const rows = $derived(settings ? buildPreviewRows(list, values, settings, gapSeries) : []);
+	const rows = $derived(buildPreviewRows(list, values, settings, gapSeries));
 	// The credits a product's days carry, once any row's rain came from it (docs/data-sources.md).
 	const credits = $derived.by(() => {
 		const era5l = rows.some((r) => r.derived.rainSource === 'era5l');

@@ -6924,8 +6924,9 @@ station** (issue #553, `series/StationFields.svelte`, helpers in
 its **MAP (mm)**, the MAP's required **Source of the MAP** once a MAP is
 typed, and an optional **Latitude** and **Longitude** (WGS84 degrees, both
 or neither), saved together with **Save the station** (`PATCH
-…/series/:id { station }`, null once every field is empty; disabled while
-nothing changes or while the engine's `rainStationError` finds a problem,
+…/series/:id { station }`, null once every field is empty; `aria-disabled`
+while nothing changes or a save is out, so the focus stays on it after a
+save (issue #932), and disabled while the engine's `rainStationError` finds a problem,
 which shows under the fields: *Say where the station's MAP comes from …*,
 *A station's coordinates need both a latitude and a longitude, or
 neither.*). It says *Saved the station.*, or *Not saved: &lt;reason&gt;*.
@@ -6941,15 +6942,18 @@ field, which shows the browser's own order; issue #521), shown back as
 "2 Oct 2021" and checked against the series' span (its placeholder reads
 *e.g. 15 Nov 2021*, an example rather than a day that looks picked), a *Value (unit)* box that takes the day's stored value when the
 day is picked (12.5 or 12,5; blank = no reading; never negative), and
-**Save the day** (**Clear the day** when the box is blank; disabled while
-nothing changes). The line under them says the stored value and whether the
+**Save the day** (**Clear the day** when the box is blank; `aria-disabled`
+while nothing changes or the save is out, so a failed save leaves the focus
+on it, issue #932). The line under them says the stored value and whether the
 day is already edited by hand, and on a series a data feed fills that the
 feed won't write over the day. Until a day is picked the button reads **Save the day**, disabled (it read
 *Clear the day*, the blank box read as a clearing). It saves through `PUT
 …/series/:id/days/:date`, then says *Saved 2 Oct 2021: 14.2 mm. Kept in
 History, where the value before can be restored.*, and the focus goes to
-the Day field with its text selected, ready for the next day (the button
-that had it is disabled once saved, which dropped the focus to the page); a day outside the series
+the Day field with its text selected, ready for the next day. The line under
+the fields says the saved value as stored at once, before the series'
+values reload (it showed the old value beside a live Save until then;
+`storedValue`, `lib/series/editDay.ts`); a day outside the series
 is for Add data (a file or pasted rows), and while a feed is replacing the
 series the box says to wait. A day edited by hand is marked so an edited
 record never passes as the raw one ([data-model.md § Days edited by
@@ -6966,7 +6970,9 @@ a read-only *At gauge &lt;name&gt;*. Editors set the product, where measured
 and the source there; they **save on change**: each says *Saving…*, then
 *Saved* or *Not saved: &lt;reason&gt;* beside itself (a polite live region the
 control is described by), and a failed save puts the control back to the
-stored value. The row is keyed on the series, so a half-typed source never
+stored value. Picking another series clears those statuses, and an answer
+from before is dropped (`settleSave`, `series/details.ts`), so coming back
+to a series shows no stale *Saved* or *Not saved* (issue #932). The row is keyed on the series, so a half-typed source never
 carries over to the next one picked. Viewers read the same labels with the
 values as words. Editors can **Delete** a series (after a confirm; runs
 already stored are not affected). A CHIRPS series' **Product** says which
@@ -7834,7 +7840,9 @@ editors run one now and read the map's proposals, viewers read.
   editor's, **Area**), and closing it (Cancel, a proposal's Close, or a
   successful attach) returns focus to the head's **Attach a feed** (or **Rain
   from the map**); the attach status line sits under the head; a bad cell or code marks its field `aria-invalid`, describes it by
-  the message and focuses it (the bounding box too); busy buttons are `aria-disabled` so they keep
+  the message and focuses it (the bounding box too), and editing that field
+  clears the message and the mark until the next Attach checks again, as the
+  station API form does (`editClearsProblem`, issue #932); busy buttons are `aria-disabled` so they keep
   focus; after **Remove**, focus goes to the section heading. Messages land
   in a live region that is always in the page. A failed action re-reads the
   list (it was usually changed elsewhere), and a failed refresh keeps the
