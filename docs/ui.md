@@ -7095,7 +7095,16 @@ it, and how many rows were read as gaps and why) and the quality codes met.
 When that block states the values in m³/s (`dws.ts` `unit`), the form's
 *Unit* is set to m³/s for a flow kind, so a unit left at l/s or ML/day from
 an earlier file can't scale the export by 1 000 or 86.4; a
-sub-daily DWS export (a TIME column) is refused. A plain date,value CSV reads
+sub-daily DWS export (a TIME column) is refused. So is an export whose block
+describes a water level or a volume (issue #909: HyData words them "Corrected
+level in m" in a primary export and "Monthly volumes in million cubic metres"
+in a monthly one; the daily reservoir wording isn't known, so `dws.ts` matches
+level, stage, height, volume, storage and million m³ loosely), naming what it
+holds and its unit, since no series kind is a level or a volume. A block that
+states no flow unit at all can still go in as a flow kind, but only after the
+person ticks *These values are daily flows in (the chosen unit)* under *Not said to
+be a flow* (`dwsFlowCheck`; the upload stays disabled until then, and a new
+file clears the tick); headerless rows have no block, so nothing is asked. A plain date,value CSV reads
 a negative value as a gap too (issue #51: every kind is a rain, flow or
 evaporation, so −999 or −1 is a "no reading" placeholder), and its summary
 adds a *Negative values* line with how many (`csv.ts` `negativeGaps`). In number fields, a comma is a thousands separator only in a
