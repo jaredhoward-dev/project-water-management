@@ -2367,6 +2367,15 @@ Interaction details that bit:
   off). Write a long form's error under its field, not at the form's foot,
   and check its problems in the form's order so the first one is the first
   field to fix.
+- **A short form's error line above the form still names its field.** The
+  sign-up and new-password pages showed their own checks' messages (a name
+  of only spaces, two passwords that differ) in a `role="alert"` line over
+  the form, with no field marked and focus left on the button, so a screen
+  reader heard that something was wrong but not which box (WCAG 3.3.1). The
+  line keeps an `id`; the field it is about gets `aria-invalid`, that id in
+  its `aria-describedby` and the focus (`emailAuth.ts`
+  `passwordProblemField` names the field for the password rule;
+  `a11y-form-errors.spec.ts`).
 - **A `NumberInput` that isn't `nullable` never reaches `null`.** Cleared or
   given text it can't read, it keeps the last number and marks itself
   `aria-invalid` with its own message, so a check written against `null`

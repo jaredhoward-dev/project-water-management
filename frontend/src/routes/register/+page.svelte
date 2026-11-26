@@ -1,6 +1,6 @@
 <!-- i18n-section: register -->
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
@@ -75,8 +75,20 @@
 	// would be baked into the account, and its owner locked out of it.
 	let password2 = $state('');
 	let password2El: HTMLInputElement | undefined = $state();
+	let nameEl: HTMLInputElement | undefined = $state();
+	let passwordEl: HTMLInputElement | undefined = $state();
 	let busy = $state(false);
 	let error = $state<string | null>(null);
+	// The field a check before sending found wrong, so it gets aria-invalid, points at the
+	// message and takes focus (WCAG 3.3.1); null for a server failure, which is about no one field.
+	let errorField = $state<'name' | 'password' | 'password2' | null>(null);
+
+	async function fieldError(field: 'name' | 'password' | 'password2', message: string) {
+		error = message;
+		errorField = field;
+		await tick();
+		({ name: nameEl, password: passwordEl, password2: password2El })[field]?.focus();
+	}
 
 	onMount(async () => {
 		if (!inviteToken) return;
@@ -111,21 +123,12 @@
 	async function submit(e: SubmitEvent) {
 		e.preventDefault();
 		error = null;
+		errorField = null;
 		const nameProblem = displayNameProblem(displayName);
-		if (nameProblem) {
-			error = t(nameProblem);
-			return;
-		}
-		if (password.length < 8 || password.length > 200) {
-			error = t('Password must be 8–200 characters.');
-			return;
-		}
+		if (nameProblem) return fieldError('name', t(nameProblem));
+		if (password.length < 8 || password.length > 200) return fieldError('password', t('Password must be 8–200 characters.'));
 		// Compared exactly: a trailing space is a real difference, never trimmed away.
-		if (password !== password2) {
-			error = t('The two passwords don’t match. Type the same password in both.');
-			password2El?.focus();
-			return;
-		}
+		if (password !== password2) return fieldError('password2', t('The two passwords don’t match. Type the same password in both.'));
 		busy = true;
 		try {
 			const result = await api.auth.register(
@@ -232,11 +235,20 @@
 	{:else if inviteState === 'error'}
 		<div class="alert alert-warning" role="alert">{t('We couldn’t check your invitation right now. You can still create an account; you’ll join once your email address is confirmed.')}</div>
 	{/if}
-	{#if error}<div class="alert alert-error" role="alert">{error}</div>{/if}
+	{#if error}<div class="alert alert-error" role="alert" id="register-error">{error}</div>{/if}
 	<form onsubmit={submit} aria-busy={inviteState === 'loading'}>
 		<div class="field">
 			<label for="name">{t('Display name')}</label>
-			<input id="name" autocomplete="name" required maxlength="100" bind:value={displayName} />
+			<input
+				id="name"
+				autocomplete="name"
+				required
+				maxlength="100"
+				aria-invalid={errorField === 'name' ? 'true' : undefined}
+				aria-describedby={errorField === 'name' ? 'register-error' : undefined}
+				bind:value={displayName}
+				bind:this={nameEl}
+			/>
 		</div>
 		<div class="field">
 			<label for="email">{t('Email')}</label>
@@ -266,8 +278,10 @@
 				required
 				minlength={8}
 				maxlength={200}
-				aria-describedby="pw-hint"
+				aria-invalid={errorField === 'password' ? 'true' : undefined}
+				aria-describedby={errorField === 'password' ? 'register-error pw-hint' : 'pw-hint'}
 				bind:value={password}
+				bind:el={passwordEl}
 			/>
 			<span class="hint" id="pw-hint">{t('At least 8 characters. A short passphrase works well.')}</span>
 		</div>
@@ -279,7 +293,8 @@
 				required
 				minlength={8}
 				maxlength={200}
-				aria-invalid={password2 !== '' && password2.length >= password.length && password2 !== password ? 'true' : undefined}
+				aria-invalid={errorField === 'password2' || (password2 !== '' && password2.length >= password.length && password2 !== password) ? 'true' : undefined}
+				aria-describedby={errorField === 'password2' ? 'register-error' : undefined}
 				bind:value={password2}
 				bind:el={password2El}
 			/>

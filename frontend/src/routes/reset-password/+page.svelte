@@ -1,11 +1,11 @@
 <!-- i18n-section: reset -->
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { api, ApiError } from '#lib/api/index.js';
-	import { emailAuthApi, linkToken, passwordProblem } from '#lib/api/emailAuth.js';
+	import { emailAuthApi, linkToken, passwordProblem, passwordProblemField } from '#lib/api/emailAuth.js';
 	import { session } from '#lib/auth/session.svelte.js';
 	import PasswordInput from '#lib/components/common/PasswordInput.svelte';
 	import AuthCard, { focusAuthTitle } from '#lib/components/layout/AuthCard.svelte';
@@ -27,6 +27,11 @@
 	let confirm = $state('');
 	let busy = $state(false);
 	let error = $state<string | null>(null);
+	// The field the error is about (a length problem or a mismatch), so it gets aria-invalid,
+	// points at the message and takes focus (WCAG 3.3.1); null for a server failure.
+	let errorField = $state<'password' | 'confirm' | null>(null);
+	let passwordEl: HTMLInputElement | undefined = $state();
+	let confirmEl: HTMLInputElement | undefined = $state();
 	let linkDead = $state(!token);
 	let done = $state(false);
 
@@ -34,6 +39,11 @@
 		e.preventDefault();
 		const problem = passwordProblem(password, confirm);
 		error = problem ? t(problem) : null;
+		errorField = passwordProblemField(password, confirm);
+		if (errorField) {
+			await tick();
+			(errorField === 'password' ? passwordEl : confirmEl)?.focus();
+		}
 		if (error || !token) return;
 		busy = true;
 		try {
@@ -69,7 +79,7 @@
 		{#if session.user}
 			<p class="signed-in"><Rich text={tRich('You’re signed in as **{email}**. Setting a new password signs this browser out too.', { email: session.user.email })} /></p>
 		{/if}
-		{#if error}<div class="alert alert-error" role="alert">{error}</div>{/if}
+		{#if error}<div class="alert alert-error" role="alert" id="reset-error">{error}</div>{/if}
 		<form onsubmit={submit}>
 			<div class="field">
 				<label for="password">{t('New password')}</label>
@@ -79,14 +89,25 @@
 					required
 					minlength={8}
 					maxlength={200}
-					aria-describedby="password-hint"
+					aria-invalid={errorField === 'password' ? 'true' : undefined}
+					aria-describedby={errorField === 'password' ? 'reset-error password-hint' : 'password-hint'}
 					bind:value={password}
+					bind:el={passwordEl}
 				/>
 				<span class="hint" id="password-hint">{t('At least 8 characters. Changing it signs you out on every device.')}</span>
 			</div>
 			<div class="field">
 				<label for="confirm">{t('Repeat new password')}</label>
-				<PasswordInput id="confirm" autocomplete="new-password" required maxlength={200} bind:value={confirm} />
+				<PasswordInput
+					id="confirm"
+					autocomplete="new-password"
+					required
+					maxlength={200}
+					aria-invalid={errorField === 'confirm' ? 'true' : undefined}
+					aria-describedby={errorField === 'confirm' ? 'reset-error' : undefined}
+					bind:value={confirm}
+					bind:el={confirmEl}
+				/>
 			</div>
 			<button class="btn btn-primary" type="submit" disabled={busy}>{busy ? t('Saving…') : t('Set new password')}</button>
 		</form>
