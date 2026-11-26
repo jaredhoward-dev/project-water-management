@@ -105,7 +105,7 @@ so a count commits or rolls back with it (`backend/src/billing/entitlements.ts`
 - **Issued evidence packs**: one per issue (`evidence/packs.ts`, the issue
   route). Drafts, sign-offs, withdrawals and verify never count.
 - **Catchments**: not a counter; `app_account_plan` counts the account's
-  active projects (not archived, not deleted).
+  projects (projects have no archived state yet, and a deleted one is gone).
 - **Assistant tokens and cost**: summed from `assistant_usage` (above), in
   its UTC month. `usage.assistantTokens` is the weighted tokens;
   `usage.assistantCost` is the dollar cost the backend records per turn
