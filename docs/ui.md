@@ -10812,7 +10812,10 @@ read it before.
   boundary](./maps.md#rain-from-the-boundary)); otherwise a plain note
   linking to Data. A note, never a blocker. A run the header started on
   another section and still going when the page opens shows here the same
-  way, the form waiting for it. A viewer gets no form, and
+  way, the form waiting for it. A run started here that finishes after the
+  page was left goes into the workspace's runs list (on the same project)
+  but writes no `run=` into the address now open, so Back doesn't stop on an
+  entry nobody chose. A viewer gets no form, and
   the inputs-changed note as before.
 - **The rail.** Where the page is at least 50rem (700 px) wide (a container
   query, `runs-page`), a 250 px left rail holds the runs list beside the

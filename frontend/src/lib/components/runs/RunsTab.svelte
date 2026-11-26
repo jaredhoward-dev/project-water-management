@@ -269,7 +269,12 @@
 		detailFor = id;
 		const hit = detailCache.get(id);
 		if (hit) {
+			// A cached run is shown at once: a load still out for the run picked before (Back past it) owns nothing now,
+			// so its busy state and any earlier error go too, else the results stayed aria-busy for good.
 			detail = hit;
+			detailLoading = false;
+			detailError = null;
+			detailGone = false;
 			return;
 		}
 		detailLoading = true;
@@ -395,7 +400,15 @@
 			label = '';
 			const { summary: _summary, ...meta } = r;
 			// Drop the oldest runs the server trimmed to stay within its cap.
-			commit([meta, ...runs.filter((x) => x.id !== r.id && !removedRunIds.includes(x.id))]);
+			const next = [meta, ...runs.filter((x) => x.id !== r.id && !removedRunIds.includes(x.id))];
+			if (destroyed) {
+				// Left the tab while the run went: the page (still on this project) takes the new run for its other tabs,
+				// but the URL is another tab's or another project's now, so no ?run= is written into it (a history entry
+				// there, or this project's run named on another project).
+				if (page.params.id === projectId) onRunsChange?.(next);
+				return;
+			}
+			commit(next);
 			select(r.id, 'pick');
 		} catch (err) {
 			actionError = msg(err);
