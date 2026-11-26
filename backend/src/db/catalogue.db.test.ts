@@ -526,6 +526,7 @@ const SCENARIO_ID_NULL_TESTS = new Map<string, string>([
 	['policy yield_result.yield_result_select_contributor', 'yield_result.scenario_id'],
 	['constraint evidence_pack.evidence_pack_application', 'evidence_pack.scenario_id'],
 	['constraint note.note_participation_on_scenario', 'note.scenario_id'],
+	['constraint yield_result.yield_result_base_run_scenario', 'yield_result.scenario_id: a base run is recorded on a scenario\'s yield only (367)'],
 	['constraint yield_result.yield_result_check', 'yield_result.scenario_id'],
 	['trigger note.note_write_revision', 'note.scenario_id'],
 	['index model_run_scenario_idx', 'link: covers the foreign key'],

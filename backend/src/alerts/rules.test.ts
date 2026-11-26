@@ -37,6 +37,16 @@ describe('dam_below hysteresis', () => {
 		expect(recovered('dam_below', 0.3, 0.3 + DAM_MARGIN)).toBe(true);
 	});
 
+	it('re-arms at a full dam when the threshold + 5 points is past 100 % (a level of 96–99 %, which the editor allows)', () => {
+		// The dam is a fraction 0–1: 0.97 + 0.05 can never be reached, so the event would fire once and never again.
+		const r = simulate('dam_below', 0.97, [0.9, 0.99, 1, 0.9]);
+		expect(r.steps).toEqual(['open', 'keep', 'clear', 'open']);
+		expect(recovered('dam_below', 0.99, 1)).toBe(true);
+		expect(recovered('dam_below', 0.99, 0.995)).toBe(false);
+		expect(recovered('dam_below', 0.95, 1)).toBe(true);
+		expect(recovered('dam_below', 0.95, 0.999)).toBe(false);
+	});
+
 	it('clears when the figure is gone (the farm left the publication), and does nothing on none while quiet', () => {
 		expect(simulate('dam_below', 0.3, [0.2, null]).steps).toEqual(['open', 'clear']);
 		expect(simulate('dam_below', 0.3, [null, Number.NaN]).steps).toEqual(['keep', 'keep']);

@@ -70,7 +70,7 @@
 	import { downloads } from '#lib/export/index.js';
 	import { fmtDay, fmtNum } from '#lib/format/number.js';
 	import { projectToday } from '#lib/components/projects/freshness.js';
-	import { CsvError, parseSeriesCsv, type ParsedSeries } from '#lib/series/csv.js';
+	import { CsvError, parseSeriesCsv, subDailyAggregate, type ParsedSeries } from '#lib/series/csv.js';
 	import { defaultUnit, KIND_OPTIONS, kindLabel, seriesKindLabel } from '#lib/series/kinds.js';
 	import { CHIRPS_CHOICES, describeProvenance, feedMark, provenanceFields, rebuildingNote } from '#lib/series/provenance.js';
 	import { firstOutletSeries } from '#lib/series/pick.js';
@@ -925,8 +925,8 @@
 				<span class="prov" data-testid="series-site">{rowSiteMark(s, gauges)}</span>
 			{/if}
 			{#if s.dayBoundary}
-				<!-- In words, not a hover title: a day added up from sub-daily readings in these windows. -->
-				<span class="prov" data-testid="series-day-boundary">{s.dayBoundary}–{s.dayBoundary} days, added up from sub-daily readings</span>
+				<!-- In words, not a hover title: a day made from sub-daily readings in these windows (a flow averaged, a depth added up). -->
+				<span class="prov" data-testid="series-day-boundary">{s.dayBoundary}–{s.dayBoundary} days, {subDailyAggregate(s.kind) === 'mean' ? 'averaged' : 'added up'} from sub-daily readings</span>
 			{/if}
 			{#if role}
 				<!-- The badge, the kind's role as a HelpTip (keyboard and touch reach it; a title doesn't), and for a gauge record where it is checked and scored, in words. -->

@@ -107,8 +107,8 @@ data](./api.md#model-data)).
 | `node` column | Farm spec column | Notes |
 | --- | --- | --- |
 | `area_km2` | Total area farms (km²) | The unit's runoff area: GR4J on its own rain (Per unit; until engine 1.109.0 also the share runs under Fragmentation, which set its natural MAR share), `RainToM3`, land cover, and the area shares the natural MAR shares fall back to ([model.md §2.5](./model.md)) |
-| `area_hi_km2` / `area_lo_km2` | Farm area high / low MAP | The retired *Hi/Lo* method. Neither read nor written since engine 1.105.0 (issue #616, [266](#flow-share-methods-retired-266_retire_flow_share_methodsql)); a later contract migration drops them |
-| `flow_share_manual` | External fragmentation (%) | The retired *Specific* method (0–1). Neither read nor written since engine 1.105.0 (issue #616, [266](#flow-share-methods-retired-266_retire_flow_share_methodsql)); a later contract migration drops it |
+| *(dropped)* `area_hi_km2` / `area_lo_km2` | Farm area high / low MAP | The retired *Hi/Lo* method. Neither read nor written since engine 1.105.0 (issue #616, [266](#flow-share-methods-retired-266_retire_flow_share_methodsql)); migration 366 dropped them (issue #836) |
+| *(dropped)* `flow_share_manual` | External fragmentation (%) | The retired *Specific* method (0–1). Neither read nor written since engine 1.105.0 (issue #616, [266](#flow-share-methods-retired-266_retire_flow_share_methodsql)); migration 366 dropped it (issue #836) |
 | `pct_upstream_to_dam` | "Upstream inflow above dam (%)" | The share of upstream inflow that enters the dam (engine ≥ 0.9.0). The workbook's formula applied it to the water passing below the dam; the client confirmed the label's meaning ([model.md Q1](./model.md#3-workbook-quirks-and-suspected-bugs)). Defaults to 1 (a dam on the river). |
 | `pct_runoff_to_dam` | Farm runoff above (into) dam (%) | |
 | `dam_capacity_m3` | Composite dam capacity (m³) | |
@@ -419,8 +419,9 @@ sub-daily readings (issue #40 (b) amendment 5, [model.md
 `'08:00'` = each day is 08:00 to 08:00 the next morning, booked to the day
 it starts (the manual-gauge convention); `'00:00'` = midnight to midnight;
 `NULL` = daily values as uploaded (a CHECK allows only these). The browser
-adds an hourly or other sub-daily CSV up into days (each timestamp closes
-its interval) and sends the boundary with the values.
+makes an hourly or other sub-daily CSV into days (each timestamp closes
+its interval; a depth added up, a flow averaged, a part first or last day
+left out, issue #829) and sends the boundary with the values.
 
 - **Set by** an upload (`PUT …/series` with `dayBoundary`; a replace that
   doesn't say clears it), a merge into an empty or new series, a copy, and
@@ -1709,12 +1710,14 @@ licensing evidence pack: its frozen manifest and hash, and its lifecycle.
 - **Keeps its project**: `project_pack_guard` (BEFORE DELETE on `project`)
   refuses a project with a pack past draft (`restrict_violation`).
 - **`app_verify_pack(code)`** (`SECURITY DEFINER`, `STABLE`; latest body:
-  132_verify_pack_run_engines, which adds `runs`; 122_pack_bundle added
+  368_verify_alternative_errata, which adds the cited alternatives' runs to
+  `runs`; 132_verify_pack_run_engines added `runs`; 122_pack_bundle added
   `bundleSha256`): by short code or full hash,
   the printed fields of a pack that was issued, as `jsonb`, or NULL
   ([evidence-pack.md § Verification](./evidence-pack.md#verification)).
-  `runs` (each run's `engine_version` and its fit's engine, baseline first)
-  is for the API's errata found since issue and never returned as is.
+  `runs` (each run's `engine_version` and its fits' engines, baseline first,
+  then each mitigation alternative the manifest cites, in its order) is for
+  the API's errata found since issue and never returned as is.
 - **`app_record_pack_bundle(pack, sha256)`** (122_pack_bundle, `SECURITY
   DEFINER`, `EXECUTE` for `water_app`): records the reproduction bundle's key
   (`packs/<project>/<pack>/<sha256>.zip`, derived here) and SHA-256, for an
@@ -4322,6 +4325,7 @@ No job table of its own: `job` holds status, progress and errors.
 | `engine_version`, `created_by`, `created_at` | `created_by` and `created_at` are stamped by the insert trigger |
 | `allocation_mode` | The `settings.allocationMode` of the input the yield ran on (`none`, `cap`, `fullAllocation`; 221, #523 G1c), written by the job. A viewer kept from the volumes gets a `cap` or `fullAllocation` result without its points; NULL = a result from before 221, judged on a run by the run's own mode and withheld on a scenario (`yield/store.ts` `yieldsOnCapOrFull`) |
 | `ops_sha256` | On a scenario, its `ops_sha256` when the job ran (320; CHECK 64 hex), so the Yield panel flags a result worked out before the scenario's latest changes. NULL on a run (its input never changes) and for a scenario's result from before 320 |
+| `base_run_id` | On a scenario, its `base_run_id` when the job ran (367; no foreign key, a record that outlives the run; CHECK only with `scenario_id`), so the Yield panel flags a result worked out on another base run: a rebase keeps the ops and their `ops_sha256`. NULL on a run and for a scenario's result from before 367 |
 
 - **RLS**: SELECT for viewers (farmers read nothing: listed in the catalogue
   guard's `FARMERS_NEVER_READ`), INSERT and DELETE for editors. No UPDATE
@@ -4813,12 +4817,15 @@ expand/contract:
 - It then strips `flowShareMethod` and `hiLoSplit` from `project.settings`.
   The engine's and the API's `mergeSettings` drop them too
   (`RETIRED_SETTINGS_KEYS`).
-- The three node columns stay for now. The backend from this release
-  neither reads nor writes them (`model/store.ts`; new rows take the
+- The three node columns stayed. The backend from this release
+  neither reads nor writes them (`model/store.ts`; new rows took the
   defaults 0, 0 and NULL), and the engine drops the fields from any input
-  it reads (`upgradeLegacyModel`, `RETIRED_NODE_FIELDS`). A later contract
-  migration drops the columns once this backend release is in production
-  ([followups.md](./followups.md)).
+  it reads (`upgradeLegacyModel`, `RETIRED_NODE_FIELDS`). The contract
+  half, `366_drop_flow_share_columns.sql` (issue #836), drops them, once
+  the release carrying 266 (backend@0.10.0) and every later one in
+  production had stopped reading them: no policy, view, index or function
+  names them, the row-type readers look columns up by name, and their
+  CHECK constraints go with them.
 
 Stored runs, model revisions and scenario ops keep the values in their
 JSON, as records: an older run's summary keeps its recorded shares, the

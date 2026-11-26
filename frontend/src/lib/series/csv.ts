@@ -9,7 +9,7 @@
 // reads either way (1,234 in a semicolon file), is refused, never guessed.
 // DWS hydrology exports (fixed-width YYYYMMDD) are read by ./dws.ts;
 // ./file.ts picks the reader.
-import { fromEpochDay, toEpochDay, type DayBoundary } from '@water-management/engine';
+import { fromEpochDay, seriesDimension, toEpochDay, type DayBoundary } from '@water-management/engine';
 import type { DwsImport } from './dws';
 import { fmtNum } from '#lib/format/number.js';
 
@@ -25,7 +25,7 @@ export interface ParsedSeries {
 	dateOrder: 'iso' | DateOrder;
 	/** True when no day above 12 settled the order and day/month was assumed. */
 	dateOrderAssumed: boolean;
-	/** Sub-daily readings added up into days (only when parsed with a day boundary). */
+	/** Sub-daily readings made into days (only when parsed with a day boundary). */
 	subDaily?: SubDailyInfo;
 	/** A DWS export's quality codes and the rows it dropped as gaps (./dws.ts). */
 	dws?: DwsImport;
@@ -38,15 +38,41 @@ export interface ParsedSeries {
 	negativeGaps?: number;
 }
 
-/** How a sub-daily file was added up into days (issue #40 (b), 033_series_day_boundary.sql). */
+/**
+ * How a day is made from sub-daily readings (issue #829): a depth (rain,
+ * evaporation: mm in the interval) is added up, a flow (a rate, m³/s at the
+ * time) is averaged. Adding up an hourly flow made its day 24 × too large.
+ */
+export type SubDailyAggregate = 'sum' | 'mean';
+
+/** The aggregate for a series kind, from the engine's flow-or-depth split (units.ts). */
+export const subDailyAggregate = (kind: string): SubDailyAggregate => (seriesDimension(kind) === 'flow' ? 'mean' : 'sum');
+
+/** Read a sub-daily file: the day window and how its readings make a day. */
+export interface SubDailyOptions {
+	dayBoundary: DayBoundary;
+	aggregate: SubDailyAggregate;
+}
+
+/** A daily file (no options), or a sub-daily one, which must say both its window and its aggregate. */
+export type ParseOptions = { dayBoundary?: undefined; aggregate?: undefined } | SubDailyOptions;
+
+/** How a sub-daily file was made into days (issue #40 (b), 033_series_day_boundary.sql; issue #829). */
 export interface SubDailyInfo {
 	dayBoundary: DayBoundary;
+	aggregate: SubDailyAggregate;
 	/** Rows with a value. */
 	readings: number;
-	/** The most common number of readings in a day: the file's interval (24 for hourly). */
+	/** Readings a whole day holds: 1440 minutes over the file's most common interval (24 for hourly), else the most common count in a day. */
 	readingsPerDay: number;
-	/** Days with a value but fewer readings than that: their totals may be short. */
+	/** Days kept with a value but fewer readings than that: a total may be short, an average leans on the hours it has. */
 	incompleteDays: number;
+	/**
+	 * The first and last days when the file starts or ends partway through
+	 * them (fewer rows than a whole day): left out of the series, not stored
+	 * as a short total or a part-day average (issue #829). Absent when whole.
+	 */
+	partialEdges?: { first?: string; last?: string };
 }
 
 /** Order of a slash/dot/dash date whose year comes last: 05/01/2020. */
@@ -108,6 +134,11 @@ const BOUNDARY_MINUTES: Record<DayBoundary, number> = { '00:00': 0, '08:00': 480
 export function bookedDay(date: string, minutes: number, boundary: DayBoundary): number {
 	const instant = toEpochDay(date) * 1440 + minutes;
 	return Math.floor((instant - BOUNDARY_MINUTES[boundary] - 1e-6) / 1440);
+}
+
+/** The instant (minutes since the epoch) a booked day's window opens; the window is (start, start + 1440]. */
+function windowStart(day: number, boundary: DayBoundary): number {
+	return day * 1440 + BOUNDARY_MINUTES[boundary];
 }
 
 /**
@@ -320,11 +351,12 @@ export function denseDays(byDay: Map<number, number | null>): Pick<ParsedSeries,
 /**
  * Parse a date,value CSV into daily values. With `dayBoundary`, the file is
  * sub-daily (hourly, 10-minute…): each row's date and time say when its
- * interval ended, and the values are added up into days in that window
- * (bookedDay). Without it, one row per day; a file with several timed rows a
+ * interval ended, and the values make days in that window (bookedDay):
+ * added up for a depth, averaged for a flow (`aggregate`, issue #829). A first
+ * or last day the file covers only in part (by the span of its readings, issue #840) is left out (`partialEdges`). Without it, one row per day; a file with several timed rows a
  * day throws a CsvError marked `subDaily`, so the form can ask for a boundary.
  */
-export function parseSeriesCsv(text: string, opts: { dayBoundary?: DayBoundary } = {}): ParsedSeries {
+export function parseSeriesCsv(text: string, opts: ParseOptions = {}): ParsedSeries {
 	const lines = text.replace(/^﻿/, '').split(/\r\n?|\n/);
 	// Trimmed of spaces but not tabs: "2025-04-03<tab>" (a blank last cell, as a spreadsheet copies or saves it) is still two columns.
 	const rows = lines
@@ -345,6 +377,9 @@ export function parseSeriesCsv(text: string, opts: { dayBoundary?: DayBoundary }
 	const decimal = detectDecimal(valueCells, delim);
 	const byDay = new Map<number, number | null>();
 	const readingsOn = new Map<number, number>();
+	// Sub-daily: every timed row's instant (minutes), and each day's first and last (blank or not, it shows the logger was running).
+	const spanOn = new Map<number, { first: number; last: number }>();
+	const instants: number[] = [];
 	let timed = false;
 	let readings = 0;
 	let negativeGaps = 0;
@@ -377,6 +412,14 @@ export function parseSeriesCsv(text: string, opts: { dayBoundary?: DayBoundary }
 		if (opts.dayBoundary) {
 			if (minutes === null) throw new CsvError(`"${cells[0]}" has no time: every row of a sub-daily file needs one (YYYY-MM-DD HH:MM)`, i + 1);
 			const day = bookedDay(date, minutes, opts.dayBoundary);
+			const at = toEpochDay(date) * 1440 + minutes;
+			instants.push(at);
+			const span = spanOn.get(day);
+			if (!span) spanOn.set(day, { first: at, last: at });
+			else {
+				if (at < span.first) span.first = at;
+				if (at > span.last) span.last = at;
+			}
 			if (!byDay.has(day)) byDay.set(day, null);
 			if (value !== null) {
 				byDay.set(day, (byDay.get(day) ?? 0) + value);
@@ -392,21 +435,74 @@ export function parseSeriesCsv(text: string, opts: { dayBoundary?: DayBoundary }
 		}
 		byDay.set(day, value);
 	}
+	let subDaily: SubDailyInfo | undefined;
+	if (opts.dayBoundary) {
+		const perDay = readingsPerDay(instants, readingsOn);
+		if (opts.aggregate === 'mean') for (const [day, n] of readingsOn) byDay.set(day, byDay.get(day)! / n);
+		// A first or last day the file covers only in part: left out, never a short total or a part-day average.
+		const partialEdges: { first?: string; last?: string } = {};
+		const days = [...byDay.keys()].sort((a, b) => a - b);
+		// Judged by the span the readings cover, not their count (issue #840): a missed reading inside an edge day
+		// keeps it (counted in incompleteDays); the day is part-way only when the logger's grid has a slot inside
+		// the day's window (start, end] before its first reading or after its last.
+		const step = 1440 / perDay;
+		const opensWhole = (day: number) => spanOn.get(day)!.first - step <= windowStart(day, opts.dayBoundary) + 1e-6;
+		const closesWhole = (day: number) => spanOn.get(day)!.last + step > windowStart(day, opts.dayBoundary) + 1440 + 1e-6;
+		if (days.length > 0 && !opensWhole(days[0]!)) partialEdges.first = fromEpochDay(days[0]!);
+		if (days.length > 1 && !closesWhole(days.at(-1)!)) partialEdges.last = fromEpochDay(days.at(-1)!);
+		// A one-day file must also close: its single day is both edges.
+		if (days.length === 1 && !partialEdges.first && !closesWhole(days[0]!)) partialEdges.first = fromEpochDay(days[0]!);
+		if (partialEdges.first && (days.length === 1 || (days.length === 2 && partialEdges.last))) {
+			throw new CsvError(
+				`no whole day: the readings ${days.length === 1 ? `cover only part of ${partialEdges.first}` : `cover only parts of ${partialEdges.first} and ${partialEdges.last}`} (${opts.dayBoundary}–${opts.dayBoundary}), and a part day isn't stored`
+			);
+		}
+		if (partialEdges.first) byDay.delete(days[0]!);
+		if (partialEdges.last) byDay.delete(days.at(-1)!);
+		const incompleteDays = [...byDay.keys()].filter((d) => (readingsOn.get(d) ?? 0) > 0 && readingsOn.get(d)! < perDay).length;
+		subDaily = {
+			dayBoundary: opts.dayBoundary,
+			aggregate: opts.aggregate,
+			readings,
+			readingsPerDay: perDay,
+			incompleteDays,
+			...(partialEdges.first || partialEdges.last ? { partialEdges } : {})
+		};
+	}
 	const out: ParsedSeries = {
 		...denseDays(byDay),
 		dateOrder: order,
 		dateOrderAssumed: assumed,
 		...(negativeGaps ? { negativeGaps } : {})
 	};
-	if (opts.dayBoundary) {
-		// The file's interval: the most common count of readings in a day (the larger on a tie).
-		const tally = new Map<number, number>();
-		for (const n of readingsOn.values()) tally.set(n, (tally.get(n) ?? 0) + 1);
-		let perDay = 0;
-		let seen = -1;
-		for (const [n, c] of tally) if (c > seen || (c === seen && n > perDay)) [perDay, seen] = [n, c];
-		const incompleteDays = [...readingsOn.values()].filter((n) => n < perDay).length;
-		out.subDaily = { dayBoundary: opts.dayBoundary, readings, readingsPerDay: perDay, incompleteDays };
-	}
+	if (subDaily) out.subDaily = subDaily;
 	return out;
+}
+
+/** The more common of two keys by count, the larger on a tie. */
+function mostCommon(values: Iterable<number>): number {
+	const tally = new Map<number, number>();
+	for (const n of values) tally.set(n, (tally.get(n) ?? 0) + 1);
+	let best = 0;
+	let seen = -1;
+	for (const [n, c] of tally) if (c > seen || (c === seen && n > best)) [best, seen] = [n, c];
+	return best;
+}
+
+/**
+ * Readings a whole day holds: 1440 over the most common step between
+ * timestamps (60 → 24, 15 → 96) when that step divides the day; else (an
+ * irregular file, or one with a single reading) the most common count of
+ * readings in a day.
+ */
+function readingsPerDay(instants: number[], readingsOn: Map<number, number>): number {
+	const sorted = [...new Set(instants)].sort((a, b) => a - b);
+	const steps: number[] = [];
+	for (let i = 1; i < sorted.length; i++) steps.push(Math.round((sorted[i]! - sorted[i - 1]!) * 60) / 60);
+	const step = mostCommon(steps);
+	if (step > 0 && step <= 1440) {
+		const n = 1440 / step;
+		if (Math.abs(n - Math.round(n)) < 1e-9) return Math.round(n);
+	}
+	return mostCommon(readingsOn.values());
 }

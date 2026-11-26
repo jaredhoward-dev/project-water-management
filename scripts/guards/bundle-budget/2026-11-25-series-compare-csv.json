@@ -1,0 +1,4 @@
+{
+	"addKb": 2,
+	"why": "Sub-daily averaging (#829), the comparison's change size and CSV download (#830) and the shared latest-rain rule (#832): measured origin/main 2543 KB, this branch before #843 2545 KB"
+}

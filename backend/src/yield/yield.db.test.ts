@@ -352,6 +352,41 @@ describe('a dam that receives no water (the hydrologist, 2026-11-09): refused, t
 	});
 });
 
+describe("a scenario's yield records the base run it ran on (367): a rebase keeps the ops and their hash", () => {
+	it('stores the base run; after a rebase the scenario names another while the ops hash is unchanged', async () => {
+		const owner = await signUp('YieldRebase');
+		const c = await catchment(owner);
+		const sid = (
+			await owner.call('POST', `/projects/${c.projectId}/scenarios`, {
+				name: 'Raise',
+				baseRunId: c.runId,
+				ops: [{ op: 'node.set', nodeId: c.dam.id, field: 'damCapacityM3', value: 80_000 }]
+			})
+		).body.scenario.id as string;
+		const post = await owner.call('POST', `/projects/${c.projectId}/yield`, { nodeId: c.dam.id, scenarioId: sid, kind: 'firm' });
+		expect(post.status, JSON.stringify(post.body)).toBe(202);
+		await tick();
+		expect(await job(post.body.jobId)).toMatchObject({ status: 'done', last_error: null });
+		const [r] = (await owner.call('GET', `/projects/${c.projectId}/yield?jobId=${post.body.jobId}`)).body.results;
+		expect(r).toMatchObject({ scenarioId: sid, runId: null, baseRunId: c.runId });
+
+		// A wetter record, a new run, and the scenario rebased onto it: the same ops, so the same hash.
+		const rain = Array.from({ length: 90 }, (_, i) => (i % 3 === 0 ? 30 : 0));
+		expect((await owner.call('PUT', `/projects/${c.projectId}/series`, { kind: 'rain_catchment_mm', unit: 'mm', startDate: '2020-01-01', values: rain })).status).toBe(200);
+		const run2 = await owner.call('POST', `/projects/${c.projectId}/runs`, { label: 'wetter' });
+		expect(run2.status, JSON.stringify(run2.body)).toBe(201);
+		const rebased = await owner.call('POST', `/projects/${c.projectId}/scenarios/${sid}/rebase`, { baseRunId: run2.body.run.id });
+		expect(rebased.status, JSON.stringify(rebased.body)).toBe(200);
+		expect(rebased.body.scenario.opsSha256).toBe(r.opsSha256);
+		expect(rebased.body.scenario.baseRunId).not.toBe(r.baseRunId);
+
+		// A yield on a run records none: the run is its own input.
+		const runYield = await owner.call('POST', `/projects/${c.projectId}/yield`, { nodeId: c.dam.id, runId: c.runId, kind: 'firm' });
+		await tick();
+		expect((await owner.call('GET', `/projects/${c.projectId}/yield?jobId=${runYield.body.jobId}`)).body.results[0].baseRunId).toBeNull();
+	});
+});
+
 describe('POST /projects/:id/yield/:jobId/cancel', () => {
 	it('kills a waiting job at once; a viewer who didn’t queue it gets 404', async () => {
 		const owner = await signUp('YieldCancel');

@@ -6,16 +6,20 @@
 // the forecast run's staleness) counts to the last value instead. SQL
 // fragments, so each query keeps its one round-trip.
 
-/** Recorded rain: what a run is driven by, so what freshness measures (a forecast runs ahead, observed flow only scores a run). */
-export const RECORDED_RAIN_KINDS = ['rain_catchment_mm', 'rain_chirps_mm'] as const;
+import { RECORDED_RAIN_KINDS } from '@water-management/engine';
+
+/** Recorded rain: what a run is driven by, so what freshness measures (a forecast runs ahead, observed flow only scores a run). The engine's list (recordedRain.ts). */
+export { RECORDED_RAIN_KINDS };
 
 /** SQL (a date, or NULL when every value is blank): the last day with a value of the time_series row `alias`. */
 export const lastValueDaySql = (alias: string) =>
 	`(SELECT ${alias}.start_date + max(lv.o)::int - 1 FROM unnest(${alias}."values") WITH ORDINALITY lv(v, o) WHERE lv.v IS NOT NULL)`;
 
 /**
- * SQL (a date, or NULL): the project's recorded rain end, the last day with a catchment or CHIRPS rain value.
+ * SQL (a date, or NULL): the project's latest rain day, the last day with a catchment or CHIRPS rain value.
  * The catchment's rain only (no site): a land unit's own rain (209_unit_rain_series, issue #482) never moves it.
+ * The SQL form of the engine's `latestRainDay` (recordedRain.ts), the rule the workspace header follows (issue #832):
+ * the same kinds and the same no-site test, so the header and the project list never name different days.
  */
 export const recordedRainUntilSql = (projectExpr: string) =>
 	`(SELECT max(${lastValueDaySql('rts')}) FROM time_series rts

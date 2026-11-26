@@ -2186,8 +2186,17 @@ EventBridge, daily
   summed into the engine's catchment monthly totals; then one engine call
   (`runForecastOutlook`) after the ESP members. A copy laid out otherwise
   fails the job; no forecast or no hindcast in the copy leaves the outlook
-  the ESP alone with the reason. Locally the committed copy holds invented
-  members (`backend/fixtures/mirror/c3s/`, `backend/scripts/c3s-fixture.ts`).
+  the ESP alone with the reason. A hindcast is read from its monthly totals
+  (`c3s-hc-monthly/<system>/<MM>`, (year, member, lead_month, lat, lon), one
+  chunk per system, which the ingest writes beside each daily hindcast and
+  derives for one held before it, a run at a time; issue #837) in one GET
+  instead of one daily chunk per member per year (~600 a system); without
+  them, or with them for other years or members, from the daily chunks,
+  with the same totals to float32 rounding (`c3s.test.ts` compares both on
+  the synthetic copy). Locally the committed copy holds invented members
+  (`backend/fixtures/mirror/c3s/`, `backend/scripts/c3s-fixture.ts`), and
+  ECMWF's hindcasts' monthly totals but not the Met Office's, so both paths
+  run.
 - **NEX-GDDP-CMIP6's monthly aggregates (issue #621 slice 2).** Not a
   scheduled product: the operator copies them once, in us-west-2 next to
   NASA's bucket (`ingest/cmip6_delta.py`,
@@ -2300,7 +2309,8 @@ EventBridge, daily
   cells in the job (`feeds/fromMirrorEcmwf.ts`), whatever `CHIRPS_SOURCE`
   says: there is no per-feed path to ECMWF, and the fetcher refuses one. It
   maps each day through `ecmwf/qm.json` (the operator's offline fit,
-  `ingest/ecmwf_qm_fit.py`) when that covers the place and season, else
+  `ingest/ecmwf_qm_fit.py`; a group fitted on area means before a per-cell
+  one, issue #835) when that covers the place and season, else
   writes the model's own value with `last_meta.calibration` = `not yet
   calibrated`. Today's issue, else yesterday's; a copy with neither waits
   without a failure. The feeds fall due at 14:00 UTC
@@ -3176,7 +3186,8 @@ sequenceDiagram
   enabled schedules through `app_report_schedules_to_check`, works out the
   latest due time, claims it atomically (`app_claim_report_schedule`: later
   than the last one, after the schedule was saved), and queues a render of
-  the project's **latest run** as the schedule's acting user (the editor who
+  the project's **latest run** (`runs/read.ts latestRunId`: the newest run of
+  the model, never a newer scenario or forecast run while there is one) as the schedule's acting user (the editor who
   last saved it) with the dedupe key `report_schedule:<id>:<time>`. A time
   that finds no runs, or an acting user who is no longer an editor, queues
   nothing and says why on the schedule. Each schedule is handled on its own:

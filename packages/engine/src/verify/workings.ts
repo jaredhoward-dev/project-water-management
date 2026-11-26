@@ -87,9 +87,10 @@ export function dailyDemandFactor(
 	const abstractFrom = abstractionStartDay(n, day0, days, []);
 	// × the dated factors on their days (engine ≥ 1.82.0, demand.scale with from/to): the whole demand's, and `part`'s.
 	const dated = datedDemandFactorOf(n, part, day0, days, []);
-	const perDay = Float64Array.from({ length: days }, (_, t) =>
-		t < abstractFrom ? 0 : (factor && t >= from ? factor[(monthOfEpochDay(day0 + t) + 2) % 12]! : 1) * (dated && t >= from ? dated[t]! : 1) * (allocation ? Number(allocation[t]) : 1)
-	);
+	// A plain loop: Float64Array.from with a mapping function was most of this function's cost on a long run.
+	const perDay = new Float64Array(days);
+	for (let t = 0; t < days; t++)
+		perDay[t] = t < abstractFrom ? 0 : (factor && t >= from ? factor[(monthOfEpochDay(day0 + t) + 2) % 12]! : 1) * (dated && t >= from ? dated[t]! : 1) * (allocation ? Number(allocation[t]) : 1);
 	return { perDay, scaled: !!factor || !!dated || !!allocation || abstractFrom > 0 };
 }
 

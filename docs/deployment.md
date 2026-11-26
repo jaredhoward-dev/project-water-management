@@ -2092,6 +2092,15 @@ limits we keep to are in [data-sources.md § ecmwf-ens](./data-sources.md#ecmwf-
   observed rain first, `--regions` fits per region (default the whole
   region D1), and each group (region × season) needs `--min-samples` pairs
   (default 2,000). Removing `ecmwf/qm.json` returns feeds to uncalibrated.
+  Feeds map a catchment's area mean, so compare the per-cell fit with one
+  made on area means first (issue #835): add `--holdout-from <day>` (a day
+  about a month before the archive's last) to print each fit's error on the
+  area means of the days after it, then write the better one with
+  `--basis cell|area|both` (`--block N` sets the area blocks, N × N 0.1°
+  cells, default 5; `--block 0` with the feeds' boxes in `--regions` fits
+  each feed region whole). The feed applies an area group before a per-cell
+  one. A backend older than #835 refuses a file with area groups (the fit
+  file's schema is strict), so release the backend first.
 
 ### Backfill
 
@@ -2611,8 +2620,11 @@ unchanged to the bit; once the forecasts are held but before the hindcast
 backfill below, it says the copy holds no hindcast. No new environment
 variable, flag or permission: the API never reads the copy (it isn't told
 where it is), only the worker. Each such outlook reads one chunk (~0.4 MB)
-per member per hindcast year of each system used, about 600 per system with
-25 hindcast members; see docs/followups.md § C3S outlook read cost.
+per forecast member of each system used, and each system's hindcast as one
+chunk of monthly totals (`c3s-hc-monthly/<system>/<MM>`, issue #837). A
+hindcast collected by an image older than that has its monthly totals
+derived from the copy by the next runs, one a run; until then it is read
+from its daily chunks, one per member per hindcast year (~600 a system).
 
 **No new secret.** The runs read ERA5-Land's `water-management/ingest/cds-key`
 (`infra/era5land.tf`). The daily rule (14:20 UTC,

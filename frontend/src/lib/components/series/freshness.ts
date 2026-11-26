@@ -1,6 +1,6 @@
 // How current a project's input data is, whether runs are behind it, and
 // which stored series an uploaded file most likely updates.
-import { fromEpochDay, toEpochDay, type SeriesMeta } from '@water-management/engine';
+import { fromEpochDay, latestRainDay, seriesLastValueDay, toEpochDay, type SeriesMeta } from '@water-management/engine';
 import type { RunMeta } from '#lib/api/types.js';
 
 /** Days after which data counts as stale: the one threshold ($lib/format/age). */
@@ -16,11 +16,10 @@ export const seriesEnd = (s: Pick<SeriesMeta, 'startDate' | 'length'>) =>
  * How far a series' data reaches: its last day with a value (the API's
  * `lastValueDate`), not the last day it stores. Blank days after it (a
  * logger's "no reading" for a dead sensor) are no data, so they never make a
- * series look fresh. A series with no value at all "ends" the day before it
- * starts. Without the field (an older payload), the stored end.
+ * series look fresh. The engine's rule (recordedRain.ts), shared with the
+ * latest rain day.
  */
-export const dataEnd = (s: Pick<SeriesMeta, 'startDate' | 'length' | 'lastValueDate'>) =>
-	s.lastValueDate === undefined ? seriesEnd(s) : (s.lastValueDate ?? fromEpochDay(toEpochDay(s.startDate) - 1));
+export const dataEnd = seriesLastValueDay;
 
 /**
  * The days a series' data spans, as the Data table's From and Data up to and
@@ -40,16 +39,12 @@ export function dataSpan(
 /** Kinds that drive a run (rainfall, daily A-pan evaporation, daily reference ET); observed flow only scores it. */
 export const isDriver = (kind: string) => kind.startsWith('rain_') || kind === 'evap_apan_mm' || kind === 'evap_et0_mm';
 
-/**
- * Recorded rain: what a run is driven by, so what freshness measures. A
- * forecast runs into the future and observed flow only scores a run: either
- * would read "up to date" while the rain lags (the backend's `dataUntil`
- * uses the same two kinds).
- */
-export const isRecordedRain = (kind: string) => kind === 'rain_catchment_mm' || kind === 'rain_chirps_mm';
-
 export interface Freshness {
-	/** Latest last-value day of the recorded rain (dataEnd); null when there is none. */
+	/**
+	 * The latest rain day: the engine's `latestRainDay`, the one rule the
+	 * project list's `dataUntil` follows too (issue #832): the catchment's
+	 * recorded rain, never a land unit's own; null when there is none.
+	 */
 	latest: string | null;
 	/** Days from `latest` to today; null without recorded rain. */
 	age: number | null;
@@ -78,9 +73,10 @@ export function freshness(list: readonly SeriesMeta[], today: string, staleDays 
 		})
 		.sort((a, b) => b.end.localeCompare(a.end));
 	const behind = perSeries.filter((p) => canFallBehind(p.kind) && p.age > staleDays);
-	const top = perSeries.find((p) => isRecordedRain(p.kind));
-	if (!top) return { latest: null, age: null, stale: true, perSeries, behind };
-	return { latest: top.end, age: top.age, stale: top.age > staleDays, perSeries, behind };
+	const latest = latestRainDay(list);
+	if (latest === null) return { latest: null, age: null, stale: true, perSeries, behind };
+	const age = toEpochDay(today) - toEpochDay(latest);
+	return { latest, age, stale: age > staleDays, perSeries, behind };
 }
 
 /**

@@ -2147,6 +2147,28 @@ describe('classifyOp', () => {
 		expect(classifyOp({ op: 'transfer.set', transferId: 't1', field: 'fromNodeId', value: 'B' }, ['A', 'C'], b)).toBe('baseline');
 	});
 
+	it('an off-take whose seepage rejoins below another party’s unit: changing or removing it is baseline, as adding it is', () => {
+		// r1 takes water from the river at C for B, both the applicant's; its canal seepage rejoins the river below A, another party's.
+		const b = base();
+		b.model.transfers = [{ id: 'r1', fromNodeId: 'C', toNodeId: 'B', months: [1], maxRateM3s: 0.01, dailyCapM3: null, minStoragePct: 0, enabled: true, priority: 0, source: 'river', lossPct: 0.2, lossReturnPct: 0.5, lossReturnNodeId: 'A' }];
+		expect(applyScenario(b, []).problems).toEqual([]);
+		const mine = ['B', 'C'];
+		// transfer.add of the same rule is baseline: the unit the seepage rejoins below is credited that water.
+		expect(classifyOp({ op: 'transfer.add', transfer: { ...b.model.transfers[0]!, id: 'r2' } }, mine, b)).toBe('baseline');
+		// So is taking that water from A: less seepage, the seepage moved off A, the rule off, or the rule removed.
+		expect(classifyOp({ op: 'transfer.set', transferId: 'r1', field: 'lossReturnPct', value: 0 }, mine, b)).toBe('baseline');
+		expect(classifyOp({ op: 'transfer.set', transferId: 'r1', field: 'lossReturnNodeId', value: null }, mine, b)).toBe('baseline');
+		expect(classifyOp({ op: 'transfer.set', transferId: 'r1', field: 'enabled', value: false }, mine, b)).toBe('baseline');
+		expect(classifyOp({ op: 'transfer.remove', transferId: 'r1' }, mine, b)).toBe('baseline');
+		// Positive controls: the seepage below an owned unit, or back at the source, and the same ops are the proposal.
+		expect(classifyOp({ op: 'transfer.set', transferId: 'r1', field: 'lossReturnPct', value: 0 }, [...mine, 'A'], b)).toBe('proposal');
+		expect(classifyOp({ op: 'transfer.remove', transferId: 'r1' }, [...mine, 'A'], b)).toBe('proposal');
+		const atSource = base();
+		atSource.model.transfers = [{ ...b.model.transfers[0]!, lossReturnNodeId: null }];
+		expect(classifyOp({ op: 'transfer.set', transferId: 'r1', field: 'lossReturnPct', value: 0 }, mine, atSource)).toBe('proposal');
+		expect(classifyOp({ op: 'transfer.remove', transferId: 'r1' }, mine, atSource)).toBe('proposal');
+	});
+
 	it('new nodes: a pump or dam without land is a proposal, a gauge or new land is baseline', () => {
 		const pump = node('N', { downstreamNodeId: 'A', areaKm2: 0 });
 		expect(cls({ op: 'node.add', node: pump })).toBe('proposal');
@@ -2158,6 +2180,8 @@ describe('classifyOp', () => {
 		const noLand = base();
 		Object.assign(nodeOf(noLand, 'A')!, { areaKm2: 0 });
 		noLand.settings.ewrRules = [blankEwrRuleTable('G')];
+		// Without t1 (C → A), which the removal would drop: another party's rule (next test).
+		noLand.model.transfers = [];
 		expect(classifyOp({ op: 'node.remove', nodeId: 'A' }, owned, noLand)).toBe('proposal');
 		expect(classifyOp({ op: 'node.remove', nodeId: 'A' }, owned)).toBe('baseline');
 		expect(cls({ op: 'node.remove', nodeId: 'A' })).toBe('baseline');
@@ -2166,6 +2190,24 @@ describe('classifyOp', () => {
 		// A retired specific share on a stored unit no longer makes it land (engine 1.105.0, issue #616).
 		Object.assign(nodeOf(noLand, 'A')!, { flowShareManual: 0.3 });
 		expect(classifyOp({ op: 'node.remove', nodeId: 'A' }, owned, noLand)).toBe('proposal');
+	});
+
+	it('removing an owned node that drops or changes another party’s transfer is baseline, as transfer.remove would be', () => {
+		const noLand = base();
+		Object.assign(nodeOf(noLand, 'A')!, { areaKm2: 0 });
+		noLand.settings.ewrRules = [blankEwrRuleTable('G')];
+		// t1 runs C → A, and C is another party's: removing A drops C's rule.
+		expect(applyScenario(noLand, [{ op: 'node.remove', nodeId: 'A' }]).applied[0]!.notes.join()).toMatch(/dropped 1 transfer/);
+		expect(classifyOp({ op: 'transfer.remove', transferId: 't1' }, owned, noLand)).toBe('baseline');
+		expect(classifyOp({ op: 'node.remove', nodeId: 'A' }, owned, noLand)).toBe('baseline');
+		// Positive control: with C the applicant's too, or without the rule, the removal is the proposal.
+		expect(classifyOp({ op: 'node.remove', nodeId: 'A' }, ['A', 'C'], noLand)).toBe('proposal');
+		const noRule = { ...noLand, model: { ...noLand.model, transfers: [] } };
+		expect(classifyOp({ op: 'node.remove', nodeId: 'A' }, owned, noRule)).toBe('proposal');
+		// A rule from A to another party's B likewise.
+		const out = { ...noRule, model: { ...noRule.model, transfers: [{ ...noLand.model.transfers[0]!, fromNodeId: 'A', toNodeId: 'B' }] } };
+		expect(classifyOp({ op: 'node.remove', nodeId: 'A' }, owned, out)).toBe('baseline');
+		expect(classifyOp({ op: 'node.remove', nodeId: 'A' }, ['A', 'B'], out)).toBe('proposal');
 	});
 
 	it('classifyScenario counts nodes the scenario added as owned', () => {

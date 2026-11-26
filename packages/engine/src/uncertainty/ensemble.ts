@@ -6,7 +6,8 @@
 //   (./sample.ts), never from the optimiser's search path, so the ensemble
 //   doesn't crowd where one fit happened to look.
 // - Each member also draws a pan-coefficient shift (GR4J), a rain source
-//   (station rain with CHIRPS infill, or CHIRPS alone) and the observed record
+//   (station rain with CHIRPS infill, CHIRPS alone, or each gap-filling
+//   product the run reads alone, issue #834) and the observed record
 //   it is judged against (gauge or logger), where the project has a choice.
 // - A member is kept only if it passes stored thresholds: a skill score on
 //   the first half of its record, the Phase 8 WR2012 flag (and MAR band) on
@@ -208,6 +209,51 @@ function chirpsOnly(input: ModelInput, run: PreparedRun): { input: ModelInput | 
 	if (covered < CHIRPS_ONLY_MIN_COVERAGE) {
 		return { input: null, reason: `CHIRPS covers only ${Math.round(covered * 100)} % of the run's days (at least ${CHIRPS_ONLY_MIN_COVERAGE * 100} % needed)` };
 	}
+	return { input: griddedOnly(input, run, values, stationKeys), reason: null };
+}
+
+/** A gap-filling product's rain source (issue #834): the product settings.gapRain reads, as RunSummary.gapRain names it. */
+export type GapRainSource = Extract<RainSource, 'era5l' | 'imerg_late'>;
+const GAP_RAIN_SOURCES: readonly GapRainSource[] = ['era5l', 'imerg_late'];
+const GAP_LABEL: Record<GapRainSource, string> = { era5l: 'ERA5-Land', imerg_late: 'IMERG Late' };
+
+/**
+ * The gap-filling products the run reads (settings.gapRain, §2.4b; none under a catchment rainfall station, which
+ * ignores the setting), each as a rain source of its own: the product on every run day, corrected by its own fit
+ * (ERA5-Land also quantile-mapped) as the run corrects the days it fills, without the station rain, as the CHIRPS-only
+ * member is (issue #834). IMERG Late takes the newest version with the day, each version by its own fit. Empty for a
+ * run with CHIRPS alone, so such a project's options, sample and bands are as before to the bit.
+ */
+function gapProductsOnly(input: ModelInput, run: PreparedRun): { source: GapRainSource; input: ModelInput | null; reason: string | null }[] {
+	const products = run.gapRain?.info.products ?? [];
+	const stationKeys = Object.keys(input.series ?? {}).filter((k) => k.startsWith('rain_station_mm#'));
+	return GAP_RAIN_SOURCES.filter((src) => products.some((p) => p.product === src)).map((source) => {
+		const label = GAP_LABEL[source];
+		const present = products.filter((p) => p.product === source && p.present);
+		if (!present.length) return { source, input: null, reason: `the run has no ${label} rain` };
+		if (!input.series?.rain_catchment_mm && !(run.stations && stationKeys.length)) return { source, input: null, reason: `the project has no station rain, so ${label} only stands in for the gridded rain the run already uses` };
+		// Newest IMERG version first (products are in gapRainKeys' order): a day both versions hold reads the newer, as the run does.
+		const values = new Array<number | null>(run.days).fill(null);
+		for (const p of present) {
+			const s = (input.series as Record<string, DailySeries | undefined>)[p.key];
+			const cols = chirpsColumns(s, p.correction, run.start, run.days, run.month);
+			const col = cols.find((c) => c.key === 'rain_chirps_mapped') ?? cols.find((c) => c.key === 'rain_chirps_corrected') ?? cols[0];
+			if (!col) continue;
+			for (let t = 0; t < run.days; t++) if (values[t] === null && Number.isFinite(col.values[t]!) && col.values[t]! >= 0) values[t] = col.values[t]!;
+		}
+		const covered = values.filter((v) => v !== null).length / run.days;
+		if (covered < CHIRPS_ONLY_MIN_COVERAGE) {
+			return { source, input: null, reason: `${label} covers only ${Math.round(covered * 100)} % of the run's days (at least ${CHIRPS_ONLY_MIN_COVERAGE * 100} % needed)` };
+		}
+		return { source, input: griddedOnly(input, run, values, stationKeys), reason: null };
+	});
+}
+
+/**
+ * The member input that runs on one gridded rain on every day: `values` in CHIRPS' place, read as they are (no CHIRPS
+ * correction, map or gap-filling product on top), without the station rain.
+ */
+function griddedOnly(input: ModelInput, run: PreparedRun, values: (number | null)[], stationKeys: string[]): ModelInput {
 	// Without the station rain, and (engine ≥ 1.78.0, docs/model.md §2.4h) without a land unit's own gauge: the member runs on
 	// CHIRPS alone, each unit on its own CHIRPS where it has one, at the base run's level (below). A filtered copy, never a
 	// delete by an input's key.
@@ -256,10 +302,7 @@ function chirpsOnly(input: ModelInput, run: PreparedRun): { input: ModelInput | 
 		...(ref && ur.reference ? { reference: { ...ur.reference, pinnedFactors: ref.months.map((m) => m.factor) } } : {}),
 		...(recipes ? { pinned: recipes } : {})
 	};
-	return {
-		input: { ...input, settings: { ...input.settings, chirpsBiasCorrection: 'none', chirpsQuantileMap: null, gapRain: null, unitRain, ...(rainStations ? { rainStations } : {}) }, series },
-		reason: null
-	};
+	return { ...input, settings: { ...input.settings, chirpsBiasCorrection: 'none', chirpsQuantileMap: null, gapRain: null, unitRain, ...(rainStations ? { rainStations } : {}) }, series };
 }
 
 const isInt = (v: unknown, lo: number, hi: number): v is number => typeof v === 'number' && Number.isInteger(v) && v >= lo && v <= hi;
@@ -338,12 +381,19 @@ export function resolveEnsembleOptions(input: ModelInput, req: EnsembleRequest =
 	}
 
 	const chirps = chirpsOnly(input, run);
-	const availableRain: RainSource[] = chirps.input ? ['recorded', 'chirps'] : ['recorded'];
+	// A member per gap-filling product the run reads (issue #834); none without settings.gapRain.
+	const gaps = gapProductsOnly(input, run);
+	const availableRain: RainSource[] = ['recorded', ...(chirps.input ? (['chirps'] as const) : []), ...gaps.filter((g) => g.input).map((g) => g.source)];
 	const rainSources = RAIN_SOURCES.filter((r) => (req.rainSources ?? availableRain).includes(r));
 	if (!rainSources.length) throw new Error('choose at least one rain source');
-	const noRain = rainSources.filter((r) => !availableRain.includes(r));
-	if (noRain.length) throw new Error(`the CHIRPS-only rain source is not available: ${chirps.reason}`);
-	if (!chirps.input) notes.push(`The rain source is not varied: ${chirps.reason}.`);
+	const noRain = rainSources.find((r) => !availableRain.includes(r));
+	if (noRain) {
+		const g = gaps.find((x) => x.source === noRain);
+		throw new Error(noRain === 'chirps' ? `the CHIRPS-only rain source is not available: ${chirps.reason}` : `the ${GAP_LABEL[noRain as GapRainSource]}-only rain source is not available: ${g?.reason ?? 'the run does not read it (Model settings → Rain gaps)'}`);
+	}
+	if (availableRain.length === 1) notes.push(`The rain source is not varied: ${chirps.reason}.`);
+	else if (!chirps.input) notes.push(`CHIRPS alone is not one of the rain sources: ${chirps.reason}.`);
+	for (const g of gaps) if (!g.input) notes.push(`${GAP_LABEL[g.source]} alone is not one of the rain sources: ${g.reason}.`);
 
 	const availableRecords = usableRecords(input, run, model);
 	if (!availableRecords.length) {
@@ -441,6 +491,8 @@ export interface EnsembleContext {
 	split: number;
 	base: ModelInput;
 	chirps: ModelInput | null;
+	/** Each gap-filling product's own member input (issue #834), for the ones the options sample; absent when none. */
+	gapProducts?: Partial<Record<GapRainSource, ModelInput>>;
 	panRow: readonly number[];
 	records: Map<CalibrationFlowKind, RecordDays>;
 	/**
@@ -475,6 +527,15 @@ export function ensembleContext(input: ModelInput, options: ResolvedEnsembleOpti
 		const c = chirpsOnly(input, run);
 		if (!c.input) throw new Error(`the CHIRPS-only rain source is not available: ${c.reason}`);
 		chirps = pin(c.input);
+	}
+	const gapProducts: Partial<Record<GapRainSource, ModelInput>> = {};
+	if (options.rainSources.some((r) => r === 'era5l' || r === 'imerg_late')) {
+		for (const g of gapProductsOnly(input, run)) {
+			if (!options.rainSources.includes(g.source)) continue;
+			if (!g.input) throw new Error(`the ${GAP_LABEL[g.source]}-only rain source is not available: ${g.reason}`);
+			gapProducts[g.source] = pin(g.input);
+		}
+		for (const r of options.rainSources) if ((r === 'era5l' || r === 'imerg_late') && !gapProducts[r]) throw new Error(`the ${GAP_LABEL[r]}-only rain source is not available: the run does not read it`);
 	}
 	const startParams = prepareCalibrationParams(base, options.model, site);
 	const records = new Map<CalibrationFlowKind, RecordDays>();
@@ -511,6 +572,7 @@ export function ensembleContext(input: ModelInput, options: ResolvedEnsembleOpti
 		split,
 		base,
 		chirps,
+		...(Object.keys(gapProducts).length ? { gapProducts } : {}),
 		panRow: settings.panCoefficient,
 		records,
 		siteNodeId: site,
@@ -532,8 +594,8 @@ function prepareCalibrationParams(input: ModelInput, model: RunoffModelId, site:
 
 /** The project input one member runs: its parameters, pan shift, rain source and record. */
 export function memberInput(ctx: EnsembleContext, m: EnsembleMember): ModelInput {
-	const src = m.rain === 'chirps' ? ctx.chirps : ctx.base;
-	if (!src) throw new Error('the CHIRPS-only rain source is not available for this project');
+	const src = m.rain === 'chirps' ? ctx.chirps : m.rain === 'recorded' ? ctx.base : (ctx.gapProducts?.[m.rain] ?? null);
+	if (!src) throw new Error(m.rain === 'chirps' ? 'the CHIRPS-only rain source is not available for this project' : `the ${GAP_LABEL[m.rain as GapRainSource]}-only rain source is not available for this project`);
 	const site = ctx.siteNodeId ?? null;
 	// The headline location's record and parameters (engine 1.110.0): a gauge's row, or the top level for the outlet.
 	// The flow kind on the normalised settings; the parameters through withHeadlineParams, which reads the stored shape.

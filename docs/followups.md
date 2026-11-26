@@ -58,6 +58,28 @@ are in. Still open:
       `redirect_domains`. Trigger: the domain bought, in the client's name if
       they will own the brand.
 
+## Sub-daily flow series stored summed (issue #829)
+
+Before the fix, an hourly or 15-minute flow CSV was added up into days, so
+its days were 24 × or 96 × too large. Any flow series stored then with a
+day boundary was made that way. The operator checks production read-only
+(the schema owner's `psql`; no write):
+
+```sql
+SELECT ts.project_id, ts.id, ts.kind, ts.name, ts.day_boundary
+FROM time_series ts
+WHERE ts.kind LIKE '%\_m3s' AND ts.day_boundary IS NOT NULL
+ORDER BY ts.project_id, ts.kind, ts.name;
+```
+
+- [ ] Operator: run the query. No rows: tick this and the next. Rows: each
+  series is uploaded again from its original file (now averaged), or its
+  owner told; the runs that read it are re-run. A stored series can't be
+  divided back safely (the readings a day aren't kept), so don't patch the
+  values in SQL.
+- [ ] Series revisions (`series_revision`, `day_boundary` kept) of a flow
+  series hold the same summed values: restoring one brings them back.
+
 ## Blocking releases (operator)
 
 The checklist for these is issue #62; the history scrub is #63.
@@ -344,6 +366,43 @@ It measured **11.1 s** on the dev laptop on 2026-11-01, and **1.5 s** (1.85,
       engine's self-checks (run them once per run, not per pass, or sample
       them) before adding more per-day work. Trigger: the V1 test's median
       passing 1.8 s, or a Lambda run of a client-sized catchment over 3 s.
+      **Measured 2026-11-25 (issue #838):** the checks already run **once
+      per run**, not per pass: `runModelChecked` → `withVerification` →
+      `verifyRun` is their only caller, and it runs once on the finished
+      output. On an invented catchment of the V1 test's shape (12 units on
+      two arms, 9 crops on 23 planted areas, one transfer, 16 000 days, 431
+      series; medians of 7, Node 24, laptop busy with other sessions' tests):
+      `runModel` 270 ms, `verifyRun` 253 ms, `runModelChecked` 649 ms. Per
+      check: `checkWorkings` **143 ms** (over half), `checkTransferLimits`
+      26, `checkBalance` 24, `checkEwrAttribution` 18, `checkOperatingRules`
+      8, the other eight under 4 ms each. So there is no per-pass repeat to
+      remove. What's left: `checkWorkings`'s per-day recompute of the
+      intermediate columns, and the ~125 ms `runModelChecked` spends beyond
+      `runModel` + `verifyRun` (the water balance and `runDrought`), both not
+      yet profiled. Next step: a CPU profile of `checkWorkings` on that
+      catchment, then share its work, keeping every check.
+      **Profiled 2026-11-25 (issue #841):** the recompute itself was not the
+      cost. Most of `checkWorkings`'s time was overhead around it: the
+      borehole replay built a new `pump` closure every day (esbuild's
+      `--keep-names`, which the Lambda bundles use too, names each one with
+      `Object.defineProperty`, ~25 % of the profile) and asked for the month
+      twice a day even on a farm with no boreholes; each day also built its
+      `where` text (number to string) and three empty arrays, and called
+      `monthOfEpochDay` up to five times; `dailyDemandFactor` filled its
+      array through `Float64Array.from` with a mapping function. Now the
+      closure is made once per farm, the month check is skipped with no
+      boreholes, the months are worked out once per run (`calendarMonths`),
+      the text is built only on a failure, the arrays are reused, and the
+      factor is a plain loop. Every comparison and tolerance is unchanged,
+      so no check compares anything new. Same script, interleaved before and
+      after on one checkout, medians of 7, Node 24, load average 2.6–3.7
+      (other sessions' jobs): `checkWorkings` **149–153 → 71–75 ms** (one
+      after-run read 98 ms while the load spiked), `verifyRun` 259–282 →
+      178–195 ms, `runModelChecked` 673–701 → 582–623 ms. The checked run's
+      fingerprint is identical before and after (a6342d9e0ab33646 on this
+      main; #838's dd0d2bebfeeb59a7 was an older main). What's left in
+      `checkWorkings` is the day's arithmetic and its `near` comparisons
+      (~60 % of its profile), which are the checks themselves.
 - [ ] **Verifying a run still re-hashes its rows** (`app_run_digest`, 0.3 s
       for a client-sized run) on every `GET …/runs/:runId`, sign-off and
       decision. Fine for one run; a list that verified many would not be.
@@ -462,19 +521,16 @@ provenance, `ingest/verify_copy.py`):
       reads it with 75 as the local default, the API's production check
       refuses a value outside 60–3650 whole days (the variable's validation
       matches), and `tests/ingest.tftest.hcl` asserts the two agree.
-- [ ] **ECMWF quantile mapping is fitted on cells, applied to area means**
+- [x] **ECMWF quantile mapping is fitted on cells, applied to area means**
       (R4-C, [data-sources.md § ecmwf-ens](./data-sources.md#ecmwf-ens)).
-      `ingest/ecmwf_qm_fit.py` pairs the ensemble mean with observed rain
-      per 0.1° cell, but `fromMirrorEcmwf.ts` applies the fit to a
-      catchment's area-weighted mean, whose distribution has more
-      small-rain days and fewer extremes, so the mapping can over-correct
-      the tails and under-correct drizzle. **Durable fix:** fit on area
-      means for the feed's region (the forecast mean and the observed rain
-      averaged over the same cells, per feed or per catchment-sized block,
-      one fit per group), and check it against the per-cell fit on held-out
-      days. **Trigger:** when the first QM fit is run, once the archive
-      (`ecmwf/`'s archived issue means) holds a season.
-- [ ] **The uncertainty bands don't vary ERA5-Land or IMERG Late**
+      Done (issue #835): `ingest/ecmwf_qm_fit.py --basis area|both` fits on
+      area means (per `--block` of cells, or each `--regions` box whole),
+      the feed applies an area group before a per-cell one (`qmGroupFor`),
+      and `--holdout-from` compares the two fits on held-out days (tested
+      on a synthetic copy). Left for the operator: run `--holdout-from` on
+      the real archive once it holds a season, and write the first fit with
+      the basis that wins.
+- [x] **The uncertainty bands don't vary ERA5-Land or IMERG Late**
       (R4-B, [model.md § 2.10e](./model.md#210e-uncertainty-bands-engine--0260-issue-4-phase-9)).
       The ensemble's rain-source members run CHIRPS alone with
       `gapRain: null` (`packages/engine/src/uncertainty/ensemble.ts`), so a
@@ -485,7 +541,12 @@ provenance, `ingest/verify_copy.py`):
       the CHIRPS-only member is), split evenly with the others, and the
       members' rain source named in `run_uncertainty`. **Trigger:** the
       first client project that sets `settings.gapRain` to a product, or an
-      evidence pack on one.
+      evidence pack on one. — *Done (issue #834): a rain-source member per
+      gap-filling product the run reads (`era5l`, `imerg_late`), split
+      evenly with the others, each member's `rain` naming its source in
+      the result and in `run_uncertainty` (no migration: the options and
+      members are stored as JSON); a project without `settings.gapRain`
+      gets the same bands to the bit.*
 - [ ] **Confirm AgERA5's and NASA POWER's live shape** (R5-E). Built on
       synthetic fixtures only (operator decision, 2026-10-27): the AgERA5
       request (`variable: reference_evapotranspiration`, `version: 2_0`,
@@ -1536,7 +1597,7 @@ runs and accumulations are real) can't be decided without the client.
       open: the methodology statement's paragraph on the forecast-conditioned
       outlook once the chances reach a report (a new methodology version if
       methodology-13 is published by then).
-- [ ] **C3S outlook read cost (issue #620 step 7, `outlooks/c3s.ts`).** A
+- [x] **C3S outlook read cost (issue #620 step 7, `outlooks/c3s.ts`).** A
       `c3s` outlook reads one chunk (one member's whole 215-day forecast over
       the 29 × 32 grid, ~0.4 MB gzipped) per member per hindcast year of each
       system used: about 600 GETs per system with 25 hindcast members, 5 000
@@ -1546,7 +1607,13 @@ runs and accumulations are real) can't be decided without the client.
       totals per cell (`c3s-hc-monthly/<system>/<MM>`, (year, member,
       lead_month, lat, lon), ~30× smaller and one chunk per system), which
       the bridge reads instead. Trigger: the first live outlook with the
-      hindcasts backfilled, or a worker timeout on a `c3s` outlook.
+      hindcasts backfilled, or a worker timeout on a `c3s` outlook. **Done
+      ([#837](https://github.com/jaredhoward-dev/project-water-management/issues/837)):**
+      the ingest writes `c3s-hc-monthly/<system>/<MM>` beside each hindcast
+      (and derives it, one a run, for a hindcast held before), and the bridge
+      reads it in one GET when it matches the daily hindcast's years and
+      members, else the daily chunks; `c3s.test.ts` shows both paths give
+      the same inputs on the synthetic copy (architecture.md § Data feeds).
 - [x] **Runoff from each unit's own rain (engine 1.78.0,
       [#482](https://github.com/jaredhoward-dev/project-water-management/issues/482),
       model.md §2.4h).** Built off by default (`settings.unitRain` absent
@@ -1687,7 +1754,7 @@ runs and accumulations are real) can't be decided without the client.
       (issue #523), rerun it and confirm nothing else moved, and add a
       run-from-rain check of the EWR columns under FM1 if it is to be
       pinned. Trigger: the fresh re-extract.
-- [ ] **Drop the retired flow-share node columns (issue #616, contract
+- [x] **Drop the retired flow-share node columns (issue #616, contract
       half of [266](./data-model.md#flow-share-methods-retired-266_retire_flow_share_methodsql)).**
       Migration 266 stripped `flowShareMethod` and `hiLoSplit` from the
       settings but kept `node.area_hi_km2`, `node.area_lo_km2` and
@@ -1698,7 +1765,10 @@ runs and accumulations are real) can't be decided without the client.
       reads them; check `catalogue.db.test.ts` and any `SELECT *` first),
       with the `/safe-migration` checks. Trigger: once the `backend@`
       release carrying migration 266 is in production and no older backend
-      can be rolled back to.
+      can be rolled back to. **Done (issue #836):**
+      `366_drop_flow_share_columns.sql` drops them; nothing read them
+      (no policy, view, index or function, no `SELECT *` on `node` in
+      app code), and `store.db.test.ts` checks they are gone.
 - [x] **The daily EWR at the outlet from the DRM tables (engine 1.77.0,
       [#455](https://github.com/jaredhoward-dev/project-water-management/issues/455),
       model.md §2.9f, engine-audit A8).** Built off by default (the pragmatic

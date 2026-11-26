@@ -285,7 +285,8 @@ export function evidenceChecks(input: EvidenceInput): EvidenceCheck[] {
 		passed: nUnbounded === 0,
 		detail:
 			nUnbounded === 0
-				? riverWorks(b.inputs.model, winB).length + (a ? riverWorks(a.inputs.model, winA).length : 0) === 0
+				? // A dam on the river is bounded by the dam, not a pump: it is judged by protectsEwr only.
+					[...riverWorks(b.inputs.model, winB), ...(a ? riverWorks(a.inputs.model, winA) : [])].every((w) => w.kind === 'dam')
 					? `No unit, other water user or off-take takes from the river${a ? ' in either run' : ''}.`
 					: `Every river pump, other water user and off-take${a ? ' in both runs' : ''} has a capacity, so what it takes is bounded.`
 				: capitalise(groups.map((g) => `${g.who}: ${listWorks(g.ws)}`).join('; ')) +
@@ -300,6 +301,7 @@ export function evidenceChecks(input: EvidenceInput): EvidenceCheck[] {
 		const works = proposedRiverWorks(a.scenario.ops, a.scenario.classified, b.inputs.model, a.inputs.model, winA);
 		const open = works.filter((w) => !w.protectsEwr);
 		const users = open.some((w) => w.kind === 'user');
+		const dams = open.some((w) => w.kind === 'dam');
 		add({
 			id: 'protectsEwr',
 			label: 'The application’s own river abstraction leaves the EWR in the river',
@@ -314,6 +316,10 @@ export function evidenceChecks(input: EvidenceInput): EvidenceCheck[] {
 			blocksIssue: true,
 			fix: `In the scenario, give each one a hands-off flow in every month it takes, or keep the EWR in the river (Network › the unit › Supply; an off-take’s rule on Transfers), and run it again.${
 				users ? ' An other water user can’t keep one in the model: model the new take as a unit that pumps from the river, with a pump capacity and a hands-off flow.' : ''
+			}${
+				dams
+					? ' A dam on the river catches the river’s flow whatever the unit’s hands-off flow: give it the Pass inflow release rule (Network › the unit › Dam survey and releases), up to the EWR required here or an amount above 0 in every month, or move it off the river (its share of the upstream flow to 0 %).'
+					: ''
 			}`
 		});
 	}

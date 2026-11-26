@@ -97,18 +97,22 @@ export function yieldDedupeKey(r: YieldRequest, contributorId?: string): string 
  * is a historical figure, so it is judged on history, as sweeps and
  * scenarios are (a scenario's base is refused the same way, loadBaseInput).
  */
-export async function yieldInput(db: Db, projectId: string, r: Pick<YieldRequest, 'runId' | 'scenarioId'>): Promise<{ input: ModelInput; opsSha256: string | null }> {
+export async function yieldInput(
+	db: Db,
+	projectId: string,
+	r: Pick<YieldRequest, 'runId' | 'scenarioId'>
+): Promise<{ input: ModelInput; opsSha256: string | null; baseRunId: string | null }> {
 	if (r.scenarioId) {
 		const scenario = await loadScenario(db, projectId, r.scenarioId);
 		const check = checkScenario(await loadBaseInput(db, projectId, scenario.baseRunId), scenario);
 		if (check.problems.length) throw new ApiError(422, "an op of this scenario doesn't apply to its base run", { problems: check.problems });
-		return { input: check.input, opsSha256: scenario.opsSha256 };
+		return { input: check.input, opsSha256: scenario.opsSha256, baseRunId: scenario.baseRunId };
 	}
 	const { rows } = await db.query<{ trigger: string }>('SELECT "trigger" FROM model_run WHERE project_id = $1 AND id = $2', [projectId, r.runId]);
 	if (!rows[0]) throw new ApiError(404, 'run not found');
 	if (rows[0].trigger === 'forecast') throw new ApiError(409, 'that run is a forecast run; a yield is judged on history, so use an ordinary run of the model');
 	try {
-		return { input: await loadRunInput(db, r.runId!), opsSha256: null };
+		return { input: await loadRunInput(db, r.runId!), opsSha256: null, baseRunId: null };
 	} catch (err) {
 		if (err instanceof RunInputError) throw new ApiError(err.problem === 'not_found' ? 404 : 409, err.problem === 'not_found' ? 'run not found' : err.message);
 		throw err;
@@ -126,9 +130,15 @@ export async function yieldInput(db: Db, projectId: string, r: Pick<YieldRequest
  * Checks the node too (checkYieldNode). Used by the route and, as the acting
  * user, by the job handler, so a job dies once its applicant loses the role.
  */
-export async function yieldInputFor(db: Db, projectId: string, role: Role, userId: string, r: YieldRequest): Promise<{ input: ModelInput; opsSha256: string | null }> {
-	const { input, opsSha256 } = await yieldTargetFor(db, projectId, role, userId, r);
-	return { input, opsSha256 };
+export async function yieldInputFor(
+	db: Db,
+	projectId: string,
+	role: Role,
+	userId: string,
+	r: YieldRequest
+): Promise<{ input: ModelInput; opsSha256: string | null; baseRunId: string | null }> {
+	const { input, opsSha256, baseRunId } = await yieldTargetFor(db, projectId, role, userId, r);
+	return { input, opsSha256, baseRunId };
 }
 
 /**
@@ -144,13 +154,13 @@ export async function yieldTargetFor(
 	userId: string,
 	r: Pick<YieldRequest, 'nodeId' | 'runId' | 'scenarioId'> & { kind: YieldRequest['kind'] | null; params?: Pick<YieldParams, 'patternNodeId' | 'maxCapacityM3'> },
 	opts: { read?: boolean } = {}
-): Promise<{ input: ModelInput; visible: Set<string> | null; opsSha256: string | null }> {
+): Promise<{ input: ModelInput; visible: Set<string> | null; opsSha256: string | null; baseRunId: string | null }> {
 	// `read`: only reading the model's units (GET …/yield/patterns), which a viewer may, as they may preview a yield.
 	if (rank[role] >= rank.editor || (opts.read && rank[role] >= rank.viewer)) {
-		const { input, opsSha256 } = await yieldInput(db, projectId, r);
+		const { input, opsSha256, baseRunId } = await yieldInput(db, projectId, r);
 		checkYieldNode(input, r.nodeId, r.kind, r.params?.maxCapacityM3);
 		checkPatternNode(input, r.params?.patternNodeId, null);
-		return { input, visible: null, opsSha256 };
+		return { input, visible: null, opsSha256, baseRunId };
 	}
 	if (role !== 'contributor') throw new ApiError(403, 'requires editor role');
 	if (!r.scenarioId) throw new ApiError(403, "an applicant calculates yields on their own application, not on a saved run");
@@ -165,7 +175,7 @@ export async function yieldTargetFor(
 	if (!visible.has(r.nodeId)) throw new ApiError(400, 'that hydrological unit is not in this run or scenario');
 	checkYieldNode(check.input, r.nodeId, r.kind, r.params?.maxCapacityM3);
 	checkPatternNode(check.input, r.params?.patternNodeId, visible);
-	return { input: check.input, visible, opsSha256: scenario.opsSha256 };
+	return { input: check.input, visible, opsSha256: scenario.opsSha256, baseRunId: scenario.baseRunId };
 }
 
 /**
@@ -276,12 +286,14 @@ export interface YieldResultRow {
 	engineVersion: string;
 	/** A scenario's yield: the scenario's ops_sha256 when the job ran (320); null on a run, or before 320. */
 	opsSha256: string | null;
+	/** A scenario's yield: the scenario's base run when the job ran (367; a rebase keeps the ops hash); null on a run, or before 367. */
+	baseRunId: string | null;
 	createdBy: string | null;
 	createdAt: string;
 }
 
 const SELECT = `SELECT y.id, y.run_id AS "runId", y.scenario_id AS "scenarioId", y.node_id AS "nodeId", y.job_id AS "jobId",
-	y.kind, y.params, y.points, y.engine_version AS "engineVersion", y.ops_sha256 AS "opsSha256", u.display_name AS "createdBy", y.created_at AS "createdAt"
+	y.kind, y.params, y.points, y.engine_version AS "engineVersion", y.ops_sha256 AS "opsSha256", y.base_run_id AS "baseRunId", u.display_name AS "createdBy", y.created_at AS "createdAt"
 	FROM yield_result y LEFT JOIN app_user u ON u.id = y.created_by`;
 
 /** A run's or scenario's results, newest first, optionally for one node or one job (RLS: viewer). */

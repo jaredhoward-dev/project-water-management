@@ -27,9 +27,10 @@ describe('parsePastedSeries', () => {
 	});
 
 	it('asks for a day boundary for sub-daily rows, and adds them up with one', () => {
-		const text = '2025-04-01 09:00\t1\n2025-04-01 10:00\t2\n2025-04-02 09:00\t4';
+		// Six-hourly rows: midnight to midnight, the 1st and 2nd whole (four readings each).
+		const text = ['01 06:00\t1', '01 12:00\t2', '01 18:00\t0', '02 00:00\t1', '02 06:00\t4', '02 12:00\t0', '02 18:00\t0', '03 00:00\t0'].map((r) => `2025-04-${r}`).join('\n');
 		expect(() => parsePastedSeries(text)).toThrow(expect.objectContaining({ subDaily: true }));
-		expect(parsePastedSeries(text, { dayBoundary: '00:00' }).values).toEqual([3, 4]);
+		expect(parsePastedSeries(text, { dayBoundary: '00:00', aggregate: 'sum' }).values).toEqual([4, 4]);
 	});
 
 	it('refuses an empty box, a bad row (naming its line) and an oversized paste', () => {

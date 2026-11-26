@@ -31,6 +31,7 @@ import type { PackRenderResultMessage, RenderResultMessage } from '../jobs/trans
 import { dueFireAt } from './due.js';
 import { deletePdf, REPORT_RETENTION_DAYS, reportKey, storageKind } from './storage.js';
 import { createReport } from './store.js';
+import { latestRunId } from '../runs/read.js';
 
 export interface ReportScheduleResult {
 	queued: number;
@@ -106,15 +107,13 @@ async function fireSchedule(s: ScheduleRow, fire: Date): Promise<'queued' | 'ski
 	const outcome = await withUser(s.actingUserId, async (db) => {
 		const { rows: role } = await db.query<{ ok: boolean }>(`SELECT app_has_role($1, 'editor') AS ok`, [s.projectId]);
 		if (!role[0]?.ok) return SCHEDULE_NO_ACCESS;
-		const { rows: run } = await db.query<{ id: string }>(
-			'SELECT id FROM model_run WHERE project_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1',
-			[s.projectId]
-		);
-		if (!run[0]) return SCHEDULE_NO_RUNS;
+		// The project's latest run (runs/read.ts latestRunId): a scenario's what-if or a forecast is never the week's report.
+		const runId = await latestRunId(db, s.projectId);
+		if (!runId) return SCHEDULE_NO_RUNS;
 		const { rows: to } = await db.query<{ userId: string }>('SELECT user_id AS "userId" FROM report_schedule_recipient WHERE schedule_id = $1', [s.id]);
 		await createReport(db, {
 			projectId: s.projectId,
-			runId: run[0].id,
+			runId,
 			emailTo: to.map((r) => r.userId),
 			scheduleId: s.id,
 			dedupeKey: `report_schedule:${s.id}:${fire.toISOString()}`
