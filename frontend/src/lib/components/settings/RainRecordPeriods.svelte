@@ -14,7 +14,8 @@
 	flowGeneration tidyStations); `error` is set while a list is invalid.
 	Rows keep their own keys (one RowKeys a record), an add puts the focus in
 	the new row and a remove on the row in its place, else the record's add
-	button (a11y/listRows.ts).
+	button, or the group's heading when a deleted series went with its last
+	period (a11y/listRows.ts).
 -->
 <script lang="ts">
 	import type { RainStationSettings } from '@water-management/engine';
@@ -74,7 +75,8 @@
 	function remove(id: string, i: number) {
 		keysOf(id).removed(i);
 		write(id, listOf(id).filter((_, j) => j !== i));
-		void focusListTarget(boxOf(id), listFocusTarget({ removedAt: i, left: listOf(id).length }));
+		// A deleted series goes with its last period, its add button too: the group's heading takes the focus then.
+		void focusListTarget(boxOf(id), listFocusTarget({ removedAt: i, left: listOf(id).length }), { fallback: () => document.getElementById(`${uid}-l`) });
 	}
 </script>
 

@@ -52,17 +52,52 @@ export function listFocusTarget(edit: { added: true; length: number } | { remove
 	return at === null ? { add: true } : { row: at, control: 'remove' };
 }
 
+/** Finds the candidates for the focus; each returns null when that one isn't on the page. */
+export interface ListFocusFinders<T> {
+	/** The row's ✕ (`remove`) or first field (`first`). */
+	control(row: number, control: 'first' | 'remove'): T | null;
+	/** The list's add button. */
+	add(): T | null;
+	/** What holds the focus when the list itself went (a heading): the last resort. */
+	fallback(): T | null;
+}
+
+/**
+ * The element to focus for `target`, in order: the row's control (a row whose ✕ is hidden, as the last review
+ * date, gives its first field), else the add button (gone at a list's maximum, or with the list), else the fallback.
+ */
+export function resolveListFocus<T>(target: ListFocusTarget, find: ListFocusFinders<T>): T | null {
+	if ('row' in target) {
+		const el = find.control(target.row, target.control) ?? (target.control === 'remove' ? find.control(target.row, 'first') : null);
+		if (el) return el;
+	}
+	return find.add() ?? find.fallback();
+}
+
 /** Each row of the list carries `data-row`, its ✕ `data-remove`, the list's add button(s) `data-add` (the first takes the focus). */
 const FIELD = 'input:not([type="hidden"]), select, textarea, button';
 
-/** After the edit has rendered, focus `target` inside `box` (the element holding the rows and the add button). */
-export async function focusListTarget(box: HTMLElement | null | undefined, target: ListFocusTarget): Promise<void> {
+export interface FocusListOptions {
+	/** The add button, when it sits outside `box` (null: none now). Default: the first `[data-add]` in `box`. */
+	add?: () => HTMLElement | null;
+	/** The last resort, given tabindex -1 if it can't take the focus (the list's heading), for a list that can go away. */
+	fallback?: () => HTMLElement | null;
+}
+
+/** After the edit has rendered, focus `target` inside `box` (the element holding the rows and, by default, the add button). */
+export async function focusListTarget(box: HTMLElement | null | undefined, target: ListFocusTarget, opts: FocusListOptions = {}): Promise<void> {
 	await tick();
-	if (!box) return;
-	let el: HTMLElement | null = null;
-	if ('row' in target) {
-		const row = box.querySelectorAll<HTMLElement>('[data-row]')[target.row];
-		el = row?.querySelector<HTMLElement>(target.control === 'remove' ? '[data-remove]' : FIELD) ?? null;
-	}
-	(el ?? box.querySelector<HTMLElement>('[data-add]'))?.focus();
+	const live = box?.isConnected ? box : null;
+	const fallback = opts.fallback?.() ?? null;
+	const el = resolveListFocus<HTMLElement>(target, {
+		control: (row, control) => live?.querySelectorAll<HTMLElement>('[data-row]')[row]?.querySelector<HTMLElement>(control === 'remove' ? '[data-remove]' : FIELD) ?? null,
+		add: () => {
+			const add = opts.add ? opts.add() : (live?.querySelector<HTMLElement>('[data-add]') ?? null);
+			return add?.isConnected ? add : null;
+		},
+		fallback: () => (fallback?.isConnected ? fallback : null)
+	});
+	if (!el) return;
+	if (el === fallback && !el.matches('a[href], button, input, select, textarea, [tabindex]')) el.tabIndex = -1;
+	el.focus();
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { listFocusTarget, RowKeys } from './listRows';
+import { listFocusTarget, resolveListFocus, RowKeys, type ListFocusFinders } from './listRows';
 
 describe('listFocusTarget', () => {
 	it('puts the focus in the new row (the last) after an add', () => {
@@ -62,5 +62,29 @@ describe('RowKeys', () => {
 		const keys = k.for(2);
 		keys.pop();
 		expect(k.for(2)).toHaveLength(2);
+	});
+});
+
+describe('resolveListFocus', () => {
+	// A fake page: rows as [first field, ✕ or null], the add button and the fallback, each null when gone.
+	const page = (rows: [string, string | null][], add: string | null, fallback: string | null = 'heading'): ListFocusFinders<string> => ({
+		control: (row, control) => rows[row]?.[control === 'first' ? 0 : 1] ?? null,
+		add: () => add,
+		fallback: () => fallback
+	});
+	it('focuses the row’s control', () => {
+		expect(resolveListFocus({ row: 1, control: 'remove' }, page([['f0', 'x0'], ['f1', 'x1']], 'add'))).toBe('x1');
+		expect(resolveListFocus({ row: 0, control: 'first' }, page([['f0', 'x0']], 'add'))).toBe('f0');
+	});
+	it('takes the row’s first field when its ✕ is hidden (the last review date keeps no ✕)', () => {
+		expect(resolveListFocus({ row: 0, control: 'remove' }, page([['f0', null]], 'add'))).toBe('f0');
+	});
+	it('takes the add button when the row isn’t there', () => {
+		expect(resolveListFocus({ row: 3, control: 'remove' }, page([['f0', 'x0']], 'add'))).toBe('add');
+		expect(resolveListFocus({ add: true }, page([], 'add'))).toBe('add');
+	});
+	it('takes the fallback when the list and its add button went (a deleted record’s last period)', () => {
+		expect(resolveListFocus({ add: true }, page([], null))).toBe('heading');
+		expect(resolveListFocus({ add: true }, page([], null, null))).toBeNull();
 	});
 });

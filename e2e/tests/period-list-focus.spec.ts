@@ -6,8 +6,11 @@
 // (frontend/src/lib/a11y/listRows.ts) for common/PeriodList.svelte (the
 // calibration exclusions, Flagged zero runs' lists, each record's missing
 // periods), calibration/LowFlowPeriods.svelte and
-// settings/RainRecordPeriods.svelte. Synthetic data.
-import { seedRunnableProject } from '../support/api.ts';
+// settings/RainRecordPeriods.svelte, and the drought restriction's review and
+// lift dates and its levels (settings/DroughtRestrictionFields.svelte). A
+// deleted rain series goes with its last period, add button and all: the
+// group's heading takes the focus. Synthetic data.
+import { createProject, seedRunnableProject, updateSettings } from '../support/api.ts';
 import { expect, test } from '../support/fixtures.ts';
 import { openCalibration, openFold, openSettings } from '../support/settings.ts';
 
@@ -83,4 +86,59 @@ test('a rain record’s unreliable periods move the focus into a new row and bac
 	await page.keyboard.press('Enter');
 	await expect(record.getByText('None: every reading of this record is used.')).toBeVisible();
 	await expect(add).toBeFocused();
+});
+
+test('a deleted rain series’ last period removed puts the focus on the group’s heading', async ({ page, owner }) => {
+	void owner;
+	const project = await seedRunnableProject(page.request, 'Period focus deleted series');
+	// A series id no record has: the list shows it as a deleted series, so its periods can still be removed.
+	await updateSettings(page.request, project.id, { rainStations: { unreliable: { '00000000-0000-0000-0000-00000000dead': [['2021-01-01', '2021-01-31']] } } });
+	await openSettings(page, project.id);
+	await openFold(page, 'rain-defaults');
+	const group = page.getByRole('group', { name: /^Unreliable periods of a rain record/ });
+	const gone = group.getByTestId('rain-record').filter({ hasText: 'A deleted series' });
+	await expect(gone).toHaveCount(1);
+
+	await gone.getByRole('button', { name: /^Remove unreliable period 1 of A deleted series/ }).click();
+	await expect(gone).toHaveCount(0);
+	await expect(page.locator('body')).not.toBeFocused();
+	await expect(group.getByText('Unreliable periods of a rain record', { exact: true })).toBeFocused();
+});
+
+test('the drought restriction’s dates and levels move the focus into what was added and to a neighbour on a remove', async ({ page, owner }) => {
+	void owner;
+	const project = await createProject(page.request, 'Period focus drought');
+	await page.goto(`/projects/${project.id}?tab=settings`);
+	const section = page.getByRole('region', { name: /^Drought restrictions/ });
+	// The template: reviewed 1 Oct and 1 Jan, lifted 1 May, three levels.
+	await section.getByLabel('Apply drought restrictions in runs').check();
+
+	// Review dates: an add lands on the new date's day, a remove on the next date's ✕, else the previous one's.
+	await section.getByRole('button', { name: 'Add a review date' }).click();
+	await expect(section.getByLabel('Review date 3: day')).toBeFocused();
+	await section.getByRole('button', { name: 'Add a review date' }).click();
+	await expect(section.getByLabel('Review date 4: day')).toBeFocused();
+	await section.getByRole('button', { name: /^Remove review date 1,/ }).click();
+	await expect(section.getByRole('button', { name: /^Remove review date 1,/ })).toBeFocused();
+	await section.getByRole('button', { name: /^Remove review date 3,/ }).click();
+	await expect(section.getByRole('button', { name: /^Remove review date 2,/ })).toBeFocused();
+	// Down to one: the last review date keeps no ✕ (a rule needs one), so its day field takes the focus.
+	await page.keyboard.press('Enter');
+	await expect(section.getByRole('button', { name: /^Remove review date/ })).toHaveCount(0);
+	await expect(section.getByLabel('Review date 1: day')).toBeFocused();
+
+	// Lift dates may all go: then Add a lift date.
+	await section.getByRole('button', { name: /^Remove lift date 1,/ }).click();
+	await expect(section.getByRole('button', { name: 'Add a lift date' })).toBeFocused();
+
+	// Levels: an added level's name takes the focus; Remove the deepest level keeps it while it stays, then Add a deeper level.
+	await section.getByRole('button', { name: 'Add a deeper level' }).click();
+	await expect(section.getByLabel('Level 4: name')).toBeFocused();
+	const removeDeepest = section.getByRole('button', { name: 'Remove the deepest level' });
+	await removeDeepest.click();
+	await removeDeepest.click();
+	await expect(removeDeepest).toBeFocused();
+	await page.keyboard.press('Enter');
+	await expect(section.getByTestId('restriction-level')).toHaveCount(1);
+	await expect(section.getByRole('button', { name: 'Add a deeper level' })).toBeFocused();
 });
