@@ -18,7 +18,7 @@ import { withUser, type Db } from '../db/tx.js';
 import { ApiError } from '../http/errors.js';
 import { logEvent } from '../logging/logEvent.js';
 import { safeError } from '../logging/safeError.js';
-import type { AssistantConfig } from './config.js';
+import { RESERVATION_MARGIN_SECONDS, type AssistantConfig } from './config.js';
 import { dayResetsAt, DOLLAR_REFUSAL, isDollarOutcome, poolAlarmShare, type DollarOutcome } from './dollarCaps.js';
 import type { AssistantDayMeter } from './types.js';
 
@@ -110,13 +110,8 @@ const SPENT: Record<BudgetScope, { code: 'assistant_budget_spent' | 'assistant_u
 	total: { code: 'assistant_total_budget_spent', what: 'The assistant has used this server’s budget for the month' }
 };
 
-/**
- * Seconds past the turn's deadline (cfg.turnSeconds) a reservation lasts
- * before it is charged in full as unsettled: past the assistant Lambda's
- * timeout (the deadline + 15 s, infra/assistant.tf), so a turn that ends
- * normally always settles first, and only a Lambda that died leaves one.
- */
-export const RESERVATION_MARGIN_SECONDS = 120;
+/** Seconds past the turn's deadline a reservation lasts (config.ts, where the turn's own seconds are capped by it). */
+export { RESERVATION_MARGIN_SECONDS } from './config.js';
 
 /** A begun turn: this month's tokens before it, and the budget reserved for it. */
 export interface BegunTurn {

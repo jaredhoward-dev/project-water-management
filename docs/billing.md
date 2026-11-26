@@ -155,8 +155,9 @@ summing every account's rows.
 | Trial, trial day | A person on a reverse trial (342) | $2 over the trial, $1 a SAST day ([§ The reverse trial](#the-reverse-trial-built-off)) | `assistant_trial_cap` (until the trial ends), `assistant_trial_daily_cap` (until 00:00 SAST) |
 | Pool | Free and trialing accounts together | `ASSISTANT_FREE_POOL_USD_PER_MONTH` ($30) a UTC month, and on any SAST day at most (pool left at the day's start ÷ SAST days left in the UTC month, today included, at least 1) × 2 | `assistant_free_pool_spent`, until 00:00 SAST (or the UTC month's end, when the month's pool is spent) |
 
-Checked in that order, the person's own caps first, so a refusal names the
-cap that is theirs when it binds; the pool's wording says it isn't something
+Checked day, trial, trial day, month, member, then pool (`app_assistant_begin`,
+364): the person's own caps first, so a refusal names the cap that is theirs
+when it binds, and a spent trial before its day, so it never says "tomorrow"; the pool's wording says it isn't something
 they did and has no upgrade prompt (#641's copy). Each refusal is a stable
 code with `params.seconds` and `params.resetsAt` ([api.md §
 Assistant](./api.md#assistant)).
