@@ -400,6 +400,7 @@
 					const w = sheetWaiting;
 					sheetWaiting = null;
 					delineateOutcome = null;
+					delineateFromNotice = false;
 					if (w && isWaiting(w) && delineation) delineation = { ...delineation, request: w };
 				});
 			}
@@ -415,6 +416,8 @@
 	let sheetWaiting: DelineationRequest | null = null;
 	/** A background delineation that came to nothing with the sheet closed: the notice's link shows it in the sheet again. */
 	let delineateOutcome = $state<DelineationRequest | null>(null);
+	/** The sheet was opened by that notice's own link, not by another opener (an older proposal's Review it): only then is the outcome shown. */
+	let delineateFromNotice = $state(false);
 	const backgroundRequest = $derived(!delineateSheet.open && delineation?.request && isWaiting(delineation.request) ? delineation.request : null);
 	let backgroundFailures = 0;
 	$effect(() => {
@@ -1622,7 +1625,7 @@
 			<p class="toast" data-testid="map-notice">
 				<span>{notice}{#if notice === runNotice}{' '}<a href="?tab=runs">Run the model</a> to see its effect.{/if}</span>
 				{#if noticeNext && noticeNext.text === notice}
-					<a class="btn btn-sm btn-ghost toast-next" href={withParam(page.url, noticeNext.step.sheet, '1')} data-testid="map-notice-next">{noticeNext.step.label}</a>
+					<a class="btn btn-sm btn-ghost toast-next" href={withParam(page.url, noticeNext.step.sheet, '1')} onclick={() => (delineateFromNotice = noticeNext?.step.sheet === 'delineate')} data-testid="map-notice-next">{noticeNext.step.label}</a>
 				{/if}
 				<button type="button" class="btn btn-sm btn-ghost" onclick={() => (notice = null)}>Dismiss</button>
 			</p>
@@ -1913,7 +1916,7 @@
 					onaccepted={delineationAccepted}
 					onrejected={delineationRejected}
 					onsubcatchments={delineation?.available ? () => subcatchmentsFromSheet() : null}
-					outcome={delineateStep === 'decide' && noticeNext?.step.sheet === 'delineate' && noticeNext.text === notice ? delineateOutcome : null}
+					outcome={delineateFromNotice ? delineateOutcome : null}
 					onwaiting={(r) => (sheetWaiting = r)}
 				/>
 					{/snippet}

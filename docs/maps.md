@@ -1792,7 +1792,7 @@ to a point on a river. The design, the method and its accuracy are in
   opening the sheet (`delineation.ts` `backgroundOutcome`, issue #938);
   reopened from it, the sheet shows the refusal as the request would have,
   a much larger channel's **Use that channel** offer included
-  (`outcomeShown`). The sheet hands the Map what it left waiting, so
+  (`outcomeShown`; only from that link, not an older proposal's Review it). The sheet hands the Map what it left waiting, so
   closing it asks the server nothing. **A large catchment, over about 100 km across: work it out
   in the background** sends a point straight there. One per editor at a
   time: a new click in the same catchment replaces a waiting one, and one
