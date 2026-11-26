@@ -14,7 +14,7 @@ import { mirrorStore } from '../../mirror/source.js';
 import { CLIMATE_FACTORS_KEPT, ClimateFactorsPayload } from '../../future/climate.js';
 import { Cmip6NotInCopyError, readFactorTable } from '../../future/copy.js';
 import { catchmentClimateCells, futureYieldEnabled } from '../../future/store.js';
-import { JobError } from '../errors.js';
+import { JOB_CANCELLED, JobError } from '../errors.js';
 import { defineHandler } from '../registry.js';
 
 export const climateFactorsHandler = defineHandler({
@@ -28,7 +28,7 @@ export const climateFactorsHandler = defineHandler({
 			// The boundary as it is now: one drawn again since the request is the one the factors are read over.
 			const { cells, boundarySha256 } = await catchmentClimateCells(db, job.projectId);
 			const table = await readFactorTable(mirrorStore(), cells, async (done, total) => {
-				if (!(await progress((100 * done) / total))) throw new JobError('cancelled', { retry: false });
+				if (!(await progress((100 * done) / total))) throw new JobError(JOB_CANCELLED, { retry: false });
 			});
 			read = { ...table, boundarySha256 };
 		} catch (err) {

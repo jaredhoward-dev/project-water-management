@@ -16,10 +16,10 @@ import { requireRole } from '../../projects/access.js';
 import { mirrorStore } from '../../mirror/source.js';
 import { Cmip6NotInCopyError, readFactorTable } from '../../future/copy.js';
 import { FUTURE_YIELD_RESULTS_KEPT, futurePair, FutureYieldPayload } from '../../future/store.js';
-import { JobError } from '../errors.js';
+import { JOB_CANCELLED, JobError } from '../errors.js';
 import { defineHandler } from '../registry.js';
 
-const CANCELLED = () => new JobError('cancelled', { retry: false });
+const CANCELLED = () => new JobError(JOB_CANCELLED, { retry: false });
 /** The share of the job's progress the copy's read takes; the runs take the rest. */
 const READ_PCT = 10;
 

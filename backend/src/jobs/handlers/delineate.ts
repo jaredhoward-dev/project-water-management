@@ -30,7 +30,7 @@ import { cutShort, jobBudget, jobWindowsFrom, MIN_JOB_TIME_MS, MinKm2, RELEASE_D
 import { ApiError } from '../../http/errors.js';
 import { logEvent } from '../../logging/logEvent.js';
 import { safeError } from '../../logging/safeError.js';
-import { JobError, JobRelease } from '../errors.js';
+import { JOB_CANCELLED, JobError, JobRelease } from '../errors.js';
 import { defineHandler } from '../registry.js';
 import { runPlanJob } from './delineate-plan.js';
 
@@ -50,7 +50,7 @@ export const parseAim = (v: unknown): WindowAim | null => {
 	return r.success && r.data.box[0] <= r.data.box[2] && r.data.box[1] <= r.data.box[3] ? r.data : null;
 };
 
-const CANCELLED = () => new JobError('cancelled', { retry: false });
+const CANCELLED = () => new JobError(JOB_CANCELLED, { retry: false });
 
 export const delineateHandler = defineHandler({
 	// Only editors delineate (POST …/map/delineation) and write proposals (175's policies).

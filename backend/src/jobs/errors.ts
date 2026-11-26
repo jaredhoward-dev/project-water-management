@@ -11,6 +11,19 @@ import { safeError, stackFrames } from '../logging/safeError.js';
 export const JOB_ERROR_MAX = 500;
 
 /**
+ * Ends the stored error of a job a newer one with its dedupe key replaced (runner.ts): dead, but not a dead letter,
+ * so no alarm and not counted by the job_dead alert (alerts/evaluate.ts).
+ */
+/**
+ * The stored error of a job someone cancelled (app_cancel_job_outcome kills a waiting one with it; a running one's
+ * handler throws it once progress answers false): dead, but not a dead letter, so no alarm and not counted by the
+ * job_dead alert (alerts/evaluate.ts).
+ */
+export const JOB_CANCELLED = 'cancelled';
+
+export const SUPERSEDED_NOTE = ' (a newer job with the same key is queued)';
+
+/**
  * Throw from a handler to fail the job with this message. `retry: false` is
  * for failures another attempt can't fix (bad input, a missing series): the
  * job is dead at once instead of retrying with backoff.

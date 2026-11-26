@@ -1685,7 +1685,7 @@ the worker mails each recipient ([§ below](#how-alert-mail-is-sent)).
   | `farms_short` (141) | the current publication was made by an auto run (`run_publication.auto`, `settings.autoRun.publish`) and t or more farms went short on a day of its last 7 days of data (`catchmentView.recent.farmsShort7`); re-arms at 0. A person's publication has no value (the WUA made it and saw its figures), so it clears a firing alert, unmailed | whole farms 1–1000 (1) | editors, owners | viewers |
   | `restriction_published` | the current publication's restriction level, percentage or notice changes (a lift too). The first notice of all is mailed with no restriction too when it has words. "Restriction lifted" (`lifted: true`) is only a restriction ending; new words while nothing is restricted are a notice, mailed with them | 0 | farmers, viewers and up | – |
   | `feed_failing` | an enabled feed failed t times in a row; re-arms at 0 | 1–20 (3) | owners | editors |
-  | `job_dead` | t jobs died in the last 24 hours; re-arms at 0 | 1–100 (1) | owners | editors |
+  | `job_dead` | t jobs died in the last 24 hours (not counting a job someone cancelled, or one a newer job with its dedupe key replaced); re-arms at 0 | 1–100 (1) | owners | editors |
 
   Applicants (contributors) never get alerts. A `threshold` outside its
   range, a `dam_below` rule without a farm (or another kind with one), or a
