@@ -398,44 +398,58 @@ export function readStationAnswer(text: string, f: StationFormat): StationReadin
 
 	if (pairs.length > STATION_MAX_READINGS) throw new StationFormatError(`the answer holds ${pairs.length} readings, more than a feed reads (${STATION_MAX_READINGS}): ask for fewer days a request`);
 
-	const out = new Map<number, number | null>();
-	// A sub-daily wall time in the hour an autumn clock change repeats names two instants. Records
-	// come oldest first, so the first record at that wall time is the earlier instant and the second
-	// the later; a third is a repeat of the later one. Counted per wall time, in record order.
-	const seenWall = new Map<number, number>();
+	// A sub-daily wall time in the hour an autumn clock change repeats names two instants (`all`, earliest first);
+	// they're told apart by record order once every record is read, below.
+	const read: { where: string; value: number | null; at?: number; wallKey?: number; all?: number[] }[] = [];
 	for (const p of pairs) {
 		const t = parseTime(p.time, f.timeFormat);
 		if (!t) throw new StationFormatError(`${p.where}: the time “${clip(String(p.time ?? ''))}” doesn’t match the time format (${clip(f.timeFormat)})`);
 		const v = parseValue(p.value, missing, !!f.decimalComma);
 		if (v === undefined) throw new StationFormatError(`${p.where}: the value “${clip(String(typeof p.value === 'object' ? JSON.stringify(p.value) : p.value))}” is not a number (add it to the missing markers if it means no reading)`);
-		let at: number;
-		if (f.resolution === 'daily') {
-			at = t.wall ? toEpochDay(fromEpochDay(Math.floor(Date.UTC(t.wall.y, t.wall.mo - 1, t.wall.d) / DAY_MS))) : localEpochDay(tz, t.instant!);
-		} else {
-			if (t.wall?.dateOnly) throw new StationFormatError(`${p.where}: the time “${clip(String(p.time))}” has no hour, but the readings are sub-daily`);
-			if (t.instant !== undefined) at = t.instant;
-			else {
-				const w = t.wall!;
-				const all = localInstants(tz, w.y, w.mo, w.d, w.h, w.mi, w.s);
-				if (all.length === 0) {
-					throw new StationFormatError(
-						`${p.where}: the time “${clip(String(p.time))}” doesn’t exist in ${tz} (its clocks skip that hour in spring): set the time zone the logger keeps, or read times with their offset`
-					);
-				}
-				if (all.length === 1) at = all[0]!;
-				else {
-					const key = Date.UTC(w.y, w.mo - 1, w.d, w.h, w.mi, w.s);
-					const n = seenWall.get(key) ?? 0;
-					seenWall.set(key, n + 1);
-					at = all[Math.min(n, all.length - 1)]!;
-				}
-			}
-		}
 		const value = v === null ? null : v * scale;
+		if (f.resolution === 'daily') {
+			read.push({ where: p.where, value, at: t.wall ? toEpochDay(fromEpochDay(Math.floor(Date.UTC(t.wall.y, t.wall.mo - 1, t.wall.d) / DAY_MS))) : localEpochDay(tz, t.instant!) });
+			continue;
+		}
+		if (t.wall?.dateOnly) throw new StationFormatError(`${p.where}: the time “${clip(String(p.time))}” has no hour, but the readings are sub-daily`);
+		if (t.instant !== undefined) {
+			read.push({ where: p.where, value, at: t.instant });
+			continue;
+		}
+		const w = t.wall!;
+		const all = localInstants(tz, w.y, w.mo, w.d, w.h, w.mi, w.s);
+		if (all.length === 0) {
+			throw new StationFormatError(
+				`${p.where}: the time “${clip(String(p.time))}” doesn’t exist in ${tz} (its clocks skip that hour in spring): set the time zone the logger keeps, or read times with their offset`
+			);
+		}
+		if (all.length === 1) read.push({ where: p.where, value, at: all[0]! });
+		else read.push({ where: p.where, value, wallKey: Date.UTC(w.y, w.mo - 1, w.d, w.h, w.mi, w.s), all });
+	}
+
+	// The answer's direction (issue #912), from its first and last unambiguous instants in record order: newest first
+	// when the last is earlier. Oldest first, the first record at a repeated wall time is the earlier instant and the
+	// second the later; newest first, the other way round; a further repeat is a repeat of the last one taken. When the
+	// direction can't be told (no two different unambiguous instants: one record, or every time in the repeated hour),
+	// records are taken as oldest first, so a lone newest-first reading there may land an hour off.
+	const known = read.filter((x) => x.at !== undefined);
+	const newestFirst = known.length >= 2 && known[known.length - 1]!.at! < known[0]!.at!;
+	const seenWall = new Map<number, number>();
+	const out = new Map<number, number | null>();
+	for (const x of read) {
+		let at: number;
+		if (x.at !== undefined) at = x.at;
+		else {
+			const all = x.all!;
+			const n = seenWall.get(x.wallKey!) ?? 0;
+			seenWall.set(x.wallKey!, n + 1);
+			at = newestFirst ? all[Math.max(all.length - 1 - n, 0)]! : all[Math.min(n, all.length - 1)]!;
+		}
+		const value = x.value;
 		if (out.has(at)) {
 			const prev = out.get(at);
 			if (prev !== value && !(prev != null && value !== null && Math.abs(prev - value) < 1e-9)) {
-				throw new StationFormatError(`${p.where}: two readings at the same ${f.resolution === 'daily' ? 'day' : 'time'} disagree (${prev ?? 'missing'} and ${value ?? 'missing'})`);
+				throw new StationFormatError(`${x.where}: two readings at the same ${f.resolution === 'daily' ? 'day' : 'time'} disagree (${prev ?? 'missing'} and ${value ?? 'missing'})`);
 			}
 			continue;
 		}

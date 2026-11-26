@@ -128,6 +128,53 @@ describe('clock changes (issue #908)', () => {
 		// All six fall in the 25-hour calendar day of 27 October.
 		expect(stationDays(r, hourly, '2024-10-27', '2024-10-27', LATER).values[0]).toBeCloseTo(2.1, 9);
 	});
+	// Issue #912: the same answer newest first.
+	const repeatedHour = ['2024-10-27 01:30,0.1', '2024-10-27 02:00,0.2', '2024-10-27 02:30,0.3', '2024-10-27 02:00,0.4', '2024-10-27 02:30,0.5', '2024-10-27 03:00,0.6'];
+	it('readings in the repeated hour, newest first, are the later then the earlier instant', () => {
+		const r = readStationAnswer(['time,rain', ...[...repeatedHour].reverse()].join('\n'), hourly);
+		expect(r.readings).toEqual(readStationAnswer(['time,rain', ...repeatedHour].join('\n'), hourly).readings);
+		expect(r.readings.map((x) => x.value)).toEqual([0.1, 0.2, 0.3, 0.4, 0.5, 0.6]);
+		expect(stationDays(r, hourly, '2024-10-27', '2024-10-27', LATER).values[0]).toBeCloseTo(2.1, 9);
+	});
+	it('a running total newest first rises through the repeated hour in instant order', () => {
+		const cum: StationFormat = { ...hourly, valueKind: 'cumulative' };
+		// Half-hourly totals 26 Oct 23:30 to 27 Oct 03:00 local; the repeated 02:00 and 02:30 each appear twice.
+		const oldest = [
+			'2024-10-26 23:30,10',
+			'2024-10-27 00:00,10',
+			'2024-10-27 00:30,10',
+			'2024-10-27 01:00,10',
+			'2024-10-27 01:30,10.5',
+			'2024-10-27 02:00,11',
+			'2024-10-27 02:30,12',
+			'2024-10-27 02:00,13',
+			'2024-10-27 02:30,14',
+			'2024-10-27 03:00,14.5'
+		];
+		const r = readStationAnswer(['time,total', ...[...oldest].reverse()].join('\n'), { ...cum, value: 'total' });
+		const values = r.readings.map((x) => x.value);
+		expect(values).toEqual([...values].sort((a, b) => a! - b!));
+		expect(r.readings.find((x) => x.at === at('2024-10-27T00:30:00Z'))?.value).toBe(12);
+		expect(r.readings.find((x) => x.at === at('2024-10-27T01:30:00Z'))?.value).toBe(14);
+		// 10 → 14.5 over the day, no drop read as a reset.
+		expect(stationDays(r, { ...cum, value: 'total' }, '2024-10-27', '2024-10-27', LATER).values[0]).toBeCloseTo(4.5, 9);
+	});
+	it('with no direction to tell (every time in the repeated hour), records are taken as oldest first', () => {
+		const r = readStationAnswer(['time,rain', '2024-10-27 02:30,0.5', '2024-10-27 02:30,0.3'].join('\n'), hourly);
+		expect(r.readings).toEqual([
+			{ at: at('2024-10-27T00:30:00Z'), value: 0.5 },
+			{ at: at('2024-10-27T01:30:00Z'), value: 0.3 }
+		]);
+	});
+	it('Johannesburg answers read the same either way round', () => {
+		const sast: StationFormat = { ...hourly, timeZone: SAST };
+		const lines = ['2024-10-27 01:30,0.1', '2024-10-27 02:00,0.2', '2024-10-27 02:30,0.3', '2024-10-27 03:00,0.4'];
+		const r = readStationAnswer(['time,rain', ...[...lines].reverse()].join('\n'), sast);
+		expect(r.readings).toEqual(readStationAnswer(['time,rain', ...lines].join('\n'), sast).readings);
+		expect(r.readings.map((x) => x.at)).toEqual([at('2024-10-26T23:30:00Z'), at('2024-10-27T00:00:00Z'), at('2024-10-27T00:30:00Z'), at('2024-10-27T01:00:00Z')]);
+		// No repeated hour there: a wall time given twice is one instant, so the two readings must agree.
+		expect(() => readStationAnswer(['time,rain', ...[...repeatedHour].reverse()].join('\n'), sast)).toThrow(/two readings at the same time disagree/);
+	});
 	it('two equal readings in the repeated hour are both kept, a third repeat of it must agree', () => {
 		const csv = ['time,rain', '2024-10-27 02:30,0.2', '2024-10-27 02:30,0.2'].join('\n');
 		expect(readStationAnswer(csv, hourly).readings).toHaveLength(2);
