@@ -21,8 +21,13 @@
 	import { pickedUnit, placeWords, unitChoices } from '#lib/components/ewr/unitMonths.js';
 	import { runOptionLabel, runPickName } from '#lib/components/compare/picker.js';
 	import { detailCache } from '#lib/components/runs/cache.js';
-	import { fmtWhen } from '#lib/format/number.js';
 	import { baseRerunText, judgedBy, rightChoices, rightRun } from './ewrMonths';
+	import { fmtProjectWhen } from '#lib/components/project/project.js';
+	import { projectTimeZoneReader } from '#lib/components/project/projectClock.js';
+
+	// Run dates on the project's clock, as its run report dates them (issue #899).
+	const timeZone = projectTimeZoneReader();
+	const fmtWhen = (iso: string) => fmtProjectWhen(iso, timeZone());
 
 	type Known = Pick<RunMeta, 'id' | 'label' | 'createdAt' | 'fromScenario' | 'scenarioId' | 'scenarioName'> & { summary: RunSummary };
 

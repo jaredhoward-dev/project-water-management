@@ -68,6 +68,33 @@ export function fmtProjectStamp(iso: string | null | undefined, timeZone: string
 }
 
 /**
+ * A moment as a workspace list or status line says it on the project's clock:
+ * "today 14:05", "yesterday 09:30" (the project's today, not the viewer's),
+ * otherwise fmtProjectStamp's "3 Sep 2026 14:05" (issue #899: a run's date in
+ * the Runs list and the run pickers reads as its report dates it). Not after
+ * "on" in a sentence: use fmtProjectStamp there.
+ */
+export function fmtProjectWhen(iso: string | null | undefined, timeZone: string = DEFAULT_TIME_ZONE, now: Date = new Date()): string {
+	const stamp = fmtProjectStamp(iso, timeZone);
+	if (!iso || BARE_DAY.test(iso) || Number.isNaN(new Date(iso).getTime())) return stamp;
+	const day = projectDay(iso, timeZone);
+	const today = projectDay(now.toISOString(), timeZone);
+	const yesterday = new Date(`${today}T12:00:00Z`);
+	yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+	const word = day === today ? 'today' : day === yesterday.toISOString().slice(0, 10) ? 'yesterday' : null;
+	return word ? `${word} ${stamp.slice(stamp.lastIndexOf(' ') + 1)}` : stamp;
+}
+
+/**
+ * A run's name in the workspace: its label, else when it ran on the project's
+ * clock, "27 Oct 2026 00:30", the moment the run report's "Run of …" names
+ * (reportRunName; issue #899), never the viewer's.
+ */
+export function runDisplayName(run: { label?: string | null; createdAt: string }, timeZone: string = DEFAULT_TIME_ZONE): string {
+	return run.label || fmtProjectStamp(run.createdAt, timeZone);
+}
+
+/**
  * The section header's context line: who owns the project, when it was
  * created and the time zone its downloads are dated by, e.g.
  * "Team “North WUA” · created 3 Sep 2026 · time zone Africa/Johannesburg".

@@ -269,7 +269,20 @@ Dates a person reads are **day first**: a calendar day is `fmtDay` ("1 Oct
 "on" in a sentence). `fmtDate` takes either, day first: a moment's day in
 the viewer's zone ("11 Oct 2026"; with its time, as `fmtStamp`), a bare day as
 it is. Machine text (a day count, a sort key, a file name, a CSV cell) takes
-`isoDay`, the viewer's day of a moment as "2026-10-11". The farm view's notes
+`isoDay`, the viewer's day of a moment as "2026-10-11". **A run or a
+publication is dated on the project's clock**, never the viewer's (issue
+#899): a run's name when it has no label (`runDisplayName`, "27 Oct 2026
+00:30", the moment the run report's "Run of …" names, `reportRunName`), and
+when a run ran or was nominated or a change was made in the Runs list, the
+run pickers (`runOptionLabel` with `fmtProjectWhen`), the comparison and
+scenario headers, the Demands caption, a scenario's alternatives and
+History (its day headings, times and the header line) read the project's
+zone through `fmtProjectStamp`/`fmtProjectWhen`/`fmtProjectDay`
+(`project/project.ts`; "today" and "yesterday" are the project's days). The
+project page provides the zone through context (`project/projectClock.ts`,
+`projectTimeZoneReader`); outside it (the cross-project Compare page) it is
+`DEFAULT_TIME_ZONE`, so a workspace screen and the run's report never name
+one run two ways near midnight. The farm view's notes
 write their moments through the catalogue's words ("07:42 on 19 Jan 2024",
 `fmtStampTime`). The engine's warnings write their days day first too
 (`dayText`, engine ≥ 1.100.0). Runs & results, the Summary and History use

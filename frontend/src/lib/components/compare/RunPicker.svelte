@@ -4,8 +4,13 @@
 	// legend, `actions` beside it, and a coloured top edge (`colour`).
 	import type { Snippet } from 'svelte';
 	import type { ProjectSummary, RunMeta } from '#lib/api/index.js';
-	import { fmtWhen } from '#lib/format/number.js';
 	import { runOptionLabel } from './picker';
+	import { fmtProjectWhen } from '#lib/components/project/project.js';
+	import { projectTimeZoneReader } from '#lib/components/project/projectClock.js';
+
+	// Run dates on the project's clock, as its run report dates them (issue #899).
+	const timeZone = projectTimeZoneReader();
+	const fmtWhen = (iso: string) => fmtProjectWhen(iso, timeZone());
 
 	let {
 		id,

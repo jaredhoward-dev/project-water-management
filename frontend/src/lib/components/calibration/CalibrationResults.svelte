@@ -22,7 +22,7 @@
 	import { page } from '$app/state';
 	import { api, hasRole, type Role, type RunMeta } from '#lib/api/index.js';
 	import { toEpochDay } from '@water-management/engine';
-	import { fmtDay, fmtNum, fmtWhen } from '#lib/format/number.js';
+	import { fmtDay, fmtNum } from '#lib/format/number.js';
 	import { FORMER_MEMBER } from '#lib/format/maker.js';
 	import { focusAnchor, holdAnchor, landOnAnchor } from '#lib/help/anchor.js';
 	import { runOptionLabel } from '#lib/components/compare/picker.js';
@@ -38,6 +38,12 @@
 	import type { CalState } from './status';
 	import { followRetry } from '#lib/components/common/loadState.js';
 	import { resolveReferenceGauge } from '#lib/calibration/referenceGauge.js';
+	import { fmtProjectWhen } from '#lib/components/project/project.js';
+	import { projectTimeZoneReader } from '#lib/components/project/projectClock.js';
+
+	// Run dates on the project's clock, as its run report dates them (issue #899).
+	const contextZone = projectTimeZoneReader();
+	const fmtWhen = (iso: string) => fmtProjectWhen(iso, timeZone ?? contextZone());
 
 	type Land = (id: string) => (() => void) | void;
 

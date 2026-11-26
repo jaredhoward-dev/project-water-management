@@ -37,6 +37,8 @@ describe('the mitigation alternatives’ draft (298)', () => {
 	it('names a run by its scenario and label, or when it ran; sums the list in one line', () => {
 		expect(runName({ scenarioName: 'Smaller', runLabel: 'Final', runCreatedAt: '2026-10-30T12:05:00.000Z' })).toBe('Smaller — Final');
 		expect(runName({ scenarioName: 'Smaller', runLabel: '', runCreatedAt: '2026-10-30T12:05:00.000Z' })).toMatch(/^Smaller — run of \d+ Oct 2026/);
+		// On the project's clock near midnight, whatever the viewer's (issue #899).
+		expect(runName({ scenarioName: 'Smaller', runLabel: '', runCreatedAt: '2026-10-30T22:30:00.000Z' }, 'Africa/Johannesburg')).toBe('Smaller — run of 31 Oct 2026 00:30');
 		expect(alternativesSummary([])).toBe('None cited');
 		expect(alternativesSummary([alt('r1', 'Smaller dam'), alt('r2', 'Winter only', 1)])).toBe('Smaller dam · Winter only');
 	});

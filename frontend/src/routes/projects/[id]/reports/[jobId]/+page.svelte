@@ -12,6 +12,7 @@
 	import { api, ApiError } from '#lib/api/index.js';
 	import { describeReport, isPending, type ReportState, type ReportStatus, reportsApi } from '#lib/components/report/serverPdf.js';
 	import { fmtDate } from '#lib/format/number.js';
+	import { reportRunName, reportTimeZone } from '#lib/components/report/sections.js';
 	import { pageStart } from '#lib/a11y/focusPage.js';
 	import { followRetry } from '#lib/components/common/loadState.js';
 
@@ -52,7 +53,7 @@
 		projectName = p?.name ?? null;
 		const runId = current?.report.runId;
 		const run = runId ? runs?.find((r) => r.id === runId) : null;
-		runLabel = run ? run.label || `Run of ${fmtDate(run.createdAt, true)}` : null;
+		runLabel = run ? reportRunName(run, reportTimeZone(p)) : null; // the report's own name for it, on the project's clock (issue #899)
 	}
 	$effect(() => {
 		const id = projectId;
