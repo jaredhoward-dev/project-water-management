@@ -4,7 +4,6 @@
 // public verify page. Pure, so each is unit-tested (pack.test.ts); the hash
 // itself is WebCrypto's (sha256Hex).
 import { packManifestText, type PackManifest } from '@water-management/engine';
-import { fmtDate } from '#lib/format/number.js';
 import { fmtProjectDay } from '#lib/components/project/project.js';
 import { localTimeZone } from '#lib/components/report/serverPdf.js';
 import type { Pack, PackBundleCheck, PackIssueChecks, PackReproductionState, PackStatus, PackVerification } from '#lib/api/index.js';
@@ -282,11 +281,13 @@ export async function lookUpCode(
  * button when one may be asked for (`rerun`: after the re-run gave up, or when
  * the outcome is an older engine's than the server's; POST …/reproduce). Null
  * when there is nothing to say (a draft). It is the app's own claim, so it
- * shows in the view's bar only: never printed, never on verify.
+ * shows in the view's bar only: never printed, never on verify. The check is
+ * dated by the project's calendar day in `timeZone` (packTimeZone; issue
+ * #878), as packStamp dates the issue, never the viewer's.
  */
-export function reproductionNote(r: PackReproductionState): { tone: 'good' | 'bad' | 'warn' | 'quiet'; text: string; failed: PackBundleCheck[]; rerun: string | null } | null {
+export function reproductionNote(r: PackReproductionState, timeZone?: string): { tone: 'good' | 'bad' | 'warn' | 'quiet'; text: string; failed: PackBundleCheck[]; rerun: string | null } | null {
 	const failed = r.checks.filter((c) => !c.ok);
-	const when = r.checkedAt ? ` on ${fmtDate(r.checkedAt)}` : '';
+	const when = r.checkedAt ? ` on ${fmtProjectDay(r.checkedAt, timeZone)}` : '';
 	// The pack's own runs; the headline board's pair at full allocation is re-run apart (bundle-2, #523 G2).
 	const reruns = r.checks.filter((c) => c.id === 'reproduce:baseline' || c.id === 'reproduce:application').length;
 	const pair = r.checks.some((c) => c.id === 'reproduce:headline');

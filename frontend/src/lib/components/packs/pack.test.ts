@@ -355,6 +355,24 @@ describe('reproductionNote', () => {
 		expect(headline.text).toContain('both its runs and the headline board’s pair at full allocation gave the same results, and every one of its 4 checks passed');
 	});
 
+	it('dates the check as the project’s calendar day, whatever the viewer’s zone (issue #878, skewed TZ)', () => {
+		// 22:30 UTC is already 1 Oct in Johannesburg, still 30 Sep in St John's.
+		const checkedAt = '2026-09-30T22:30:00.000Z';
+		const at = (timeZone?: string) => reproductionNote(state({ status: 'reproduced', engineVersion: '9.1.0', checkedAt, checks: [ok('reproduce:baseline')] }), timeZone)!.text;
+		for (const viewer of ['Pacific/Kiritimati', 'Pacific/Pago_Pago']) {
+			process.env.TZ = viewer;
+			expect(at('Africa/Johannesburg')).toMatch(/^Reproduced on the server on 1 Oct 2026:/);
+			expect(at('America/St_Johns')).toMatch(/^Reproduced on the server on 30 Sep 2026:/);
+			// No zone (packTimeZone without the project): the default zone, Johannesburg.
+			expect(at()).toMatch(/^Reproduced on the server on 1 Oct 2026:/);
+			// A failed check too.
+			const failed = reproductionNote(state({ status: 'not_reproduced', engineVersion: '9.1.0', checkedAt, checks: [bad('reproduce:baseline')] }), 'America/St_Johns')!;
+			expect(failed.text).toMatch(/^Not reproduced on the server on 30 Sep 2026:/);
+		}
+		// One minute before the project's midnight stays on the earlier day.
+		expect(reproductionNote(state({ status: 'reproduced', engineVersion: '9.1.0', checkedAt: '2026-09-30T21:59:00.000Z', checks: [ok('reproduce:baseline')] }), 'Africa/Johannesburg')!.text).toMatch(/ on 30 Sep 2026:/);
+	});
+
 	it('lists the failed checks when it didn’t reproduce', () => {
 		const n = reproductionNote(state({ status: 'not_reproduced', engineVersion: '9.1.0', checks: [ok('stored'), bad('results:baseline'), bad('reproduce:baseline')] }))!;
 		expect(n.tone).toBe('bad');

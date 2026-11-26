@@ -16,7 +16,7 @@
 	import { fmtMetric } from '#lib/components/compare/delta.js';
 	import { compareDamStorage, outcomeRows, takeaways } from '#lib/components/compare/summary.js';
 	import { chooseSite, matrixSites } from '#lib/components/outcomes/matrix.js';
-	import { fmtDate } from '#lib/format/number.js';
+	import { reportStamp } from './sections';
 	import LicenceImpactBoard from './LicenceImpactBoard.svelte';
 	import type { ImpactSeries } from './impactSeries';
 	import { buildLicenceImpactBoard } from './licenceImpact';
@@ -26,7 +26,8 @@
 		series,
 		outcomes = null,
 		nodes = [],
-		ewrRules = []
+		ewrRules = [],
+		timeZone
 	}: {
 		data: RunCompareResponse;
 		/** The board's daily series (loadImpactSeries). */
@@ -36,6 +37,8 @@
 		/** This run's network and Reserve rule tables, for the site. */
 		nodes?: readonly NetworkNode[];
 		ewrRules?: readonly Pick<EwrRuleTable, 'siteNodeId'>[];
+		/** The report's zone (reportTimeZone): the baseline's run date is on the project's clock, as the rest of the report (issue #878). */
+		timeZone: string;
 	} = $props();
 
 	const site = $derived(chooseSite(outcomes?.siteNodeId, matrixSites(nodes, ewrRules)).site);
@@ -51,7 +54,7 @@
 
 <p class="lede">
 	This run against the baseline <strong>“{runName(data.a)}”</strong> ({data.a.project.name}, {data.a.run.startDate} – {data.a.run.endDate}, run
-	{fmtDate(data.a.run.createdAt, true)}). Every change is this run minus the baseline.
+	{reportStamp(data.a.run.createdAt, timeZone)}). Every change is this run minus the baseline.
 </p>
 {#if sameRun}
 	<p class="alert alert-info">The baseline is this run, so nothing has changed.</p>

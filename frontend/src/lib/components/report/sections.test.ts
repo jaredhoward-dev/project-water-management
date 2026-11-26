@@ -1,7 +1,35 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import type { Run } from '#lib/api/types.js';
 import { FORECAST_RAIN_NOTE, REPORT_NOT_EVIDENCE, REPORT_NOT_SIGNED } from '@water-management/engine';
-import { disclaimerSection, forecastNote, isReportReady, readFirst, reportCharts, reportSections } from './sections';
+import { disclaimerSection, forecastNote, isReportReady, readFirst, reportCharts, reportRunName, reportSections, reportStamp, reportTimeZone } from './sections';
+
+const tz = process.env.TZ;
+afterEach(() => {
+	process.env.TZ = tz;
+});
+
+describe('the run report’s dates (issue #878: the project’s clock, never the viewer’s)', () => {
+	it('dates a moment near the project’s midnight on the project’s day, whatever the viewer’s zone (skewed TZ)', () => {
+		// 22:30 UTC is already 27 Oct in Johannesburg, still 26 Oct in St John's.
+		const at = '2026-10-26T22:30:00.000Z';
+		for (const viewer of ['Pacific/Kiritimati', 'Pacific/Pago_Pago']) {
+			process.env.TZ = viewer;
+			expect(reportStamp(at, 'Africa/Johannesburg')).toBe('27 Oct 2026 00:30');
+			expect(reportStamp(at, 'America/St_Johns')).toBe('26 Oct 2026 20:00');
+			expect(reportRunName({ label: '', createdAt: at }, 'Africa/Johannesburg')).toBe('Run of 27 Oct 2026 00:30');
+			expect(reportRunName({ label: 'Dry year', createdAt: at }, 'Africa/Johannesburg')).toBe('Dry year');
+		}
+		// One minute before the project's midnight stays on the earlier day.
+		expect(reportStamp('2026-10-26T21:59:00.000Z', 'Africa/Johannesburg')).toBe('26 Oct 2026 23:59');
+		expect(reportStamp(null, 'Africa/Johannesburg')).toBe('–');
+	});
+
+	it('takes the project’s zone, the default zone when the API sends none', () => {
+		expect(reportTimeZone({ timeZone: 'America/St_Johns' })).toBe('America/St_Johns');
+		expect(reportTimeZone({})).toBe('Africa/Johannesburg');
+		expect(reportTimeZone(null)).toBe('Africa/Johannesburg');
+	});
+});
 
 type R = Pick<Run, 'summary' | 'model' | 'notes'>;
 const run = (over: { curtailment?: boolean; nodes?: number; notes?: string; assurance?: number } = {}): R =>

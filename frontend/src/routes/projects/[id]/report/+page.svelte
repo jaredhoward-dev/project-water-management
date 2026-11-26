@@ -63,7 +63,7 @@
 	import { printedPage } from '#lib/components/report/printedPage.svelte.js';
 	import AssurancePanel from '#lib/components/reliability/AssurancePanel.svelte';
 	import { noticeLanguages, restrictionSummary } from '#lib/components/runs/publication.js';
-	import { disclaimerSection, forecastNote, isReportReady, readFirst, reportCharts, reportSections } from '#lib/components/report/sections.js';
+	import { disclaimerSection, forecastNote, isReportReady, readFirst, reportCharts, reportRunName, reportSections, reportStamp, reportTimeZone } from '#lib/components/report/sections.js';
 	import EwrAssurancePanel from '#lib/components/runs/EwrAssurancePanel.svelte';
 	import { EWR_RULE_CAPTION, ewrChartCaption, ewrChartSeries, hydrographSeries, observedCaption, type CatchmentFlows, type ObservedSources } from '#lib/components/runs/flowSeries.js';
 	import { toDisplayUnit } from '#lib/components/runs/results.js';
@@ -76,7 +76,7 @@
 	import { runSentence } from '#lib/components/runs/runSentence.js';
 	import SelfChecksPanel from '#lib/components/runs/SelfChecksPanel.svelte';
 	import { WATER_YEAR_MONTHS } from '#lib/format/months.js';
-	import { fmtDate, fmtNum } from '#lib/format/number.js';
+	import { fmtNum } from '#lib/format/number.js';
 	import { runFitEngineVersions, runForcingOfSummary } from '@water-management/engine';
 
 	// The server-side PDF (Generate / Email me). In the report's chunk: the bar renders it for every
@@ -212,8 +212,12 @@
 	const days = $derived(run ? toEpochDay(run.endDate) - toEpochDay(run.startDate) + 1 : 0);
 	const farmNames = $derived(Object.fromEntries(nodes.map((n) => [n.id, n.name])));
 	const nodeOrder = $derived(new Map(nodes.map((n) => [n.id, n.sortOrder] as [string, number])));
-	const runName = $derived(run ? run.label || `Run of ${fmtDate(run.createdAt, true)}` : '');
-	const prepared = fmtDate(new Date().toISOString(), true);
+	// Every moment on the page is on the project's clock (issue #878), as the evidence report and the server PDF date theirs.
+	const timeZone = $derived(reportTimeZone(project));
+	const when = (iso: string | null | undefined) => reportStamp(iso, timeZone);
+	const runName = $derived(run ? reportRunName(run, timeZone) : '');
+	const preparedAt = new Date().toISOString();
+	const prepared = $derived(when(preparedAt));
 	// Which EWR the results are judged by (issue #444): the project's setting now, which a later change moves, so the
 	// printed copy says which it was.
 	const judgedLine = $derived.by(() => {
@@ -314,7 +318,7 @@
 					</p>
 					<dl class="facts">
 						<div><dt>Period</dt><dd>{run.startDate} – {run.endDate} ({fmtNum(days)} days)</dd></div>
-						<div><dt>Run made</dt><dd>{fmtDate(run.createdAt, true)}{run.createdBy ? ` by ${run.createdBy}` : ''}</dd></div>
+						<div><dt>Run made</dt><dd>{when(run.createdAt)}{run.createdBy ? ` by ${run.createdBy}` : ''}</dd></div>
 						<div><dt>Engine version</dt><dd>{run.engineVersion}</dd></div>
 						<div><dt>Report prepared</dt><dd>{prepared}</dd></div>
 						{#if runPub?.publication}
@@ -323,8 +327,8 @@
 							<div data-testid="report-published">
 								<dt>Published</dt>
 								<dd>
-									{fmtDate(pub.publishedAt, true)}{pub.publishedBy ? ` by ${pub.publishedBy}` : ''}{pub.supersededAt
-										? `; replaced ${fmtDate(pub.supersededAt, true)}`
+									{when(pub.publishedAt)}{pub.publishedBy ? ` by ${pub.publishedBy}` : ''}{pub.supersededAt
+										? `; replaced ${when(pub.supersededAt)}`
 										: '; the run stakeholders see now'}
 								</dd>
 							</div>
@@ -375,6 +379,7 @@
 										outcomes={project!.settings.outcomes}
 										{nodes}
 										ewrRules={settings.ewrRules}
+										{timeZone}
 									/>{/snippet}
 							</Lazy>
 						{:else}
@@ -497,12 +502,12 @@
 						</div>
 					{:else if s.id === 'notes'}
 						<p class="notes">{run.notes}</p>
-						{#if run.notesUpdatedAt}<p class="muted small">Last changed {fmtDate(run.notesUpdatedAt, true)}{run.notesUpdatedBy ? ` by ${run.notesUpdatedBy}` : ''}.</p>{/if}
+						{#if run.notesUpdatedAt}<p class="muted small">Last changed {when(run.notesUpdatedAt)}{run.notesUpdatedBy ? ` by ${run.notesUpdatedBy}` : ''}.</p>{/if}
 					{:else if s.id === 'changes' && runPub?.previous}
 						{@const prev = runPub.previous}
 						<p class="lede">
 							{runPub.publication ? 'Since the publication before this one' : 'This run is not published. Against the current publication'}: “{prev.runLabel ||
-								'Untitled run'}”, published {fmtDate(prev.publishedAt, true)}{prev.publishedBy ? ` by ${prev.publishedBy}` : ''}. What changed in the saved
+								'Untitled run'}”, published {when(prev.publishedAt)}{prev.publishedBy ? ` by ${prev.publishedBy}` : ''}. What changed in the saved
 							model, settings and series from that run to this one:
 						</p>
 						{#if prev.attribution}<p class="muted small">{attributionSummary(prev.attribution)}</p>{/if}
@@ -510,7 +515,7 @@
 					{:else if s.id === 'validation'}
 						<ValidationStatement {summary} engineVersion={run.engineVersion} legacy={run.legacy} fitEngineVersion={runFitEngineVersions(run.settings, summary)} />
 					{:else if s.id === 'signoff' && signoffs}
-						<SignoffSection {projectId} target={{ kind: 'run', id: run.id }} list={signoffs} onchange={signoffsChanged} />
+						<SignoffSection {projectId} target={{ kind: 'run', id: run.id }} list={signoffs} onchange={signoffsChanged} {timeZone} />
 					{:else if s.id === 'disclaimer'}
 						<Disclaimer />
 					{/if}

@@ -13,9 +13,22 @@
 // use forecast rain (forecastNote).
 // Opened from Compare runs' Export impact report (`against`, issue #17 A4),
 // it is an impact report: an "Impact against the baseline" section right
-// after the cover.
+// after the cover. Every moment on it (the run's making, its publications, the
+// notes' last change, the sign-offs, when it was prepared) is dated on the
+// project's clock (reportStamp, issue #878), as the evidence report and the
+// server PDF date theirs, never the viewer's.
 import { FORECAST_RAIN_NOTE, REPORT_NOT_EVIDENCE, REPORT_NOT_SIGNED, REPORT_READ_FIRST, REPORT_SIGNED_BY } from '@water-management/engine';
 import type { Run, Signoff } from '#lib/api/types.js';
+import { DEFAULT_TIME_ZONE, fmtProjectStamp } from '#lib/components/project/project.js';
+
+/** The zone the run report dates by: the project's, DEFAULT_TIME_ZONE when the API sends none (issue #878). */
+export const reportTimeZone = (project: { timeZone?: string } | null | undefined): string => project?.timeZone ?? DEFAULT_TIME_ZONE;
+
+/** A moment on the run report, "27 Oct 2026 00:30" on the project's clock (fmtProjectStamp; issue #878). */
+export const reportStamp = (iso: string | null | undefined, timeZone: string): string => fmtProjectStamp(iso, timeZone);
+
+/** The report's name for its run: its label, else "Run of 27 Oct 2026 00:30" on the project's clock (issue #878). */
+export const reportRunName = (run: Pick<Run, 'label' | 'createdAt'>, timeZone: string): string => run.label || `Run of ${reportStamp(run.createdAt, timeZone)}`;
 
 export type ReportSectionId =
 	| 'cover'

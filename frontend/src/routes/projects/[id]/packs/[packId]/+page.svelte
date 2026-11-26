@@ -139,7 +139,7 @@
 	/** Where the server-rendered PDF is (119_pack_render): ready, rendering, failed or none. */
 	const pdf = $derived(detail?.pdf ?? null);
 	/** What the server's re-run from the stored bundle found (154_pack_reproduce); null when there is nothing to say. */
-	const reproduction = $derived(detail?.reproduction ? { state: detail.reproduction, note: reproductionNote(detail.reproduction) } : null);
+	const reproduction = $derived(detail?.reproduction ? { state: detail.reproduction, note: reproductionNote(detail.reproduction, timeZone) } : null);
 
 	let renderingAgain = $state(false);
 	let renderError = $state<string | null>(null);
