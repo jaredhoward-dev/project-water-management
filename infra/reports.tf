@@ -467,6 +467,25 @@ resource "aws_iam_role_policy" "worker_reports" {
   policy = data.aws_iam_policy_document.worker_reports.json
 }
 
+# A report row deleted before its PDF expired (its requester's account or its
+# project deleted, by the API or the operator's SQL) queues the PDF's removal
+# (395_report_pdf_erasure); the worker's tick deletes it (issue #903,
+# backend/src/reports/erasure.ts). Delete only: the worker still can't read
+# or list a PDF. Through the S3 endpoint (packs.tf WorkerDeletesReportPdfs).
+data "aws_iam_policy_document" "worker_report_erasure" {
+  statement {
+    sid       = "DeleteReportPdfs"
+    actions   = ["s3:DeleteObject"]
+    resources = ["${aws_s3_bucket.reports.arn}/reports/*"]
+  }
+}
+
+resource "aws_iam_role_policy" "worker_report_erasure" {
+  name   = "report-pdf-erasure"
+  role   = aws_iam_role.worker_lambda.id
+  policy = data.aws_iam_policy_document.worker_report_erasure.json
+}
+
 # The worker emails report links through SES, as no-reply@, the same way and
 # through the same endpoint as the API (ses.tf).
 resource "aws_iam_role_policy" "worker_ses" {

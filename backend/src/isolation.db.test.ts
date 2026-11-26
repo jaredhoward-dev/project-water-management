@@ -213,7 +213,7 @@ async function snapshot() {
  * (the status counts it through app_assistant_used). Any other table the app
  * role can't read is a lost grant, and fails.
  */
-const OWNER_ONLY_TABLES = ['allocation_holder_salt', 'assistant_reservation'];
+const OWNER_ONLY_TABLES = ['allocation_holder_salt', 'assistant_reservation', 'report_pdf_erasure'];
 
 /** The project tables, split by whether water_app may read them at all. */
 const projectTables = async (granted: boolean) =>

@@ -231,6 +231,24 @@ describe('digestMail', () => {
 		expect(m.text).toContain('…and 80 more alerts. Open the catchment to see them all.');
 		expect(m.text).toContain('Open your hydrological unit: http://localhost:7777/farm/p1');
 	});
+
+	it('says how many of the catchment’s lines the per-person limit left out, counted, and nothing when none were (#869)', () => {
+		expect(digestMail(farmer, project, [dam], unsub, 5, 0, undefined, { n: 1, limit: 200 }).text).toContain(
+			'1 older alert for this catchment was left out of this summary, because one day’s summaries list at most 200 alerts across all your catchments. Open the catchment to see it.'
+		);
+		expect(digestMail(farmer, project, [dam], unsub, 5, 0, undefined, { n: 35, limit: 200 }).text).toContain('35 older alerts for this catchment were left out');
+		expect(digestMail(farmer, project, [dam], unsub, 5, 0, undefined, { n: 0, limit: 200 }).text).not.toContain('left out');
+	});
+
+	it('says how many whole catchments the limit left out, even when this one lost none, and nothing when none were (#883)', () => {
+		expect(digestMail(farmer, project, [dam], unsub, 5, 0, undefined, { n: 0, catchments: 1, limit: 200 }).text).toContain(
+			'Alerts for 1 other catchment of yours were left out of today’s summaries, because one day’s summaries list at most 200 alerts across all your catchments.'
+		);
+		const both = digestMail(farmer, project, [dam], unsub, 5, 0, undefined, { n: 3, catchments: 12, limit: 200 }).text;
+		expect(both).toContain('3 older alerts for this catchment were left out');
+		expect(both).toContain('Alerts for 12 other catchments of yours were left out');
+		expect(digestMail(farmer, project, [dam], unsub, 5, 0, undefined, { n: 0, catchments: 0, limit: 200 }).text).not.toContain('left out');
+	});
 });
 
 describe('"Was this useful?" (151_alert_feedback)', () => {

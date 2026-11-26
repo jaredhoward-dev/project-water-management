@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { pointInRing } from '../geo/geojson.js';
-import { openDem } from './dem.js';
+import { openDem, type Dem } from './dem.js';
 import {
 	boundsText,
 	delineate,
@@ -12,10 +12,12 @@ import {
 	fitDelineationMethod,
 	METHOD_VERSION,
 	SNAP_RADIUS_M,
+	TILE_PROBE_MAX,
+	tileInBox,
 	tooLargeText,
 	type DelineationMethodFacts
 } from './delineate.js';
-import { BASIN_AREA_M2, DAM_CELL, FIXTURE_CELL_M, FIXTURE_CELLS, FIXTURE_ZOOM, fixtureElevation, fixtureLonLat, OUTLET_CELL, PAN, valleyUnitRing } from './fixture.js';
+import { BASIN_AREA_M2, carved, DAM_CELL, FIXTURE_CELL_M, FIXTURE_CELLS, FIXTURE_ZOOM, fixtureElevation, fixtureLonLat, OUTLET_CELL, PAN, valleyUnitRing } from './fixture.js';
 import { d8, DX, DY, edgeMask, fill, OUT } from './flow.js';
 import { ON_RIVER_METHOD, PAN_METHOD } from './pans.js';
 
@@ -97,6 +99,16 @@ describe('delineate (synthetic DEM)', () => {
 		expect(r.code).toBe('outside');
 		// In degrees south, as people read them (it said "-33.7243397° to -33.1375512° N").
 		expect(r.message).toMatch(/covers 20\.39° E to 21\.09° E, 33\.72° S to 33\.14° S\)\.$/);
+	});
+
+	it('refuses a click on a no-data cell inside a tile with data as no data, not off-channel (issue #905)', async () => {
+		const ridge = { x: OUTLET_CELL.x - 91, y: OUTLET_CELL.y - 120 };
+		const holed = carved(dem, ridge.x, ridge.y);
+		const e = await refusal(delineate(holed, at(ridge.x, ridge.y)));
+		expect(e.code).toBe('no_data');
+		expect(e.message).toBe('The elevation model has no data at that point.');
+		// Positive control: the same click on the uncarved DEM is off-channel (the test below).
+		expect((await refusal(delineate(dem, at(ridge.x, ridge.y)))).code).toBe('off_channel');
 	});
 
 	it('refuses a click with no terrain channel within the snap radius, saying to click on one (issue #472)', async () => {
@@ -220,6 +232,28 @@ describe('the e2e copy of the fixture’s points', () => {
 		const ring = (name: string) => JSON.parse(new RegExp(`${name}: \\[number, number\\]\\[\\] = (\\[.*\\]);`).exec(text)![1]!);
 		expect(ring('FIXTURE_UPPER_UNIT')).toEqual(valleyUnitRing(0, DAM_CELL.y + 5, 2, 10));
 		expect(ring('FIXTURE_LOWER_UNIT')).toEqual(valleyUnitRing(DAM_CELL.y + 5, 400, 2, 10));
+	});
+});
+
+describe('tileInBox (issue #874)', () => {
+	const dem = openDem(fileURLToPath(new URL('../../fixtures/dem/synthetic-dem.pmtiles', import.meta.url)));
+	const [w, s, e, n] = [fixtureLonLat(0, 0)[0], fixtureLonLat(0, FIXTURE_CELLS)[1], fixtureLonLat(FIXTURE_CELLS, 0)[0], fixtureLonLat(0, 0)[1]];
+
+	it('takes a tile from the box when its centre has none, and null when the box holds none', async () => {
+		// From the fixture's last 50 columns to 600 columns past its east edge: the centre lies where no tile is.
+		const past = fixtureLonLat(FIXTURE_CELLS + 600, 0)[0];
+		const box: [number, number, number, number] = [fixtureLonLat(FIXTURE_CELLS - 50, 0)[0], s, past, n];
+		expect((await tileInBox(dem, FIXTURE_ZOOM, box))?.size).toBe(256);
+		expect(await tileInBox(dem, FIXTURE_ZOOM, [fixtureLonLat(FIXTURE_CELLS + 10, 0)[0], s, past, n])).toBeNull();
+		// Positive control: inside the data, the tile under the centre.
+		expect((await tileInBox(dem, FIXTURE_ZOOM, [w, s, e, n]))?.size).toBe(256);
+	});
+
+	it('asks at most TILE_PROBE_MAX tiles of a box with none', async () => {
+		let asked = 0;
+		const empty: Dem = { info: () => dem.info(), tile: async () => (asked++, null) };
+		expect(await tileInBox(empty, 12, [10, -40, 40, -10])).toBeNull();
+		expect(asked).toBeLessThanOrEqual(TILE_PROBE_MAX);
 	});
 });
 

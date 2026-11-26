@@ -10,6 +10,14 @@
 // separate bands would suggest, and it is the honest statement of what the
 // change itself does. Members are judged once, on the baseline: the
 // application changes the network, not the observed history.
+//
+// Both sides run on one engine (issue #897). The baseline's stored figures
+// come from the engine its ensemble ran on; when that is not this engine,
+// subtracting them would put the engine's own changes into "B − A". The
+// paired run then re-runs the same kept sets on the baseline run's inputs too
+// (`rerun`), and the difference is taken between the two re-runs. On the
+// engine the baseline was stored on, nothing is re-run and the stored figures
+// are used, exactly as before.
 import type { ModelInput, ModelOutput } from '../project';
 import { runModelWithoutChecks } from '../run';
 import { ENGINE_VERSION } from '../version';
@@ -39,13 +47,39 @@ export interface PairedMember {
 	metrics: MemberMetrics;
 }
 
+/**
+ * The baseline side re-run on this engine (issue #897): present only when the
+ * baseline ensemble was stored on another engine. `baselineEngineVersion` is
+ * that engine (where the sets were run and judged); both sides of every pair
+ * ran on the result's `engineVersion`.
+ */
+export interface PairedRerun {
+	baselineEngineVersion: string;
+	/** The baseline run's header on this engine (pairedHeader of its first re-run). */
+	header: EnsembleHeader;
+	/** The baseline's kept members re-run, unchanged, on the baseline run's own inputs, in the order of `members`. */
+	members: PairedMember[];
+}
+
 export interface PairedResult {
 	engineVersion: string;
 	/** The other run's header (farm names, sites, water years). */
 	header: EnsembleHeader;
 	members: PairedMember[];
+	/** The baseline side on this engine, when its ensemble was stored on another (issue #897); absent otherwise. */
+	rerun?: PairedRerun;
 	cancelled: boolean;
 }
+
+/** A baseline ensemble with the engine it was stored on (absent: taken as this engine's, as every caller before issue #897). */
+export type PairedBaseline = Pick<EnsembleResult, 'options' | 'header' | 'members'> & { engineVersion?: string };
+
+/**
+ * Does a paired band on this baseline re-run its kept sets on the baseline
+ * run's inputs (issue #897)? Only when the baseline was stored on another
+ * engine; on this one, its stored figures are this engine's.
+ */
+export const pairedNeedsRerun = (baseline: { engineVersion?: string }): boolean => baseline.engineVersion !== undefined && baseline.engineVersion !== ENGINE_VERSION;
 
 /** The baseline members a paired run re-runs: every kept member, in order. */
 export const pairedMembers = (baseline: Pick<EnsembleResult, 'members'>): MemberResult[] => baseline.members.filter((m) => m.accepted && m.metrics);
@@ -81,29 +115,57 @@ export function pairedHeader(baseline: EnsembleHeader, output: ModelOutput): Ens
 	};
 }
 
-/** Run the baseline's kept members on another run's inputs. Throws when pairedRefusal refuses. */
-export function runPairedEnsemble(
-	other: ModelInput,
-	baseline: Pick<EnsembleResult, 'options' | 'header' | 'members'>,
-	opts: { onProgress?: (p: EnsembleProgress) => boolean | void } = {}
-): PairedResult {
-	const refusal = pairedRefusal(other, baseline);
-	if (refusal) throw new Error(refusal);
-	const ctx = ensembleContext(other, baseline.options, false);
-	const todo = pairedMembers(baseline);
+/** Run the kept members on `input` (the paired header from the first). Returns null once onProgress cancels. */
+function runKept(
+	input: ModelInput,
+	baseline: PairedBaseline,
+	todo: readonly MemberResult[],
+	progress: (done: number) => boolean
+): { header: EnsembleHeader; members: PairedMember[]; cancelled: boolean } {
+	const ctx = ensembleContext(input, baseline.options, false);
 	const out: PairedMember[] = [];
 	let head: EnsembleHeader | null = null;
-	let cancelled = false;
 	for (const m of todo) {
 		const output = runModelWithoutChecks(memberInput(ctx, m as EnsembleMember));
 		head ??= pairedHeader(baseline.header, output);
 		out.push({ index: m.index, metrics: memberMetrics(ctx, output) });
-		if (opts.onProgress?.({ done: out.length, total: todo.length, accepted: out.length }) === true) {
-			cancelled = true;
-			break;
-		}
+		if (progress(out.length)) return { header: head, members: out, cancelled: true };
 	}
-	return { engineVersion: ENGINE_VERSION, header: head ?? baseline.header, members: out, cancelled };
+	return { header: head ?? baseline.header, members: out, cancelled: false };
+}
+
+/**
+ * Run the baseline's kept members on another run's inputs. Throws when
+ * pairedRefusal refuses. A baseline stored on another engine (pairedNeedsRerun)
+ * needs `baselineInput`, the baseline run's own inputs: its kept members are
+ * run on them too, first, so both sides are this engine's (issue #897).
+ */
+export function runPairedEnsemble(
+	other: ModelInput,
+	baseline: PairedBaseline,
+	opts: { onProgress?: (p: EnsembleProgress) => boolean | void; baselineInput?: ModelInput } = {}
+): PairedResult {
+	const refusal = pairedRefusal(other, baseline);
+	if (refusal) throw new Error(refusal);
+	const todo = pairedMembers(baseline);
+	if (!pairedNeedsRerun(baseline)) {
+		const r = runKept(other, baseline, todo, (done) => opts.onProgress?.({ done, total: todo.length, accepted: done }) === true);
+		return { engineVersion: ENGINE_VERSION, header: r.header, members: r.members, cancelled: r.cancelled };
+	}
+	if (!opts.baselineInput) {
+		throw new Error(`the baseline ensemble was stored on engine ${baseline.engineVersion}: its run's inputs are needed to re-run its kept sets on engine ${ENGINE_VERSION}`);
+	}
+	// The baseline side is re-run on inputs the caller hands in: they must be ones the kept sets can run on as
+	// stored (the same runoff model, the pan shift read, the same days), or "B − A" would pair different members.
+	const baseRefusal = pairedRefusal(opts.baselineInput, baseline);
+	if (baseRefusal) throw new Error(`the baseline run's inputs don't match its stored ensemble: ${baseRefusal}`);
+	const total = 2 * todo.length;
+	const tick = (offset: number) => (done: number) => opts.onProgress?.({ done: offset + done, total, accepted: offset + done }) === true;
+	const base = runKept(opts.baselineInput, baseline, todo, tick(0));
+	const rerun: PairedRerun = { baselineEngineVersion: baseline.engineVersion!, header: base.header, members: base.members };
+	if (base.cancelled) return { engineVersion: ENGINE_VERSION, header: baseline.header, members: [], rerun, cancelled: true };
+	const r = runKept(other, baseline, todo, tick(todo.length));
+	return { engineVersion: ENGINE_VERSION, header: r.header, members: r.members, rerun, cancelled: r.cancelled };
 }
 
 export interface PairedSummary {
@@ -159,15 +221,30 @@ export interface PairedSummary {
 	 * otherwise). Absent from a summary computed before it.
 	 */
 	reserveFdcChange?: { key: string; name: string; months: { band: Band; worse: number | null }[][] }[];
+	/**
+	 * Issue #897: the engine the baseline ensemble was stored on, when it is
+	 * not the one both sides of the pairs ran on (the baseline's kept sets
+	 * were re-run on this engine, PairedResult.rerun). Absent when no re-run
+	 * was needed, and on summaries computed before it.
+	 */
+	baselineRerunFrom?: string;
 }
 
 /** Bands on other − baseline, member by member. */
 export function summarisePaired(
 	baseline: Pick<EnsembleResult, 'options' | 'header' | 'members'>,
-	paired: Pick<PairedResult, 'header' | 'members'>,
+	paired: Pick<PairedResult, 'header' | 'members' | 'rerun'>,
 	opts: { own?: readonly string[] } = {}
 ): PairedSummary {
-	const byIndex = new Map(pairedMembers(baseline).map((m) => [m.index, m.metrics!]));
+	// The baseline side: its kept members' figures on the engine the pairs ran on (issue #897): the re-run when
+	// there is one, else the stored figures (the baseline was stored on that engine).
+	const rerun = paired.rerun;
+	const kept = new Set(pairedMembers(baseline).map((m) => m.index));
+	const byIndex = rerun
+		? new Map(rerun.members.filter((m) => kept.has(m.index)).map((m) => [m.index, m.metrics]))
+		: new Map(pairedMembers(baseline).map((m) => [m.index, m.metrics!]));
+	// Its farm, site and unit lists from the same run (the re-run's header; the days and water years are the baseline's either way).
+	const baseHeader = rerun?.header ?? baseline.header;
 	const pairs = paired.members.flatMap((p) => {
 		const a = byIndex.get(p.index);
 		return a ? [{ a, b: p.metrics }] : [];
@@ -195,15 +272,15 @@ export function summarisePaired(
 	const share = (f: (x: MemberMetrics) => number | null | undefined) => shareOf(f, (y, x) => y > x);
 	/** Share of the pairs with a rate on both sides in which the other run's rate is lower (fewer months met, less supplied). */
 	const lowerShare = (f: (x: MemberMetrics) => number | null | undefined) => shareOf(f, (y, x) => y < x);
-	const baseFarms = new Map(baseline.header.farms.map((f) => [f.nodeId, f.name]));
+	const baseFarms = new Map(baseHeader.farms.map((f) => [f.nodeId, f.name]));
 	const otherFarms = new Map(paired.header.farms.map((f) => [f.nodeId, f.name]));
 	const bothFarms = paired.header.farms.filter((f) => baseFarms.has(f.nodeId));
-	const unpaired = [...baseline.header.farms.filter((f) => !otherFarms.has(f.nodeId)), ...paired.header.farms.filter((f) => !baseFarms.has(f.nodeId))].map((f) => f.name);
-	const baseSites = new Set(baseline.header.reserveSites.map((s) => s.key));
+	const unpaired = [...baseHeader.farms.filter((f) => !otherFarms.has(f.nodeId)), ...paired.header.farms.filter((f) => !baseFarms.has(f.nodeId))].map((f) => f.name);
+	const baseSites = new Set(baseHeader.reserveSites.map((s) => s.key));
 	const years = baseline.header.waterYears;
 	const o = baseline.options;
-	const baseUnits = new Set((baseline.header.units ?? []).map((u) => u.nodeId));
-	const baseEwrSites = new Set((baseline.header.ewrSites ?? []).map((s) => s.key));
+	const baseUnits = new Set((baseHeader.units ?? []).map((u) => u.nodeId));
+	const baseEwrSites = new Set((baseHeader.ewrSites ?? []).map((s) => s.key));
 	const fdcSites = paired.header.reserveSites.filter((s) => baseSites.has(s.key));
 	const otherMembers = pairs.map((p) => p.b);
 	const own = opts.own;
@@ -228,10 +305,10 @@ export function summarisePaired(
 		noFlowDaysWorse: share((x) => x.noFlowDays),
 		// A baseline header stored before engine 1.33.0 has no site or unit list: the other run's, which the pairs then can't fill (n = 0).
 		ewrSites: (paired.header.ewrSites ?? [])
-			.filter((s) => !baseline.header.ewrSites || baseEwrSites.has(s.key))
+			.filter((s) => !baseHeader.ewrSites || baseEwrSites.has(s.key))
 			.map((s) => ({ ...s, band: d((x) => x.ewrSiteDaysNotMet?.[s.key]), worse: share((x) => x.ewrSiteDaysNotMet?.[s.key]) })),
 		supply: (paired.header.units ?? [])
-			.filter((u) => !baseline.header.units || baseUnits.has(u.nodeId))
+			.filter((u) => !baseHeader.units || baseUnits.has(u.nodeId))
 			.map((u) => ({ ...u, band: d((x) => memberSupplyFraction(x, u.nodeId)), worse: lowerShare((x) => memberSupplyFraction(x, u.nodeId)) })),
 		...(own ? { ownSupply: { band: d((x) => memberGroupSupply(x, own)), worse: lowerShare((x) => memberGroupSupply(x, own)) } } : {}),
 		reserveFdc: fdcSites.map((s) => ({ ...s, months: reserveFdcBands(otherMembers, s.key, (f) => band(otherMembers.map(f), min)) })),
@@ -246,8 +323,12 @@ export function summarisePaired(
 				});
 			})
 		})),
+		...(rerun ? { baselineRerunFrom: rerun.baselineEngineVersion } : {}),
 		decisionRule:
 			`Each of the baseline's ${pairs.length} kept parameter sets (kept by its rule: seed ${o.seed}, ${o.members} sampled) is run on both runs' inputs with the same forcing; ` +
-			`the bands are the ${o.percentiles[0]}th to ${o.percentiles[2]}th percentiles of the difference (other − baseline), shown only with at least ${min} pairs.`
+			`the bands are the ${o.percentiles[0]}th to ${o.percentiles[2]}th percentiles of the difference (other − baseline), shown only with at least ${min} pairs.` +
+			(rerun
+				? ` The baseline ensemble was run on engine ${rerun.baselineEngineVersion}; its sets were run again on both runs' inputs on one engine, so the difference holds no change of engine.`
+				: '')
 	};
 }

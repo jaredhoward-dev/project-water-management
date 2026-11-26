@@ -155,8 +155,9 @@ summing every account's rows.
 | Trial, trial day | A person on a reverse trial (342) | $2 over the trial, $1 a SAST day ([§ The reverse trial](#the-reverse-trial-built-off)) | `assistant_trial_cap` (until the trial ends), `assistant_trial_daily_cap` (until 00:00 SAST) |
 | Pool | Free and trialing accounts together | `ASSISTANT_FREE_POOL_USD_PER_MONTH` ($30) a UTC month, and on any SAST day at most (pool left at the day's start ÷ SAST days left in the UTC month, today included, at least 1) × 2 | `assistant_free_pool_spent`, until 00:00 SAST (or the UTC month's end, when the month's pool is spent) |
 
-Checked in that order, the person's own caps first, so a refusal names the
-cap that is theirs when it binds; the pool's wording says it isn't something
+Checked day, trial, trial day, month, member, then pool (`app_assistant_begin`,
+364): the person's own caps first, so a refusal names the cap that is theirs
+when it binds, and a spent trial before its day, so it never says "tomorrow"; the pool's wording says it isn't something
 they did and has no upgrade prompt (#641's copy). Each refusal is a stable
 code with `params.seconds` and `params.resetsAt` ([api.md §
 Assistant](./api.md#assistant)).
@@ -671,7 +672,12 @@ the code was written (an election day), which the count can't know.
 **Business days.** Weekdays less South Africa's public holidays
 (`businessDays.ts`): the Public Holidays Act's ten fixed dates, Good Friday
 and Family Day (from Easter, computed), and the Monday after a holiday that
-falls on a Sunday. Without them a weekday-only count runs up to six days
+falls on a Sunday (the Act's s2(1)). When Christmas falls on a Sunday its
+Monday is the Day of Goodwill already, and the President has each time
+declared Tuesday 27 December a holiday under s2A (2011, 2016, 2022; The
+Presidency's statements on gov.za), so the count takes the 27th as one in
+such a year (next 2033) ahead of the declaration: one business day fewer
+only moves a notice earlier (issue #893). Without them a weekday-only count runs up to six days
 long over December and Easter, which at the 40-day edge would make a notice
 late; no dependency is needed for them.
 
@@ -1023,11 +1029,22 @@ granting it then would spend the person's once-per-email trial for nothing.
 
 **Granting.** When an address is verified for the first time (the
 verification link, a password reset that proves an unverified inbox, or a
-sign-up through an invite for that address), the backend hashes the
-address's canonical form (`canonicalEmail` in `billing/metrics.ts`:
-lower-cased, `+tag` dropped, Gmail's dots dropped, googlemail.com as
-gmail.com) with SHA-256 and calls `app_reverse_trial_start(hash)` as the
-person, inside its own savepoint, so a trial that fails never fails the
+sign-up through an invite for that address), the backend calls
+`app_reverse_trial_start()` as the person, and the database hashes the
+caller's own current address itself (397, issue #914): SHA-256 of its
+canonical form (`canonical_email`, the SQL twin of `canonicalEmail` in
+`billing/metrics.ts`: A-Z lower-cased, `+tag` dropped, Gmail's dots dropped,
+googlemail.com as gmail.com; a local part that starts with `+` is kept
+whole, since with no base address dropping it would fold different people's
+mailboxes at a domain into one, issue #893). No caller names an address, so
+no one can use up another address's trial; 342's
+`app_reverse_trial_start(hash)` stays only for a backend on older code
+during a release, ignores its hash and starts the caller's own (a later
+migration drops it). Lower-casing and trimming are ASCII only on both sides
+(A-Z, and ASCII whitespace at the ends): JavaScript's `toLowerCase()` and
+Postgres's locale-bound `lower()` disagree on some non-ASCII letters (`İ`),
+so a non-ASCII letter is kept as written; `export.db.test.ts` checks the two
+agree. The call runs inside its own savepoint, so a trial that fails never fails the
 verification, the password reset or the invite sign-up around it (logged as
 `reverse_trial_start_failed`, the error's name and code only), and unless
 the address is on a disposable domain (`auth/disposable.ts`,
@@ -1047,7 +1064,8 @@ Stripe trials are `stripe`). Only a verified address qualifies.
 canonical address and when, never the address and no link to the account,
 so it outlives the account's deletion: deleting the account and signing up
 again gets no second trial (`security.md` § Personal information says what
-the record is).
+the record is). "Download my data" shows the person their current
+address's claim (`reverseTrialClaim`, 396).
 
 **At the end.** The worker's tick moves each trial past its `trial_end` to
 `expired` and logs an `expire`; the account is then Free (no live
@@ -1652,7 +1670,7 @@ plan by hand, once it is paid, until the end of the invoiced period. It
 works with `BILLING_PROVIDER` unset.
 
 ```bash
-pnpm dev:billing:grant <email|team-id> <plan> [--until YYYY-MM-DD] --reason "…" [--replace] [--by <name>]
+pnpm dev:billing:grant <email|team-id> <plan> [--until YYYY-MM-DD] [--seats n] --reason "…" [--replace] [--by <name>]
 pnpm dev:billing:grant <email|team-id> --revoke --reason "…" [--by <name>]
 pnpm dev:billing:grant <email|team-id> --list
 ```
@@ -1685,6 +1703,18 @@ defaults to the operator's login.
   the plan page says it ends and the renewal notice never picks a grant up.
   `free` can't be granted (revoke instead), the end must be in the future and
   a reason (≤ 500 characters) is required.
+- **Seats** (374). `app_staff_grant_plan(…, replace, seats)` and `--seats`
+  give the editor seats in all; without them a grant has the plan's
+  included seats (Team 3, Pro 1). Fewer than included is refused, and more
+  only on a plan that sells extra seats (Team). A grant's seats change by a
+  new grant with `--replace`, which is what `POST /teams/:id/plan/seats`'s
+  `409 billing_grant_seats` tells a team admin to ask for. Before 374 every
+  grant was written with 1 seat (the plan page showed a granted Team as 1
+  seat, and enforced, it was held to its 3 included) and there was no way to
+  grant more. In production the `billing-grant` owner action takes the same
+  seats (`seats`, a whole number from 1 to 100000; the workflow's `seats`
+  input, issue #891; deployment.md § Owner actions), and its answer says the
+  seats granted.
 - **Beside a live subscription.** A live **Stripe** subscription is refused,
   with or without `--replace`: ending it here would leave Stripe billing the
   customer for a plan we no longer show, and `app_billing_apply` never
@@ -1700,7 +1730,13 @@ defaults to the operator's login.
   on Free again, with nothing deleted. "Live" stays 323's status test, so a
   grant can outlive its end by one tick (5 minutes in production; locally,
   until a worker runs). A new grant first expires the account's lapsed one,
-  so a late tick never blocks it.
+  so a late tick never blocks it. Since 387 the tick (and the reverse
+  trial's, `app_reverse_trial_expire()`) goes account by account in id
+  order, taking the account's billing lock (334's advisory lock) before it
+  writes the rows, as every other subscription writer does; before, it met
+  that lock in 341's sync while holding the row, and could deadlock against
+  a webhook ending the same trial (issue #892;
+  `billing/expireLockOrder.db.test.ts`).
 - **Revoke.** `app_staff_revoke_grant(account, reason, by)` cancels the live
   grant now (`period_end` now) and logs a `revoke` row; Free again, nothing
   deleted. It never touches a Stripe or mock subscription.
@@ -1713,7 +1749,7 @@ defaults to the operator's login.
   note. `granted_by` (the operator's name) is visible to them too.
 
 Tests: `backend/src/billing/grant.db.test.ts` (grant and the plan page, the
-SAST end under a skewed `TZ`, expiry, a lapsed grant, Stripe refused even
+SAST end under a skewed `TZ`, a Team's seats by default and with `--seats`, expiry, a lapsed grant, Stripe refused even
 with `--replace`, mock replaced, revoke, a team's grant and who reads it,
 owner-only) and `backend/scripts/billing-grant.test.ts` (arguments).
 

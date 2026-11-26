@@ -172,6 +172,12 @@ export const ERROR_CODES = [
  *     in that model (Runoff to dam and Upstream inflow to dam 0 %, no River
  *     to dam, no transfer in; engine damInflowRoutes): its yield is 0 at any
  *     size (yield/store.ts checkYieldNode).
+ *   publication_changed (409): POST …/publication or PATCH
+ *     …/publication/:pubId whose `basedOn` is no longer the current
+ *     publication as it stands (another editor published or changed it
+ *     since the form was opened), or a PATCH of a superseded publication
+ *     (publish/publish.ts, issues #863 and #885: compared by `revision`). The Publication panel is an English
+ *     workspace page: it reloads the publication and says why.
  *   assistant_* (issue #610, assistant/routes.ts; docs/api.md § Assistant):
  *     the assistant panel is an English workspace page. Before a stream:
  *     assistant_off (404, ASSISTANT_PROVIDER is off), assistant_rate_limited
@@ -212,6 +218,17 @@ export const ERROR_CODES = [
  *     by POST …/assistant/messages and by a feed save that switches a feed on
  *     (POST …/feeds, PATCH …/feeds/:feedId). The workspace's assistant and
  *     feeds panels word them, with a Resend for the first.
+ *   team_move_admin (403): PATCH /projects/:id { teamId } taking a project
+ *     out of its team, or into a different one, by someone who isn't an
+ *     admin of the team it is in (a plain member, or an outside person the
+ *     team made a direct owner; issue #900, 392_team_project_move_admin).
+ *     The project settings page is an English workspace page.
+ *   paired_baseline_mismatch (400): POST …/runs/:runId/uncertainty with a
+ *     `baselineId` whose ensemble was stored on another engine, when the
+ *     baseline run's inputs, which the job re-runs its kept sets on (issue
+ *     #897), no longer match that ensemble (the engine's pairedRefusal: another
+ *     runoff model, period, or a monthly PE under a varied pan coefficient).
+ *     The workspace's uncertainty panel shows the message.
  */
 export const MACHINE_ERROR_CODES = [
 	'render_token_refused',
@@ -226,6 +243,7 @@ export const MACHINE_ERROR_CODES = [
 	'yield_pattern_unit',
 	'yield_no_dam',
 	'yield_no_inflow',
+	'publication_changed',
 	'assistant_off',
 	'assistant_rate_limited',
 	'assistant_budget_spent',
@@ -249,7 +267,9 @@ export const MACHINE_ERROR_CODES = [
 	'billing_grant_seats',
 	'team_plan_not_cancelled',
 	'email_unverified',
-	'email_disposable'
+	'email_disposable',
+	'team_move_admin',
+	'paired_baseline_mismatch'
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number] | (typeof MACHINE_ERROR_CODES)[number];
 

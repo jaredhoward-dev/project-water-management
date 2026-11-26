@@ -46,6 +46,19 @@ describe('croplandCellsFromTiff', () => {
 		expect(info).toMatchObject({ width: 6, height: 4, blockW: 16, blockH: 16, west: 21, north: -33, pixelW: 0.001, noData: 0, compression: 1 });
 	});
 
+	it('reads a PixelIsPoint raster’s tiepoint as pixel (0, 0)’s centre, half a pixel south-east of its corner', () => {
+		// The same raster as `base`, its tiepoint written at the corner pixel's centre.
+		const point = tiff({ ...base, west: 21.0005, north: -33.0005, rasterType: 2, tile: 16 });
+		const info = readTiffInfo(point);
+		if (typeof info === 'string') throw new Error(info);
+		expect(info.west).toBeCloseTo(21, 12);
+		expect(info.north).toBeCloseTo(-33, 12);
+		expect(count(point)).toEqual(EXPECTED);
+		// PixelIsArea, written explicitly, reads the tiepoint as the corner, as with no key.
+		expect(readTiffInfo(tiff({ ...base, rasterType: 1, tile: 16 }))).toMatchObject({ west: 21, north: -33 });
+		expect(readTiffInfo(tiff({ ...base, rasterType: 7, tile: 16 }))).toMatch(/raster type \(GTRasterTypeGeoKey 7\)/);
+	});
+
 	it('without a no-data value counts every pixel: a no-data 0 then dilutes the share', () => {
 		const cells = count(tiff({ ...base, noData: undefined, tile: 16 }));
 		expect(cells.find((c) => c.row === -16502 && c.col === 10502)!.fraction).toBe(0.25);

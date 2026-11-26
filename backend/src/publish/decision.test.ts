@@ -28,7 +28,8 @@ const publication = {
 	},
 	supersededAt: null,
 	updatedAt: null,
-	updatedBy: null
+	updatedBy: null,
+	revision: 1
 } as Publication;
 
 const view = {

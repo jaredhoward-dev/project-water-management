@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseCsv } from './csv';
 import { cellFormat, numberFormat, unitOf } from './formats';
-import { defuse, sheetNamer } from './names';
+import { defuse, FORMULA_START, sheetNamer, undefuse } from './names';
 import { splitSummary } from './summary';
 
 describe('parseCsv', () => {
@@ -30,6 +30,19 @@ describe('defuse', () => {
 	it('prefixes formula-looking text like the CSV exports, and leaves the rest', () => {
 		for (const s of ['=cmd', '+1', '-2', '@SUM(A1)', '\tx', '\rx']) expect(defuse(s)).toBe(`'${s}`);
 		for (const s of ['Upper farm', 'a=b', '', "'quoted"]) expect(defuse(s)).toBe(s);
+	});
+
+	it('defuses a formula after leading whitespace, a leading line feed and the full-width signs (issue #902)', () => {
+		// LibreOffice Calc's CSV import with "Trim spaces" on evaluates an unquoted ` =1+1` (docs/security.md).
+		for (const s of [' =1+1', '   +1', '\t-2', ' \r\n@SUM(A1)', '\u00a0=cmd', '\nx', '＝1+1', '＋1', '－2', '＠SUM(A1)', ' ＝1'])
+			expect(defuse(s)).toBe(`'${s}`);
+		for (const s of [' Upper farm', '  ', 'Farm -2', 'a ＝ b']) expect(defuse(s)).toBe(s);
+	});
+
+	it('undefuse drops exactly the apostrophe defuse added', () => {
+		for (const s of ['=cmd', ' =1+1', '\tx', '\nx', '＝1', 'Upper farm', "'quoted", "'", '']) expect(undefuse(defuse(s))).toBe(s);
+		expect(undefuse("'Upper farm")).toBe("'Upper farm");
+		expect(FORMULA_START.test("' =1")).toBe(false);
 	});
 });
 

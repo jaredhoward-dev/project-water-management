@@ -15,7 +15,10 @@ import { canonicalEmail } from './metrics.js';
  */
 export const reverseTrialOn = (env: NodeJS.ProcessEnv = process.env): boolean => env.REVERSE_TRIAL === 'true' && billingEnforced(env);
 
-/** What reverse_trial_claim keeps for an address: SHA-256 (hex) of its canonical form, never the address. */
+/**
+ * What reverse_trial_claim keeps for an address: SHA-256 (hex) of its canonical form, never the address. The
+ * database works it out itself (397's canonical_email); this twin is for the tests and the export's parity check.
+ */
 export const reverseTrialHash = (email: string): string => createHash('sha256').update(canonicalEmail(email)).digest('hex');
 
 export type ReverseTrialOutcome = 'started' | 'claimed' | 'live' | 'unverified' | 'disposable' | 'off';
@@ -32,6 +35,7 @@ export async function startReverseTrial(db: Db, userId: string, env: NodeJS.Proc
 	const { rows } = await db.query<{ email: string }>('SELECT email FROM app_user WHERE id = $1', [userId]);
 	if (!rows[0]) return 'unverified';
 	if (isDisposable(rows[0].email)) return 'disposable';
-	const { rows: out } = await db.query<{ outcome: ReverseTrialOutcome }>('SELECT app_reverse_trial_start($1) AS outcome', [reverseTrialHash(rows[0].email)]);
+	// The database hashes the caller's own address itself (397, issue #914); the backend names no address.
+	const { rows: out } = await db.query<{ outcome: ReverseTrialOutcome }>('SELECT app_reverse_trial_start() AS outcome');
 	return out[0]!.outcome;
 }

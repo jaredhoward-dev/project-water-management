@@ -6,7 +6,8 @@
 	// applicant's own words (G13).
 	import type { EvidenceReport } from '@water-management/engine';
 	import type { Signoff } from '#lib/api/index.js';
-	import { fmtDate, fmtNum } from '#lib/format/number.js';
+	import { fmtNum } from '#lib/format/number.js';
+	import { fmtProjectDay } from '#lib/components/project/project.js';
 	import { monthName } from '#lib/format/months.js';
 	import type { VerifyRef } from '#lib/components/packs/pack.js';
 	import LicenceImpactBoard from '../LicenceImpactBoard.svelte';
@@ -25,7 +26,8 @@
 		authorisedBoard = null,
 		frozen = false,
 		signoffs,
-		verify
+		verify,
+		timeZone
 	}: {
 		report: EvidenceReport;
 		/** The headline board against full authorised use (evidence-14), worded; null when there is none (the fixed row says why). */
@@ -39,6 +41,8 @@
 		signoffs: readonly Pick<Signoff, 'fullName' | 'registrationBody' | 'registrationNo'>[];
 		/** An issued pack's manifest hash, short code and verify link; null for a draft. */
 		verify: VerifyRef | null;
+		/** The project's IANA zone, which the run, nomination, publication and endorsement dates are read in (issue #864); undefined = the default zone. */
+		timeZone?: string;
 	} = $props();
 
 	const id = $derived(report.identity);
@@ -66,18 +70,18 @@
 		<dt>Baseline</dt>
 		<dd>
 			{#if id.baseline.nomination}
-				Nominated evidence run, {fmtDate(id.baseline.nomination.nominatedAt)} by {id.baseline.nomination.nominatedBy ?? FORMER_MEMBER}
+				Nominated evidence run, {fmtProjectDay(id.baseline.nomination.nominatedAt, timeZone)} by {id.baseline.nomination.nominatedBy ?? FORMER_MEMBER}
 			{:else}
 				<strong>Not the nominated evidence run</strong>
 			{/if}
 			<span class="sub">{id.baseline.runoffModel === 'gr4j' ? 'GR4J' : id.baseline.runoffModel} · {id.baseline.startDate} – {id.baseline.endDate}</span>
 			<span class="sub" data-testid="evidence-published">
-				{#if id.baseline.published === 'this'}The project’s published baseline (since {fmtDate(id.baseline.publishedAt)}){:else if id.baseline.published === 'other'}<strong>Not the published baseline:</strong> another run was published {fmtDate(id.baseline.publishedAt)}{:else}Nothing is published for this project{/if}
+				{#if id.baseline.published === 'this'}The project’s published baseline (since {fmtProjectDay(id.baseline.publishedAt, timeZone)}){:else if id.baseline.published === 'other'}<strong>Not the published baseline:</strong> another run was published {fmtProjectDay(id.baseline.publishedAt, timeZone)}{:else}Nothing is published for this project{/if}
 			</span>
 			<!-- evidence-13 (163_licensing_authority): the authority's endorsement; a pack drafted before has no such field and says nothing. -->
 			{#if id.baseline.endorsement !== undefined}
 				<span class="sub" data-testid="evidence-endorsement">
-					{#if id.baseline.endorsement}Endorsed by the responsible authority {fmtDate(id.baseline.endorsement.endorsedAt)}{id.baseline.endorsement.endorsedBy ? ` (${id.baseline.endorsement.endorsedBy})` : ''}{:else}<strong>Not endorsed by the responsible authority</strong>{/if}
+					{#if id.baseline.endorsement}Endorsed by the responsible authority {fmtProjectDay(id.baseline.endorsement.endorsedAt, timeZone)}{id.baseline.endorsement.endorsedBy ? ` (${id.baseline.endorsement.endorsedBy})` : ''}{:else}<strong>Not endorsed by the responsible authority</strong>{/if}
 				</span>
 			{/if}
 		</dd>
@@ -101,7 +105,7 @@
 			<dd>
 				{id.application.scenarioName}{id.application.scenarioStatus ? ` (${id.application.scenarioStatus})` : ''}
 				<span class="sub">{id.application.proposals} proposal{id.application.proposals === 1 ? '' : 's'}, {id.application.assumptions} baseline assumption{id.application.assumptions === 1 ? '' : 's'}</span>
-				<span class="sub">Run {fmtDate(id.application.createdAt)} by {id.application.createdBy ?? FORMER_MEMBER}</span>
+				<span class="sub">Run {fmtProjectDay(id.application.createdAt, timeZone)} by {id.application.createdBy ?? FORMER_MEMBER}</span>
 			</dd>
 		</div>
 		<!-- evidence-26 (294_wula_reference): the WULA it models; the works in words are A.2's (G13). Null on a team scenario that records none; absent before evidence-26. -->
@@ -243,7 +247,7 @@
 			{#if mix.leftOut}<p class="small muted" data-testid="evidence-authorised-mix-left-out">{mix.leftOut}</p>{/if}
 		{/if}
 		{#if authorised.builtAt && authorised.engineVersion}
-			<p class="small muted">Run {fmtDate(authorised.builtAt)} on engine {authorised.engineVersion}.</p>
+			<p class="small muted">Run {fmtProjectDay(authorised.builtAt, timeZone)} on engine {authorised.engineVersion}.</p>
 		{/if}
 	</div>
 	{#if board}<p class="k" data-testid="evidence-impact-modelled-h">{MODELLED_HEADING}</p>{/if}

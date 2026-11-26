@@ -41,6 +41,15 @@ describe('stationHttp: what it refuses before asking', () => {
 		['https://[::1]/x', /private or reserved/],
 		['https://[::ffff:127.0.0.1]/x', /private or reserved/],
 		['https://0x7f.1/x', /private or reserved/],
+		// Decimal, octal and short IPv4 forms (the URL parser rewrites them to dotted quads), and IPv4 inside IPv6 written in hex.
+		['https://2130706433/x', /private or reserved/],
+		['https://017700000001/x', /private or reserved/],
+		['https://127.1/x', /private or reserved/],
+		['https://0/x', /private or reserved/],
+		['https://[::ffff:a9fe:a9fe]/x', /private or reserved/],
+		['https://[::ffff:0:7f00:1]/x', /private or reserved/],
+		['https://[::7f00:1]/x', /private or reserved/],
+		['https://[::]/x', /private or reserved/],
 		['https://[fd00:ec2::254]/x', /private or reserved/],
 		['https://localhost/x', /public internet name/],
 		['https://metadata.internal/x', /public internet name/]
@@ -182,6 +191,27 @@ describe('stationHttp: a host that asked us to wait', () => {
 		// Another host is not held back.
 		const other = fake(() => res(200, {}, 'ok'));
 		await expect(stationHttp({ requester: other.requester, throttle }).get({ url: 'https://other.example.org/x', headers: {} })).resolves.toMatchObject({ text: 'ok' });
+	});
+
+	it('a request refused while the host is paused names a Retry-After only when the source gave one (issue #898)', async () => {
+		const throttle: StationThrottle = new Map();
+		const ok = fake(() => res(200, {}, 'ok'));
+		// No Retry-After: our own 60 s pause holds the host, and the local refusal says the source gave none.
+		await stationHttp({ requester: fake(() => res(429)).requester, throttle }).get({ url: 'https://a.example.com/x', headers: {} }).catch(() => {});
+		expect(throttle.get('a.example.com')).toMatchObject({ sourceRetryAfter: false });
+		const local = await stationHttp({ requester: ok.requester, throttle }).get({ url: 'https://a.example.com/y', headers: {} }).catch((e) => e);
+		expect(local).toBeInstanceOf(FeedThrottledError);
+		expect(local).toMatchObject({ status: 429, retryAfterSeconds: null });
+		expect(local.message).toMatch(/gave no Retry-After/);
+		// With one: the local refusal names the time left of the wait the source asked for.
+		await stationHttp({ requester: fake(() => res(503, { 'retry-after': '300' })).requester, throttle }).get({ url: 'https://b.example.com/x', headers: {} }).catch(() => {});
+		expect(throttle.get('b.example.com')).toMatchObject({ sourceRetryAfter: true });
+		const asked = await stationHttp({ requester: ok.requester, throttle }).get({ url: 'https://b.example.com/y', headers: {} }).catch((e) => e);
+		expect(asked).toMatchObject({ status: 503 });
+		expect(asked.retryAfterSeconds).toBeGreaterThan(290);
+		expect(asked.retryAfterSeconds).toBeLessThanOrEqual(300);
+		expect(asked.message).toMatch(/\(Retry-After: (29\d|300) s\)/);
+		expect(ok.calls).toHaveLength(0);
 	});
 
 	it('pauses a 503 without Retry-After for the default, and never past the cap', async () => {

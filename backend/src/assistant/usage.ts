@@ -18,7 +18,7 @@ import { withUser, type Db } from '../db/tx.js';
 import { ApiError } from '../http/errors.js';
 import { logEvent } from '../logging/logEvent.js';
 import { safeError } from '../logging/safeError.js';
-import type { AssistantConfig } from './config.js';
+import { RESERVATION_MARGIN_SECONDS, type AssistantConfig } from './config.js';
 import { dayResetsAt, DOLLAR_REFUSAL, isDollarOutcome, poolAlarmShare, type DollarOutcome } from './dollarCaps.js';
 import type { AssistantDayMeter } from './types.js';
 
@@ -110,13 +110,8 @@ const SPENT: Record<BudgetScope, { code: 'assistant_budget_spent' | 'assistant_u
 	total: { code: 'assistant_total_budget_spent', what: 'The assistant has used this server’s budget for the month' }
 };
 
-/**
- * Seconds past the turn's deadline (cfg.turnSeconds) a reservation lasts
- * before it is charged in full as unsettled: past the assistant Lambda's
- * timeout (the deadline + 15 s, infra/assistant.tf), so a turn that ends
- * normally always settles first, and only a Lambda that died leaves one.
- */
-export const RESERVATION_MARGIN_SECONDS = 120;
+/** Seconds past the turn's deadline a reservation lasts (config.ts, where the turn's own seconds are capped by it). */
+export { RESERVATION_MARGIN_SECONDS } from './config.js';
 
 /** A begun turn: this month's tokens before it, and the budget reserved for it. */
 export interface BegunTurn {
@@ -245,7 +240,10 @@ export const UNPRICED: TurnCost = { cacheReadTokens: 0, cacheWriteTokens: 0, cos
 
 /**
  * Charge a finished turn's tokens and cost to the caller's row and settle its
- * reservation (null: a charge with no reservation, this month). Returns this
+ * reservation (null: a charge with no reservation, this month). A reservation
+ * id no row has (it expired and was charged in full already) charges again,
+ * counted twice by design (264), and logs `assistant_charge_no_reservation`
+ * with the id and the tokens only (388). Returns this
  * month's tokens after it, or null if the charge failed (logged as
  * `assistant_charge_failed`, not thrown: the answer is already sent; the
  * assistant's charge-failed alarm reads that line, infra/alarms.tf). A
@@ -266,15 +264,14 @@ export async function chargeTurn(
 	const cacheWrite = Math.min(input - cacheRead, count(cost.cacheWriteTokens));
 	try {
 		return await withUser(userId, async (db) => {
-			const { rows } = await db.query<UsedRow>('SELECT project_used, user_used, total_used FROM app_assistant_charge($1, $2, $3, $4, $5, $6, $7)', [
-				projectId,
-				reservationId,
-				input,
-				count(outputTokens),
-				cacheRead,
-				cacheWrite,
-				cost.costUsdMicros === null ? null : count(cost.costUsdMicros)
-			]);
+			const { rows } = await db.query<UsedRow & { reservation_missing: boolean | null }>(
+				'SELECT project_used, user_used, total_used, reservation_missing FROM app_assistant_charge($1, $2, $3, $4, $5, $6, $7)',
+				[projectId, reservationId, input, count(outputTokens), cacheRead, cacheWrite, cost.costUsdMicros === null ? null : count(cost.costUsdMicros)]
+			);
+			if (rows[0]?.reservation_missing) {
+				// Counted twice, never too little (264): the expired reservation was charged in full already.
+				logEvent('warn', { event: 'assistant_charge_no_reservation', reservationId, inputTokens: input, outputTokens: count(outputTokens) });
+			}
 			return monthUsed(rows[0]);
 		});
 	} catch (err) {

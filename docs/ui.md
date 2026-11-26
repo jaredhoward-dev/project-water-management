@@ -147,7 +147,14 @@ the code the app shows** with **Turn on the authenticator app**. Email's
 (focused) with **Turn on codes by email** and **Send again (in N s)**, which
 counts down the minute the server allows between sends
 (`lib/auth/resendTimer.svelte.ts`; a pending one shows **Finish turning
-on**). The first way turned on brings the ten recovery codes, once, in a
+on**). Adding the second way from a browser that signed in with the
+password only (the API answers `403 mfa_step_up`, security.md § Two-step
+sign-in) asks for no password: a warning, focused, says to sign in again
+with a code from the way that is on, with **Sign in again** (sign out, then
+the sign-in page, back to the Account page after) and **Cancel**; a refusal
+the page didn't expect (the status read before another tab changed it)
+shows the same instead of calling the password wrong
+(`account/addFactor.ts`, issue #882; `account-add-factor-step-up.spec.ts`). The first way turned on brings the ten recovery codes, once, in a
 highlighted box whose heading takes focus: **Download the codes** (a text file, through the download helper loaded on click; if it can’t load, an alert says to copy the codes instead, never to reload, which would lose them), **Copy the codes** (the same text on the clipboard; a status line says whether it worked) and **I’ve
 saved them**; a second way keeps the same set. With either on: **Remove** /
 **Turn off** on its row, a **Recovery codes** part with how many are left
@@ -269,7 +276,26 @@ Dates a person reads are **day first**: a calendar day is `fmtDay` ("1 Oct
 "on" in a sentence). `fmtDate` takes either, day first: a moment's day in
 the viewer's zone ("11 Oct 2026"; with its time, as `fmtStamp`), a bare day as
 it is. Machine text (a day count, a sort key, a file name, a CSV cell) takes
-`isoDay`, the viewer's day of a moment as "2026-10-11". The farm view's notes
+`isoDay`, the viewer's day of a moment as "2026-10-11". **A run or a
+publication is dated on the project's clock**, never the viewer's (issue
+#899): a run's name when it has no label (`runDisplayName`, "27 Oct 2026
+00:30", the moment the run report's "Run of …" names, `reportRunName`), and
+when a run ran or was nominated or a change was made in the Runs list, the
+run pickers (`runOptionLabel` with `fmtProjectWhen`), the comparison and
+scenario headers, the Demands caption, a scenario's alternatives and
+History (its day headings, times and the header line) read the project's
+zone through `fmtProjectStamp`/`fmtProjectWhen`/`fmtProjectDay`
+(`project/project.ts`; "today" and "yesterday" are the project's days). The
+project page provides the zone through context (`project/projectClock.ts`,
+`projectTimeZoneReader`), and "ran today", "3 days ago" (`ranAgo` in
+`overview/latestRun.ts` and `network/supplyColour.ts`) and the report job
+page's "Asked for" count and date by it too. Compare dates each run in its
+own project's zone, which `GET /compare/runs` sends with each side and
+`GET /projects` with each project (`projectZoneOf` in `compare/picker.ts`),
+so a copy in another zone reads on its own clock; the open project's zone
+(`DEFAULT_TIME_ZONE` on the standalone /compare page) stands in only when an
+older API sends none. A workspace screen and the run's report never name one
+run two ways near midnight. The farm view's notes
 write their moments through the catalogue's words ("07:42 on 19 Jan 2024",
 `fmtStampTime`). The engine's warnings write their days day first too
 (`dayText`, engine ≥ 1.100.0). Runs & results, the Summary and History use
@@ -3144,7 +3170,12 @@ each role in a short list under the table: viewers read every team project,
 editors edit them, owners own them and manage the team. A team viewer doesn't get "New project"; the
 New project dialog and the Summary's *Move to* list offer only teams where
 you're a member or admin, and copying a team project you only view makes a
-personal copy (the Copy dialog says so).
+personal copy (the Copy dialog says so). On a team project, the *Move to*
+list shows only to an admin of its team; any other owner sees "Only an admin
+of <team> can move it out of the team" in its place (issue #900). A team
+admin who owns it only through the team may choose Personal: the move keeps
+them as a direct owner (`project/teamMove.ts` decides who sees which
+choices).
 
 **Reset two-step** (admins, on every row below admin, beside Remove on the row's actions line;
 205_mfa_recovery, [security.md § Two-step sign-in](./security.md#two-step-sign-in) → Recovery):
@@ -7060,7 +7091,10 @@ the automatic DWS feed's own code (`@water-management/engine/dws`), so a
 missing-data quality code (151, 165, 170, 172, 246, 247, 255), a blank value or
 a negative placeholder such as -999 is a gap, never a value. The summary adds a
 *DWS export* line (rows, the value column as the file's format block describes
-it, and how many rows were read as gaps and why) and the quality codes met; a
+it, and how many rows were read as gaps and why) and the quality codes met.
+When that block states the values in m³/s (`dws.ts` `unit`), the form's
+*Unit* is set to m³/s for a flow kind, so a unit left at l/s or ML/day from
+an earlier file can't scale the export by 1 000 or 86.4; a
 sub-daily DWS export (a TIME column) is refused. A plain date,value CSV reads
 a negative value as a gap too (issue #51: every kind is a rain, flow or
 evaporation, so −999 or −1 is a "no reading" placeholder), and its summary
@@ -9767,7 +9801,31 @@ calibration's line points at *How the shown run fits* for NSE and PBIAS.
   seed 1", `lib/calibration/fit.ts` `searchSummary`; **Change** opens them in
   place, a `<details>` with the `app.css` `.fold` style, and the line says
   *needs fixing* while a field inside can't be taken), then **Fit
-  automatically** with "*n* runs in all." beside it, so the button is on the
+  automatically** with "*n* runs in all." beside it (over several
+  locations, "*n* runs in all over *k* locations."): one budget per
+  optimisation of the engine's own plan (`plannedFits`, the rule
+  `calibrate()` builds its optimisations from; `fit.ts` `planRuns`), with the
+  fit without the WR2012 penalty at the headline's step only, and the dry
+  → wet test only at a step whose record has 4 qualifying water years: the
+  panel reads the model input when it opens and each step's
+  count with the engine's `qualifyingWaterYears` (the years the test
+  ranks; `fit.ts` `stepWaterYears`), with the form and network as they
+  stand, 300 ms after the last edit; until then, or where a step can't
+  be set up yet, the test is counted (issues #865, #894). That recompute
+  takes about 63 ms (median of 9) on a V1-sized synthetic project (16 000
+  days, 13 nodes, one step; Node 24 on the dev laptop, 2026-11-26), about
+  one `prepareCalibration` per step, so it runs on the main thread. The automated
+  calibration's "*n* model runs in all" plans each rule case the same way,
+  one step at the headline (`autoFit.ts` `autoRunsTotal`, its years from
+  the engine's `ruleCaseWaterYears`, the rules' flagged-year exclusions
+  out; about 115 ms on the same project, once per load). Both panels
+  share one load of the model input per project and revision (its
+  `updatedAt`; `lib/calibration/modelInput.ts`, issue #913); **Fit** loads
+  it afresh, since a feed can add days without moving `updatedAt`, and
+  the estimates then read that one, as does the rules panel after the
+  rules are saved. The server's own estimate, which refuses rules that
+  would run too long, counts each case the same way
+  (`planAutoCalibration`'s `caseEvaluations`). The button is on the
   first screen of the section at 1440×900 (`fit-panel-layout.spec.ts`). The
   seed's, starts' and second record's explanations are under the page's
   *Explain each setting* switch. It takes
@@ -9779,8 +9837,9 @@ calibration's line points at *How the shown run fits* for NSE and PBIAS.
   **starts** (default 5, 1–10: separate searches of the whole record from
   their own seeds, the best kept; model.md §2.10b), which parameters to fit
   (GR4J X2 only when exchange is on), and whether to validate. Validation
-  runs the split-sample and dry → wet tests: two more fits. The run count is
-  budget × (starts + 2 with validation + 1 with the WR2012 penalty), and the
+  runs the split-sample and dry → wet tests: two more fits (one on a record
+  under 4 qualifying water years, which skips the dry → wet test). The run count is
+  budget × (starts + 2 with validation, or + 1 on such a record, + 1 with the WR2012 penalty), and the
   progress line names the start. The fit always leaves out the stored
   exclusions; the result line gives the bounds, the seed, the starts and the
   number of excluded periods. With more than one start a **Starts** table
@@ -11249,7 +11308,13 @@ read it before.
   focus on the level) changes the current notice in place (`PATCH`,
   no re-publishing): "Notice saved." The edit form and the publish dialog
   keep separate notices and errors, so opening one never overwrites the
-  other's typing. A publish that succeeds but whose history refresh
+  other's typing. Each form sends the publication it was filled in from
+  (`basedOn`: its id and revision, issues #863 and #885): when another editor has published or changed the
+  notice since, the server refuses it (`409 publication_changed`) and the
+  form reloads the publication, starts again from it and says "Another
+  editor published or changed the notice since you opened this form, so
+  nothing was saved…", so a stale form never lifts or re-imposes a
+  restriction. A publish that succeeds but whose history refresh
   fails still closes as published, with "The publication history couldn't
   be refreshed: reload the page to see it." rather than an error. The focus
   goes where the page is after each act (#586 round 2,
@@ -11860,7 +11925,9 @@ read it before.
   An ensemble run on a newer engine than the run says so. **Reproduce in
   this browser** re-runs the stored ensemble from its seed and options and
   reports "Reproduced: the same … members, verdicts, outputs and coverage" or
-  the first differences. Below, **Every ensemble of this run** lists each one
+  the first differences; it runs this web build's engine, so for an ensemble
+  stored on another engine it says the differences may be the engine's
+  changes, not forged members (`reproducedText`). Below, **Every ensemble of this run** lists each one
   ever started, newest first (who, when, stored or "started, never stored",
   seed, sets, kept), each with how its rule differs from the shown one, and a
   line counts the starts never stored. With no ensemble yet the panel is
@@ -14364,6 +14431,14 @@ exists, says so with a link to Runs & results. The Overview's published
 baseline card links to the published run's report (**Report**, beside
 **Open in Runs**).
 
+- **Dates** (issue #878): every moment on the page (when the run was made,
+  its publications and the one before, the notes' last change, the
+  sign-offs, the impact baseline's run, when the report was prepared, and a
+  label-less run's "Run of …" name) is on the project's clock
+  (`report/sections.ts` `reportStamp`, from `reportTimeZone`: the project's
+  time zone, Africa/Johannesburg when none), never the viewer's, as the
+  evidence report and the server PDF date theirs.
+
 - **Impact report** (`&against=<projectId>:<runId>`, Compare runs' **Export
   impact report**, issue #17 A4): the same report with the cover's eyebrow
   reading *Impact report* and a first section, **Impact against the
@@ -14673,6 +14748,13 @@ Viewer role and up; a contributor or farmer is told it needs the viewer role.
 - **Entry links.** **Evidence report** on the Runs tab, beside **Report**,
   for the current nominated run or a scenario run; and in the head of a
   scenario's comparison (`ScenarioCompare`), for the scenario's last run.
+- **Dates** (issues #860, #864): every run, pack, nomination, publication,
+  endorsement, revision, citation and sign-off date on the page, and a
+  pack's stamp, is read in the project's time zone (`fmtProjectDay`, and
+  `fmtProjectStamp` where a time of day shows; `project/project.ts`), never
+  the viewer's, so one page never dates the same run in two zones. A pack's
+  page takes the zone from `packTimeZone` (a render session, which reads no
+  project, uses the renderer browser's zone, the project's).
 - **Board 1, the checks** (screen only, open by default): every check the
   engine makes (`evidenceChecks`), failures first, each marked *stops
   issue* or *printed, doesn't stop issue*, with what was found and the fix.
@@ -14891,7 +14973,11 @@ Viewer role and up; a contributor or farmer is told it needs the viewer role.
     the cases run. A cancelled job is said plainly (*The last run was
     cancelled.*, `evidence-future-cancelled`), never as a failure, and the
     Run button comes back. A reload or another tab picks the job up (the GET returns the
-    newest one). Viewers get no board, and a pack never has one: a pack
+    newest one). When the catchment boundary has been drawn again or
+    removed since the result was read over it (issue #889), the board warns
+    so (`evidence-future-boundary`) and § 8 itself carries an amber banner
+    (`evidence-future-boundary-stale`; also for a result stored before the
+    boundary was recorded). Viewers get no board, and a pack never has one: a pack
     freezes § 8 as it was drafted.
   - **Appendix A** (A.1 settings, with the declared rule; A.2 the ops with
     their class and the input diff; A.3 series and SHA-256; A.4 baseline
@@ -15003,7 +15089,8 @@ their own application's in [their own view](#the-applicants-pack-view).
   [evidence-pack.md § Reproduction](./evidence-pack.md#reproduction);
   `packs/pack.ts` `reproductionNote`, `data-testid="pack-reproduction"`
   with `data-state` the status): *Reproduced on the server* with the engine
-  and date (an info box), *Not reproduced* with each failed check listed (an
+  and date (the project's calendar day, `packTimeZone`, as the stamp; issue
+  #878) (an info box), *Not reproduced* with each failed check listed (an
   error), *Not re-run on the runs' own engine* when only the re-runs differ
   on another engine (a warning), a quiet *re-running* line with **Check
   again** while its job runs, or that it couldn't be done and why. An editor
@@ -15392,7 +15479,10 @@ published.
   can be had, "We couldn’t load your hydrological unit", never a blank
   line; a farm whose figures answer 403/404, unlinked since the list loaded,
   leaves the list and its saved copy goes, as a project the list's own
-  403/404 leaves out: `farm/load.ts` `cardOnFailure`), and goes straight to the only one. `/farm/[projectId]` is one farm (`?node=` and a
+  403/404 leaves out, while one whose preview is withheld (403
+  `farm_preview_withheld`) stays and says why, as the farm page does, with
+  no saved figures shown as current, its saved copy kept (issue #875):
+  `farm/load.ts` `cardOnFailure`), and goes straight to the only one. `/farm/[projectId]` is one farm (`?node=` and a
   switcher when the farmer has several there: a row of links above the name
   for up to 4 farms; past that, folded under "Your hydrological units in this catchment
   (N farms)", so the name and the WUA's notice stay on the first screen,

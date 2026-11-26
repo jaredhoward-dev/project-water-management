@@ -409,6 +409,30 @@ describe('withdraw, reopen and delete', () => {
 	});
 });
 
+describe('deleting a run of an application before it is decided', () => {
+	it('keeps the application’s name out of the project’s log, which every viewer reads (control: a team run’s label is logged)', async () => {
+		const sid = await apply(applicantB, 'Secret weir', []);
+		const older = (await applicantB.call('POST', `${P()}/scenarios/${sid}/runs`, {})).body.run.id as string;
+		expect((await applicantB.call('POST', `${P()}/scenarios/${sid}/runs`, {})).status).toBe(201);
+		expect((await applicantB.call('POST', `${P()}/scenarios/${sid}/submit`)).body.scenario.status).toBe('submitted');
+		// The assessors read a submitted application's runs, and may delete one that nothing keeps.
+		const del = await assessor.call('DELETE', `${P()}/runs/${older}`);
+		expect(del.status, JSON.stringify(del.body)).toBe(204);
+		const [event] = await asOwner(`SELECT subject FROM audit_event WHERE project_id = $1 AND kind = 'run.deleted' AND subject->'runIds' ? $2`, [projectId, older]);
+		expect(event.subject).toEqual(expect.objectContaining({ runIds: [older], application: true, reason: 'deleted' }));
+		expect(JSON.stringify(event.subject)).not.toContain('Secret weir');
+		// The viewer's History neither (they can't read the application until it is decided).
+		expect((await viewer.call('GET', `${P()}/scenarios/${sid}`)).status).toBe(404);
+		expect(JSON.stringify((await viewer.call('GET', `${P()}/history?kind=run`)).body)).not.toContain('Secret weir');
+		// Positive control: a team run's deletion names it.
+		const team = await runModel(owner, 'Scratch run');
+		expect((await assessor.call('DELETE', `${P()}/runs/${team}`)).status).toBe(204);
+		const [teamEvent] = await asOwner(`SELECT subject FROM audit_event WHERE project_id = $1 AND kind = 'run.deleted' AND subject->'runIds' ? $2`, [projectId, team]);
+		expect(teamEvent.subject).toEqual(expect.objectContaining({ runIds: [team], label: 'Scratch run' }));
+		expect(JSON.stringify((await viewer.call('GET', `${P()}/history?kind=run`)).body)).toContain('Scratch run');
+	});
+});
+
 describe('roles', () => {
 	it('lets a contributor linked to a farm read that farm’s publication row (control: one without a link can’t)', async () => {
 		expect(await rowsAs(applicantA, 'SELECT node_id FROM publication_farm')).toEqual([{ node_id: rooikloof.id }]);
@@ -445,5 +469,63 @@ describe('roles', () => {
 describe('project routes for a contributor', () => {
 	it('answers a contributor’s alert-events with no event', async () => {
 		expect(await applicantB.call('GET', `/projects/${projectId}/alert-events`)).toEqual({ status: 200, body: { events: [] } });
+	});
+});
+
+// Issue #901: the party prune (049) ran only when a member's party or role
+// changed. An applicant removed and later re-invited (with no party) kept the
+// shares of their own applications, and those still let their old party read
+// them (access checks only that a share row exists). 393_prune_shares_on_join
+// prunes on join and on leave too.
+describe('a removed and re-invited applicant', () => {
+	let leaver: User; // contributor, party "Doornhoek Trust", owns the application
+	let partner: User; // contributor, same party
+	let sid: string;
+	const reads = async (u: User) => (await u.call('GET', `${P()}/scenarios/${sid}`)).status;
+	const invite = async (u: User) => expect((await owner.call('POST', `${P()}/members`, { email: u.email, role: 'contributor' })).status, u.email).toBe(201);
+	const remove = async (u: User) => expect((await owner.call('DELETE', `${P()}/members/${u.id}`)).status, u.email).toBe(204);
+	const setParty = async (u: User, party: string | null) =>
+		expect((await owner.call('PATCH', `${P()}/members/${u.id}`, { party: party ?? '' })).body.member.party, u.email).toBe(party);
+	const share = async () => expect((await leaver.call('POST', `${P()}/scenarios/${sid}/members`, { userId: partner.id })).status).toBe(201);
+	const shares = async () => asOwner('SELECT user_id FROM scenario_member WHERE scenario_id = $1', [sid]);
+
+	beforeAll(async () => {
+		[leaver, partner] = (await Promise.all(['Leaver', 'Partner'].map((n) => signUp(n)))) as [User, User];
+		for (const u of [leaver, partner]) {
+			await invite(u);
+			await setParty(u, 'Doornhoek Trust');
+		}
+		sid = await apply(leaver, 'Leaver application', []);
+	});
+
+	it('shares within the party (positive control), and ends those shares when the owner of the application leaves', async () => {
+		await share();
+		expect(await reads(partner)).toBe(200);
+		await remove(leaver);
+		expect(await shares()).toEqual([]);
+		expect(await reads(partner)).toBe(404);
+		// Re-invited with no party: their application again, shared with nobody.
+		await invite(leaver);
+		expect(await reads(leaver)).toBe(200);
+		expect(await reads(partner)).toBe(404);
+	});
+
+	it('prunes a share the rule no longer allows when its owner joins again (one left from before 393)', async () => {
+		await remove(leaver);
+		// Plant the share as it stood before 393: kept through the leave (replica: triggers off).
+		await asOwner(
+			`BEGIN; SET LOCAL session_replication_role = replica;
+			 INSERT INTO scenario_member (scenario_id, project_id, user_id) VALUES ('${sid}', '${projectId}', '${partner.id}');
+			 COMMIT`
+		);
+		expect(await reads(partner)).toBe(200);
+		await invite(leaver);
+		expect(await shares()).toEqual([]);
+		expect(await reads(partner)).toBe(404);
+		// Positive control: back in the party, the owner shares again and the partner reads it.
+		await setParty(leaver, 'Doornhoek Trust');
+		await share();
+		expect(await reads(partner)).toBe(200);
+		expect(await shares()).toEqual([{ user_id: partner.id }]);
 	});
 });

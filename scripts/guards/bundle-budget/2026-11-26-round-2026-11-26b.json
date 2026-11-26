@@ -1,0 +1,4 @@
+{
+	"addKb": 9,
+	"why": "Round 2026-11-26b's frontend: the account step-up panel (#882), project-zone dates in the workspace and per-side compare zones (#899), the evidence/report date helpers (#864, #878), the farm withheld state (#875), the comparison and calibration estimate changes (#894, #913) and the shared model-input cache; measured main (#862's head) 2562 KB, this branch 2571 KB"
+}

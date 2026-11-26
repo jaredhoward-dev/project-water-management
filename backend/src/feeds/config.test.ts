@@ -232,6 +232,15 @@ describe('a station API feed (issue #784)', () => {
 		}
 		expect(issue({ ...base, url: 'https://api.example.com/{station}/rain?from={start}&to={end}' })).toBeUndefined();
 	});
+	it('refuses a placeholder in the site however the URL spells its authority (backslashes, missing or extra slashes, tabs)', () => {
+		// The URL parser reads each of these with {station} as the host, so the station ID (dots allowed) chose the site:
+		// https:\\{station}/rain with station "attacker.example" asked https://attacker.example/rain under the same binding.
+		for (const url of ['https:\\\\{station}/rain', 'https:{station}/rain', 'https:/{station}/rain', 'https:///{station}/rain', 'https:/\t/{station}/rain', 'HTTPS:\\{station}.example.com/rain', 'https:\\\\{station}%2ecom/rain', 'https:api.example.com:{start}/rain']) {
+			expect(issue({ ...base, url }), JSON.stringify(url)).toMatch(/site \(its host\) must be written out/);
+		}
+		// Those spellings with a written-out host are still the host the owner typed, and stay allowed.
+		expect(issue({ ...base, url: 'https:\\\\api.example.com/{station}/rain' })).toBeUndefined();
+	});
 
 	it('refuses a host the app’s own feeds and ingest read', () => {
 		for (const host of ['data.chc.ucsb.edu', 'chc.ucsb.edu', 'www.dws.gov.za', 'power.larc.nasa.gov', 'urs.earthdata.nasa.gov', 'storage.googleapis.com', 'foo.storage.googleapis.com', 's3.af-south-1.amazonaws.com', 'nex-gddp-cmip6.s3.us-west-2.amazonaws.com', 'DATA.CHC.UCSB.EDU.']) {

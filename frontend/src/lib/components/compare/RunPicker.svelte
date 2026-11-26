@@ -4,8 +4,14 @@
 	// legend, `actions` beside it, and a coloured top edge (`colour`).
 	import type { Snippet } from 'svelte';
 	import type { ProjectSummary, RunMeta } from '#lib/api/index.js';
-	import { fmtWhen } from '#lib/format/number.js';
-	import { runOptionLabel } from './picker';
+	import { projectZoneOf, runOptionLabel } from './picker';
+	import { fmtProjectWhen } from '#lib/components/project/project.js';
+	import { projectTimeZoneReader } from '#lib/components/project/projectClock.js';
+
+	// Run dates on the picked project's own clock, as its run report dates them (issue #899): the picker can hold
+	// another project's runs, so its zone comes from the project list, the open project's only as a fallback.
+	const contextZone = projectTimeZoneReader();
+	const fmtWhen = (iso: string) => fmtProjectWhen(iso, projectZoneOf(projects, projectId, contextZone()));
 
 	let {
 		id,

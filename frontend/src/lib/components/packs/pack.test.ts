@@ -59,12 +59,18 @@ describe('packStamp', () => {
 		expect(packStamp(pack({ status: 'withdrawn' }))).toBe('Withdrawn · version 1');
 	});
 
-	it('dates the issue in the viewer’s zone, on either side of the date line (skewed TZ)', () => {
-		const issuedAt = '2026-09-29T23:30:00.000Z';
-		process.env.TZ = 'Pacific/Kiritimati';
-		expect(packStamp(pack({ status: 'issued', issuedAt }))).toBe('Issued · version 1 · 30 Sep 2026');
-		process.env.TZ = 'Pacific/Pago_Pago';
-		expect(packStamp(pack({ status: 'issued', issuedAt }))).toBe('Issued · version 1 · 29 Sep 2026');
+	it('dates the issue as the project’s calendar day, whatever the viewer’s zone (issue #864, skewed TZ)', () => {
+		// 22:30 UTC is already 30 Sep in Johannesburg, still 29 Sep in St John's.
+		const issuedAt = '2026-09-29T22:30:00.000Z';
+		for (const viewer of ['Pacific/Kiritimati', 'Pacific/Pago_Pago']) {
+			process.env.TZ = viewer;
+			expect(packStamp(pack({ status: 'issued', issuedAt }), 'Africa/Johannesburg')).toBe('Issued · version 1 · 30 Sep 2026');
+			expect(packStamp(pack({ status: 'superseded', issuedAt }), 'America/St_Johns')).toBe('Superseded · version 1 · issued 29 Sep 2026');
+			// No zone (a pack page without the project): the default zone, Johannesburg.
+			expect(packStamp(pack({ status: 'withdrawn', issuedAt }))).toBe('Withdrawn · version 1 · issued 30 Sep 2026');
+		}
+		// One minute before the project's midnight stays on the earlier day.
+		expect(packStamp(pack({ status: 'issued', issuedAt: '2026-09-29T21:59:00.000Z' }), 'Africa/Johannesburg')).toBe('Issued · version 1 · 29 Sep 2026');
 	});
 });
 
@@ -347,6 +353,24 @@ describe('reproductionNote', () => {
 			state({ status: 'reproduced', engineVersion: '9.1.0', checks: [ok('reproduce:baseline'), ok('reproduce:application'), ok('headline'), ok('reproduce:headline')] })
 		)!;
 		expect(headline.text).toContain('both its runs and the headline board’s pair at full allocation gave the same results, and every one of its 4 checks passed');
+	});
+
+	it('dates the check as the project’s calendar day, whatever the viewer’s zone (issue #878, skewed TZ)', () => {
+		// 22:30 UTC is already 1 Oct in Johannesburg, still 30 Sep in St John's.
+		const checkedAt = '2026-09-30T22:30:00.000Z';
+		const at = (timeZone?: string) => reproductionNote(state({ status: 'reproduced', engineVersion: '9.1.0', checkedAt, checks: [ok('reproduce:baseline')] }), timeZone)!.text;
+		for (const viewer of ['Pacific/Kiritimati', 'Pacific/Pago_Pago']) {
+			process.env.TZ = viewer;
+			expect(at('Africa/Johannesburg')).toMatch(/^Reproduced on the server on 1 Oct 2026:/);
+			expect(at('America/St_Johns')).toMatch(/^Reproduced on the server on 30 Sep 2026:/);
+			// No zone (packTimeZone without the project): the default zone, Johannesburg.
+			expect(at()).toMatch(/^Reproduced on the server on 1 Oct 2026:/);
+			// A failed check too.
+			const failed = reproductionNote(state({ status: 'not_reproduced', engineVersion: '9.1.0', checkedAt, checks: [bad('reproduce:baseline')] }), 'America/St_Johns')!;
+			expect(failed.text).toMatch(/^Not reproduced on the server on 30 Sep 2026:/);
+		}
+		// One minute before the project's midnight stays on the earlier day.
+		expect(reproductionNote(state({ status: 'reproduced', engineVersion: '9.1.0', checkedAt: '2026-09-30T21:59:00.000Z', checks: [ok('reproduce:baseline')] }), 'Africa/Johannesburg')!.text).toMatch(/ on 30 Sep 2026:/);
 	});
 
 	it('lists the failed checks when it didn’t reproduce', () => {

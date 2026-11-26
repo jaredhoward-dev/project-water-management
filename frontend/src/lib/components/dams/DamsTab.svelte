@@ -47,7 +47,7 @@
 	import { isScenarioRun } from '#lib/components/runs/scenarioRun.js';
 	import { FLOW_OPEN_DAYS, FLOW_WINDOWS } from '#lib/components/overview/summaryChart.js';
 	import { cachedSeries, detailCache } from '#lib/components/runs/cache.js';
-	import { fmtDay, fmtNum, fmtWhen } from '#lib/format/number.js';
+	import { fmtDay, fmtNum } from '#lib/format/number.js';
 	import type { ModelEditor } from '#lib/model/editor.svelte.js';
 	import { withParam } from '#lib/workspace/overlays.js';
 	import { mapNodeHref } from '#lib/workspace/mapLinks.js';
@@ -55,6 +55,12 @@
 	import { changeWords, DAM_CHANGED, damCards, damsRunText, damsSummary, fmtVolume, pickDam, SPARK_CAPTION, storageChartSeries, storageSpark, type StorageUnit } from './dams';
 	import DamProposalsBox from './DamProposalsBox.svelte';
 	import DamObservedBox from './DamObservedBox.svelte';
+	import { fmtProjectWhen } from '#lib/components/project/project.js';
+	import { projectTimeZoneReader } from '#lib/components/project/projectClock.js';
+
+	// Run dates on the project's clock, as its run report dates them (issue #899).
+	const timeZone = projectTimeZoneReader();
+	const fmtWhen = (iso: string) => fmtProjectWhen(iso, timeZone());
 
 	let {
 		projectId,
@@ -199,7 +205,7 @@
 	const picked = $derived(pickDam(cards, damParam));
 	// A failed run list is not "no run yet": the header says which it is, as the alert below does.
 	const runText = $derived(
-		runs === null ? 'run list couldn’t be loaded' : latest ? damsRunText(latest, isNewest, ranAgo(latest.createdAt)) : null
+		runs === null ? 'run list couldn’t be loaded' : latest ? damsRunText(latest, isNewest, ranAgo(latest.createdAt, new Date(), timeZone())) : null
 	);
 	const summary = $derived(damsSummary(cards.length, cards.reduce((s, c) => s + c.nowCapacityM3, 0), runText));
 	// The card's sparkline is its record's, as its figures are (issue #51): a forecast run's stops before the forecast.

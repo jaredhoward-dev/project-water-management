@@ -531,10 +531,15 @@ area-weighted CHIRPS (`rain_chirps_mm`, the from-units feeds,
   a unit feed whose unit has left the model or is no longer a farm, so the
   site check never fails a fetch with database text.
 - **Carried** by a copy, the project document and an import, moved to the
-  unit's new id; a unit rain series whose unit has left the model is **left
-  out** of a copy and of the export (with no site it would become the
-  catchment's rain). An import refuses rain sited at a gauge, a user or a farm
-  with no area. A restore puts it back at its unit, and is refused (`409
+  unit's new id; a unit rain series whose unit has left the model, or is no
+  longer a land unit (a farm the editor made a gauge), is **left out** of a
+  copy and of the export (with no site it would become the catchment's rain).
+  An import refuses rain sited at a gauge or a user; a farm with no area keeps
+  its rain, as a restore does (the run leaves it out and says so), so the
+  download of a unit whose area was later typed to 0 imports back. Likewise a
+  flow record whose gauge is no longer a gauge above the outlet (made a farm
+  or the outlet) goes in the export as the outlet's, as one whose gauge left
+  the model does, since the import refuses such a site. A restore puts it back at its unit, and is refused (`409
   site_gone`) while that node is no longer a land unit.
 - **The unit's MAP**: `node.map_mm` (1–12 000 mm, NULL = none) and
   `node.map_source` (1–600 characters, not blank), with
@@ -1086,7 +1091,9 @@ the result change?", and put back any earlier version.
   `series.held` (WP-2.16: an API key's
   pushed days the data-quality rules flag, with `negative`, `outlier`, up to
   5 `examples` and the `source` label; automatic runs wait until a person
-  runs the model, `series/hold.ts`), `run.created/changed/deleted/trimmed`, `feed.configured`,
+  runs the model, `series/hold.ts`), `run.created/changed/deleted/trimmed`
+  (a run of an application not yet decided: `application: true` in place
+  of its label, which is the application's name by default), `feed.configured`,
   `feed.failed` (only the first failure after a success), `project.changed`,
   `report_schedule.configured`, `scenario.created/changed/deleted`, the
   application workflow's `scenario.submitted/withdrawn/reopened/decided/shared/unshared`
@@ -1179,8 +1186,11 @@ the result change?", and put back any earlier version.
   (`SECURITY DEFINER`, before the row goes) sets `actor_label` to
   `Deleted user` on every event they acted in, `displayName` to
   `Deleted user` in every event whose subject's `userId` is theirs, and
-  `author` in every `note.deleted` about their note; then the foreign key
-  clears `actor_user_id`. The events, kinds and times stay (the project's
+  `author` in every `note.deleted` about their note, and (383)
+  `handedFrom` in a team project's hand-over event (`handedFromId`, or for
+  older events the `member.removed` event of the same transaction), and
+  deletes every invite addressed to them, live or expired; then the
+  foreign key clears `actor_user_id`. The events, kinds and times stay (the project's
   audit trail). What every other foreign key to `app_user` does is
   classified in `catalogue.db.test.ts` (`APP_USER_ON_DELETE`: cascade or
   set null; none restricts since 138);
@@ -2885,8 +2895,16 @@ projection's read and narrows their series further:
   `app_share_candidates(project)` lists, for the current user, whom they may
   share with (id and display name, never an email): the only way an
   applicant names someone, so no answer says who else is a member.
-  `project_member_prune_shares` (after a change of party or role) deletes
-  the shares the rule no longer allows.
+  `project_member_prune_shares` deletes the shares the rule no longer
+  allows, of the member's applications or to them: after a change of party
+  or role (049), and after a member joins or leaves (393_prune_shares_on_join,
+  issue #901). Shares *to* a member who leaves go with their row anyway (the
+  foreign key cascades); the leave prune ends the shares *of their own
+  applications*, since the rule refuses every share of an owner who is no
+  longer a member, so an applicant removed and later re-invited comes back
+  sharing with nobody until they share again within the party the owner
+  gives them. The join prune catches any share left from before 393 (which
+  also deleted every existing share the rule refused).
 - **`project_member.specialist`** (167_signers, boolean, default false,
   needs a party: `project_member_specialist_party`): the applying party's
   appointed specialist, who signs the draft evidence packs of the party's
@@ -3031,6 +3049,16 @@ chose for the project's stakeholders, with the WUA's restriction notice.
   it) and refuses any change to one once made, except the endorser's
   account going clearing `endorsed_by`. The `run_publication_endorsement`
   CHECK keeps `endorsed_by` and the note empty without `endorsed_at`.
+- **The revision (389_publication_revision, issue #885):** `revision
+  integer NOT NULL ≥ 1`, what a Publish dialog's or Edit notice form's
+  `basedOn` names (api.md § Publication). The `run_publication_count_revision`
+  trigger keeps it: 1 on insert whatever the row says, one more on every
+  UPDATE of `note`, `restriction_level`, `restriction_pct`, `notice` or
+  `next_expected_on`. It's in no water_app grant (022's, 081's and 163's
+  column grants are unchanged), so only that trigger moves it; superseding,
+  endorsing and an account going leave it alone. The trigger fires before
+  `run_publication_final` (name order), so a superseded publication's notice
+  columns written again, even unchanged, are refused as history.
 - **The notice, by language (081_notice_languages.sql, issue #58).**
   `notice` is one jsonb object from a language code to the WUA's words in
   that language, `{"en": "…", "af": "…"}`; `{}` is no notice (never NULL).
@@ -3329,7 +3357,7 @@ Plain-text notes and comments kept against what they are about (WP-2.7;
   it was written, when an edit replaced it, by whom: the author, the only
   one who edits). Written by the `note_write_revision` trigger (`AFTER
   UPDATE OF body`, `SECURITY DEFINER`) on every body change of a note with a
-  `scenario_id`; other notes keep none. RLS: SELECT where the note itself is
+  `scenario_id` or (since 128) a `pack_id`; other notes keep none. RLS: SELECT where the note itself is
   readable (the policy's subquery runs under the caller's note policies);
   water_app has SELECT only (the catalogue test's append-only and
   written-through-a-function lists). Indexed on `(note_id, edited_at)`,
@@ -3485,7 +3513,15 @@ would otherwise become the direct owner of a project inside a team they can
 only read. `project_insert` and `project_update` enforce this (008);
 `project_update` only gates a *change* of team, so a direct editor can still
 edit a project whose team they only view. A viewer copying a team project gets
-a personal copy.
+a personal copy. **Taking a project out of a team, or into a different one,
+also needs admin on the team it leaves** (issue #900,
+392_team_project_move_admin): a plain member who created it, or an outside
+person the team made a direct owner, owns it directly but may not take it from
+the team's admins (nor keep it by moving it out and then leaving). RLS's WITH
+CHECK can't see the old team, so the BEFORE UPDATE OF `team_id` trigger
+`project_team_move_guard` refuses it for water_app (not for the owner role, so
+`ON DELETE SET NULL` still works), and `PATCH /projects/:id` answers
+`403 team_move_admin` first.
 
 **Leaving a team takes its projects with it** (operator decision,
 2026-11-24; `backend/src/teams/leaveProjects.ts`). When someone leaves a
@@ -3831,7 +3867,10 @@ page holds the conversation and sends it with each turn.
   cost (a model the table hasn't) adds 1 to `unpriced_turns` instead. The
   4-argument form stays for a backend released before 324: the same charge
   with no cache tokens, unpriced. A reservation charged in full at its
-  expiry is unpriced too. So the month's cost is exact when
+  expiry is unpriced too. The 7-argument form also returns
+  `reservation_missing` (388): true when it was given a reservation id no
+  row has (one already charged at its expiry), so the backend can log the
+  double count (architecture.md § Assistant). So the month's cost is exact when
   `unpriced_turns` is 0, and a floor otherwise. The local providers (mock,
   Ollama) cost 0.
 - `assistant_usage` is read-only to `water_app`: one SELECT policy,
@@ -3872,7 +3911,7 @@ never to a farmer, contributor or viewer.
 | `renewal_notice` | The annual renewal notice's sent-log (329, CPA s14): (`subscription_id` (cascade), `period_end`) primary key, so one notice per subscription and period ever; `user_id` (cascade, indexed), `status` (`pending`, `sending`, `sent`, `skipped`, `failed`), `attempts`, `created_at`, `claimed_at`, `locked_until`, `sent_at`, `settled_at`, `reason`. Written only by the worker's `app_renewal_notice_queue`, `_claim` and `_finish` (`alert_worker_context`); `water_app` reads its own rows (`renewal_notice_own`). Never purged: it is the record that the notice went ([billing.md § Renewal notice](./billing.md#renewal-notice)) |
 | `billing_notice` | The owners' plan emails' sent-log (346, issue #641): (`billing_account_id` (cascade), `kind` (`grace`, `paused`, `trial_ending`), `about` (the occurrence: `over_free_since` or `trial_end`), `user_id` (cascade, indexed)) primary key, so one email per occurrence and recipient ever; `status` (`pending`, `sending`, `sent`, `skipped`, `failed`), `attempts`, `created_at`, `claimed_at`, `locked_until`, `sent_at`, `settled_at`, `reason`. Written only by the worker's `app_billing_notice_queue`, `_claim` and `_finish` (`alert_worker_context`); `water_app` reads its own rows (`billing_notice_own`). Never purged: it is the record that the email went ([billing.md § Plan emails](./billing.md#plan-emails)). `app_plan_pause_preview(account)` gives the account's owner 341's order of its live catchments (kept, paused), with no id for one they can't read |
 | `billing_grant_log` | The staff grant's audit log (330, issue #641): `id`, `billing_account_id` (cascade; indexed with `created_at`), `subscription_id` (set null, indexed), `action` (`grant`, `revoke`, `expire`), `plan_code`, `until` (the grant's end, null for until revoked; for a revoke, when), `reason` (1–500 characters), `granted_by` (the operator's name, `expiry`, `invoice` for a paid B2B invoice's grant, `reverse trial`, or `checkout` for a reverse trial a paid plan ended, 344), `created_at`. Append-only: written only by `app_staff_grant_plan` and `app_staff_revoke_grant` (the schema owner's, caller's rights, revoked from `water_app` and PUBLIC), the worker's `app_staff_grant_expire` (`alert_worker_context`) and, for a paid B2B invoice, `app_billing_apply` (335, no user); `water_app` reads the rows of accounts it may read (`app_billing_account_readable`). A grant is a `provider = 'manual'` subscription; the partial index `subscription_manual_end_idx` serves the expiry scan ([billing.md § Staff grants](./billing.md#staff-grants)) |
-| `reverse_trial_claim` | One row per canonical email that has had the Pro reverse trial, ever (342, issue #641): `email_hash` (primary key, `bytea`, the 32-byte SHA-256 of the canonical address, `CHECK (octet_length = 32)` like every stored digest), `claimed_at`. No address and no foreign key, so it outlives the account. Owner only: RLS on, no policy, no privilege to `water_app` (the catalogue's `OWNER_ONLY`); written only by `app_reverse_trial_start` (SECURITY DEFINER, the caller's own verified account: `unverified`, `live`, `claimed` or `started`, which writes a `manual` `trialing` Pro subscription for `plan.trial_days` and a `billing_grant_log` grant by `reverse trial`). `app_reverse_trial_expire` (the worker's, `alert_worker_context`) moves trials past `trial_end` to `expired` and logs it; the partial index `subscription_reverse_trial_end_idx` serves that scan. A reverse trial is a `manual` + `trialing` subscription (`subscription_reverse_trial`) ([billing.md § The reverse trial](./billing.md#the-reverse-trial-built-off)) |
+| `reverse_trial_claim` | One row per canonical email that has had the Pro reverse trial, ever (342, issue #641): `email_hash` (primary key, `bytea`, the 32-byte SHA-256 of the canonical address, `CHECK (octet_length = 32)` like every stored digest), `claimed_at`. No address and no foreign key, so it outlives the account. Owner only: RLS on, no policy, no privilege to `water_app` (the catalogue's `OWNER_ONLY`); written only by `app_reverse_trial_start()` (397; SECURITY DEFINER, the caller's own verified account, claiming the SHA-256 of `canonical_email` of the caller's own current address, worked out in the function so no caller names an address; 342's `app_reverse_trial_start(text)` remains for an older backend during a release and ignores its hash: `unverified`, `live`, `claimed` or `started`, which writes a `manual` `trialing` Pro subscription for `plan.trial_days` and a `billing_grant_log` grant by `reverse trial`); read only by `app_subject_reverse_trial` (396, the data export: the caller's own row, by the SHA-256 of `canonical_email` of their current address; `canonical_email` folds A-Z and trims ASCII whitespace only, as `canonicalEmail` does since 397, so the two agree on non-ASCII addresses). `app_reverse_trial_expire` (the worker's, `alert_worker_context`) moves trials past `trial_end` to `expired` and logs it; the partial index `subscription_reverse_trial_end_idx` serves that scan. A reverse trial is a `manual` + `trialing` subscription (`subscription_reverse_trial`) ([billing.md § The reverse trial](./billing.md#the-reverse-trial-built-off)) |
 | `email_gate_refusal` | Refusals by Free's verified-email gate per SAST day (348, issue #641): `day` (Africa/Johannesburg), `code` (`email_unverified` or `email_disposable`), `feature` (`assistant` or `feeds`), `refusals`; primary key (`day`, `code`, `feature`). Counts only: no address, domain, person or project, so no erasure path. Owner only: RLS on, no policy, no privilege to `water_app` (the catalogue's `OWNER_ONLY`); written only by `app_email_gate_refused(code, feature)` (SECURITY DEFINER, executable by `water_app`, called with no user on its own connection by `billing/emailGate.ts`, since the refusal rolls the route's transaction back); read by the owner's abuse report (`billing/gatherReport.ts`; [billing.md § Metrics and the abuse report](./billing.md#metrics-and-the-abuse-report)) |
 
 - `plan.limits` is a closed key set, because SQL reads it:
@@ -4229,7 +4268,8 @@ The background job queue's source of truth ([architecture.md § Background work]
 | `acting_user_id` | The member who queued it (stamped by the insert trigger): an editor, or any viewer for `report_render` (`023_reports.sql`). The job runs as this user under RLS |
 | `created_at`, `started_at`, `finished_at` | `finished_at` is set exactly when `done` or `dead` |
 | `progress` | 0–100 while a running job reports it (040_yield), else NULL. Written only by `app_job_progress`; cleared by the enqueue trigger and when a worker claims the job (`job_progress_reset`); a finished job keeps its last value |
-| `cancel_requested_at` | When someone cancelled the job while it ran (040_yield, `app_cancel_job`); NULL otherwise. Cleared by the enqueue trigger |
+| `cancel_requested_at` | When someone cancelled the job while it ran (040_yield, `app_cancel_job`); NULL otherwise. Cleared by the enqueue trigger. A flagged job is never retried or handed back (394): it is dead as `cancelled` |
+| `dead_reason` | Why a `dead` job died (394_job_dead_reason, issue #904): `cancelled` (someone cancelled it), `superseded` (a newer job with its dedupe key does the work) or `failed` (a dead letter: the production alarm and the `job_dead` alert count only these). NULL unless `dead` (a CHECK). Set by every function that kills a job; the `job_settle_dead_reason` trigger clears it on a live job (so an enqueue can't forge one) and records `failed` for a death written without one. Jobs dead before 394 got theirs from their `last_error` text ('cancelled', the "… (a newer job with the same key is queued)" suffix) |
 
 - **Enqueue** is a plain INSERT as the signed-in editor. The `job_enqueue`
   trigger stamps the acting user and resets every lifecycle column (a forged
@@ -4244,12 +4284,24 @@ The background job queue's source of truth ([architecture.md § Background work]
     dedupe key has one running; sets `running`, bumps `attempts`, draws a new
     `lease_token`. Returns routing columns only (id, project, kind, acting
     user, lease, attempts), never the payload. A lease that ran out with no
-    attempts left becomes `dead` instead. With `projects` (123), only those
+    attempts left becomes `dead` instead (`failed`), and so does one someone
+    cancelled (`cancelled`, 394) rather than running again only to stop. With `projects` (123), only those
     projects' jobs are claimed or marked dead: the e2e suite's tick, so
     parallel tests never run each other's jobs. Production passes none.
-  - `app_finish_job(id, lease, ok, error, retry)`: only with the current
-    lease (a stale worker gets `NULL` and rolls back); `done`, `failed` with
-    backoff, or `dead`.
+  - `app_finish_job_outcome(id, lease, ok, error, retry, dead_reason)` (394)
+    → `(status, dead_reason)`: only with the current lease (a stale worker
+    gets `NULL`s and rolls back); `done`, `failed` with backoff, or `dead`
+    with the caller's reason (`cancelled`, `superseded`, or `failed` by
+    default; anything else is `invalid_parameter_value`). A failure that would
+    retry on a job someone cancelled is `dead` as `cancelled` instead, its
+    error 'cancelled'; one with no retry keeps the caller's reason, so a real
+    error stays a dead letter. The runner calls this.
+  - `app_finish_job(id, lease, ok, error, retry)` (016, latest 394): the
+    same, returning only the status, the reason inferred from the error text
+    (kept for a backend from before 394).
+  - `app_release_job(id, lease, delay)` (191, latest 394): a `JobRelease`
+    hands the job back to `queued` with its attempt given back; a job someone
+    cancelled is `dead` as `cancelled` instead, and the function returns `dead`.
   - `app_purge_jobs(age)`: deletes `done`/`dead` jobs finished longer ago
     than `age` (at least a day; the tick passes 30 days). Every key to `job`
     is ON DELETE SET NULL, so the rows that named a purged job stay with
@@ -4270,7 +4322,7 @@ The background job queue's source of truth ([architecture.md § Background work]
     session's user, the one who queued it or an editor of its project, and
     for `yield`, `delineate` (191), `future_yield` and `climate_factors` (284)
     jobs only: a `queued` or `failed` job becomes `dead` with `last_error =
-    'cancelled'`; a `running` one not flagged yet gets `cancel_requested_at`.
+    'cancelled'` and `dead_reason = 'cancelled'` (394); a `running` one not flagged yet gets `cancel_requested_at`.
     `status` is the job's status afterwards (NULL for a job that isn't the
     caller's to cancel); `changed` is whether this call did either, so a
     second cancel, of a job already dead or flagged, answers false. The cancel
@@ -4390,6 +4442,7 @@ by a `future_yield` job as its acting editor. `job.kind` accepts
 | `method` | `delta-1` |
 | `result` | the engine's `FutureYieldResult` (factor table included), an object of at most 1 MB |
 | `engine_version`, `created_by`, `created_at` | the engine that ran the pairs; the session's user and time (stamped by the guard) |
+| `boundary_sha256` | SHA-256 (hex) of the catchment boundary's geometry as canonical JSON when the job read the factors over it, as `climate_factors.boundary_sha256` (390_future_yield_boundary, issue #889); null for rows written before 390. The API and the evidence report compare it with the boundary now (`future/store.ts futureYieldBoundary`) |
 
 Insert and delete only (no `UPDATE` grant); the job keeps the newest 3 per
 pair. RLS: viewers and above read; an applicant reads the rows of their own
@@ -4411,6 +4464,13 @@ a wrapper over it (same signature and grants: expand only, so a backend still
 calling it while the migration lands keeps working). The yield, future yield
 and climate factors cancel routes answer `cancelled: false` for a job already
 dead or already flagged.
+
+Migration 394 (`394_job_dead_reason.sql`, issue #904) adds `job.dead_reason`
+(backfilled for jobs already dead from their error text), the
+`job_settle_dead_reason` trigger and `app_finish_job_outcome`, makes
+`app_finish_job` a wrapper over it (expand only, as 285), and has
+`app_release_job`, `app_claim_jobs` and `app_cancel_job_outcome` record the
+reason, ending a running job someone cancelled instead of queueing it again.
 
 ### Automated calibrations (108_auto_calibration.sql, 290_auto_calibration_work.sql)
 
@@ -5036,6 +5096,21 @@ runbook ([deployment.md § Restoring the database](./deployment.md#restoring-the
 step 6a), which reads it on the old instance and deletes each row again on
 the restored one.
 
+### Report PDF erasure (395_report_pdf_erasure.sql)
+
+`report_pdf_erasure (id, project_id, report_id, queued_at, attempts)`: a
+report row deleted while its PDF may still be stored (younger than 8 days:
+its requester's account or its project deleted, by either path) is queued
+here by an `AFTER DELETE` trigger on `report` (`report_pdf_erasure_record`,
+SECURITY DEFINER); older rows are `app_purge_reports`' own. Ids only, the
+object key derived in code (`reportKey`), no foreign keys, owner-only like
+`erasure_log` (`OWNER_ONLY`). The job tick claims a batch
+(`app_report_pdf_erasures`, fewest attempts first, `FOR UPDATE SKIP
+LOCKED`), deletes each PDF from storage and settles it
+(`app_report_pdf_erasures_settle`: removed entries go, failed ones count an
+attempt); both functions refuse anything but the worker's context
+(`reports/erasure.ts`, `reports/erasure.db.test.ts`; issue #903).
+
 ### Reference loads (192_feature_names_reference_load.sql, 248_reference_load_provenance.sql)
 
 `reference_load (kind, dataset, source_key, source_sha256, loaded_at)`,
@@ -5177,7 +5252,12 @@ One scheduled feed per row ([architecture.md § Data feeds](./architecture.md#da
     `water_app`): the first instant `app_feed_is_due` turns true, so the
     backoff arithmetic lives in one place; NULL when never scheduled. The
     feed list (`feeds/store.ts`) returns it as `nextAttemptAt` for an enabled
-    feed with an acting user, null otherwise.
+    feed with an acting user, null otherwise. 377 gives a throttle its own
+    floor: when `last_error` matches `^the source is unreachable: HTTP
+    (429|503): the source asked us to slow down` (`FeedThrottledError`), the
+    failing backoff is 1 h × 2^(failures − 1) and at least the
+    `Retry-After: N s` the message names, still capped at the day (issue
+    #877).
   - Held while a fetch is out (`app_feed_fetch_out(fetch_job_id, now)`, 276,
     plain, pinned `search_path`, revoked from `PUBLIC`): `app_due_feeds` and
     `app_claim_feed` skip a due feed whose `fetch_job_id` names a
@@ -6035,7 +6115,7 @@ Email alerts (roadmap WP-2.13; [api.md § Alerts](./api.md#alerts),
 | `alert_rule` | What a project alerts on: `kind` (`dam_below`, `ewr_forecast_fail`, `data_stale`, `restriction_published`, `job_dead`, `feed_failing`, `farms_short` (141)), `node_id` (the farm, `dam_below` only; `ON DELETE CASCADE`), `feed_id` (057: the data feed, `data_stale` only; `ON DELETE CASCADE`), `series_id` (141: the series an API key writes, `data_stale` only, never with a `feed_id`; a composite foreign key `(project_id, series_id)` onto `time_series`, `ON DELETE CASCADE`), `threshold` (a per-kind CHECK `alert_rule_threshold`: a dam fraction 0–1, whole days, failures, jobs or farms, 0 for a notice), `enabled`, `created_by` (`SET NULL`), `created_at`, `updated_at`. Unique `(project_id, kind, node_id, feed_id, series_id) NULLS NOT DISTINCT`. Alerts are **opt-in**: no row, or `enabled = false`, and nothing is evaluated or sent. Once dam alerts are on for any farm, a farm added later gets a rule at the threshold last set (`alerts/evaluate.ts` `ensureFarmRules`); once staleness alerts are on for any feed, a feed added later gets a rule at its source's default (`ensureFeedRules`, `SOURCES[source].staleAlertDays`), and a series an API key writes (a `series_key_days` row) gets one at 2 days (`ensureSeriesRules`, 141). Only key-fed series get a rule (a hand-uploaded series is stale by nature, issue #120); once made, it stays with the series even after a person writes over the key's days. 057 turned 051's catchment-wide `data_stale` rules into one per feed **in place**: the old row became the first feed's rule (keeping its events and deliveries, the 180-day history and the export's), and each other feed got a new rule at the same level, switch and creator. A catchment with no feed then kept its row with `feed_id` NULL, its pending choice: it never fires, the rule editor doesn't list it, the API never makes one, and `ensureFeedRules` gives it the first feed added (the one change of feed a rule may make; `migration-057.db.test.ts`) |
 | `alert_event` | Each time a rule fired: `rule_id`, `project_id`, `kind` and `node_id` (copied from the rule, for the policies), `state` (`firing` → `cleared`, never back), `value`, `detail` (jsonb ≤ 8 KB: the figures the mail and pages show, from the recipient's scope only), `threshold` (312, issue #670: the rule's level when the event opened, copied by the guard, never changed; the mail and the pages quote it rather than the rule's level now, which a WUA may have edited before the mail went; NULL for an event opened before 312, whose readers fall back to the rule's level, `COALESCE(e.threshold, r.threshold)`), `run_id` (`SET NULL` when the run is trimmed), `opened_at`, `cleared_at` (set exactly when cleared). A partial unique index allows **one firing event per rule**: the hysteresis, in the schema |
 | `alert_subscription` | A person's choice: `user_id`, `project_id`, `kind` (the kinds, or `all`: the catchment-wide switch), `node_id` (a farmer's farm for `dam_below`; else NULL), `channel` (`email`; room for WhatsApp/SMS), `mode` (`immediate`, `daily_digest`, `off`; `all` is `immediate` or `off`), `unsubscribe_nonce` (32 random bytes), `unsubscribe_hash` (SHA-256 of the token HMAC(`ALERTS_TOKEN_SECRET`, nonce); unique; NULL until the worker first mails with that nonce), `created_at`, `updated_at`. Unique `(user_id, project_id, kind, node_id) NULLS NOT DISTINCT`. No row means the role's default |
-| `alert_delivery` | One email (or digest line) per event and person, ever: primary key `(event_id, user_id)`; `project_id`, `mode` (what they had chosen at fan-out), `status` (`pending` / `digest` → `sending` → `sent`, `skipped` with a `reason`, or `failed`), `via` (`immediate` or `digest`), `attempts`, `created_at`, `claimed_at` (the daily cap counts these), `locked_until`, `sent_at`. Kept **180 days** (`app_purge_alerts`, from the tick) |
+| `alert_delivery` | One email (or digest line) per event and person, ever: primary key `(event_id, user_id)`; `project_id`, `mode` (what they had chosen at fan-out, which since 370 is *not* how it went out: the choice at send time wins, and `via` records that; the name stays, as renaming a column the export and the policies read buys nothing (386 says so in the column's comment); Download my data exports both, `mode` as the choice they had when the alert was queued), `status` (`pending` / `digest` → `sending` → `sent`, `skipped` with a `reason`, or `failed`), `via` (`immediate` or `digest`), `attempts`, `created_at`, `claimed_at` (the daily cap counts these), `locked_until`, `sent_at`. Kept **180 days** (`app_purge_alerts`, from the tick) |
 | `alert_feedback` | "Was this useful?" on an alert email (151, issue #74): one row per email a person got, made when the worker builds it (`app_alert_answer_slot`, as the recipient, only for a delivery of theirs being sent). `project_id`, `user_id` (`ON DELETE CASCADE`), `event_id` (the alert, a digest's first line; `SET NULL` when the alert is purged), `kind` (the alert's, or `digest`), `nonce` (32 random bytes), `token_hash` (SHA-256 of the token HMAC(`ALERTS_TOKEN_SECRET`, `"wm-alert-feedback/v1/"` + nonce); unique), `sent_at`, then once answered `useful`, `comment` (1–500 characters, optional) and `answered_at`. Unique `(user_id, event_id)`: a retried mail reuses the row and its link. **Retention**: unanswered 30 days after `sent_at` (the link stops working then), an answer 365 days after `answered_at` (`app_purge_alert_answers`, from the tick). No open or click is ever recorded: a row says only that the email offered the question, which `alert_delivery` already holds |
 
 - **RLS**:
@@ -6092,12 +6172,42 @@ Email alerts (roadmap WP-2.13; [api.md § Alerts](./api.md#alerts),
     turning each past `cap` immediate mails since the last 06:00 in its
     project's time zone (at `now`; `alert_digest_start`, 059_local_day) into
     `digest`; a delivery left `sending` past its lease becomes `failed`,
-    never re-sent.
+    never re-sent. First (370, issue #868: the mode at send time wins) it
+    moves each `pending` delivery whose recipient now chooses
+    `daily_digest` to `digest`, and each `digest` line whose recipient now
+    chooses `immediate` to `pending` (claimed in the same call), except a
+    line the cap put there (`reason` "over the daily cap"); the rows are
+    locked `SKIP LOCKED`, so a row another worker holds waits for the next
+    tick. `mode` keeps what they had chosen at fan-out. Since 386 (issue
+    #890) only the deliveries whose recipient's own subscription row could
+    move them (that kind's row, the farm's first, now `daily_digest` for a
+    pending one; now `immediate`, or no row, for a digest line not put
+    there by the cap) are read against the audience: a daily choice only
+    ever comes from a row, so the rest can't have changed, and a backlog of
+    daily lines costs index lookups, not an audience read each tick
+    (`alerts/send.db.perf.test.ts`). Someone who switches between the claim
+    and the mail being built, within the same tick, gets the mode they had
+    at the claim: not re-queued, since the window is one tick's send loop
+    and sending it back to `digest` would need a `sending` → `digest` path
+    that doesn't spend an attempt.
   - `app_alert_claim_digest(now, people, lines, lease)`: each person's
-    newest `lines` due digest lines (queued before the latest 06:00 in their
-    project's time zone at `now`), for up to `people` people; their older due
+    first `lines` due digest lines (queued before the latest 06:00 in their
+    project's time zone at `now`), for up to `people` people; their due
     lines past that are marked `skipped` ("over the digest limit"), so
-    nothing piles up for the next digest. 051 took the boundary itself
+    nothing piles up for the next digest. Since 371 (issue #869) the lines
+    are ranked by turns across the person's projects (each project's newest,
+    then each one's second newest, newest first within a turn) rather than
+    newest first overall, so one busy project can't take the whole limit,
+    and each claimed row carries `left_out`: how many of that person's lines
+    of that project this claim skipped, which the project's digest email
+    states (371 dropped and recreated the function for the new result
+    column; the first five columns are unchanged). 386 (issue #883) adds
+    `catchments_left_out`, the same on every line of a person: how many of
+    their projects kept no line at all (more projects with due lines than
+    `lines`), which each of their digests states; and before ranking it
+    skips, with the sender's reasons, the due lines whose recipient no
+    longer gets the alert, turned it off, or whose rule is off, so those
+    take no place in the limit and neither count includes them. 051 took the boundary itself
     (06:00 SAST for every project); 059 moved it to each project's zone.
     357 claims each person under a transaction-scoped advisory *try* lock
     (`'alert_digest:' || user_id`), taken before any of their lines is read:

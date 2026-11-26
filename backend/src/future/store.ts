@@ -2,7 +2,7 @@
 // docs/evidence-pack.md § Future yield, 280_future_yield): the switch, the
 // request, the pair it runs on, and the stored results.
 import { createHash } from 'node:crypto';
-import { canonicalJson, futureDamError, type FutureYieldResult, type ModelInput } from '@water-management/engine';
+import { canonicalJson, futureDamError, type FutureYieldBoundary, type FutureYieldResult, type ModelInput } from '@water-management/engine';
 import { z } from 'zod';
 import type { Db } from '../db/tx.js';
 import { ApiError } from '../http/errors.js';
@@ -40,6 +40,8 @@ export interface FuturePair {
 	baseline: ModelInput;
 	application: ModelInput;
 	cells: ClimateGridCell[];
+	/** SHA-256 of the catchment boundary the cells come from, stored on the result (390_future_yield_boundary). */
+	boundarySha256: string;
 }
 
 /**
@@ -81,8 +83,8 @@ export async function futurePair(db: Db, projectId: string, applicationRunId: st
 	}
 	const damError = futureDamError(application, dam);
 	if (damError) throw new ApiError(400, damError, { code: 'future_yield_dam' });
-	const { cells } = await catchmentClimateCells(db, projectId);
-	return { applicationRunId, baselineRunId: sc.baseRunId, nodeId: dam, ownedNodeIds: [...owned], baseline, application, cells };
+	const { cells, boundarySha256 } = await catchmentClimateCells(db, projectId);
+	return { applicationRunId, baselineRunId: sc.baseRunId, nodeId: dam, ownedNodeIds: [...owned], baseline, application, cells, boundarySha256 };
 }
 
 /** SHA-256 (hex) of a boundary's geometry as canonical JSON: which boundary a factor table was read over. */
@@ -120,20 +122,37 @@ export interface FutureYieldRow {
 	jobId: string | null;
 	result: FutureYieldResult;
 	engineVersion: string;
+	/** The boundary's hash when the job read the factors (null: written before 390_future_yield_boundary). */
+	boundarySha256: string | null;
+	/** That boundary against the project's now (futureYieldBoundary). */
+	boundary: FutureYieldBoundary;
 	createdBy: string | null;
 	createdAt: string;
 }
 
+/**
+ * A stored result's boundary against the project's catchment boundary now (issue #889, as climateFactorsState):
+ * `same`; `changed` (drawn again since); `none` (removed since); `unrecorded` (a result from before
+ * 390_future_yield_boundary, which kept no hash).
+ */
+export function futureYieldBoundary(stored: string | null, now: { sha256: string } | null): FutureYieldBoundary {
+	if (!now) return 'none';
+	if (stored === null) return 'unrecorded';
+	return stored === now.sha256 ? 'same' : 'changed';
+}
+
 /** The newest stored result for the application run (and its baseline, when given), under the reader's RLS; null when none. */
 export async function latestFutureYield(db: Db, projectId: string, applicationRunId: string, baselineRunId?: string): Promise<FutureYieldRow | null> {
-	const { rows } = await db.query<Omit<FutureYieldRow, 'createdAt'> & { createdAt: Date }>(
+	const { rows } = await db.query<Omit<FutureYieldRow, 'createdAt' | 'boundary'> & { createdAt: Date }>(
 		`SELECT f.id, f.baseline_run_id AS "baselineRunId", f.application_run_id AS "applicationRunId", f.node_id AS "nodeId", f.job_id AS "jobId",
-			f.result, f.engine_version AS "engineVersion", u.display_name AS "createdBy", f.created_at AS "createdAt"
+			f.result, f.engine_version AS "engineVersion", f.boundary_sha256 AS "boundarySha256", u.display_name AS "createdBy", f.created_at AS "createdAt"
 		 FROM future_yield f LEFT JOIN app_user u ON u.id = f.created_by
 		 WHERE f.project_id = $1 AND f.application_run_id = $2 AND ($3::uuid IS NULL OR f.baseline_run_id = $3)
 		 ORDER BY f.created_at DESC, f.id DESC LIMIT 1`,
 		[projectId, applicationRunId, baselineRunId ?? null]
 	);
 	const r = rows[0];
-	return r ? { ...r, createdAt: r.createdAt.toISOString() } : null;
+	if (!r) return null;
+	const boundary = futureYieldBoundary(r.boundarySha256, await catchmentBoundary(db, projectId));
+	return { ...r, boundary, createdAt: r.createdAt.toISOString() };
 }

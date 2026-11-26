@@ -24,7 +24,7 @@ function runJob(job: EnsembleJob) {
 	};
 	try {
 		const result =
-			job.kind === 'ensemble' ? runEnsemble(job.input, job.options, { onProgress }) : runPairedEnsemble(job.input, job.baseline, { onProgress });
+			job.kind === 'ensemble' ? runEnsemble(job.input, job.options, { onProgress }) : runPairedEnsemble(job.input, job.baseline, { onProgress, baselineInput: job.baselineInput });
 		post({ type: 'ensemble-done', result });
 	} catch (err) {
 		post({ type: 'error', message: err instanceof Error ? err.message : String(err) });

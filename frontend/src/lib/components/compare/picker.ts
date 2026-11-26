@@ -17,6 +17,22 @@ export function parseRef(s: string | null | undefined): RunRef | null {
 	return { projectId: parts[0], runId: parts[1] };
 }
 
+/**
+ * The zone a compared run is dated in (issue #899): its own project's, from
+ * the compare response's side or the project list (a picker can hold another
+ * project's runs), else `fallback` (the open project's, or the default zone)
+ * when an older API sends none.
+ */
+export function projectZoneOf(
+	source: { project: { timeZone?: string } } | readonly { id: string; timeZone?: string }[] | null | undefined,
+	projectId: string | null | undefined,
+	fallback: string
+): string {
+	if (!source) return fallback;
+	if ('project' in source) return source.project.timeZone || fallback;
+	return (projectId ? source.find((p) => p.id === projectId)?.timeZone : undefined) || fallback;
+}
+
 export function formatRef(r: RunRef): string {
 	return `${r.projectId}:${r.runId}`;
 }

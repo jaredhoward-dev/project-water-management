@@ -6,6 +6,7 @@
 // (their index a multiple of the stride), so the points stay put as the view
 // pans. Web Mercator tiles, as the delineation reads them (dem.ts).
 import type { Dem } from './dem.js';
+import { tileInBox } from './delineate.js';
 
 /** Every this-many DEM cells along each axis: one point in 100 cells. */
 export const DEM_GRID_STRIDE = 10;
@@ -55,15 +56,11 @@ const round6 = (v: number) => Math.round(v * 1e6) / 1e6;
 export async function demGridPoints(dem: Dem, box: Box, max: number, stride = DEM_GRID_STRIDE): Promise<{ points: DemPoint[]; zoom: number; cellM: number | null } | null> {
 	const info = await dem.info();
 	const z = info.maxZoom;
-	// The tile side is the DEM's own; read a tile in the box to learn it (cached by dem.ts): the one under its centre, else the
-	// first the box holds, since the centre of a box over the data's edge may have none. Never assumed: a guessed side put every
-	// point of a 256 px DEM (the fixture) at the wrong cell, or none at all. Tile indices at z don't depend on the side.
+	// The tile side is the DEM's own; read a tile in the box to learn it (cached by dem.ts; tileInBox: the one under its centre,
+	// else the first the box holds, since the centre of a box over the data's edge may have none). Never assumed: a guessed side
+	// put every point of a 256 px DEM (the fixture) at the wrong cell, or none at all. The route holds a box to 0.5° a side.
 	const n = 2 ** z;
-	const tileX = (lon: number) => Math.min(n - 1, Math.max(0, Math.floor(pxX(lon, n))));
-	const tileY = (lat: number) => Math.min(n - 1, Math.max(0, Math.floor(pxY(lat, n))));
-	let probe = await dem.tile(z, tileX((box.w + box.e) / 2), tileY((box.s + box.n) / 2));
-	// The route holds a box to 0.5° a side, a handful of tiles at the DEM's zoom.
-	for (let ty = tileY(box.n); !probe && ty <= tileY(box.s); ty++) for (let tx = tileX(box.w); !probe && tx <= tileX(box.e); tx++) probe = await dem.tile(z, tx, ty);
+	const probe = await tileInBox(dem, z, [box.w, box.s, box.e, box.n]);
 	// No tile anywhere in the box: no points, and no cell size to state.
 	if (!probe) return { points: [], zoom: z, cellM: null };
 	const size = probe.size;

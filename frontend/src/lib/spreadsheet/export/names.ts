@@ -4,14 +4,29 @@
 // spreadsheet formulas") and fit Excel's sheet-name rules.
 
 /**
- * Text that a spreadsheet would treat as a formula (leading `= + - @`, tab or
- * CR) gets a leading apostrophe, exactly like backend/src/export/csv.ts
- * `textCell`. The workbook writes every name as a string cell, which Excel
- * never evaluates; the apostrophe keeps it inert if someone edits the cell or
- * copies it into a CSV.
+ * Where a spreadsheet may read a cell as a formula (OWASP "CSV injection"):
+ * a leading `= + - @` (or a full-width `＝ ＋ － ＠`, a formula in some
+ * locales), the same after leading whitespace (LibreOffice Calc's CSV import
+ * with "Trim spaces" on evaluates ` =1+1`; docs/security.md, issue #902), or a
+ * leading tab, CR or LF. One rule, kept in step with backend/src/export/csv.ts
+ * `FORMULA_START`.
+ */
+export const FORMULA_START = /^(?:[\t\r\n]|\s*[=+\-@\uFF1D\uFF0B\uFF0D\uFF20])/;
+
+/**
+ * Text that a spreadsheet would treat as a formula (FORMULA_START) gets a
+ * leading apostrophe, exactly like backend/src/export/csv.ts `textCell`. The
+ * workbook writes every name as a string cell, which Excel never evaluates;
+ * the apostrophe keeps it inert if someone edits the cell or copies it into a
+ * CSV.
  */
 export function defuse(text: string): string {
-	return /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
+	return FORMULA_START.test(text) ? `'${text}` : text;
+}
+
+/** Read a defused cell back: the apostrophe `defuse` (or the backend's `textCell`) added is dropped, any other kept. */
+export function undefuse(text: string): string {
+	return text.startsWith("'") && FORMULA_START.test(text.slice(1)) ? text.slice(1) : text;
 }
 
 /** Longest sheet name Excel accepts. */

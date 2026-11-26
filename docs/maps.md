@@ -1618,7 +1618,14 @@ reads it.
   `pnpm import:dam-register list.csv doc.kml --dataset DSO-2025-07 --source "DWS Dam Safety Office, List of Registered Dams, July 2025"`.
   The loader joins them by register number ("No of dam" / `No_of_dam`),
   converts the capacity to m³, takes a year from "Completion date", and
-  lists every dam it skipped (no position, no name). A load replaces every
+  lists every dam it skipped (no position, no name). The CSV's numbers may
+  use a decimal comma (a South African export) or a decimal point: spaces
+  are dropped, and the file's mark is read from its unambiguous cells
+  (`12,5` or `1.234,5` a comma; `12.5`, `1,234.5` or `1,234,567` a point),
+  which settles a `1,234` (a thousand and more, or one and a bit). When no
+  other number says which, or the file writes both marks, such a value is
+  left out and listed, never guessed (issue #886, `loadDamRegister.ts`
+  `decimalMarkOf`). A load replaces every
   row of its dataset in one transaction. Production loading goes through
   the reference-dataset path, which refuses the register while its licence
   is unconfirmed ([deployment.md § Reference datasets](./deployment.md#reference-datasets)).
@@ -1709,7 +1716,9 @@ to a point on a river. The design, the method and its accuracy are in
   channel runs within 150 m of that point. Zoom in until the terrain
   channels show (they're in the map's key), and click on one: they are the elevation
   model's rivers, which the outline follows. Zoom in further to see
-  smaller channels." The mapped river network
+  smaller channels." A click on a cell with no elevation data (a hole in
+  a tile, or no tile) is refused `no_data` instead: "The elevation model
+  has no data at that point." (issue #905). The mapped river network
   (HydroRIVERS, the basemap's waterways) never moves or chooses the
   outlet: the elevation model's rivers often run hundreds of metres from
   the mapped lines, and the outline follows the elevation model's
@@ -1749,7 +1758,15 @@ to a point on a river. The design, the method and its accuracy are in
   point outside the DEM, one with no terrain channel within 150 m, or
   one almost nothing drains to. Since `delineate-6` the land beside missing data is
   the data's edge, not a sink every cell beside it drained into, which
-  had hidden such catchments (issue #390).
+  had hidden such catchments (issue #390). A request that reads a box rather
+  than one point (Start or Divide from a boundary, Sub-catchments from
+  clicks, a DEM rivers tile) takes the DEM's tile side from any tile in that
+  box, the one under its centre first (`tileInBox`, `delineate.ts`): a centre
+  in a hole of the data (an extract without its ocean tiles, say) is no
+  reason to refuse when the data round it is fine, and only a box holding no
+  tile at all is refused as no data (issue #874; the DEM grid since #862).
+  Delineate, a fixed outlet and Trace a dam still read the tile under their
+  point, which must have data.
   A catchment past the largest window is refused as too large: "Click
   further upstream for a smaller catchment, divide the river with
   Sub-catchments, one per click …", or, when the nearby river reach drains
@@ -2409,7 +2426,11 @@ in [design/start-from-map.md](./design/start-from-map.md); the screen in
   150 m of the outlet gauge. Move the gauge onto a terrain channel …");
   any other such point is dropped with the reason
   "has no terrain channel within 150 m: move it onto one of the elevation
-  model’s channels". From `start-7` to `start-14` the points were placed by
+  model’s channels". A point on a cell with no elevation data (a tile the
+  DEM lacks) is not off-channel: the outlet gauge, or a click that would be
+  the lowest, is refused `no_data` ("The elevation model has no data at
+  …"), and any other is dropped as "is where the elevation model has no
+  data" (issue #905). From `start-7` to `start-14` the points were placed by
   the mapped river's rules (a reach's area matched, the river asked
   for at a confluence, a junction side kept, a red-line or gully rule);
   those were retired in `start-15`. A point placed
@@ -2917,7 +2938,10 @@ it.
   (the Western Cape's south coast, measured 2026-10-01), from 1.3 billion pixels. The grid must line up with
   the raster (the cell a whole number of pixels, the corner on a cell edge),
   so each cell's share is exact and no cell straddles two tiles; anything else
-  is refused with the reason. No GeoTIFF code is in a Lambda bundle.
+  is refused with the reason. The corner comes from the tiepoint, read by the
+  raster type key: PixelIsArea (the default) ties the pixel's corner,
+  PixelIsPoint its centre, so the corner is half a pixel west and north
+  (issue #886); any other raster type is refused. No GeoTIFF code is in a Lambda bundle.
 - **A polygon's cultivated area** (`geo/cropland.ts`) is the sum, over the
   cells it covers, of the cell's area on the WGS84 ellipsoid × the share of
   the cell inside the polygon (exact clipping, `geo/gridShares.ts`, the same

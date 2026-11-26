@@ -28,7 +28,7 @@
 import type pg from 'pg';
 import { geometryAreaM2 } from './area.js';
 import { checkGeometry, type Geometry } from './geojson.js';
-import { recordReferenceOrigin, type ReferenceOrigin } from './referenceOrigin.js';
+import { forgetEmptiedOrigins, recordReferenceOrigin, type ReferenceOrigin } from './referenceOrigin.js';
 
 /**
  * The credit a production load stores on every row, shown with every value
@@ -245,6 +245,8 @@ export async function replaceDataset(client: pg.ClientBase, dataset: string, rec
 			);
 		}
 		await recordReferenceOrigin(client, 'quaternaries', dataset, origin);
+		// Keyed by code across datasets: the rows above may have emptied an older dataset, whose record goes with it.
+		await forgetEmptiedOrigins(client, 'quaternaries', dataset);
 		await client.query('COMMIT');
 		return records.length;
 	} catch (e) {

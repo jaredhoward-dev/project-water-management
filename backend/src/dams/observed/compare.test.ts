@@ -255,6 +255,14 @@ describe('compareDam', () => {
 		expect(r.summary.biasPctOfFull).toBeCloseTo(-5, 9);
 	});
 
+	it('counts a pair exactly 0.1 F apart as within, as the S1/S2 agreement does (issue #867)', () => {
+		// On a 1 m² dam, 0.4 − 0.3 is 0.10000000000000003 > 0.1 · 1: the old m² form called this pair outside.
+		const tiny = { areaM2: 1, from: 'entered' as const };
+		const r = compareDam(base({ full: tiny, modelled: run(new Array(31).fill(0.4)), observations: [obs('2024-01-02', 0.3), obs('2024-01-03', 0.3 - 1e-6)] }));
+		expect(r.summary.compared).toBe(2);
+		expect(r.summary.withinShare).toBe(0.5);
+	});
+
 	it('leaves out a view under 90 % clear, says why, and counts it as skipped', () => {
 		const r = compareDam(base({ observations: [obs('2024-01-02', 5_000, { pctObserved: 89.9 }), obs('2024-01-03', 5_000, { pctObserved: 90 })] }));
 		expect(r.points.map((p) => p.skip)).toEqual(['partly-seen', null]);

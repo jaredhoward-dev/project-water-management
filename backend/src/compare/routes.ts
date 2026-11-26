@@ -79,10 +79,10 @@ async function loadSide(db: Db, ref: { projectId: string; runId: string }) {
 	// requireRole: 404 when the project is invisible (never 403 — viewer is the floor).
 	const role = await requireRole(db, ref.projectId, 'viewer');
 	if (!UUID.test(ref.runId)) throw new ApiError(404, 'not found');
-	const { rows } = await db.query<Omit<LoadedRun, 'evidence'> & { projectName: string; projectEwrHeadline: unknown; scenarioName: string | null }>(
+	const { rows } = await db.query<Omit<LoadedRun, 'evidence'> & { projectName: string; projectTimeZone: string; projectEwrHeadline: unknown; scenarioName: string | null }>(
 		`SELECT r.id, r.label, r.engine_version AS "engineVersion", r.start_date AS "startDate",
 		        r.end_date AS "endDate", r.created_at AS "createdAt", u.display_name AS "createdBy",
-		        r.summary, r.inputs, p.name AS "projectName", p.settings->'ewrHeadline' AS "projectEwrHeadline",
+		        r.summary, r.inputs, p.name AS "projectName", p.time_zone AS "projectTimeZone", p.settings->'ewrHeadline' AS "projectEwrHeadline",
 		        COALESCE(r.inputs->'settings'->>'runoffModel', 'legacy') = 'legacy' AS legacy,
 		        r.notes, r.notes_updated_at AS "notesUpdatedAt", nu.display_name AS "notesUpdatedBy",
 		        r.scenario_id AS "scenarioId", sc.name AS "scenarioName"
@@ -106,7 +106,7 @@ async function loadSide(db: Db, ref: { projectId: string; runId: string }) {
 	// Without the catchment series a viewer kept from the volumes doesn't read of a cap or full-allocation run (#523 I).
 	const w = await seriesWithholding(db, ref.projectId, role, ref.runId);
 	const series = w ? listed.filter((s) => !w.withheld(null, s.key)) : listed;
-	const { projectName, projectEwrHeadline, scenarioName, ...rest } = row;
+	const { projectName, projectTimeZone, projectEwrHeadline, scenarioName, ...rest } = row;
 	const run: LoadedRun = { ...rest, evidence: runEvidence(await listNominations(db, ref.projectId), ref.runId) };
 	const recorded = (row.inputs as { scenario?: RunScenarioSnapshot }).scenario;
 	const scenario: CompareScenario | null = recorded
@@ -122,7 +122,8 @@ async function loadSide(db: Db, ref: { projectId: string; runId: string }) {
 		: null;
 	// The project's choice of the EWR its results are judged by (issue #444): a lens, not a model input, so the
 	// project's current one, as every other page reads it (ewrHeadlineSettings.ts).
-	return { project: { id: ref.projectId, name: projectName, ewrHeadline: resolveEwrHeadline({ ewrHeadline: projectEwrHeadline }) }, run, scenario, catchmentSeries: series };
+	// Its time zone (058) dates this side's run on its own project's clock, as its run report does (issue #899).
+	return { project: { id: ref.projectId, name: projectName, timeZone: projectTimeZone, ewrHeadline: resolveEwrHeadline({ ewrHeadline: projectEwrHeadline }) }, run, scenario, catchmentSeries: series };
 }
 
 /**

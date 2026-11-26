@@ -5,7 +5,7 @@
 // whether it applies is the grid's business: components/network/nodePaste.ts
 // and components/crops/areaPaste.ts.
 import type { FileFormat } from '#lib/components/common/formatHelp.js';
-import { defuse } from '#lib/spreadsheet/export/names.js';
+import { defuse, undefuse } from '#lib/spreadsheet/export/names.js';
 import { blockCommas, DECIMAL_COMMA_NOTE, GROUPING_COMMA_NOTE, numberReader, readPastedBlock } from './read';
 
 /** A row of the grid, matched by its name. */
@@ -64,9 +64,8 @@ export interface MapOptions {
  * Brackets stay, so "Farm A (east)" and "Farm A (west)" are two names.
  */
 export function normalName(s: string): string {
-	return s
-		.replace(/^'(?=[=+\-@])/, '')
-		.replace(/[\u2010\u2011]/g, '-')
+	return undefuse(s)
+				.replace(/[\u2010\u2011]/g, '-')
 		.replace(/\s+/g, ' ')
 		.trim()
 		.toLowerCase();

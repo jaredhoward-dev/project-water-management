@@ -6,7 +6,13 @@ import type { EnsembleHeader, EnsembleProgress, EnsembleResult, MemberResult, Mo
 
 export type EnsembleJob =
 	| { kind: 'ensemble'; input: ModelInput; options: ResolvedEnsembleOptions }
-	| { kind: 'paired'; input: ModelInput; baseline: { options: ResolvedEnsembleOptions; header: EnsembleHeader; members: MemberResult[] } };
+	| {
+			kind: 'paired';
+			input: ModelInput;
+			/** `engineVersion`: the engine the baseline ensemble was stored on; on another engine, `baselineInput` (its run's inputs) is needed too (issue #897). */
+			baseline: { options: ResolvedEnsembleOptions; header: EnsembleHeader; members: MemberResult[]; engineVersion: string };
+			baselineInput?: ModelInput;
+	  };
 
 export type EnsembleWorkerMessage =
 	| { type: 'ensemble-progress'; progress: EnsembleProgress }

@@ -46,7 +46,7 @@ export interface StationFormat {
 	skipLines?: number;
 	/** CSV: whether the first line read is a header (default true); without one, columns are 1-based numbers. */
 	headerRow?: boolean;
-	/** Numbers written with a decimal comma (1,5). CSV with ',' as the delimiter can't have one. */
+	/** Numbers written with a decimal comma (1,5); a dot is then a thousands separator only in whole groups (1.234,5), and 1.5 is refused. CSV with ',' as the delimiter can't have one. */
 	decimalComma?: boolean;
 	/** The time field (JSON path within a record) or CSV column (header name, or 1-based number). */
 	time: string;
@@ -82,8 +82,13 @@ export const STATION_DEFAULT_TIME_ZONE = 'Africa/Johannesburg';
 export const STATION_DEFAULT_MISSING = ['', 'nan', 'null', 'none', 'n/a', '-9999', '-999'];
 /** The most readings one answer may hold (a year of one-minute readings is 525 600). */
 export const STATION_MAX_READINGS = 600_000;
-/** The largest believable day's rain, mm (the world record is ~1 825 mm); above it the scale is wrong. */
-export const STATION_MAX_DAY_MM = 2000;
+/**
+ * A day's rain this large or larger is refused, mm: about half the world's 24-hour record (~1 825 mm), so a day
+ * at it means the scale or the decimal mark is wrong. Lower than the 2000 mm the gridded reads cap at (engine
+ * 1.123.0): under a decimal comma a 0.254 mm bucket's 1.016 (four tips) reads as 1016 mm, which
+ * 2000 let through; any value a dot groups into thousands is ≥ 1000, so this refuses it at scale 1.
+ */
+export const STATION_MAX_DAY_MM = 1000;
 
 const DAY_MS = 86_400_000;
 const HOUR_MS = 3_600_000;
@@ -119,12 +124,32 @@ export function zoneOffsetMs(tz: string, t: number): number {
 	return asUtc - Math.floor(t / 1000) * 1000;
 }
 
-/** The instant a wall-clock time in `tz` names (the earlier one in a repeated hour). */
-export function localToInstant(tz: string, y: number, mo: number, d: number, h = 0, mi = 0, s = 0): number {
+/**
+ * Every instant a wall-clock time in `tz` names, earliest first: one as a rule, two in the hour an
+ * autumn clock change repeats, none in the hour a spring change skips. The candidate offsets are the
+ * zone's a day either side, which finds every transition but two within one day of each other.
+ */
+export function localInstants(tz: string, y: number, mo: number, d: number, h = 0, mi = 0, s = 0): number[] {
 	const wall = Date.UTC(y, mo - 1, d, h, mi, s);
-	let t = wall - zoneOffsetMs(tz, wall);
-	t = wall - zoneOffsetMs(tz, t);
-	return t;
+	const out: number[] = [];
+	for (const off of new Set([zoneOffsetMs(tz, wall - DAY_MS), zoneOffsetMs(tz, wall + DAY_MS)])) {
+		const t = wall - off;
+		if (zoneOffsetMs(tz, t) === off) out.push(t);
+	}
+	return out.sort((a, b) => a - b);
+}
+
+/**
+ * The instant a wall-clock time in `tz` names: the earlier one in a repeated hour, and in a skipped
+ * hour the time read with the offset before the change (02:30 on a spring-forward day that jumps
+ * from 02:00 to 03:00 is 03:30 after it), as JavaScript's Temporal does by default. The day
+ * boundaries of stationRange use this; readStationAnswer refuses a skipped time instead.
+ */
+export function localToInstant(tz: string, y: number, mo: number, d: number, h = 0, mi = 0, s = 0): number {
+	const all = localInstants(tz, y, mo, d, h, mi, s);
+	if (all.length > 0) return all[0]!;
+	const wall = Date.UTC(y, mo - 1, d, h, mi, s);
+	return wall - zoneOffsetMs(tz, wall - DAY_MS);
 }
 
 /** The epoch day of an instant's wall-clock date in `tz`, after shifting the clock back `shiftMs`. */
@@ -260,6 +285,9 @@ function parseValue(raw: unknown, missing: ReadonlySet<string>, decimalComma: bo
 	if (typeof raw !== 'string') return undefined;
 	const s = raw.trim();
 	if (missing.has(s.toLowerCase())) return null;
+	// Under a decimal comma a dot is a thousands separator only where it groups whole thousands (1.234,5): a lone
+	// decimal point (1.5, 0.254) is refused, never read with its dot dropped as 15 or 254 mm.
+	if (decimalComma && s.includes('.') && !/^[+-]?[1-9]\d{0,2}(\.\d{3})+(,\d*)?$/.test(s)) return undefined;
 	const t = decimalComma ? s.replace(/\./g, '').replace(',', '.') : s;
 	return /^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/.test(t) ? Number(t) : undefined;
 }
@@ -375,24 +403,58 @@ export function readStationAnswer(text: string, f: StationFormat): StationReadin
 
 	if (pairs.length > STATION_MAX_READINGS) throw new StationFormatError(`the answer holds ${pairs.length} readings, more than a feed reads (${STATION_MAX_READINGS}): ask for fewer days a request`);
 
-	const out = new Map<number, number | null>();
+	// A sub-daily wall time in the hour an autumn clock change repeats names two instants (`all`, earliest first);
+	// they're told apart by record order once every record is read, below.
+	const read: { where: string; value: number | null; at?: number; wallKey?: number; all?: number[] }[] = [];
 	for (const p of pairs) {
 		const t = parseTime(p.time, f.timeFormat);
 		if (!t) throw new StationFormatError(`${p.where}: the time “${clip(String(p.time ?? ''))}” doesn’t match the time format (${clip(f.timeFormat)})`);
 		const v = parseValue(p.value, missing, !!f.decimalComma);
 		if (v === undefined) throw new StationFormatError(`${p.where}: the value “${clip(String(typeof p.value === 'object' ? JSON.stringify(p.value) : p.value))}” is not a number (add it to the missing markers if it means no reading)`);
-		let at: number;
-		if (f.resolution === 'daily') {
-			at = t.wall ? toEpochDay(fromEpochDay(Math.floor(Date.UTC(t.wall.y, t.wall.mo - 1, t.wall.d) / DAY_MS))) : localEpochDay(tz, t.instant!);
-		} else {
-			if (t.wall?.dateOnly) throw new StationFormatError(`${p.where}: the time “${clip(String(p.time))}” has no hour, but the readings are sub-daily`);
-			at = t.instant ?? localToInstant(tz, t.wall!.y, t.wall!.mo, t.wall!.d, t.wall!.h, t.wall!.mi, t.wall!.s);
-		}
 		const value = v === null ? null : v * scale;
+		if (f.resolution === 'daily') {
+			read.push({ where: p.where, value, at: t.wall ? toEpochDay(fromEpochDay(Math.floor(Date.UTC(t.wall.y, t.wall.mo - 1, t.wall.d) / DAY_MS))) : localEpochDay(tz, t.instant!) });
+			continue;
+		}
+		if (t.wall?.dateOnly) throw new StationFormatError(`${p.where}: the time “${clip(String(p.time))}” has no hour, but the readings are sub-daily`);
+		if (t.instant !== undefined) {
+			read.push({ where: p.where, value, at: t.instant });
+			continue;
+		}
+		const w = t.wall!;
+		const all = localInstants(tz, w.y, w.mo, w.d, w.h, w.mi, w.s);
+		if (all.length === 0) {
+			throw new StationFormatError(
+				`${p.where}: the time “${clip(String(p.time))}” doesn’t exist in ${tz} (its clocks skip that hour in spring): set the time zone the logger keeps, or read times with their offset`
+			);
+		}
+		if (all.length === 1) read.push({ where: p.where, value, at: all[0]! });
+		else read.push({ where: p.where, value, wallKey: Date.UTC(w.y, w.mo - 1, w.d, w.h, w.mi, w.s), all });
+	}
+
+	// The answer's direction (issue #912), from its first and last unambiguous instants in record order: newest first
+	// when the last is earlier. Oldest first, the first record at a repeated wall time is the earlier instant and the
+	// second the later; newest first, the other way round; a further repeat is a repeat of the last one taken. When the
+	// direction can't be told (no two different unambiguous instants: one record, or every time in the repeated hour),
+	// records are taken as oldest first, so a lone newest-first reading there may land an hour off.
+	const known = read.filter((x) => x.at !== undefined);
+	const newestFirst = known.length >= 2 && known[known.length - 1]!.at! < known[0]!.at!;
+	const seenWall = new Map<number, number>();
+	const out = new Map<number, number | null>();
+	for (const x of read) {
+		let at: number;
+		if (x.at !== undefined) at = x.at;
+		else {
+			const all = x.all!;
+			const n = seenWall.get(x.wallKey!) ?? 0;
+			seenWall.set(x.wallKey!, n + 1);
+			at = newestFirst ? all[Math.max(all.length - 1 - n, 0)]! : all[Math.min(n, all.length - 1)]!;
+		}
+		const value = x.value;
 		if (out.has(at)) {
 			const prev = out.get(at);
 			if (prev !== value && !(prev != null && value !== null && Math.abs(prev - value) < 1e-9)) {
-				throw new StationFormatError(`${p.where}: two readings at the same ${f.resolution === 'daily' ? 'day' : 'time'} disagree (${prev ?? 'missing'} and ${value ?? 'missing'})`);
+				throw new StationFormatError(`${x.where}: two readings at the same ${f.resolution === 'daily' ? 'day' : 'time'} disagree (${prev ?? 'missing'} and ${value ?? 'missing'})`);
 			}
 			continue;
 		}
@@ -534,8 +596,10 @@ export function stationDays(r: StationReadings, f: StationFormat, from: string, 
 		if (broken[i]) v = null;
 		else if (counts[i] === 0) v = f.noReadingsMeans === 'zero' && anyReadings ? 0 : null;
 		else v = Math.round(sums[i]! * 1e4) / 1e4;
-		if (v !== null && v > STATION_MAX_DAY_MM) {
-			throw new StationFormatError(`${fromEpochDay(a + i)} adds up to ${Math.round(v)} mm, more than any day’s rain: check the scale and whether the values are a running total`);
+		if (v !== null && v >= STATION_MAX_DAY_MM) {
+			throw new StationFormatError(
+				`${fromEpochDay(a + i)} adds up to ${Math.round(v)} mm, more than any day’s rain: check the scale, the decimal mark and whether the values are a running total`
+			);
 		}
 		if (v === null) gaps++;
 		else daysWithData++;

@@ -326,6 +326,9 @@ describe('what an item says', () => {
 			'Changed the publication’s restriction notice and next publication date'
 		);
 		expect(eventLine(ev('run.deleted', { runIds: ['a', 'b'], reason: 'trimmed' }))).toBe('Removed 2 old runs to stay within the storage cap');
+		// A run of an application not yet decided: no label in the log (runs/routes.ts).
+		expect(eventLine(ev('run.deleted', { runIds: ['a'], application: true, reason: 'deleted' }))).toBe('Deleted a run of an application');
+		expect(eventLine(ev('run.deleted', { runIds: ['a'], label: 'Scratch', reason: 'deleted' }))).toBe('Deleted the run “Scratch”');
 		expect(eventLine(ev('project.changed', { fields: ['name'], from: 'Old', to: 'New' }))).toBe('Renamed the project from “Old” to “New”');
 		expect(eventLine(ev('project.changed', { fields: ['time_zone'], timeZone: { from: 'Africa/Johannesburg', to: 'Africa/Windhoek' } }))).toBe(
 			'Set the time zone to Africa/Windhoek'
@@ -511,6 +514,22 @@ describe('grouping by day, under a skewed time zone', () => {
 		expect(groupByDay(late, now).map((d) => [d.label, d.entries.length])).toEqual([['24 Sep 2026', 2]]);
 		process.env.TZ = 'America/St_Johns'; // UTC−2:30 in September
 		expect(localTime('2026-09-24T20:30:00.000000Z')).toBe('18:00');
+	});
+
+	it("dates by the project's clock when its zone is given, whatever the viewer's (issue #899)", () => {
+		process.env.TZ = 'Pacific/Pago_Pago'; // UTC−11: both entries are on 24 Sep there
+		const now = new Date('2026-09-24T22:30:00Z'); // 25 Sep 00:30 in Johannesburg
+		const entries = groupByChangeSet([
+			rev({ id: '2', changeSet: 'a', createdAt: '2026-09-24T22:10:00.000000Z' }),
+			rev({ id: '1', changeSet: 'b', createdAt: '2026-09-24T21:50:00.000000Z' })
+		]);
+		expect(groupByDay(entries, now, 'Africa/Johannesburg').map((d) => [d.label, d.day])).toEqual([
+			['Today', '2026-09-25'],
+			['Yesterday', '2026-09-24']
+		]);
+		expect(groupByDay(entries, now).map((d) => d.label)).toEqual(['Today']);
+		expect(localTime('2026-09-24T22:10:00.000000Z', 'Africa/Johannesburg')).toBe('00:10');
+		expect(whenText('2026-09-24T21:50:00.000000Z', now, 'Africa/Johannesburg')).toBe('yesterday 23:50');
 	});
 
 	it('says Today and Yesterday by the viewer’s clock', () => {

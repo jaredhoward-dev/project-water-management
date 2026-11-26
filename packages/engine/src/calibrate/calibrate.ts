@@ -1029,6 +1029,21 @@ export function validationNotes(
 }
 
 const MIN_DAYS_PER_YEAR = 180;
+
+/** Qualifying water years (MIN_DAYS_PER_YEAR scored days each) the dry → wet test needs: half dry, half wet. */
+export const DSST_MIN_WATER_YEARS = 4;
+
+/**
+ * The water years of the record a fit scores with at least MIN_DAYS_PER_YEAR scored days, ascending: the years the
+ * dry → wet test ranks (dsstSetup), read by the same rule from the same problem (prepareCalibration with these
+ * options), so an estimate made before a fit (issue #894) knows whether the test will run: it runs with
+ * DSST_MIN_WATER_YEARS or more. Throws as calibrate() would on a problem it can't fit.
+ */
+export function qualifyingWaterYears(input: ModelInput, opts: Pick<CalibrateOptions, 'exclusions' | 'model' | 'zone'> = {}): number[] {
+	return waterYears(prepareCalibration(input, opts.exclusions, opts.model, opts.zone), MIN_DAYS_PER_YEAR)
+		.map((y) => y.year)
+		.sort((a, b) => a - b);
+}
 const WET_DRY_CONTRAST = 1.5;
 
 /**
@@ -1135,6 +1150,50 @@ interface DsstSetup {
 	years: number;
 }
 
+/** What decides which optimisations a fit makes, all known before its first model run (plannedFits). */
+export interface FitPlanShape {
+	/** Searches over the whole record (CR-2); clamped to 1…MAX_STARTS as the fit clamps them. */
+	starts: number;
+	/** The split-sample test, and the dry → wet test when `dsst`, run (CalibrateOptions.validate). */
+	validate: boolean;
+	/** The record has at least 4 water years of MIN_DAYS_PER_YEAR scored days, so the dry → wet test can run. */
+	dsst: boolean;
+	/** The WR2012 MAR penalty applies at the location fitted (on in the settings, a reference, the headline location), so a fit without it runs too. */
+	penalty: boolean;
+	/** A regional prior with fitWithoutPrior: the fit runs again without it, once per start. */
+	unpriored: boolean;
+}
+
+/** One optimisation a fit plans to make, in the order it runs them; `start` on the starts of a fit with several. */
+export interface PlannedFit {
+	stage: CalibrationStage;
+	start?: { start: number; starts: number };
+}
+
+/** The starts a fit makes for CalibrateOptions.starts: 1…MAX_STARTS, whole. */
+export const fitStarts = (starts: number | undefined): number => Math.min(MAX_STARTS, Math.max(1, Math.floor(starts ?? 1)));
+
+/**
+ * The optimisations a fit makes, in order (issue #865): the starts over the whole record, then the split-sample and
+ * dry → wet tests as they apply, then the fit without the WR2012 penalty where it applies, then one per start without
+ * the regional prior. The one rule the fit itself builds its optimisations from (setupCalibration), so an estimate
+ * read from it (each optimisation one budget of model runs) is the plan the fit runs. Pure.
+ */
+export function plannedFits(s: FitPlanShape): PlannedFit[] {
+	const starts = fitStarts(s.starts);
+	const at = (i: number) => (starts > 1 ? { start: { start: i + 1, starts } } : {});
+	const out: PlannedFit[] = [];
+	for (let i = 0; i < starts; i++) out.push({ stage: 'full', ...at(i) });
+	if (s.validate) {
+		out.push({ stage: 'split' });
+		if (s.dsst) out.push({ stage: 'dsst' });
+	}
+	if (s.penalty) out.push({ stage: 'unpenalised' });
+	// Last, so a fit without it keeps every index (issue #622).
+	if (s.unpriored) for (let i = 0; i < starts; i++) out.push({ stage: 'unpriored', ...at(i) });
+	return out;
+}
+
 /** Everything a fit fixes before its first model run: the problem, the search and the optimisations in order. */
 interface CalibrationSetup {
 	objective: ObjectiveId;
@@ -1161,7 +1220,7 @@ function setupCalibration(input: ModelInput, opts: CalibrateOptions): Calibratio
 	const bounds = opts.bounds ?? 'wide';
 	const budget = Math.max(10, Math.floor(opts.budget ?? 1500));
 	const seed = opts.seed ?? 1;
-	const starts = Math.min(MAX_STARTS, Math.max(1, Math.floor(opts.starts ?? 1)));
+	const starts = fitStarts(opts.starts);
 	const pb = prepareCalibration(input, opts.exclusions, opts.model, opts.zone);
 	const specs = CALIBRATION_PARAMS[pb.model];
 	const free = opts.free ?? specs.filter((s) => !s.fixedByDefault).map((s) => s.key);
@@ -1173,31 +1232,37 @@ function setupCalibration(input: ModelInput, opts: CalibrateOptions): Calibratio
 	const all = pb.scoredDays;
 	const validate = opts.validate !== false;
 
-	// The whole record from each start; the lowest loss is kept (CR-2).
-	const tasks: FitTask[] = [];
-	for (let i = 0; i < starts; i++) tasks.push({ stage: 'full', seed: startSeed(seed, i), idx: all, penalty: true, ...(starts > 1 ? { start: { start: i + 1, starts } } : {}) });
-	const at = { split: -1, dsst: -1, unpenalised: -1, unpriored: -1 };
 	let split: CalibrationSetup['split'] = null;
 	let dsst: DsstSetup | null = null;
 	if (validate) {
 		// Split-sample: first half of the observed days vs the second.
 		const half = Math.floor(all.length / 2);
 		split = { a: all.slice(0, half), b: all.slice(half) };
-		at.split = tasks.push({ stage: 'split', seed: seed + 1, idx: split.a, penalty: true }) - 1;
 		dsst = dsstSetup(pb, opts);
-		if (dsst.split) at.dsst = tasks.push({ stage: 'dsst', seed: seed + 2, idx: dsst.split.di, penalty: true }) - 1;
 	}
-	// The same fit without the penalty, so its effect is visible.
-	if (penalty) at.unpenalised = tasks.push({ stage: 'unpenalised', seed, idx: all, penalty: false }) - 1;
-	// The same fit without the regional prior, when asked, so what it cost is visible (issue #622): as many starts, from the same
-	// seeds, so both fits get the same search. Last, so a fit without it keeps every index.
-	if (prior && opts.fitWithoutPrior) {
-		const x0 = startedFromPrior(input, opts.prior!, pb.startParams) ? defaultStart(pb.startParams, free, unpriorBounds(bounds)) : undefined;
-		at.unpriored = tasks.length;
-		for (let i = 0; i < starts; i++) {
-			tasks.push({ stage: 'unpriored', seed: startSeed(seed, i), idx: all, penalty: true, prior: false, ...(x0 ? { x0 } : {}), ...(starts > 1 ? { start: { start: i + 1, starts } } : {}) });
+	const unpriored = !!(prior && opts.fitWithoutPrior);
+	// The fit without the prior starts where the fit with it would have without "Start from the prior".
+	const x0 = unpriored && startedFromPrior(input, opts.prior!, pb.startParams) ? defaultStart(pb.startParams, free, unpriorBounds(bounds)) : undefined;
+	const at = { split: -1, dsst: -1, unpenalised: -1, unpriored: -1 };
+	// The optimisations in order, from the one rule calibrationPlan reports before a fit (plannedFits).
+	const tasks: FitTask[] = plannedFits({ starts, validate, dsst: !!dsst?.split, penalty: !!penalty, unpriored }).map((p, k): FitTask => {
+		const start = p.start ? { start: p.start } : {};
+		const i = (p.start?.start ?? 1) - 1;
+		// Each validation fit's index; the first of the fits without the prior.
+		if (p.stage !== 'full' && at[p.stage] < 0) at[p.stage] = k;
+		switch (p.stage) {
+			case 'full':
+				return { stage: 'full', seed: startSeed(seed, i), idx: all, penalty: true, ...start };
+			case 'split':
+				return { stage: 'split', seed: seed + 1, idx: split!.a, penalty: true };
+			case 'dsst':
+				return { stage: 'dsst', seed: seed + 2, idx: dsst!.split!.di, penalty: true };
+			case 'unpenalised':
+				return { stage: 'unpenalised', seed, idx: all, penalty: false };
+			case 'unpriored':
+				return { stage: 'unpriored', seed: startSeed(seed, i), idx: all, penalty: true, prior: false, ...(x0 ? { x0 } : {}), ...start };
 		}
-	}
+	});
 	return { objective, bounds, budget, seed, starts, pb, specs, free, prior, penalty, all, split, dsst, tasks, at };
 }
 
@@ -1212,7 +1277,7 @@ function dsstSetup(pb: CalibrationProblem, opts: CalibrateOptions): DsstSetup {
 	const want: DsstRanking = opts.rankYearsBy ?? (pb.reference ? 'reference' : 'observed');
 	let rankedBy: DsstRanking = 'observed';
 	let rankOf = new Map(years.map((y) => [y.year, y.mean]));
-	if (want === 'reference' && years.length >= 4) {
+	if (want === 'reference' && years.length >= DSST_MIN_WATER_YEARS) {
 		if (!pb.reference) {
 			notes.push('The project has no reference gauge, so the dry → wet test ranks water years by their own observed flow.');
 		} else {
@@ -1230,7 +1295,7 @@ function dsstSetup(pb: CalibrationProblem, opts: CalibrateOptions): DsstSetup {
 		}
 	}
 	years.sort((x, y) => rankOf.get(x.year)! - rankOf.get(y.year)!);
-	if (years.length < 4) return { notes, split: null, years: years.length };
+	if (years.length < DSST_MIN_WATER_YEARS) return { notes, split: null, years: years.length };
 	const k = Math.floor(years.length / 2);
 	const dry = years.slice(0, k);
 	const wet = years.slice(years.length - k);
@@ -1273,6 +1338,16 @@ function defaultStart(start: ParamSet, free: readonly string[], bounds: FitBound
 /** The box the fit without the prior searches: the fit's own, or the wide box where the fit searched the prior's. */
 function unpriorBounds(b: FitBounds): FitBounds {
 	return b === 'prior' ? 'wide' : b;
+}
+
+/**
+ * The optimisations calibrate() will make for this input and these options, before any model run (issue #865): the
+ * plan its progress events count (`optimisation` of `optimisations`), with a dry → wet test the record is too short
+ * for, or an unpenalised fit where no WR2012 penalty applies, left out. Throws as calibrate() would on a problem it
+ * can't fit.
+ */
+export function calibrationPlan(input: ModelInput, opts: Omit<CalibrateOptions, 'onProgress'> = {}): PlannedFit[] {
+	return setupCalibration(input, opts).tasks.map(({ stage, start }) => (start ? { stage, start } : { stage }));
 }
 
 /** Calibrate a runoff model's parameters against the project's observed flow. */

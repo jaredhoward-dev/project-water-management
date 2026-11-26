@@ -5,7 +5,11 @@
 //   1. The kill switch: with ALERTS_ENABLED=false every waiting delivery is
 //      skipped (app_alert_skip_all), so nothing floods out when it's turned
 //      back on.
-//   2. Immediate: claim pending deliveries (app_alert_claim), which applies
+//   2. Immediate: claim pending deliveries (app_alert_claim), which first
+//      moves each waiting delivery to the queue the person's choice *now*
+//      says (370, issue #868: the mode at send time wins, so a switch to
+//      daily after an alert was queued puts it in the digest, and a switch
+//      to right away sends a waiting digest line now), then applies
 //      the daily cap: past DAILY_CAP immediate mails since the last 06:00
 //      in the project's time zone, the rest wait for the digest.
 //   3. Digest: after 06:00 where the catchment is (project.time_zone,
@@ -40,6 +44,10 @@ export interface Claimed {
 	project_id: string;
 	kind: AlertKind;
 	node_id: string | null;
+	/** Digest claims only: how many of this person's lines of this project the claim skipped as over the limit (371). */
+	left_out?: number;
+	/** Digest claims only: how many of this person's catchments the claim left out entirely (386, issue #883); the same on every line of the person. */
+	catchments_left_out?: number;
 }
 
 export interface SendResult {
@@ -58,7 +66,17 @@ const LEASE = '10 minutes';
  * marked sent (in the digest), and never sent again.
  */
 export const DIGEST_MAX_LINES = 20;
-/** Lines claimed per person for one digest (app_alert_claim_digest); older ones are skipped as over the limit. */
+/**
+ * Lines claimed per person for one digest run, across all their catchments
+ * (app_alert_claim_digest). Ranked by turns (each catchment's newest, then
+ * each one's next, 371), so a busy catchment never pushes a quiet one out;
+ * the lines past it are skipped as over the limit, and each catchment's
+ * digest says how many of its own were (left_out, issue #869). Past
+ * DIGEST_CLAIM_LINES catchments some keep no line at all: every digest of the
+ * person then says how many (catchments_left_out, 386, issue #883). Lines the
+ * reader no longer gets, turned off, or whose rule is off are skipped before
+ * the ranking, so neither count includes them.
+ */
 export const DIGEST_CLAIM_LINES = 200;
 
 
@@ -320,7 +338,8 @@ async function deliverDigest(lines: Claimed[], secret: string, r: SendResult): P
 				{ pageUrl: unsubscribePageUrl(token), oneClickUrl: oneClickUrl(token) },
 				dailyCap(),
 				rest.counted.length,
-				await feedbackLinks(db, used[0]!.event_id, true, secret)
+				await feedbackLinks(db, used[0]!.event_id, true, secret),
+				{ n: first.left_out ?? 0, catchments: first.catchments_left_out ?? 0, limit: DIGEST_CLAIM_LINES }
 			);
 			return { mail, used, skipped };
 		});
@@ -404,7 +423,7 @@ export async function sendAlerts({ now = new Date(), limit = 100 }: { now?: Date
 	for (const c of due) await deliver(c, secret, r);
 
 	const { rows: digest } = await withoutUser((db) =>
-		db.query<Claimed>(`SELECT event_id, user_id, project_id, kind, node_id FROM app_alert_claim_digest($1, $2, $3, $4::interval)`, [now, limit, DIGEST_CLAIM_LINES, LEASE])
+		db.query<Claimed>(`SELECT event_id, user_id, project_id, kind, node_id, left_out, catchments_left_out FROM app_alert_claim_digest($1, $2, $3, $4::interval)`, [now, limit, DIGEST_CLAIM_LINES, LEASE])
 	);
 	const groups = new Map<string, Claimed[]>();
 	for (const c of digest) {

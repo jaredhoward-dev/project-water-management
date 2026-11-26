@@ -8,17 +8,18 @@
 // Ported from extract_project.py's month_list() (transfer months), which
 // finds the numbers in the cell text as written. (The legacy runoff model's
 // summer months, read with the spaces removed, went with it in engine 1.0.0.)
-import { type Cell, pyStr } from './cells';
+import { type Cell, pyDigitsValue, pyStr } from './cells';
 
 function cellText(v: Cell): string {
-	// A cell holding a single whole number: str(int(v)) for a float, str(v) for an int; the same text.
+	// str(int(v)) for a whole float, else str(v). A whole number past 1e16 is all its digits here, where pyStr would write 1e+16 (issue #895).
+	if (typeof v === 'number' && Number.isInteger(v)) return BigInt(v).toString();
 	return pyStr(v);
 }
 
 function listed(text: string): number[] {
 	const months = new Set<number>();
-	for (const m of text.match(/\d+/g) ?? []) {
-		const n = Number(m);
+	for (const m of text.match(/\p{Nd}+/gu) ?? []) {
+		const n = pyDigitsValue(m);
 		if (n >= 1 && n <= 12) months.add(n);
 	}
 	return [...months].sort((a, b) => a - b);

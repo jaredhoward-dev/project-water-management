@@ -29,7 +29,7 @@ import type { Db } from '../../db/tx.js';
 import { ApiError } from '../../http/errors.js';
 import { logEvent } from '../../logging/logEvent.js';
 import { safeError } from '../../logging/safeError.js';
-import { JobError, JobRelease } from '../errors.js';
+import { JOB_CANCELLED, JobError, JobRelease } from '../errors.js';
 import type { ClaimedJob, JobContext } from '../registry.js';
 import { parseAim } from './delineate.js';
 
@@ -56,7 +56,7 @@ export async function movedOn(db: Db, projectId: string, req: Pick<RequestRow, '
 export const PAST_THE_WORKER =
 	'The catchment reaches beyond the largest area the app routes, even in the background, so the elevation model can’t order or check the units here. Each unit’s area is its own boundary’s: set the order on the Network.';
 
-const CANCELLED = () => new JobError('cancelled', { retry: false });
+const CANCELLED = () => new JobError(JOB_CANCELLED, { retry: false });
 
 export async function runPlanJob(ctx: Pick<JobContext<unknown>, 'db' | 'progress' | 'deadline'> & { job: Readonly<ClaimedJob> }, req: RequestRow): Promise<void> {
 	const { db, job } = ctx;

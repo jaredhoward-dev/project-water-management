@@ -88,6 +88,13 @@ describe('the importer coercions', () => {
 		expect(isNumeric(null)).toBe(false);
 	});
 
+	// scripts/wbt-import/test_num.py: Python's float() reads these, but JSON has no NaN or infinity.
+	it.each(['nan', 'NaN', ' inf ', '-Infinity', '+inf'])('num(): the text %j is not a number', (text) => {
+		expect(num(text)).toBe(0);
+		expect(num(text, 0.65)).toBe(0.65);
+		expect(isNumeric(text)).toBe(false);
+	});
+
 	it('clean() collapses whitespace like Python, and treats 0 and False as blank', () => {
 		expect(clean('  Echo \t\n  Farm ')).toBe('Echo Farm');
 		expect(clean('a  b')).toBe('a b');

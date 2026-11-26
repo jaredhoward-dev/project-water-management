@@ -48,6 +48,9 @@ const tokenIn = (m: Mail) => m.text.match(/\/alerts\/unsubscribe#t=([A-Za-z0-9_-
 const rules = (u: User, list: { kind: string; nodeId?: string | null; feedId?: string | null; threshold: number; enabled: boolean }[], pid = projectId) =>
 	u.call('PUT', `/projects/${pid}/alert-rules`, { rules: list });
 const damRules = (threshold: number, enabled = true) => farms.map((f) => ({ kind: 'dam_below', nodeId: f.id, threshold, enabled }));
+/** `u` chooses to get `kind` once a day: a digest line queued for them stays one (the mode at send time wins, #868). */
+const chooseDaily = async (u: User, pid: string, kind: string) =>
+	expect((await u.call('PUT', `/me/alerts/${pid}`, { items: [{ kind, mode: 'daily_digest' }] })).status).toBe(200);
 const rowsAs = async <T = Record<string, unknown>>(u: User, sql: string, params: unknown[] = []) =>
 	withUser(u.id, async (db) => (await db.query<T & Record<string, unknown>>(sql, params)).rows);
 
@@ -557,6 +560,7 @@ describe('the digest’s size limit', () => {
 	async function queueDigest(n: number) {
 		const u = await signUp('Adigest');
 		expect((await owner.call('POST', `/projects/${projectId}/members`, { email: u.email, role: 'editor' })).status).toBe(201);
+		await chooseDaily(u, projectId, 'dam_below');
 		const [rule] = await asOwner(`INSERT INTO alert_rule (project_id, kind, node_id, threshold) VALUES ($1, 'dam_below', $2, 0.5) RETURNING id`, [projectId, one.id]);
 		await asOwner(
 			`WITH e AS (
@@ -595,6 +599,8 @@ describe('the digest’s size limit', () => {
 		const mails = mailsTo(u);
 		expect(mails).toHaveLength(1);
 		expect(mails[0]!.text).toContain(`…and ${DIGEST_CLAIM_LINES - DIGEST_MAX_LINES} more alerts.`);
+		// The 30 skipped are said, not silently lost (#869).
+		expect(mails[0]!.text).toContain('30 older alerts for this catchment were left out of this summary');
 		expect(await statuses(u)).toEqual([
 			{ status: 'sent', reason: null, n: DIGEST_CLAIM_LINES },
 			{ status: 'skipped', reason: 'over the digest limit', n: 30 }
@@ -608,6 +614,143 @@ describe('the digest’s size limit', () => {
 		await sendAlerts({ now: tomorrow() });
 		expect(mailsTo(u)).toHaveLength(1);
 		await reset();
+	});
+
+	it('never drops a quiet catchment for a busy one: each gets its fair share of the 200, and each says how many it left out (#869)', async () => {
+		await reset();
+		// A second catchment the same person edits, with a farm of its own.
+		const { id: quietId } = await makeProject(owner, 'Alerts quiet');
+		const [{ id: quietFarm }] = await asOwner(`SELECT id FROM node WHERE project_id = $1 AND name = 'Farm One'`, [quietId]);
+		// Busy: 230 lines in Alerts, the newest. Quiet: 5 lines, older than every busy one.
+		const u = await queueDigest(230);
+		expect((await owner.call('POST', `/projects/${quietId}/members`, { email: u.email, role: 'editor' })).status).toBe(201);
+		// Daily there too, or the mode at send time (370) would send the quiet lines on their own.
+		await chooseDaily(u, quietId, 'dam_below');
+		const [rule] = await asOwner(`INSERT INTO alert_rule (project_id, kind, node_id, threshold) VALUES ($1, 'dam_below', $2, 0.5) RETURNING id`, [quietId, quietFarm]);
+		await asOwner(
+			`WITH e AS (
+				INSERT INTO alert_event (rule_id, project_id, state, value, detail)
+				SELECT $1, $2, 'cleared', 0.2, jsonb_build_object('source', 'latest', 'pct', 0.2, 'date', '2023-02-01', 'i', i) FROM generate_series(1, 5) i
+				RETURNING id, (detail->>'i')::int AS i
+			)
+			INSERT INTO alert_delivery (event_id, user_id, project_id, mode, status, created_at)
+			SELECT e.id, $3, $2, 'daily_digest', 'digest', now() - make_interval(hours => 300 - e.i) FROM e`,
+			[rule.id, quietId, u.id]
+		);
+		await sendAlerts({ now: tomorrow() });
+		const mails = mailsTo(u);
+		const quiet = mails.filter((m) => m.subject.includes('Alerts quiet'));
+		const busy = mails.filter((m) => !m.subject.includes('Alerts quiet'));
+		// Before #869 the busy catchment's newest 200 took the whole limit: the quiet one's 5 were skipped, no email.
+		expect(quiet).toHaveLength(1);
+		expect(quiet[0]!.text.match(/Dam low on Farm One:/g)).toHaveLength(5);
+		expect(quiet[0]!.text).not.toContain('left out');
+		// The busy one fills the rest (195), and says it left 35 out.
+		expect(busy).toHaveLength(1);
+		expect(busy[0]!.text).toContain(`…and ${DIGEST_CLAIM_LINES - 5 - DIGEST_MAX_LINES} more alerts.`);
+		expect(busy[0]!.text).toContain('35 older alerts for this catchment were left out of this summary');
+		const byProject = await asOwner(
+			`SELECT project_id = $2 AS quiet, status, count(*)::int AS n FROM alert_delivery WHERE user_id = $1 GROUP BY 1, 2 ORDER BY 1, 2`,
+			[u.id, quietId]
+		);
+		expect(byProject).toEqual([
+			{ quiet: false, status: 'sent', n: DIGEST_CLAIM_LINES - 5 },
+			{ quiet: false, status: 'skipped', n: 35 },
+			{ quiet: true, status: 'sent', n: 5 }
+		]);
+		await asOwner('DELETE FROM alert_delivery WHERE user_id = $1', [u.id]);
+		await reset(quietId);
+		await reset();
+	});
+});
+
+describe('what the digest limit leaves out (386)', () => {
+	/** A new person owning `sizes.length` catchments, each with `sizes[i]` data_stale digest lines (catchment i's queued after i−1's), as the schema owner. */
+	async function catchments(sizes: number[]) {
+		const u = await signUp('Aleft');
+		const ids: string[] = [];
+		for (const [i, n] of sizes.entries()) {
+			const pid = (await u.call('POST', '/projects', { name: `Left ${i}` })).body.project.id as string;
+			ids.push(pid);
+			const [rule] = await asOwner(`INSERT INTO alert_rule (project_id, kind, threshold) VALUES ($1, 'data_stale', 3) RETURNING id`, [pid]);
+			await asOwner(
+				`WITH e AS (
+					INSERT INTO alert_event (rule_id, project_id, state, value, detail)
+					SELECT $1, $2, 'cleared', 4, jsonb_build_object('i', i) FROM generate_series(1, $4::int) i
+					RETURNING id, (detail->>'i')::int AS i
+				)
+				INSERT INTO alert_delivery (event_id, user_id, project_id, mode, status, created_at)
+				SELECT e.id, $3, $2, 'daily_digest', 'digest', now() - make_interval(hours => 100 - 10 * $5::int - e.i) FROM e`,
+				[rule.id, pid, u.id, n, i]
+			);
+		}
+		return { u, ids };
+	}
+	const tomorrow = () => new Date(Date.now() + 24 * 3600_000);
+	/** One digest claim with a limit of `lines` a person; this person's rows only. */
+	const mine = async (u: { id: string }, lines: number) => {
+		const rows = await withoutUser((db) =>
+			db.query<{ user_id: string; project_id: string; left_out: number; catchments_left_out: number }>(
+				`SELECT user_id, project_id, left_out, catchments_left_out FROM app_alert_claim_digest($1, 500, $2, interval '5 minutes')`,
+				[tomorrow(), lines]
+			)
+		);
+		return rows.rows.filter((r) => r.user_id === u.id);
+	};
+	const byProject = (u: { id: string }) =>
+		asOwner(`SELECT project_id, status, reason, count(*)::int AS n FROM alert_delivery WHERE user_id = $1 GROUP BY 1, 2, 3 ORDER BY 1, 2, 3`, [u.id]);
+	const cleanUp = async (u: { id: string }, ids: string[]) => {
+		await asOwner('DELETE FROM alert_delivery WHERE user_id = $1', [u.id]);
+		for (const pid of ids) await reset(pid);
+	};
+
+	it('past the limit in catchments, says on every claimed line how many catchments kept no line (#883)', async () => {
+		// Three catchments, a limit of 2: each one's newest is turn 1, so the oldest catchment (0) keeps none.
+		const { u, ids } = await catchments([3, 2, 2]);
+		const got = await mine(u, 2);
+		expect(got.map((r) => r.project_id).sort()).toEqual([ids[1], ids[2]].sort());
+		// Every line of the person carries the whole catchment left out; each its own catchment's lines.
+		expect(got.map((r) => r.catchments_left_out)).toEqual([1, 1]);
+		expect(Object.fromEntries(got.map((r) => [r.project_id, r.left_out]))).toEqual({ [ids[1]!]: 1, [ids[2]!]: 1 });
+		const rows = await byProject(u);
+		expect(rows.filter((r) => r.project_id === ids[0])).toEqual([{ project_id: ids[0], status: 'skipped', reason: 'over the digest limit', n: 3 }]);
+		await cleanUp(u, ids);
+	});
+
+	it('counts neither in the limit nor in left out the lines the reader turned off or whose rule is off: skipped with the sender’s reason (#883)', async () => {
+		const { u, ids } = await catchments([3, 2, 2, 2]);
+		// Catchment 2: the person turned the alert off. Catchment 3: an editor switched the rule off.
+		expect((await u.call('PUT', `/me/alerts/${ids[2]}`, { items: [{ kind: 'data_stale', mode: 'off' }] })).status).toBe(200);
+		await asOwner(`UPDATE alert_rule SET enabled = false WHERE project_id = $1`, [ids[3]]);
+		const got = await mine(u, 2);
+		// Only catchments 0 and 1 compete for the 2 places now: each keeps one, no catchment is left out whole.
+		expect(got.map((r) => r.project_id).sort()).toEqual([ids[0], ids[1]].sort());
+		expect(got.map((r) => r.catchments_left_out)).toEqual([0, 0]);
+		expect(Object.fromEntries(got.map((r) => [r.project_id, r.left_out]))).toEqual({ [ids[0]!]: 2, [ids[1]!]: 1 });
+		const rows = await byProject(u);
+		expect(rows.filter((r) => r.project_id === ids[2])).toEqual([{ project_id: ids[2], status: 'skipped', reason: 'turned this alert off', n: 2 }]);
+		expect(rows.filter((r) => r.project_id === ids[3])).toEqual([{ project_id: ids[3], status: 'skipped', reason: RULE_OFF, n: 2 }]);
+		await cleanUp(u, ids);
+	});
+
+	it('skips the lines of a person no longer in the catchment as no longer getting the alert (positive control: a member’s are claimed)', async () => {
+		const { u, ids } = await catchments([2]);
+		const v = await signUp('Aleftv');
+		// v was an editor when the line was queued, and has since left.
+		const [e] = await asOwner(`SELECT event_id FROM alert_delivery WHERE user_id = $1 LIMIT 1`, [u.id]);
+		await asOwner(`INSERT INTO alert_delivery (event_id, user_id, project_id, mode, status, created_at) VALUES ($1, $2, $3, 'daily_digest', 'digest', now() - interval '2 hours')`, [
+			e.event_id,
+			v.id,
+			ids[0]
+		]);
+		const all = await withoutUser((db) =>
+			db.query<{ user_id: string }>(`SELECT user_id FROM app_alert_claim_digest($1, 500, 200, interval '5 minutes')`, [tomorrow()])
+		);
+		expect(all.rows.filter((r) => r.user_id === u.id)).toHaveLength(2);
+		expect(all.rows.filter((r) => r.user_id === v.id)).toHaveLength(0);
+		expect(await asOwner(`SELECT status, reason FROM alert_delivery WHERE user_id = $1`, [v.id])).toEqual([{ status: 'skipped', reason: 'no longer gets this alert' }]);
+		await asOwner('DELETE FROM alert_delivery WHERE user_id = $1', [v.id]);
+		await cleanUp(u, ids);
 	});
 });
 
@@ -1113,6 +1256,7 @@ describe('the project’s local day', () => {
 		const u = await signUp('Adigestzone');
 		for (const pid of [sa, kiri]) {
 			expect((await owner.call('POST', `/projects/${pid}/members`, { email: u.email, role: 'editor' })).status).toBe(201);
+			await chooseDaily(u, pid, 'ewr_forecast_fail');
 			// An EWR forecast alert: an editor gets it by default (job_dead is off for editors).
 			const [rule] = await asOwner(`INSERT INTO alert_rule (project_id, kind, threshold) VALUES ($1, 'ewr_forecast_fail', 3) RETURNING id`, [pid]);
 			const [e] = await asOwner(`INSERT INTO alert_event (rule_id, project_id, state, value, detail) VALUES ($1, $2, 'cleared', 5, '{"days":5,"of":14,"from":"2026-09-12","to":"2026-09-25","madeOn":"2026-09-11"}') RETURNING id`, [rule.id, pid]);
@@ -1204,6 +1348,7 @@ describe('a failed send is logged without personal data', () => {
 		const { id: pid } = await makeProject(owner, 'Digest send fails');
 		const u = await signUp('Adigestfail');
 		expect((await owner.call('POST', `/projects/${pid}/members`, { email: u.email, role: 'editor' })).status).toBe(201);
+		await chooseDaily(u, pid, 'ewr_forecast_fail');
 		const [rule] = await asOwner(`INSERT INTO alert_rule (project_id, kind, threshold) VALUES ($1, 'ewr_forecast_fail', 3) RETURNING id`, [pid]);
 		const [e] = await asOwner(`INSERT INTO alert_event (rule_id, project_id, state, value, detail) VALUES ($1, $2, 'cleared', 5, '{"days":5,"of":14,"from":"2026-09-12","to":"2026-09-25","madeOn":"2026-09-11"}') RETURNING id`, [rule.id, pid]);
 		// Queued at 05:30 SAST on the 26th; 06:30 SAST is past that digest day's 06:00.
@@ -1367,5 +1512,61 @@ describe('a firing event follows its figure, and stops with its rule', () => {
 		await sendAlerts();
 		expect(mailsAbout(name).map((m) => m.subject)).toEqual([`Data feed failing — ${name}`]);
 		await asOwner(`DELETE FROM job WHERE project_id = $1`, [pid]);
+	});
+});
+
+describe('the mode at send time wins (issue #868)', () => {
+	const EWR = '{"days":5,"of":14,"from":"2026-09-12","to":"2026-09-25","madeOn":"2026-09-11"}';
+	async function setUp(name: string) {
+		const { id: pid } = await makeProject(owner, name);
+		const u = await signUp(`A${name.replace(/\W/g, '').toLowerCase()}`);
+		expect((await owner.call('POST', `/projects/${pid}/members`, { email: u.email, role: 'editor' })).status).toBe(201);
+		const [rule] = await asOwner(`INSERT INTO alert_rule (project_id, kind, threshold) VALUES ($1, 'ewr_forecast_fail', 3) RETURNING id`, [pid]);
+		const [e] = await asOwner(`INSERT INTO alert_event (rule_id, project_id, state, value, detail) VALUES ($1, $2, 'cleared', 5, $3) RETURNING id`, [rule.id, pid, EWR]);
+		const row = async () => (await asOwner(`SELECT status, via, reason FROM alert_delivery WHERE event_id = $1 AND user_id = $2`, [e.id, u.id]))[0];
+		const choose = async (mode: string) => expect((await u.call('PUT', `/me/alerts/${pid}`, { items: [{ kind: 'ewr_forecast_fail', mode }] })).status).toBe(200);
+		return { pid, u, e, row, choose };
+	}
+
+	it('an alert queued to go right away, after a switch to once a day, waits for the next digest (positive control: unswitched, it goes at once)', async () => {
+		// Positive control: queued as immediate and still immediate, it goes at the next tick.
+		const ctl = await setUp('Mode control');
+		await asOwner(`INSERT INTO alert_delivery (event_id, user_id, project_id, mode) VALUES ($1, $2, $3, 'immediate')`, [ctl.e.id, ctl.u.id, ctl.pid]);
+		await sendAlerts();
+		expect(await ctl.row()).toMatchObject({ status: 'sent', via: 'immediate' });
+
+		const s = await setUp('Mode to daily');
+		await asOwner(`INSERT INTO alert_delivery (event_id, user_id, project_id, mode) VALUES ($1, $2, $3, 'immediate')`, [s.e.id, s.u.id, s.pid]);
+		await s.choose('daily_digest');
+		await sendAlerts();
+		expect(mailsTo(s.u)).toEqual([]);
+		expect(await s.row()).toMatchObject({ status: 'digest', reason: null });
+		// The next morning's digest carries it.
+		await sendAlerts({ now: new Date(Date.now() + 30 * 3600_000) });
+		expect(await s.row()).toMatchObject({ status: 'sent', via: 'digest' });
+		expect(mailsTo(s.u).map((m) => m.subject)).toEqual(['Your alerts for Mode to daily — IC-WBT']);
+	});
+
+	it('a digest line, after a switch to right away, goes out at the next tick on its own; a line over the daily cap stays in the digest', async () => {
+		const s = await setUp('Mode to immediate');
+		await s.choose('daily_digest');
+		await asOwner(`INSERT INTO alert_delivery (event_id, user_id, project_id, mode, status) VALUES ($1, $2, $3, 'daily_digest', 'digest')`, [s.e.id, s.u.id, s.pid]);
+		// Positive control: still daily, it waits (queued after this morning's 06:00).
+		await sendAlerts();
+		expect(await s.row()).toMatchObject({ status: 'digest' });
+		await s.choose('immediate');
+		await sendAlerts();
+		expect(await s.row()).toMatchObject({ status: 'sent', via: 'immediate' });
+		const mails = mailsTo(s.u);
+		expect(mails).toHaveLength(1);
+		expect(mails[0]!.subject).not.toMatch(/^Your alerts for/);
+
+		// Over the cap is the cap's doing, not the person's choice: it stays for the digest.
+		const c = await setUp('Mode capped');
+		await asOwner(`INSERT INTO alert_delivery (event_id, user_id, project_id, mode, status, reason) VALUES ($1, $2, $3, 'immediate', 'digest', 'over the daily cap')`, [c.e.id, c.u.id, c.pid]);
+		// At the default cap and with no mail sent today, moving it back to the immediate queue would send it.
+		await sendAlerts();
+		expect(await c.row()).toMatchObject({ status: 'digest', reason: 'over the daily cap' });
+		await settlePendingNotices(c.pid);
 	});
 });

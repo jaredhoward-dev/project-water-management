@@ -26,6 +26,7 @@
 		type ZoneFitPlanStep,
 		type CalibrationReport,
 		type FitRecord,
+		type ModelInput,
 		type ProjectModel,
 		type ProjectSettings
 	} from '@water-management/engine';
@@ -33,6 +34,7 @@
 	import { apanDailyOfValues, chirpsSourceOfInput, et0DailyOfValues } from '#lib/series/provenance.js';
 	import { fitScoredThrough } from '@water-management/engine';
 	import { api } from '#lib/api/index.js';
+	import { calibrationModelInput } from '#lib/calibration/modelInputShared.js';
 	import {
 		benchmarkColumns,
 		benchmarkRows,
@@ -56,7 +58,9 @@
 		SEED_MAX,
 		seedError,
 		stageText,
-		totalRuns,
+		planRuns,
+		stepWaterYears,
+		type PlanRunsStep,
 		validationRecordOptions
 	} from '#lib/calibration/fit.js';
 	import { FLOW_KIND_LABEL } from '#lib/components/calibration/metrics.js';
@@ -76,6 +80,7 @@
 
 	let {
 		projectId,
+		revision,
 		x2Open,
 		settings,
 		model,
@@ -90,6 +95,8 @@
 		penaltyFields
 	}: {
 		projectId: string;
+		/** The project's revision as loaded (its updatedAt): the model input is loaded once per project and revision (issue #913). */
+		revision: string;
 		x2Open: boolean;
 		/** The Settings form as it stands (unsaved edits included). */
 		settings: () => ProjectSettings;
@@ -144,7 +151,6 @@
 	const penalty = $derived(marPenaltyOn(settings()));
 	// The fit without the regional prior, when asked (engine 1.120.0): one more optimisation per start, so the report says what the prior cost.
 	const priorCostOn = $derived(session.priorUse !== 'off' && session.priorCost);
-	const runs = $derived(totalRuns(session.budget ?? 0, session.validate, penalty, startsOk ? session.starts! : 1, priorCostOn));
 	// The regional prior (issue #622): a penalty, the search box or both; its weight only matters with the penalty.
 	const priorProblem = $derived(priorWeightError(session.priorUse, session.priorWeight));
 	const priorBox = $derived(session.priorUse === 'bounds' || session.priorUse === 'both');
@@ -180,6 +186,51 @@
 	// before any worker starts.
 	const planned = $derived(nodes.length ? fitPlanOf(settings(), nodes) : null);
 	// A ticked outlet with no record yet (a new project is created with the outlet ticked): its step can't be scored.
+	// Each location's qualifying water years (issue #894), so the estimate leaves out a dry → wet test a short record
+	// skips: the model input as the server would run it, loaded once per project and revision and shared with the
+	// automated calibration panel (lib/calibration/modelInput.ts; Fit loads it afresh and the estimate then reads that), read
+	// with the form and the network as they stand by the engine's own rule, a moment after the last edit. Until then,
+	// or where the engine can't set a step up yet, the test is counted.
+	let serverInput = $state.raw<ModelInput | null>(null);
+	$effect(() => {
+		const id = projectId;
+		const rev = revision;
+		if (readonly || !hasObserved) return;
+		let live = true;
+		calibrationModelInput.get(id, rev).then(
+			(got) => {
+				if (live) serverInput = got;
+			},
+			() => {
+				if (live) serverInput = null;
+			}
+		);
+		return () => {
+			live = false;
+		};
+	});
+	let yearSteps = $state.raw<PlanRunsStep[] | null>(null);
+	$effect(() => {
+		const base = serverInput;
+		const plan = planned?.plan;
+		if (!base || !plan) {
+			yearSteps = null;
+			return;
+		}
+		const form = settings();
+		const net = model?.();
+		const t = setTimeout(() => {
+			try {
+				yearSteps = stepWaterYears(fitInput(base, form, net), plan);
+			} catch {
+				yearSteps = null;
+			}
+		}, 300);
+		return () => clearTimeout(t);
+	});
+	// The engine's plan per location (issue #865): the unpenalised fit at the headline's step only, the dry → wet test
+	// only where the record has the water years for it (issue #894).
+	const runs = $derived(planRuns(yearSteps && yearSteps.length === planned?.plan?.length ? yearSteps : planned?.plan, session.budget ?? 0, session.validate, penalty, startsOk ? session.starts! : 1, priorCostOn));
 	const outletMissing = $derived(!!planned?.plan?.some((st) => st.zoneNodeId === null) && !outletHasRecord);
 	const planError = $derived(
 		planned?.error ?? (outletMissing ? 'The outlet has no flow record yet, so its step can’t be fitted: add one on Data, or untick Calibrate here at the outlet.' : null)
@@ -218,7 +269,8 @@
 		const priors: Record<string, CalibrationPrior> = {};
 		void session.start(
 			async () => {
-				server = await api.runs.modelInput(projectId);
+				server = await calibrationModelInput.refresh(projectId, revision);
+				serverInput = server;
 				const form = settings();
 				input = fitInput(server, form, model?.());
 				// Refuses no location ticked, a group with no unit draining through it, or a borrowing cycle (engine
@@ -423,7 +475,7 @@
 			{/if}
 			<span class="muted small" id="{uid}-runs" data-testid="fit-runs"
 				>{planned?.plan && planned.plan.length > 1
-					? `${fmtNum(runs)} runs a location, ${fmtNum(runs * planned.plan.length)} in all over ${planned.plan.length} locations.`
+					? `${fmtNum(runs)} runs in all over ${planned.plan.length} locations.`
 					: `${fmtNum(runs)} runs in all.`}</span
 			>
 		</div>

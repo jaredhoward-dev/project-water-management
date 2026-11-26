@@ -27,6 +27,7 @@ import type {
 	OpClass,
 	OutlookExcluded,
 	PairedMember,
+	PairedRerun,
 	PairedSummary,
 	ProjectModel,
 	ProjectSettings,
@@ -189,6 +190,8 @@ export interface ProjectSummary {
 	lastRunAt: string | null;
 	/** ISO timestamp of the current publication (022_publication), or null before any. Every member sees it, farmers included. */
 	publishedAt: string | null;
+	/** IANA zone (058_project_time_zone, Africa/Johannesburg by default): dates the project's downloads, and its runs on every screen (issue #899). Absent from an older API. */
+	timeZone?: string;
 }
 
 /**
@@ -277,8 +280,6 @@ export interface ResponsibleAuthority {
 }
 
 export interface Project extends ProjectSummary {
-	/** IANA zone (058_project_time_zone, Africa/Johannesburg by default): dates the project's downloads. Absent from an older API. */
-	timeZone?: string;
 	/** The WUA that publishes the figures (095_wua_name): the farm pages name it in their contact lines. null = "your WUA". Absent from an older API. */
 	wuaName?: string | null;
 	settings: ProjectSettings & { autoRun?: AutoRunSettings; outcomes?: OutcomeSettings; outlook?: OutlookSettings; responsibleAuthority?: ResponsibleAuthority | null; ewrHeadline?: EwrHeadline; referenceGauge?: ReferenceGauge | null };
@@ -998,7 +999,7 @@ export interface Ensemble {
 export interface EnsembleDetail extends Ensemble {
 	result:
 		| { engineVersion: string; header: EnsembleHeader; members: MemberResult[]; coverage: RecordCoverage[] }
-		| { engineVersion: string; header: EnsembleHeader; members: PairedMember[] }
+		| { engineVersion: string; header: EnsembleHeader; members: PairedMember[]; rerun?: PairedRerun }
 		| null;
 }
 
@@ -1130,8 +1131,8 @@ export interface RunCatchmentDay {
 
 /** One side of GET /compare/runs. */
 export interface CompareSide {
-	/** `ewrHeadline`: the project's current choice of the EWR its results are judged by (issue #444); absent from an older API. */
-	project: { id: string; name: string; ewrHeadline?: EwrHeadline };
+	/** `ewrHeadline`: the project's current choice of the EWR its results are judged by (issue #444); `timeZone`: its IANA zone, which dates this side's run (issue #899); both absent from an older API. */
+	project: { id: string; name: string; ewrHeadline?: EwrHeadline; timeZone?: string };
 	/** `evidence` is null when the run was never nominated, absent from an older API. */
 	run: Omit<Run, 'evidence'> & { inputs: RunInputsSnapshot; evidence?: RunEvidence | null };
 	/** The scenario that made this side's run; null for a run of the model. Absent from an older API. */
@@ -1645,6 +1646,8 @@ export interface Publication extends Omit<PublicationMeta, 'restriction'> {
 	catchmentView: CatchmentView & { engineVersion: string; runoffModel: string; calibration: { nse: number | null; pbias: number | null; kge: number | null } | null };
 	updatedAt: string | null;
 	updatedBy: string | null;
+	/** 1 when published, one more on every notice save (issue #885); what a form's `basedOn` names. */
+	revision: number;
 }
 
 /**
@@ -1699,17 +1702,28 @@ export interface RunPublication {
 	} | null;
 }
 
+/**
+ * The publication a form was filled in from (issue #863): its id and
+ * revision as read (issue #885), both null when nothing was published. The
+ * server answers 409 publication_changed when it is no longer the current
+ * one as it stands. The API takes it as optional; the app's own writes
+ * always send it, so it is required here.
+ */
+export type PublicationBasis = { id: string; revision: number } | { id: null; revision: null };
+
 export interface PublishRequest {
 	runId: string;
 	note?: string;
 	restriction?: PublicationRestriction;
 	nextExpectedOn?: string | null;
+	basedOn: PublicationBasis;
 }
 
 export interface PublicationPatch {
 	note?: string;
 	restriction?: PublicationRestriction;
 	nextExpectedOn?: string | null;
+	basedOn: PublicationBasis;
 }
 
 // --- Change history (WP-2.4, docs/api.md § History) ------------------------
@@ -2355,13 +2369,21 @@ export interface PackDetail {
 	/** The stored manifest still hashes to its recorded SHA-256. */
 	manifestMatches: boolean;
 	/**
+	 * `manifest` is redacted, so it no longer hashes to `pack.manifestSha256`.
 	 * A viewer the project doesn't let read each farm's registered volume, on a
-	 * pack whose runs carry them (D3, issue #523 G1): `manifest` comes without
-	 * Appendix A.1's allocation rows and the summaries' per-unit part, so it no
-	 * longer hashes to `pack.manifestSha256`, and the reproduction bundle is
-	 * refused (403 `pack_volumes_withheld`).
+	 * pack whose runs carry them (D3, issue #523 G1): without Appendix A.1's
+	 * allocation rows and the summaries' per-unit part, and the reproduction
+	 * bundle is refused (403 `pack_volumes_withheld`); or, on a pack whose runs
+	 * carry none, its boards' verdicts only (`manifestVerdictsOnly`, #870).
 	 */
 	volumesWithheld: boolean;
+	/**
+	 * `manifest` is redacted only to page 1's licence-impact boards' and the
+	 * combined dams' verdicts, for a viewer kept from each volume on a pack whose
+	 * own runs carry none (#870): `volumesWithheld` is true too (it no longer
+	 * hashes, so it doesn't download), but the bundle isn't refused for it.
+	 */
+	manifestVerdictsOnly: boolean;
 	/**
 	 * The reproduction bundle is refused this caller (403 `pack_volumes_withheld`): as `volumesWithheld`, or
 	 * because a run only the bundle holds (an alternative's, the cited assessment's background) carries a
@@ -2782,6 +2804,10 @@ export interface FutureYieldState {
 		result: FutureYieldResult | null;
 		withheld?: string[];
 		engineVersion: string;
+		/** The catchment boundary's hash when the job read the factors; null for a result stored before 390_future_yield_boundary. */
+		boundarySha256: string | null;
+		/** That boundary against the project's now (issue #889): changed or none means the result is stale. */
+		boundary: 'same' | 'changed' | 'none' | 'unrecorded';
 		createdBy: string | null;
 		createdAt: string;
 	} | null;

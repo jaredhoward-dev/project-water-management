@@ -10,15 +10,17 @@
 	`start()` and asks `canRun()`.
 -->
 <script lang="ts">
-	import { rulesLines, waterYearLabel, type CalibrationRules } from '@water-management/engine';
+	import { canonicalJson, rulesLines, waterYearLabel, type CalibrationRules } from '@water-management/engine';
 	import { api } from '#lib/api/index.js';
+	import { calibrationModelInput } from '#lib/calibration/modelInputShared.js';
 	import { AutoCalibrationFollower } from '#lib/calibration/autoFollow.svelte.js';
-	import { applyBlocker, autoCaseRows, autoRunsTotal, autoState, rulesUnsaved, runBlocker as runBlockerOf, selectionText, triggerText, type RunBlocker } from '#lib/calibration/autoFit.js';
+	import { applyBlocker, autoCaseRows, autoRunsTotal, autoState, ruleWaterYears, rulesUnsaved, runBlocker as runBlockerOf, selectionText, triggerText, type RunBlocker } from '#lib/calibration/autoFit.js';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { fmtDay, fmtNum } from '#lib/format/number.js';
 
 	let {
 		projectId,
+		revision,
 		savedRules,
 		formRules,
 		formDirty,
@@ -28,6 +30,8 @@
 		onApplied
 	}: {
 		projectId: string;
+		/** The project's revision as loaded (its updatedAt): the model input is loaded once per project and revision (issue #913). */
+		revision: string;
 		/** settings.calibrationRules as saved: the only rules the server runs. */
 		savedRules: CalibrationRules;
 		/** The form's rules as they stand: the run and Apply wait while they differ from the saved ones. */
@@ -56,6 +60,36 @@
 	const blocked = $derived(runBlockerOf({ hasObserved, readonly, rulesUnsaved: unsaved, running, busy }));
 	const canStart = $derived(blocked === null);
 	const rows = $derived(latest ? autoCaseRows(latest) : []);
+	// The qualifying water years each case fits on (issue #894), from the project's saved input under the saved rules
+	// (the rules' flagged-year exclusions out), so the estimate leaves out a dry → wet test the record is too short for.
+	// Asked again when the saved rules change; null (not known yet, or refused) counts the test. The input is the one
+	// the fit panel loads too, once per project and revision (lib/calibration/modelInput.ts, issue #913); a save of the
+	// rules loads it afresh.
+	let waterYears = $state<number | null>(null);
+	let rulesSeen: { id: string; key: string } | null = null;
+	const savedKey = $derived(canonicalJson(savedRules));
+	$effect(() => {
+		const id = projectId;
+		const rev = revision;
+		const key = savedKey;
+		if (!hasObserved) return;
+		// The same project with other saved rules than last time: they were saved, so the input changed.
+		const saved = rulesSeen;
+		const fresh = saved !== null && saved.id === id && saved.key !== key;
+		rulesSeen = { id, key };
+		let live = true;
+		(fresh ? calibrationModelInput.refresh(id, rev) : calibrationModelInput.get(id, rev)).then(
+			(got) => {
+				if (live) waterYears = ruleWaterYears(got);
+			},
+			() => {
+				if (live) waterYears = null;
+			}
+		);
+		return () => {
+			live = false;
+		};
+	});
 	const kept = $derived(latest && latest.chosen !== null ? latest.cases[latest.chosen]! : null);
 	const blocker = $derived(latest ? applyBlocker(latest, { rulesUnsaved: unsaved, formDirty, readonly }) : null);
 
@@ -103,7 +137,7 @@
 		{#if !savedRules.signedOff}
 			<p class="alert alert-warning small">These rules are drafts until the hydrologist signs them off: a fit they keep is not evidence yet.</p>
 		{/if}
-		<p class="muted small" data-testid="auto-runs">{fmtNum(autoRunsTotal(savedRules, penalty))} model runs in all, by the rules’ search.</p>
+		<p class="muted small" data-testid="auto-runs">{fmtNum(autoRunsTotal(savedRules, penalty, waterYears))} model runs in all, by the rules’ search.</p>
 		{#if unsaved}
 			<p class="alert alert-info small" data-testid="auto-rules-unsaved">The calibration rules have unsaved changes. Save them first: the server only runs, and applies fits under, saved rules.</p>
 		{/if}

@@ -503,7 +503,11 @@ headline results, for two runs of **one project**:
   shortfall (with the same share), outflow MAR, Reserve compliance (in
   percentage points) and curtailment per farm in both runs, then EWR days not
   met by month; farms in only one run are named. The decision rule is printed
-  above it. Same inputs give exactly zero.
+  above it. Same inputs give exactly zero. When A's ensemble was stored on
+  an older engine, the browser also runs A's kept sets again on A's own
+  inputs (the progress counts both sides) and the band is the difference of
+  the two re-runs, so it holds no change of engine (issue #897; model.md
+  §2.10e).
 - It needs A to have a stored ensemble, one runoff model (bands of two models
   are never pooled: "The runs use different runoff models … no paired band")
   and one period. An editor of B's project computes it (**Compute the paired

@@ -270,7 +270,7 @@ describe('losing the team revokes every team project, rows the user wrote includ
 				 ORDER BY 1`
 			)
 		).map((r) => r.table_name as string);
-		expect(unreadable).toEqual(['allocation_holder_salt', 'assistant_reservation']);
+		expect(unreadable).toEqual(['allocation_holder_salt', 'assistant_reservation', 'report_pdf_erasure']);
 		routes = [...new Set(app.routes.filter((r) => r.method !== 'ALL' && r.method !== 'OPTIONS').map((r) => `${r.method} ${r.path}`))];
 	});
 

@@ -177,6 +177,11 @@ describe('CSV', () => {
 	it('quotes, defuses formulas and writes plain numbers', () => {
 		expect(csvCell('Smith, J')).toBe('"Smith, J"');
 		expect(csvCell('=1+1')).toBe("'=1+1");
+		expect(csvCell(' =1+1')).toBe("' =1+1");
+		expect(csvCell('＠x')).toBe("'＠x");
+		// normalName reads the defused name back as the name (issue #902).
+		for (const n of [' =Farm', '＝Farm', '-Farm']) expect(normalName(csvCell(n))).toBe(normalName(n));
+		expect(normalName("'Farm")).toBe("'farm");
 		expect(csvCell(0.7 * 100)).toBe('70');
 		expect(csvCell(-5)).toBe('-5');
 		expect(csvCell(null)).toBe('');

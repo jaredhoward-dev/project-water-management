@@ -5,42 +5,37 @@
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { onMount, untrack } from 'svelte';
 	import { resolve } from '$app/paths';
-	import { api, hasTeamRole, type Member, type Project, type Team } from '#lib/api/index.js';
+	import { api, type Project, type Team } from '#lib/api/index.js';
 	import { cached } from './cache';
+	import { teamMoveChoices } from './teamMove';
 
 	let {
 		project,
 		isOwner,
-		currentUserId,
 		onProjectChange
 	}: {
 		project: Project;
 		isOwner: boolean;
-		currentUserId: string;
 		onProjectChange: (p: Project) => void;
 	} = $props();
 
-	// Last-seen teams/members first so the panel doesn't change shape on revisit.
+	// Last-seen teams first so the panel doesn't change shape on revisit.
 	const memo = untrack(() => cached(project.id));
 	let teams = $state<Team[] | null>(memo.teams ?? null);
-	let direct = $state<Member[] | null>(memo.members ?? null);
 	let target = $state(untrack(() => project.team?.id ?? ''));
 	let moving = $state(false);
 	let error = $state<string | null>(null);
 
 	onMount(async () => {
 		if (!isOwner) return;
-		const [t, m] = await Promise.allSettled([api.teams.list(), api.members.list(project.id)]);
-		teams = memo.teams = t.status === 'fulfilled' ? t.value : [];
-		if (m.status === 'fulfilled') direct = m.value;
+		teams = memo.teams = await api.teams.list().catch(() => []);
 	});
 
-	// Owners through a team admin role alone would lose the project if it left
-	// the team: the API can't move it to personal for them.
-	const directOwner = $derived(direct?.some((m) => m.userId === currentUserId && m.role === 'owner') ?? true);
 	const current = $derived(project.team?.id ?? '');
-	// Only teams you may add projects to (member or admin); a team viewer can't.
-	const movable = $derived(teams?.filter((t) => hasTeamRole(t.role, 'member')) ?? null);
+	// Who may move it where (teamMove.ts): an owner; out of its team only an admin of it (issue #900), who keeps it
+	// as a direct owner when it goes personal; into teams where they are member or admin.
+	const choice = $derived(teamMoveChoices(isOwner, project.team, teams ?? []));
+	const movable = $derived(choice.kind === 'choose' && teams ? choice.teams : null);
 	const targetName = $derived(target ? (teams?.find((t) => t.id === target)?.name ?? 'the team') : 'Personal');
 
 	async function move(e: SubmitEvent) {
@@ -77,13 +72,15 @@
 		<p class="owner-line"><strong>Personal project.</strong> Only the people listed under Members can open it.</p>
 	{/if}
 
-	{#if isOwner}
+	{#if choice.kind === 'admin_only'}
+		<p class="muted small">Only an admin of {project.team?.name ?? 'its team'} can move it out of the team.</p>
+	{:else if choice.kind === 'choose'}
 		{#if error}<div class="alert alert-error" role="alert">{error}</div>{/if}
 		<form class="form-row move" onsubmit={move}>
 			<div class="field grow">
 				<label for="move-team">Move to</label>
 				<select id="move-team" bind:value={target} disabled={moving}>
-					<option value="" disabled={!!project.team && !directOwner}>Personal</option>
+					<option value="">Personal</option>
 					{#if project.team && !movable?.some((t) => t.id === project.team?.id)}
 						<option value={project.team.id}>{project.team.name ?? 'Current team'}</option>
 					{/if}
@@ -94,11 +91,7 @@
 				<button class="btn" type="submit" disabled={moving || target === current}>{moving ? 'Moving…' : 'Move'}</button>
 			</div>
 		</form>
-		{#if project.team && !directOwner}
-			<p class="muted small">
-				You're an owner through the team, so you can't make it personal: add yourself under Members as an owner first.
-			</p>
-		{:else if movable && !movable.length}
+		{#if movable && !movable.length}
 			<p class="muted small"><a href={resolve('teams')}>Create a team</a> to share this catchment with colleagues in one step.</p>
 		{/if}
 	{/if}

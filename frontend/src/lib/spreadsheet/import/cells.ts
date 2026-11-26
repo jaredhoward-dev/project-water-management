@@ -41,10 +41,46 @@ const WS_EDGES = new RegExp(`^[${PY_WS}]+|[${PY_WS}]+$`, 'g');
 /** extract_project.py _CLEAN_RUN: whitespace and the C0, DEL and C1 control characters (issue #385). */
 const CLEAN_RUN = new RegExp(`[${PY_WS}\\x00-\\x1f\\x7f-\\x9f]+`, 'g');
 
+/** A character class of Python's whitespace, for building regexes that match as Python's \\s does. */
+export const PY_WS_CLASS = `[${PY_WS}]`;
+
 /** Python str.strip(). */
 export function pyStrip(s: string): string {
 	return s.replace(WS_EDGES, '');
 }
+
+/**
+ * int() of a run of Python's \\d: any Unicode decimal digit (Nd). Nd digits
+ * come in runs of ten from 0 to 9, so a digit's value is its distance from
+ * the start of its run, mod 10.
+ */
+export function pyDigitsValue(run: string): number {
+	let n = 0;
+	for (const ch of run) {
+		const cp = ch.codePointAt(0)!;
+		let d = cp - 48;
+		if (d < 0 || d > 9) {
+			let start = cp;
+			while (ND.test(String.fromCodePoint(start - 1))) start--;
+			d = (cp - start) % 10;
+		}
+		n = n * 10 + d;
+	}
+	return n;
+}
+
+const ND = /^\p{Nd}$/u;
+
+const PY_INT = /^[+-]?\p{Nd}+(?:_\p{Nd}+)*$/u;
+
+/** Python int() of a string: its whitespace stripped, a sign, Unicode decimal digits with single underscores between; null where int() raises. */
+export function pyInt(s: string): number | null {
+	const t = pyStrip(s);
+	if (!PY_INT.test(t)) return null;
+	const n = pyDigitsValue(t.replace(/^[+-]/, '').replaceAll('_', ''));
+	return t.startsWith('-') ? -n : n;
+}
+
 
 /**
  * Whether openpyxl would have returned this number as an int: it does when the
@@ -238,19 +274,30 @@ export function pyRepr(v: Cell | readonly (Cell | number)[]): string {
 
 // --- the importer's own coercions (extract_project.py num / clean / is_name) ----
 
-/** extract_project.py num(): Excel treats blanks as 0 in arithmetic; anything unreadable becomes `fallback`. */
+/**
+ * Python float() of a cell's text, or null where it raises or reads a NaN or
+ * an infinity ("nan", "inf"): those are text that isn't a number to the
+ * importers, since JSON has no token for them (Python's json.dumps wrote a
+ * bare NaN, JSON.stringify null).
+ */
+function finiteFloat(v: Cell): number | null {
+	const n = pyFloat(pyStr(v));
+	return n !== null && Number.isFinite(n) ? n : null;
+}
+
+/** extract_project.py num(): Excel treats blanks as 0 in arithmetic; anything unreadable (NaN and infinity text too) becomes `fallback`. */
 export function num(v: Cell, fallback = 0): number {
 	if (v === null || v === '') return fallback;
 	if (typeof v === 'boolean') return v ? 1 : 0;
 	if (typeof v === 'number') return v;
-	return pyFloat(pyStr(v)) ?? fallback;
+	return finiteFloat(v) ?? fallback;
 }
 
 /** Whether num() read a real number from the cell (not a blank, and not text or an error it replaced). */
 export function isNumeric(v: Cell): boolean {
 	if (typeof v === 'number' || typeof v === 'boolean') return true;
 	if (v === null || v === '') return false;
-	return pyFloat(pyStr(v)) !== null;
+	return finiteFloat(v) !== null;
 }
 
 /** extract_project.py clean(): str(v or ''), runs of whitespace and control characters collapsed to one space, stripped. */

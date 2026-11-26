@@ -512,9 +512,17 @@ the other way round. Two tests hold it:
 SheetJS, which the port used first: SheetJS held the whole [Flow data] XML
 and an object per cell, which a large workbook turns into a lot of memory. The
 reader gives the parser the cells SheetJS gave it (cached values, the number
-formats that mark a date, blanks for formula cells with no value), with one
-deliberate difference: cell text is decoded as openpyxl decodes it, since
-the Python importer is the reference (issue #22). So the XML entities are
+formats that mark a date, blanks for formula cells with no value), with two
+deliberate differences, both because the Python importer is the reference.
+A cell's number format is found as openpyxl 3.1.5 finds it (issue #895;
+`readStyles` in `workbookParts.ts`; re-check when the openpyxl pin moves):
+the built-in formats are openpyxl's table by id, not SheetJS's (which also
+has id 56, a time format openpyxl lacks); a workbook's own format replaces
+any id, 0 included, and ids past 0x188 are looked up as written (SheetJS
+moved them); a cell with no `s` has style 0, and `s` is read with Python's
+`int()` (`01`, ` 1`); the last `<numFmts>` and `<cellXfs>` block counts; an
+`s` or id `int()` can't read refuses the workbook, as openpyxl does. And cell
+text is decoded as openpyxl decodes it (issue #22). So the XML entities are
 expanded once, a formula's cached text included (SheetJS decoded it twice:
 `a&amp;amp;b` read `a&b`, openpyxl `a&amp;b`); Excel's `_xHHHH_` escapes are
 left as written (SheetJS turned `_x000D_` into a CR); a CR written as
@@ -529,7 +537,12 @@ literal `_xHHHH_` would show.
 A third test holds the reader to SheetJS: `readerParity.test.ts` (CI) reads
 the synthetic workbook, SheetJS-written workbooks and hand-written edge cases
 with both readers (SheetJS's in `sheetjsReference.ts`, test-only) and compares
-every cell through `B023Workbook`; `stringDecoding.test.ts` lists exactly the
+every cell through `B023Workbook`, and builds a workbook with a cell under
+every built-in format id 0–58 to pin which ones read as dates (openpyxl's
+twelve) and that SheetJS differs only at 56, and a table of style cases
+(custom id 0, ids past 0x188, no `s`, `s` forms, repeated blocks, refusals)
+each pinned to what openpyxl read from that workbook and to SheetJS's
+reading where it differs; `stringDecoding.test.ts` lists exactly the
 fixture cells whose text SheetJS read differently; `sourceWorkbooks.test.ts`
 compares the client workbooks, allowing only differences that
 `explainedByDecoding()` puts down to the text decoding.
@@ -564,7 +577,10 @@ What the port does beyond the Python:
   from the source dam), a destination with no rate, the M1 month lists, a
   blank share under the Specific method, an element type other than Farm or
   Gauge, a [Farm spec] farm not in [Network], and number cells holding text or
-  errors (read as 0 or blank, as in the Python). It never changes a value.
+  errors (read as 0 or blank, as in the Python; text that Python's `float()`
+  reads as NaN or infinity, such as `nan` or `inf`, counts as text too, since
+  JSON has no token for either, and in [Flow Calibration Cfg] it stops the
+  import like other text). It never changes a value.
 - **Typed errors**: not a b023 workbook (the named ranges it lacks), an
   unsupported build (AppSettings `zAppVer` other than b02x), a file over 150 MB
   or 250 sheets, and the Python's own stops (non-consecutive dates, an unknown
@@ -580,8 +596,13 @@ What the port does beyond the Python:
   build (`xlsx/dist/xlsx.mini.min`) as the reference reader; the import
   worker carries no SheetJS.
 
-Differences no b023 workbook reaches: Python's `\d` also matches non-ASCII
-digits in a month list; a cell SheetJS reads as an ISO date (`t="d"`, which
+A month list and a [Transfers] draw formula's constant 0 are read as Python
+reads them (issue #895): any Unicode decimal digit is a digit in a month list
+(Python's `\d` and `int()`), a whole number past 10¹⁶ is all its digits there
+(`str(int(v))`, not `1e+16`), and the zero test strips and matches Python's
+whitespace (`\s`, `strip()`), its `0` the ASCII digit only.
+
+Differences no b023 workbook reaches: a cell SheetJS reads as an ISO date (`t="d"`, which
 Excel doesn't write) or with an error code it doesn't know; and repr() of a
 whole number of 10¹⁵ or more in a note's text.
 

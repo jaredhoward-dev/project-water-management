@@ -359,8 +359,11 @@ export async function evaluateAlerts(db: Db, projectId: string, { now = new Date
 				};
 			}
 			case 'job_dead': {
+				// Dead letters only (394 job.dead_reason = 'failed'): a cancelled job is what someone asked for, and a superseded
+				// one's work is done by the newer job with its key. Jobs dead before 394 got their reason from their text there.
 				const { rows } = await db.query<{ n: number }>(
-					`SELECT count(*)::int AS n FROM job WHERE project_id = $1 AND status = 'dead' AND finished_at > now() - interval '24 hours'`,
+					`SELECT count(*)::int AS n FROM job WHERE project_id = $1 AND status = 'dead' AND dead_reason = 'failed'
+					   AND finished_at > now() - interval '24 hours'`,
 					[projectId]
 				);
 				return { value: rows[0]?.n ?? 0, detail: { count: rows[0]?.n ?? 0 }, runId: null };

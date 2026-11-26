@@ -8,6 +8,7 @@
 // all exercised. Everything outside the ridge falls away from it.
 //
 // The tests and the e2e click the points below and know the areas to expect.
+import type { Dem } from './dem.js';
 import { TARGET_ZOOM } from './delineate.js';
 
 /** Zoom of the fixture's tiles; delineation reads min(TARGET_ZOOM, max zoom), so this one. */
@@ -124,4 +125,43 @@ export function valleyUnitRing(fromY: number, toY: number, pad = 2, step = 2): [
 	const ring = all.filter((p, i) => i === 0 || p[0] !== all[i - 1]![0] || p[1] !== all[i - 1]![1]);
 	if (ring.length > 1 && ring[ring.length - 1]![0] === ring[0]![0] && ring[ring.length - 1]![1] === ring[0]![1]) ring.pop();
 	return [...ring, ring[0]!];
+}
+
+/**
+ * The fixture's DEM with its bounds stated `tiles` tiles further east than its tiles reach, as an extract whose data stops
+ * short of its bounds (a coast whose ocean tiles were left out): a box can then have its centre where no tile is, though
+ * the data around it is fine (issue #874).
+ */
+export function widerEast(dem: Dem, tiles = 2): Dem {
+	return {
+		info: async () => {
+			const i = await dem.info();
+			return { ...i, bounds: [i.bounds[0], i.bounds[1], fixtureLonLat(FIXTURE_CELLS + tiles * FIXTURE_TILE, 0)[0], i.bounds[3]] };
+		},
+		tile: (z, x, y) => dem.tile(z, x, y)
+	};
+}
+
+/**
+ * The fixture's DEM with a square of no-data cells (NaN) of half-side `r` round fixture cell (cx, cy), inside a tile that keeps
+ * its other data: a hole in the data, not a missing tile (issue #905).
+ */
+export function carved(dem: Dem, cx: number, cy: number, r = 3): Dem {
+	return {
+		info: () => dem.info(),
+		tile: async (z, x, y) => {
+			const t = await dem.tile(z, x, y);
+			if (!t || z !== FIXTURE_ZOOM) return t;
+			const out = new Float32Array(t.z);
+			const ox = (x - FIXTURE_X0) * FIXTURE_TILE;
+			const oy = (y - FIXTURE_Y0) * FIXTURE_TILE;
+			for (let yy = cy - r; yy <= cy + r; yy++)
+				for (let xx = cx - r; xx <= cx + r; xx++) {
+					const lx = xx - ox;
+					const ly = yy - oy;
+					if (lx >= 0 && ly >= 0 && lx < t.size && ly < t.size) out[ly * t.size + lx] = Number.NaN;
+				}
+			return { size: t.size, z: out };
+		}
+	};
 }

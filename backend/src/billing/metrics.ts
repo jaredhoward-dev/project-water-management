@@ -49,19 +49,39 @@ export const ACTIVATION_DAYS = 7;
 /** Mail providers whose clusters are expected at scale; flagged, not hidden. */
 const COMMON_PROVIDERS = new Set(['gmail.com', 'googlemail.com', 'outlook.com', 'hotmail.com', 'live.com', 'yahoo.com', 'icloud.com', 'proton.me', 'protonmail.com']);
 
+/** The ASCII whitespace canonical_email's btrim strips (space, \t, \n, \v, \f, \r), at either end. */
+const EDGE_SPACE = /^[ \t\n\v\f\r]+|[ \t\n\v\f\r]+$/g;
+/** A-Z to a-z and nothing else, as canonical_email's translate(). */
+const asciiLower = (s: string): string => s.replace(/[A-Z]+/g, (m) => m.toLowerCase());
+
 /**
  * The address one allowance is keyed to: lower-cased, a `+tag` removed, and
  * for Gmail the dots too (googlemail.com is gmail.com). Issue #641, "One
  * allowance per person".
+ *
+ * A local part that starts with `+` (`+tag@example.org`) is kept whole (issue
+ * #893): there is no base address before the tag, so dropping it would leave
+ * `@example.org` and fold every such address at a domain, different
+ * mailboxes of different people, into one trial and one abuse cluster.
+ * Subaddressing needs a base (Gmail's, Outlook's and Fastmail's usernames
+ * can't start with `+`), so such an address is its own mailbox, as a
+ * catch-all domain's `a@` and `b@` are, which no canonical form can join.
+ *
+ * Lower-casing and trimming are ASCII only (issue #914): A-Z to a-z, and the
+ * six ASCII whitespace characters off the ends, so the SQL twin
+ * canonical_email (396, 397) gives the same string byte for byte. Unicode
+ * case rules differ between JavaScript's toLowerCase() and Postgres's
+ * locale-bound lower() (`İ`), and String.trim() strips Unicode spaces btrim
+ * keeps; a non-ASCII letter stays as written on both sides.
  */
 export function canonicalEmail(email: string): string {
-	const lower = email.trim().toLowerCase();
+	const lower = asciiLower(email.replace(EDGE_SPACE, ''));
 	const at = lower.lastIndexOf('@');
 	if (at < 1) return lower;
 	let local = lower.slice(0, at);
 	let domain = lower.slice(at + 1);
 	const plus = local.indexOf('+');
-	if (plus > 0) local = local.slice(0, plus);
+	if (plus > 0) local = local.slice(0, plus); // not at 0: a leading `+` has no base address (above)
 	if (domain === 'googlemail.com') domain = 'gmail.com';
 	if (domain === 'gmail.com') local = local.replaceAll('.', '');
 	return `${local}@${domain}`;

@@ -11,6 +11,10 @@
 //   3. POST …/uncertainty/:uid/result regenerates the whole sample, re-runs
 //      member 0 and three members picked at random, and only then summarises
 //      the bands itself and completes the row, once.
+// A paired band on a baseline ensemble stored on another engine also posts
+// the baseline's kept sets re-run on the baseline run's inputs (`rerun`,
+// issue #897), checked the same way, so both sides of every pair are this
+// engine's.
 import { randomInt } from 'node:crypto';
 import {
 	ENGINE_VERSION,
@@ -18,6 +22,7 @@ import {
 	EWR_RULE_POINTS_MAX,
 	OBJECTIVES,
 	pairedMembers,
+	pairedNeedsRerun,
 	pairedRefusal,
 	RAIN_SOURCES,
 	resolveEnsembleOptions,
@@ -29,6 +34,7 @@ import {
 	type MemberResult,
 	type ModelInput,
 	type PairedMember,
+	type PairedRerun,
 	type RecordCoverage,
 	type ResolvedEnsembleOptions,
 	type RunInputsSnapshot,
@@ -183,9 +189,9 @@ const EnsembleResultBody = z
 	})
 	.strict();
 
-const PairedResultBody = z
-	.object({ members: z.array(z.object({ index: z.number().int().min(0), metrics: MetricsSchema }).strict()).max(ENSEMBLE_MEMBERS_MAX + 1) })
-	.strict();
+const PairedMembers = z.array(z.object({ index: z.number().int().min(0), metrics: MetricsSchema }).strict()).max(ENSEMBLE_MEMBERS_MAX + 1);
+/** `rerun`: required exactly when the baseline ensemble was stored on another engine (issue #897). */
+const PairedResultBody = z.object({ members: PairedMembers, rerun: z.object({ members: PairedMembers }).strict().optional() }).strict();
 
 interface Row {
 	id: string;
@@ -315,8 +321,15 @@ export const uncertaintyRoutes = new Hono<AuthEnv>()
 			let notes: string[] = [];
 			let baselineId: string | null = null;
 			if ('baselineId' in body) {
-				const { rows } = await db.query<{ runId: string; status: string; baselineId: string | null; options: ResolvedEnsembleOptions; result: { header: EnsembleHeader } | null }>(
-					`SELECT run_id AS "runId", status, baseline_id AS "baselineId", options, result FROM run_uncertainty WHERE project_id = $1 AND id = $2`,
+				const { rows } = await db.query<{
+					runId: string;
+					status: string;
+					baselineId: string | null;
+					engineVersion: string;
+					options: ResolvedEnsembleOptions;
+					result: { header: EnsembleHeader } | null;
+				}>(
+					`SELECT run_id AS "runId", status, baseline_id AS "baselineId", engine_version AS "engineVersion", options, result FROM run_uncertainty WHERE project_id = $1 AND id = $2`,
 					[id, body.baselineId]
 				);
 				const base = rows[0];
@@ -325,6 +338,19 @@ export const uncertaintyRoutes = new Hono<AuthEnv>()
 				if (base.runId === runId) throw new ApiError(400, 'a paired band compares two different runs');
 				const refusal = engine(() => pairedRefusal(input, { options: base.options, header: base.result!.header }));
 				if (refusal) throw new ApiError(400, `no paired band: ${refusal}`);
+				// Stored on another engine: the job re-runs its kept sets on the baseline run's inputs too (issue #897), so they
+				// must still load (409 if not) and still match the stored ensemble, refused here rather than only in the job.
+				if (pairedNeedsRerun(base)) {
+					const baselineInput = await runModelInput(db, id, base.runId);
+					const baseRefusal = engine(() => pairedRefusal(baselineInput, { options: base.options, header: base.result!.header }));
+					if (baseRefusal) {
+						throw ApiError.coded(
+							400,
+							'paired_baseline_mismatch',
+							`no paired band: the baseline ensemble was stored on engine ${base.engineVersion}, and its run's inputs no longer match it (${baseRefusal}); start a new ensemble on the baseline run`
+						);
+					}
+				}
 				options = base.options;
 				baselineId = body.baselineId;
 			} else {
@@ -362,8 +388,23 @@ export const uncertaintyRoutes = new Hono<AuthEnv>()
 				const input = await runModelInput(db, id, runId);
 				if (!row.baselineId) return { row, input, paired: false as const, body: EnsembleResultBody.parse(raw) };
 				const body = PairedResultBody.parse(raw);
-				const { rows } = await db.query<{ result: { header: EnsembleHeader; members: MemberResult[] } }>('SELECT result FROM run_uncertainty WHERE id = $1', [row.baselineId]);
-				return { row, input, paired: true as const, body, base: rows[0]!.result };
+				const { rows } = await db.query<{ runId: string; engineVersion: string; result: { header: EnsembleHeader; members: MemberResult[] } }>(
+					'SELECT run_id AS "runId", engine_version AS "engineVersion", result FROM run_uncertainty WHERE id = $1',
+					[row.baselineId]
+				);
+				const base = rows[0]!;
+				// A baseline stored on another engine (issue #897): its kept sets re-run on its own run's inputs, on this engine.
+				const rerun = pairedNeedsRerun(base);
+				if (rerun !== (body.rerun !== undefined)) {
+					throw new ApiError(
+						400,
+						rerun
+							? `the baseline ensemble was stored on engine ${base.engineVersion}: post its kept sets re-run on the baseline run's inputs as rerun`
+							: 'the baseline ensemble was stored on this engine: a paired result has no rerun'
+					);
+				}
+				const baselineInput = rerun ? await runModelInput(db, id, base.runId) : null;
+				return { row, input, paired: true as const, body, base: base.result, baselineEngineVersion: base.engineVersion, baselineInput };
 			},
 			{ readOnly: true }
 		);
@@ -373,14 +414,22 @@ export const uncertaintyRoutes = new Hono<AuthEnv>()
 		let result: unknown;
 		let accepted: number;
 		if (read.paired) {
-			const { base, body } = read;
+			const { base, body, baselineInput } = read;
 			const kept = pairedMembers(base);
+			let rerun: PairedRerun | undefined;
+			if (baselineInput && body.rerun) {
+				// The baseline side, checked exactly as the other side: the pairing, the first set and three at random.
+				const members = body.rerun.members as PairedMember[];
+				const v = engine(() => verifyPaired(baselineInput, row.options, base.header, kept, members, CHECKED_MEMBERS, random));
+				if (v.mismatches.length || !v.header) throw new ApiError(422, 'the posted pairs do not reproduce', v.mismatches.map((m) => `baseline re-run: ${m}`));
+				rerun = { baselineEngineVersion: read.baselineEngineVersion, header: v.header, members };
+			}
 			const { mismatches, header } = engine(() => verifyPaired(input, row.options, base.header, kept, body.members as PairedMember[], CHECKED_MEMBERS, random));
 			if (mismatches.length || !header) throw new ApiError(422, 'the posted pairs do not reproduce', mismatches);
-			const s = summarisePaired({ options: row.options, header: base.header, members: base.members }, { header, members: body.members as PairedMember[] });
+			const s = summarisePaired({ options: row.options, header: base.header, members: base.members }, { header, members: body.members as PairedMember[], rerun });
 			summary = s;
 			accepted = s.members;
-			result = { engineVersion: ENGINE_VERSION, header, members: body.members };
+			result = { engineVersion: ENGINE_VERSION, header, members: body.members, ...(rerun ? { rerun } : {}) };
 		} else {
 			const { body } = read;
 			const members = body.members as MemberResult[];

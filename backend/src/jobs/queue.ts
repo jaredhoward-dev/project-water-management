@@ -124,23 +124,35 @@ export async function claimJobs(db: Db, limit: number, leaseSeconds: number, pro
 	return rows;
 }
 
+/** Why a dead job died (394 job.dead_reason): only `failed` is a dead letter (the alarm, the job_dead alert). */
+export type DeadReason = 'cancelled' | 'superseded' | 'failed';
+
 /**
- * Record a claimed job's outcome (app_finish_job). Returns the new status, or
- * null when the lease was lost (the job was claimed again after it expired).
+ * Record a claimed job's outcome (394 app_finish_job_outcome): the new status
+ * and, when dead, why. A failure's `deadReason` is the caller's word for a
+ * death (default `failed`); a job someone cancelled while it ran is never
+ * retried, but dead as `cancelled`. Both null when the lease was lost (the job
+ * was claimed again after it expired).
  */
+export async function finishJobOutcome(
+	db: Db,
+	job: Pick<ClaimedJob, 'id' | 'leaseToken'>,
+	outcome: { ok: true } | { ok: false; error: string; retry: boolean; deadReason?: DeadReason }
+): Promise<{ status: JobStatus | null; deadReason: DeadReason | null }> {
+	const { rows } = await db.query<{ status: JobStatus | null; deadReason: DeadReason | null }>(
+		'SELECT status, dead_reason AS "deadReason" FROM app_finish_job_outcome($1, $2, $3, $4, $5, $6)',
+		[job.id, job.leaseToken, outcome.ok, outcome.ok ? null : outcome.error, outcome.ok ? true : outcome.retry, outcome.ok ? null : (outcome.deadReason ?? null)]
+	);
+	return { status: rows[0]?.status ?? null, deadReason: rows[0]?.deadReason ?? null };
+}
+
+/** finishJobOutcome's status alone. */
 export async function finishJob(
 	db: Db,
 	job: Pick<ClaimedJob, 'id' | 'leaseToken'>,
-	outcome: { ok: true } | { ok: false; error: string; retry: boolean }
+	outcome: { ok: true } | { ok: false; error: string; retry: boolean; deadReason?: DeadReason }
 ): Promise<JobStatus | null> {
-	const { rows } = await db.query<{ status: JobStatus | null }>('SELECT app_finish_job($1, $2, $3, $4, $5) AS status', [
-		job.id,
-		job.leaseToken,
-		outcome.ok,
-		outcome.ok ? null : outcome.error,
-		outcome.ok ? true : outcome.retry
-	]);
-	return rows[0]?.status ?? null;
+	return (await finishJobOutcome(db, job, outcome)).status;
 }
 
 /** Finished jobs are kept this long, then the tick deletes them. */

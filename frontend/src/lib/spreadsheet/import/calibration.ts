@@ -14,7 +14,8 @@ function strictNum(v: Cell, name: string): number {
 	if (typeof v === 'boolean') return v ? 1 : 0;
 	if (typeof v === 'number') return v;
 	const n = pyFloat(pyStr(v));
-	if (n === null) throw new InvalidWorkbookError(`[Flow Calibration Cfg] ${name}: expected a number, got ${pyRepr(v)}`, 'Flow Calibration Cfg');
+	// "nan" and "inf" too: not a number to the workbook, and not JSON (calibration.py _num()).
+	if (n === null || !Number.isFinite(n)) throw new InvalidWorkbookError(`[Flow Calibration Cfg] ${name}: expected a number, got ${pyRepr(v)}`, 'Flow Calibration Cfg');
 	return n;
 }
 

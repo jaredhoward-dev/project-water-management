@@ -49,11 +49,13 @@
 	import RunPicker from '#lib/components/compare/RunPicker.svelte';
 	import SectionNav from '#lib/components/common/SectionNav.svelte';
 	import { COMPARE_HEADINGS as HEADING, compareNavGroups } from '#lib/components/compare/sections.js';
-	import { defaultPair, defaultRunFor, defaultWhatIf, formatRef, parseRef, publishedBaseline, type RunRef } from '#lib/components/compare/picker.js';
+	import { defaultPair, defaultRunFor, defaultWhatIf, formatRef, parseRef, projectZoneOf, publishedBaseline, type RunRef } from '#lib/components/compare/picker.js';
 	import { compareEvidenceNote } from '#lib/components/runs/evidence.js';
 	import { fillHeader } from '#lib/components/workspace/headerSlot.svelte.js';
 	import { runYears } from '#lib/components/runs/runList.js';
-	import { fmtDate, fmtWhen } from '#lib/format/number.js';
+	import { fmtDate } from '#lib/format/number.js';
+	import { fmtProjectStamp, fmtProjectWhen } from '#lib/components/project/project.js';
+	import { projectTimeZoneReader } from '#lib/components/project/projectClock.js';
 	import { runForcingOfSummary } from '@water-management/engine';
 	import { runHeadlineSettings } from '#lib/calibration/zones.js';
 
@@ -67,6 +69,12 @@
 	import ReserveYearsChart from '#lib/components/compare/ReserveYearsChart.svelte';
 	import { dailyEwrName, daysBelowTestOf } from '#lib/components/ewr/notMet.js';
 	// A scenario run's overrides (issue #18): their own chunk, fetched only when a side is a scenario run.
+	// Each run is dated on its own project's clock, as its run report dates it (issue #899): the compare response's
+	// side, or the project list for a picked run; the open project's zone (DEFAULT_TIME_ZONE on /compare) only when an
+	// older API sends none.
+	const contextZone = projectTimeZoneReader();
+	const sideStamp = (s: RunCompareResponse['a'], iso: string) => fmtProjectStamp(iso, projectZoneOf(s, null, contextZone()));
+	const fmtWhenIn = (projectId: string | null | undefined, iso: string) => fmtProjectWhen(iso, projectZoneOf(projects, projectId, contextZone()));
 	const loadOverrides = () => import('#lib/components/scenarios/ScenarioOverrides.svelte');
 	const runoffModelOf = (s: RunCompareResponse['a']) => (s.run.inputs.settings?.runoffModel as string | undefined) ?? 'legacy';
 
@@ -327,7 +335,7 @@
 
 	const sameRun = $derived(!!refA && !!refX && formatRef(refA) === formatRef(refX));
 	const describe = (s: RunCompareResponse['a']) =>
-		`${s.run.label || 'Untitled run'} · ${s.project.name} · ${fmtDate(s.run.startDate)} → ${fmtDate(s.run.endDate)} · run ${fmtDate(s.run.createdAt, true)}`;
+		`${s.run.label || 'Untitled run'} · ${s.project.name} · ${fmtDate(s.run.startDate)} → ${fmtDate(s.run.endDate)} · run ${sideStamp(s, s.run.createdAt)}`;
 
 	// --- the header's context line and the cards ---------------------------------
 	const runMeta = (side: Side) => {
@@ -350,7 +358,7 @@
 	const baseLine = $derived.by(() => {
 		const m = runMeta('a');
 		if (!m) return '';
-		const tags = [runYears(m.startDate, m.endDate), `ran ${fmtWhen(m.createdAt)}`];
+		const tags = [runYears(m.startDate, m.endDate), `ran ${fmtWhenIn(refA?.projectId, m.createdAt)}`];
 		if (m.published) tags.push('published');
 		if (m.evidence === 'current') tags.push('evidence');
 		if (refA && projectA && refA.projectId !== (refB?.projectId ?? refA.projectId)) tags.push(projects.find((p) => p.id === refA.projectId)?.name ?? '');
@@ -704,7 +712,7 @@
 						</div>
 					{/if}
 					<!-- Either side is, or was, the project's nominated evidence run (010_run_nomination). -->
-					{#each [compareEvidenceNote('A', data.a.run.evidence, (iso) => fmtDate(iso, true)), compareEvidenceNote('B', data.b.run.evidence, (iso) => fmtDate(iso, true))] as note, i (i)}
+					{#each [compareEvidenceNote('A', data.a.run.evidence, (iso) => sideStamp(data.a, iso)), compareEvidenceNote('B', data.b.run.evidence, (iso) => sideStamp(data.b, iso))] as note, i (i)}
 						{#if note}<div class="alert alert-info" role="status" data-testid="evidence-note">{note}</div>{/if}
 					{/each}
 					{#if data.a.run.legacy || data.b.run.legacy}

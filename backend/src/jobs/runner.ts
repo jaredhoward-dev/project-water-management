@@ -22,10 +22,11 @@ import { purgeInvites } from '../invites/invites.js';
 import { type LicenceRecordResult, sendLicenceRecordNotices } from '../licence/record.js';
 import { safeError, stackFrames } from '../logging/safeError.js';
 import { rank, requireRole } from '../projects/access.js';
+import { erasePendingReportPdfs, type ReportPdfErasureResult } from '../reports/erasure.js';
 import { purgeReports, type ReportScheduleResult, scheduleDueReports } from '../reports/schedule.js';
-import { describeFailure, JOB_ERROR_MAX, JobError, JobRelease, LeaseLostError } from './errors.js';
+import { describeFailure, JOB_ERROR_MAX, JobError, JobRelease, JOB_CANCELLED, LeaseLostError, SUPERSEDED_NOTE } from './errors.js';
 import { handlers as builtInHandlers } from './handlers/index.js';
-import { claimJobs, finishJob, type JobStatus, nextJobDueSeconds, purgeJobs, queueStats, type QueueStats } from './queue.js';
+import { claimJobs, type DeadReason, finishJob, finishJobOutcome, type JobStatus, nextJobDueSeconds, purgeJobs, queueStats, type QueueStats } from './queue.js';
 import type { ClaimedJob, HandlerRegistry, JobHandler } from './registry.js';
 import { logEvent } from '../logging/logEvent.js';
 import { type MfaResetTickResult, runMfaResets } from '../auth/mfaReset.js';
@@ -69,30 +70,61 @@ export async function runJob(job: ClaimedJob, registry: HandlerRegistry = builtI
 		}
 		if (err instanceof JobRelease) {
 			// Back to the queue, its attempt given back: too little time in this tick, nothing wrong with the job.
-			const { rows } = await withoutUser((db) =>
-				db.query<{ status: string | null }>('SELECT app_release_job($1, $2, $3) AS status', [job.id, job.leaseToken, err.delaySeconds])
-			);
+			let status: string | null;
+			try {
+				const { rows } = await withoutUser((db) =>
+					db.query<{ status: string | null }>('SELECT app_release_job($1, $2, $3) AS status', [job.id, job.leaseToken, err.delaySeconds])
+				);
+				status = rows[0]?.status ?? null;
+			} catch (e) {
+				// A newer job with its key was queued while it ran: back to queued would be two pending jobs with one key
+				// (job_dedupe_idx), and the throw took the rest of the tick with it, every time the job was claimed again.
+				// The newer job does the same work, so this one is superseded, as a failure is (recordFailure).
+				if (!isDedupeCollision(e)) throw e;
+				const superseded = await supersede(job, err.message);
+				if (superseded.status !== 'dead') return 'lost';
+				await afterDead(job, handler, superseded.deadReason);
+				return 'dead';
+			}
+			if (status === 'dead') {
+				// Someone cancelled it while it ran: not handed back to run again only to stop at its next progress
+				// report, but dead as cancelled (394 app_release_job).
+				await afterDead(job, handler, 'cancelled');
+				return 'dead';
+			}
 			logEvent('info', { event: 'job_released', jobId: job.id, kind: job.kind, delaySeconds: err.delaySeconds });
-			return rows[0]?.status === 'queued' ? 'released' : 'lost';
+			return status === 'queued' ? 'released' : 'lost';
 		}
 		const failure = describeFailure(err);
 		// Name, code and stack frames only: an error's text can carry personal
 		// data (a pg error's detail holds row values, SES's names the recipient).
 		if (!failure.expected) logEvent('error', { event: 'job_failed', jobId: job.id, kind: job.kind, ...safeError(err), at: stackFrames(err) });
-		const { status, superseded } = await recordFailure(job, failure);
-		if (superseded) {
-			// Not a dead letter: the newer job with its key does the work (no alarm, no job_dead alert).
-			logEvent('info', { event: 'job_superseded', jobId: job.id, projectId: job.projectId, kind: job.kind, attempts: job.attempts });
-		} else if (status === 'dead') {
-			// The alarm hook (infra/jobs.tf metric filter), and the owners' job_dead alert
-			// when the project has it on (a check queued now; never for a dead alert check).
-			logEvent('error', { event: 'job_dead', jobId: job.id, projectId: job.projectId, kind: job.kind, attempts: job.attempts });
-			if (job.kind !== 'alert_eval') await scheduleAlertCheck(job.projectId);
-			// What waited on it records its death (an assessment_yield job's assessment fails, 297).
-			if (handler?.onDead) await afterDeath(job, handler);
-		}
+		const { status, deadReason } = await recordFailure(job, failure);
+		if (status === 'dead') await afterDead(job, handler, deadReason);
 		return status === 'failed' || status === 'dead' ? status : 'lost';
 	}
+}
+
+/**
+ * Log a job's death by its reason (394 job.dead_reason, as the database recorded it) and run what follows it. Only a
+ * failure is a dead letter: `job_dead` (the alarm hook, infra/jobs.tf metric filter) and the owners' job_dead alert
+ * check when the project has it on (never for a dead alert check). A cancel is what someone asked for, and a
+ * superseded job's newer one does the work: logged as such, no alarm, no alert.
+ */
+async function afterDead(job: ClaimedJob, handler: JobHandler<unknown> | undefined, reason: DeadReason | null): Promise<void> {
+	const fields = { jobId: job.id, projectId: job.projectId, kind: job.kind, attempts: job.attempts };
+	if (reason === 'superseded') {
+		logEvent('info', { event: 'job_superseded', ...fields });
+		return;
+	}
+	if (reason === 'cancelled') {
+		logEvent('info', { event: 'job_cancelled', ...fields });
+	} else {
+		logEvent('error', { event: 'job_dead', ...fields });
+		if (job.kind !== 'alert_eval') await scheduleAlertCheck(job.projectId);
+	}
+	// What waited on it records its death (an assessment_yield job's assessment fails, 297).
+	if (handler?.onDead) await afterDeath(job, handler);
 }
 
 /** A dead job's handler's onDead, as the acting user, after the death is recorded; a failure is logged, never thrown. */
@@ -111,7 +143,8 @@ async function afterDeath(job: ClaimedJob, handler: JobHandler<unknown>): Promis
 const DEDUPE_INDEX = 'job_dedupe_idx';
 
 /**
- * Record a failed attempt (app_finish_job). A job with a dedupe key that
+ * Record a failed attempt (app_finish_job_outcome, 394): dead as `cancelled` when the handler stopped for a cancel, or
+ * when someone cancelled the job and the failure would retry (never back to the queue). A job with a dedupe key that
  * fails while a newer job with its key was queued (allowed while this one
  * ran: running isn't pending) can't go back to pending for a retry, as that
  * would be two pending jobs with one key, which the dedupe index refuses. The
@@ -123,17 +156,27 @@ const DEDUPE_INDEX = 'job_dedupe_idx';
 async function recordFailure(
 	job: ClaimedJob,
 	failure: { message: string; retry: boolean }
-): Promise<{ status: JobStatus | null; superseded: boolean }> {
+): Promise<{ status: JobStatus | null; deadReason: DeadReason | null }> {
+	// A handler that stops because progress said it was cancelled throws JOB_CANCELLED (no retry).
+	const deadReason: DeadReason = failure.message === JOB_CANCELLED ? 'cancelled' : 'failed';
 	try {
-		return { status: await withoutUser((db) => finishJob(db, job, { ok: false, error: failure.message, retry: failure.retry })), superseded: false };
+		return await withoutUser((db) => finishJobOutcome(db, job, { ok: false, error: failure.message, retry: failure.retry, deadReason }));
 	} catch (err) {
-		const e = err as { code?: unknown; constraint?: unknown };
-		if (!failure.retry || e.code !== '23505' || e.constraint !== DEDUPE_INDEX) throw err;
+		if (!failure.retry || !isDedupeCollision(err)) throw err;
 	}
-	const note = ' (a newer job with the same key is queued)';
-	const error = `${failure.message.slice(0, JOB_ERROR_MAX - note.length)}${note}`;
-	const status = await withoutUser((db) => finishJob(db, job, { ok: false, error, retry: false }));
-	return { status, superseded: status === 'dead' };
+	return supersede(job, failure.message);
+}
+
+/** The error a write that would make two pending jobs with one dedupe key throws (job_dedupe_idx). */
+function isDedupeCollision(err: unknown): boolean {
+	const e = err as { code?: unknown; constraint?: unknown };
+	return e.code === '23505' && e.constraint === DEDUPE_INDEX;
+}
+
+/** Finish a job a newer one with its key replaces: dead as superseded, its message saying so, no retry. */
+async function supersede(job: ClaimedJob, message: string): Promise<{ status: JobStatus | null; deadReason: DeadReason | null }> {
+	const error = `${message.slice(0, JOB_ERROR_MAX - SUPERSEDED_NOTE.length)}${SUPERSEDED_NOTE}`;
+	return withoutUser((db) => finishJobOutcome(db, job, { ok: false, error, retry: false, deadReason: 'superseded' }));
 }
 
 /**
@@ -281,8 +324,8 @@ export interface TickResult {
 	dams?: DamsTickResult | null;
 	/** Observed actual ET's wanted list and loads (water-use/observed/tick.ts): null unless ET_OBSERVATIONS=on, absent when feeds were off. */
 	et?: EtTickResult | null;
-	/** Scheduled reports queued by this tick (absent when reports were off). */
-	reports?: ReportScheduleResult & { purged: number };
+	/** Scheduled reports queued by this tick, rows purged and deleted reports' PDFs removed from storage (395; absent when reports were off). */
+	reports?: ReportScheduleResult & { purged: number; pdfsErased: ReportPdfErasureResult };
 	/** Alert checks queued, alert rows purged (0 when alerts scheduling was off), and alert mails sent by this tick. */
 	alerts: SendResult & { scheduled: number; purged: number };
 	/** Evidence pack notices sent by this tick, and settled ones purged (133_pack_notices). */
@@ -388,7 +431,7 @@ export async function runTick(o: TickOptions = {}): Promise<TickResult> {
 		result.et = await runEtTick();
 		result.feeds = await scheduleDueFeeds({ all: o.allFeeds, projectIds: o.projectIds });
 	}
-	if (o.reports !== false) result.reports = { purged: await purgeReports(), ...(await scheduleDueReports()) };
+	if (o.reports !== false) result.reports = { purged: await purgeReports(), pdfsErased: await erasePendingReportPdfs(), ...(await scheduleDueReports()) };
 	let alertsScheduled = 0;
 	let alertsPurged = 0;
 	if (o.alerts !== false) {

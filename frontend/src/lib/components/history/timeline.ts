@@ -6,6 +6,7 @@ import { language, LOCALES } from '@water-management/engine/languages';
 import { roleLabel } from '#lib/api/roleLabels.js';
 import type { HistoryEvent, HistoryItem, HistoryRevision } from '#lib/api/types.js';
 import { fmtDay, fmtNum, fmtPct, fmtWhen, localIsoDate } from '#lib/format/number.js';
+import { fmtProjectStamp, fmtProjectWhen, projectDay } from '#lib/components/project/project.js';
 import { kindLabel } from '#lib/series/kinds.js';
 import { KIND_NAME } from '#lib/components/alerts/alerts.js';
 
@@ -337,7 +338,7 @@ export function eventLine(e: Pick<HistoryEvent, 'kind' | 'subject'>): string {
 			return 'Edited a run’s notes';
 		case 'run.deleted': {
 			const n = Array.isArray(s.runIds) ? s.runIds.length : 1;
-			return s.reason === 'trimmed' ? `Removed ${plural(n, 'old run')} to stay within the storage cap` : `Deleted the run${str(s.label) ? ` “${str(s.label)}”` : ''}`;
+			return s.reason === 'trimmed' ? `Removed ${plural(n, 'old run')} to stay within the storage cap` : s.application ? 'Deleted a run of an application' : `Deleted the run${str(s.label) ? ` “${str(s.label)}”` : ''}`;
 		}
 		case 'feed.configured': {
 			const feed = `the ${feedName(s.source)} feed`;
@@ -662,11 +663,19 @@ export function groupByChangeSet(items: readonly HistoryItem[]): HistoryEntry[] 
 	return out;
 }
 
-/** The viewer's calendar day of a timestamp (YYYY-MM-DD), not the UTC one. */
-export const localDay = (iso: string): string => localIsoDate(new Date(iso));
+/**
+ * The calendar day of a timestamp (YYYY-MM-DD), never the UTC one: on the
+ * project's clock when its zone is given (the History tab, issue #899, so a
+ * publication is dated as its run report dates it), else the viewer's.
+ */
+export const localDay = (iso: string, timeZone?: string): string => (timeZone ? projectDay(iso, timeZone) : localIsoDate(new Date(iso)));
 
-/** "14:05" in the viewer's time zone. */
-export function localTime(iso: string): string {
+/** "14:05" on the project's clock when its zone is given (issue #899), else the viewer's. */
+export function localTime(iso: string, timeZone?: string): string {
+	if (timeZone) {
+		const stamp = fmtProjectStamp(iso, timeZone);
+		return stamp.slice(stamp.lastIndexOf(' ') + 1);
+	}
 	const d = new Date(iso);
 	return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
@@ -677,15 +686,27 @@ export interface HistoryDay {
 	entries: HistoryEntry[];
 }
 
-/** Entries by the viewer's calendar day, newest first: "Today", "Yesterday", then "3 Sep 2026". */
-export function groupByDay(entries: readonly HistoryEntry[], now: Date = new Date()): HistoryDay[] {
-	const today = localIsoDate(now);
-	const y = new Date(now);
-	y.setDate(y.getDate() - 1);
-	const yesterday = localIsoDate(y);
+/**
+ * Entries by calendar day, newest first: "Today", "Yesterday", then "3 Sep
+ * 2026". The project's days when its zone is given (issue #899), else the viewer's.
+ */
+export function groupByDay(entries: readonly HistoryEntry[], now: Date = new Date(), timeZone?: string): HistoryDay[] {
+	let today: string;
+	let yesterday: string;
+	if (timeZone) {
+		today = projectDay(now.toISOString(), timeZone);
+		const y = new Date(`${today}T12:00:00Z`);
+		y.setUTCDate(y.getUTCDate() - 1);
+		yesterday = y.toISOString().slice(0, 10);
+	} else {
+		today = localIsoDate(now);
+		const y = new Date(now);
+		y.setDate(y.getDate() - 1);
+		yesterday = localIsoDate(y);
+	}
 	const out: HistoryDay[] = [];
 	for (const e of entries) {
-		const day = localDay(e.createdAt);
+		const day = localDay(e.createdAt, timeZone);
 		const last = out.at(-1);
 		if (last?.day === day) last.entries.push(e);
 		else out.push({ day, label: day === today ? 'Today' : day === yesterday ? 'Yesterday' : fmtDay(day), entries: [e] });
@@ -741,8 +762,8 @@ export function pickEntry(entries: readonly HistoryEntry[], key: string | null):
 	return (key ? entries.find((e) => e.key === key) : undefined) ?? entries[0] ?? null;
 }
 
-/** "today 14:05", "yesterday 09:30", "3 Sep 2026 14:05", in the viewer's time zone (the app's fmtWhen). */
-export const whenText = fmtWhen;
+/** "today 14:05", "yesterday 09:30", "3 Sep 2026 14:05": on the project's clock when its zone is given (fmtProjectWhen, issue #899), else the viewer's (fmtWhen). */
+export const whenText = (iso: string, now: Date = new Date(), timeZone?: string): string => (timeZone ? fmtProjectWhen(iso, timeZone, now) : fmtWhen(iso, now));
 
 /**
  * The section header's line, the fact the page is opened for: the latest
@@ -750,11 +771,11 @@ export const whenText = fmtWhen;
  * "Latest change today 14:05 by Ann: Model changed · recorded since 3 Sep 2026",
  * "No changes recorded yet · recorded since 3 Sep 2026".
  */
-export function historyContext(latest: HistoryEntry | null, since: string | null, now: Date = new Date()): string {
-	const from = since ? ` · recorded since ${fmtDay(localDay(since))}` : '';
+export function historyContext(latest: HistoryEntry | null, since: string | null, now: Date = new Date(), timeZone?: string): string {
+	const from = since ? ` · recorded since ${fmtDay(localDay(since, timeZone))}` : '';
 	if (!latest) return `No changes recorded yet${from}`;
 	const { title } = entrySummary(latest);
-	return `Latest change ${whenText(latest.createdAt, now)} by ${latest.actor ?? 'a deleted account'}: ${title}${from}`;
+	return `Latest change ${whenText(latest.createdAt, now, timeZone)} by ${latest.actor ?? 'a deleted account'}: ${title}${from}`;
 }
 
 /** One hydrological unit's line in a publication's record: its own figures (backend publish/decision.ts DecisionFarm), formatted. */

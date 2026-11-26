@@ -123,6 +123,25 @@ async function checkPassword(
 	return { email: row.email, locale: row.locale, verified: row.verified };
 }
 
+/**
+ * Adding a factor beside one already on: this session must have signed in
+ * (or stepped up) with a code. Otherwise a password-only session (one from
+ * before the account's first factor, which lasts its 7 days) plus the
+ * password would put the holder's own factor on the account and, on
+ * confirming it, make the session two-step, without ever giving a code from
+ * the factor the owner has: the existing factor would guard nothing.
+ * `mfa_step_up`, as stepUpRefusal answers, so the page says to sign in again
+ * with a code. The first factor needs only the password (there is nothing
+ * to prove yet). As the account (`db` under withUser).
+ */
+async function requireCodeForAnotherFactor(c: Context<AuthEnv>, db: Db, userId: string, method: MfaMethod): Promise<void> {
+	const on = await confirmedMethods(db, userId);
+	// No factor yet; or this one is on already, which the route answers with its 409 mfa_already_enrolled.
+	if (on.length === 0 || on.includes(method)) return;
+	if ((c.get('amr') ?? []).includes('otp')) return;
+	throw ApiError.coded(403, 'mfa_step_up', 'to add another way to get codes, sign out and sign in again with a code from the one you have');
+}
+
 /** What a send answers: when the next may go, and how long this code works. */
 const sentAnswer = () => ({ resendInSeconds: EMAIL_CODE_SEND.gapSeconds, expiresInSeconds: EMAIL_CODE_TTL_SECONDS });
 
@@ -184,8 +203,12 @@ export const mfaRoutes = new Hono<AuthEnv>()
 	.post('/mfa/totp/enrol', requireUser, async (c) => {
 		const body = EnrolBody.parse(await readJson(c));
 		const userId = c.get('userId');
+		await withUser(userId, (db) => requireCodeForAnotherFactor(c, db, userId, 'totp'));
 		const { email } = await checkPassword(c, userId, body.password, '/auth/mfa/totp/enrol');
-		const started = await withUser(userId, (db) => startEnrolment(db, userId, email));
+		const started = await withUser(userId, async (db) => {
+			await requireCodeForAnotherFactor(c, db, userId, 'totp');
+			return startEnrolment(db, userId, email);
+		});
 		if (!started) throw ApiError.coded(409, 'mfa_already_enrolled', 'an authenticator app is already on: turn it off first to set up another');
 		c.header('Cache-Control', 'no-store');
 		return c.json(started);
@@ -198,10 +221,15 @@ export const mfaRoutes = new Hono<AuthEnv>()
 	.post('/mfa/totp/confirm', requireUser, async (c) => {
 		const body = Code.parse(await readJson(c));
 		const userId = c.get('userId');
+		// The session check before the throttle counts: a refusal is no code guess (issue #881). It runs again
+		// below, in the confirm's own transaction, for a factor that goes on in between.
+		await withUser(userId, (db) => requireCodeForAnotherFactor(c, db, userId, 'totp'));
 		await throttle(c, userId, '/auth/mfa/totp/confirm');
 		const result = await withUser(userId, async (db) => {
 			const { rows } = await db.query<{ pending: boolean }>('SELECT confirmed_at IS NULL AS pending FROM user_totp WHERE user_id = $1', [userId]);
 			if (!rows[0]?.pending) return { kind: 'none' as const };
+			// An app started before another factor went on still needs the session's code to join it.
+			await requireCodeForAnotherFactor(c, db, userId, 'totp');
 			if (!(await useCode(db, userId, body.code, { pending: true }))) return { kind: 'wrong' as const };
 			const first = !(await isEnrolled(db, userId));
 			await db.query('UPDATE user_totp SET confirmed_at = now() WHERE user_id = $1 AND confirmed_at IS NULL', [userId]);
@@ -227,8 +255,10 @@ export const mfaRoutes = new Hono<AuthEnv>()
 	.post('/mfa/email/enrol', requireUser, async (c) => {
 		const body = EnrolBody.parse(await readJson(c));
 		const userId = c.get('userId');
+		await withUser(userId, (db) => requireCodeForAnotherFactor(c, db, userId, 'email'));
 		await checkPassword(c, userId, body.password, '/auth/mfa/email/enrol');
 		await emailCode(c, userId, 'enrol', 'enrol', async (db) => {
+			await requireCodeForAnotherFactor(c, db, userId, 'email');
 			const { rowCount } = await db.query(
 				`INSERT INTO user_email_otp (user_id) VALUES ($1)
 				 ON CONFLICT (user_id) DO UPDATE SET created_at = now() WHERE user_email_otp.confirmed_at IS NULL`,
@@ -244,10 +274,14 @@ export const mfaRoutes = new Hono<AuthEnv>()
 	.post('/mfa/email/confirm', requireUser, async (c) => {
 		const body = Code.parse(await readJson(c));
 		const userId = c.get('userId');
+		// The session check before the throttle counts: a refusal is no code guess (issue #881). It runs again
+		// below, in the confirm's own transaction, for a factor that goes on in between.
+		await withUser(userId, (db) => requireCodeForAnotherFactor(c, db, userId, 'email'));
 		await throttle(c, userId, '/auth/mfa/email/confirm');
 		const result = await withUser(userId, async (db) => {
 			const { rows } = await db.query<{ pending: boolean }>('SELECT confirmed_at IS NULL AS pending FROM user_email_otp WHERE user_id = $1', [userId]);
 			if (!rows[0]?.pending) return { kind: 'none' as const };
+			await requireCodeForAnotherFactor(c, db, userId, 'email');
 			const six = normaliseEmailCode(body.code);
 			if (!six || !(await spendEmailCode(db, userId, 'enrol', six))) return { kind: 'wrong' as const };
 			const first = !(await isEnrolled(db, userId));

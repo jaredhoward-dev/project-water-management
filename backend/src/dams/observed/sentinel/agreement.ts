@@ -26,13 +26,14 @@ import { FeedFormatError } from '../../../feeds/errors.js';
 import { geometryAreaM2 } from '../../../geo/area.js';
 import type { MirrorStore } from '../../../mirror/store.js';
 import { FEATURE_ID, readJson, readObservationFile, readWanted, writeJson, type ObservationRow, type WantedOutline } from '../handover.js';
+import { WITHIN_SHARE, withinOfFull } from '../within.js';
 
 /** The agreement check's rules (issue #624 § Acceptance criteria). */
 export const S1_AGREEMENT = {
 	/** A radar view pairs with a Sentinel-2 view this many days apart at most (the same day first). */
 	maxDayGap: 1,
-	/** Two views agree when their wet areas are within this share of the full area F (compare.ts OBSERVED.withinShare). */
-	withinShare: 0.1,
+	/** Two views agree when their wet areas are within this share of the full area F (within.ts, the comparison's rule too). */
+	withinShare: WITHIN_SHARE,
 	/** The share of paired days that must agree. */
 	bar: 0.85,
 	/**
@@ -89,7 +90,7 @@ export function agreementPairs(s1: readonly ObservationRow[], s2: readonly Obser
 		if (!other) continue;
 		const s1Share = r.wetAreaM2 / fullAreaM2;
 		const s2Share = other.wetAreaM2 / fullAreaM2;
-		out.push({ s1Date: r.date, s2Date: other.date, s1Share, s2Share, within: Math.abs(s1Share - s2Share) <= S1_AGREEMENT.withinShare });
+		out.push({ s1Date: r.date, s2Date: other.date, s1Share, s2Share, within: withinOfFull(r.wetAreaM2, other.wetAreaM2, fullAreaM2, S1_AGREEMENT.withinShare) });
 	}
 	return out;
 }

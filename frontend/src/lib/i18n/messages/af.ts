@@ -225,6 +225,14 @@ export const af: Catalogue = {
 	'1b137731': '’n Kode van ’n app op jou foon, soos Google Authenticator, Microsoft Authenticator of Aegis. Net jou foon kan die kodes maak.',
 	// We email a code to {email} each time. Easier, but less safe: whoever can read your email can also reset your password, so with codes by email your inbox guards your account. Keep your email account secure.
 	'7af10615': 'Ons e-pos elke keer ’n kode na {email}. Makliker, maar minder veilig: wie jou e-pos kan lees, kan ook jou wagwoord terugstel, so met kodes per e-pos hang jou rekening se veiligheid van jou inkassie af. Hou jou e-posrekening veilig.',
+	// To turn on codes by email beside your authenticator app, sign in again with a code from the app. This browser signed in with your password only.
+	'1579764d': 'Om kodes per e-pos naas jou verifikasie-app aan te skakel, teken weer in met ’n kode van die app. Hierdie blaaier het net met jou wagwoord ingeteken.',
+	// To set up the authenticator app beside codes by email, sign in again with a code from your email. This browser signed in with your password only.
+	'17cd71d9': 'Om die verifikasie-app naas kodes per e-pos op te stel, teken weer in met ’n kode uit jou e-pos. Hierdie blaaier het net met jou wagwoord ingeteken.',
+	// Signing out…
+	'53ed2592': 'Teken tans uit…',
+	// Sign in again
+	'1184ff4b': 'Teken weer in',
 	// Turn on codes by email
 	'7baf539a': 'Skakel kodes per e-pos aan',
 	// Set up the authenticator app
@@ -345,8 +353,6 @@ export const af: Catalogue = {
 	'74119e7f': 'Stoor tans…',
 	// Accept the new terms
 	'c67007cf': 'Aanvaar die nuwe voorwaardes',
-	// Signing out…
-	'53ed2592': 'Teken tans uit…',
 	// Sign out
 	'8b4f3c70': 'Teken uit',
 	// Sent — check your inbox (and spam folder).

@@ -28,12 +28,19 @@ export function classify(e: unknown): Failure {
  * A card's figures on /farm when asking for them failed: a farm unlinked (or
  * a project lost) between loading the list and its figures (403/404) is
  * dropped from the list, as the list's own 403/404 leaves a project out, and
- * its saved copy goes; any other failure falls back to the phone's saved copy
- * (`saved`, read only then), else nothing.
+ * its saved copy goes. A preview withheld (403 `farm_preview_withheld`) keeps
+ * the card and the phone's saved copy, as the farm page does, but shows no
+ * figures: the card says why instead (issue #875), since the saved figures
+ * are from before the withholding and would read as current. Any other
+ * failure falls back to the phone's saved copy (`saved`, read only then),
+ * else nothing.
  */
-export function cardOnFailure<V>(e: unknown, saved: () => V | null): { drop: true } | { drop: false; view: V | null } {
-	if (classify(e) === 'removed') return { drop: true };
-	return { drop: false, view: saved() };
+export type CardFailure<V> = { drop: true } | { drop: false; withheld: true; view: null } | { drop: false; withheld: false; view: V | null };
+export function cardOnFailure<V>(e: unknown, saved: () => V | null): CardFailure<V> {
+	const why = classify(e);
+	if (why === 'removed') return { drop: true };
+	if (why === 'withheld') return { drop: false, withheld: true, view: null };
+	return { drop: false, withheld: false, view: saved() };
 }
 
 /**

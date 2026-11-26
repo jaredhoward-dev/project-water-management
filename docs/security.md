@@ -280,8 +280,19 @@ falls through to the first when it was the last. Neither is granted to
 - **Enrolment needs the password.** `…/totp/enrol` and `…/email/enrol`
   check the current password through the sign-in lockout, as changing the
   password does, so a stolen session can't put its own factor on the
-  account and lock its owner out. Turning a factor off needs a code (from
-  the app, by email, or a recovery code).
+  account and lock its owner out. Adding a **second** factor beside one
+  already on also needs a session that signed in (or stepped up) with a
+  code (`403 mfa_step_up` otherwise, at …/enrol and …/confirm,
+  `requireCodeForAnotherFactor`): a password-only session lives its 7 days
+  after the first factor goes on, and with the password it could otherwise
+  add a factor of its own and, by confirming it, become two-step without
+  ever giving the owner's factor's code. At …/confirm the check runs before
+  the code throttle counts (and again inside the confirm), so a refusal is
+  never counted as a code guess (issue #881). Turning a factor off needs a code (from
+  the app, by email, or a recovery code). Tests:
+  `auth/mfa-email.db.test.ts` "adding a second factor needs a session that
+  gave a code" (each order, a pending app or pending codes by email,
+  refusals not counted on the throttle, positive controls).
 - **Code throttle.** Every code check (sign-in, confirm, turn off, new
   codes) counts on the account's `mfa_throttle` row first, in its own
   transaction under a row lock, like `login_throttle`: the 5th wrong code in
@@ -604,6 +615,12 @@ account is signed out, as a password change does; the browser that confirms
 keeps a fresh session if it is signed in to that account. A
 disposable new address is refused only with `BILLING_ENFORCED` on, as at
 sign-up ([billing.md § Verified email on Free](./billing.md#verified-email-on-free)).
+A pending change dies when the owner secures the account: changing the
+password, a password reset and "sign out everywhere" each delete the
+account's `email_change` row, so a link someone asked for with a stolen
+session and the password (to their own inbox) can't move the account to
+them afterwards (`auth/email-change.db.test.ts` "a pending change dies when
+the owner secures the account", with a positive control).
 
 ## Password reset, email verification and invites
 
@@ -1110,7 +1127,9 @@ buys a **render session** that can read one report and nothing else.
   like any browser. Its role can receive `render-requests`, send
   `render-results`, put objects under `reports/` in the reports bucket and
   under `packs/` in the packs bucket (infra/packs.tf): it can't read, list
-  or delete a PDF, nor change or bypass a pack's retention. It opens only its configured
+  or delete a PDF, nor change or bypass a pack's retention. The worker may
+  delete under `reports/` (a deleted report's PDF, issue #903) and nothing
+  else in that bucket: no read or list. It opens only its configured
   `RENDER_SITE_URL`: a render request carries ids and the token, never a URL.
   Its browser is confined to that site and `RENDER_API_URL` whatever the
   page asks for (`reports/render.ts` `confineToOrigins`): any request to
@@ -1818,8 +1837,9 @@ against its owner, and a farmer's mail naming a neighbour's farm.
     catchment. A digest is bounded too: at most 20 alerts written out
     (`DIGEST_MAX_LINES`, the newest), then "…and N more" with a link to the
     app, all marked sent with it; and at most 200 lines a person are claimed
-    for one digest (`app_alert_claim_digest`), older ones skipped as over the
-    limit, so a flapping rule can't build a huge email or a backlog. The cap is applied when a delivery is claimed, one person at
+    for one digest run (`app_alert_claim_digest`), shared by turns across
+    their catchments (371) and the rest skipped as over the limit (each
+    catchment's digest says how many of its own were), so a flapping rule can't build a huge email or a backlog. The cap is applied when a delivery is claimed, one person at
     a time under an advisory lock, so two workers can't both send the sixth.
     This bounds what any source can send a person, a hostile editor
     flapping thresholds included (their edits are in the audit log).
@@ -2180,11 +2200,29 @@ In short:
   `teams/leave-projects.db.test.ts` (the removed creator loses access, an
   admin owns it, the keep-owner trigger holds, a concurrent leave, the
   positive control).
+- **Only a team admin takes a project out of its team** (issue #900,
+  392_team_project_move_admin). Moving a project to personal, or to another
+  team, needs admin on the team it is in, besides project owner and member
+  or admin of the team it goes to. Before, a plain member who created a
+  team project (its direct owner), or an outside person the team shared it
+  with as a direct owner, could take it out: the team's admins lost it, and
+  the member could then leave the team and keep it, which defeated the
+  decision above. `project_update`'s WITH CHECK sees only the new row, so a
+  BEFORE UPDATE OF `team_id` trigger (`project_team_move_guard`, invoker
+  rights, water_app only, so a team's deletion still sets its projects'
+  team to null) refuses it, and `PATCH /projects/:id` checks first with
+  `403 team_move_admin`. Moving a personal project into a team is
+  unchanged. Tests: `teams/teams.db.test.ts` (the member and the outside
+  owner refused through the route and SQL, a team admin allowed).
 - **Your own id in any case is you.** The member routes (`DELETE
   /teams/:id/members/:userId`, `DELETE /projects/:id/members/:userId`)
   compare the id case-insensitively with the caller's, as the team's MFA
   reset does, so an uppercased own id is a leave, not a removal of someone
-  else (which needs admin or owner and step-up).
+  else (which needs admin or owner and step-up). So does stepping down as
+  the authority's delegate (`DELETE /projects/:id/authority-delegates/:userId`):
+  an uppercased own id withdraws your own proposal or delegation, where it
+  had been refused as a removal of someone else
+  (`projects/authority-delegates.db.test.ts`).
 - The backend connects as **`water_app`**: no superuser, no `BYPASSRLS`, owns
   no tables. Each request that touches project data runs in a transaction that
   sets `app.current_user_id` (transaction-local), and RLS policies on every
@@ -2405,7 +2443,9 @@ In short:
     server has regenerated the whole Latin-hypercube sample from the seed and
     re-run member 0 and **three members picked with `crypto.randomInt`**,
     finding the same scores, verdicts and outputs (`verifyEnsemble`,
-    `verifyPaired`, tolerance 1e-6 relative); the bands are then summarised
+    `verifyPaired`, tolerance 1e-6 relative; a paired band on a baseline
+    stored on another engine also posts that baseline's kept sets re-run on
+    its own run's inputs, checked the same way, issue #897); the bands are then summarised
     on the server from the members, and the header (farms, sites, EWR line)
     comes from the server's own run of member 0;
   - limits: an unchecked member's outputs are taken on trust, so a forger
@@ -3296,9 +3336,20 @@ In short:
   tab) is refused as well as `//host`.
 - **CSV exports defuse spreadsheet formulas.** Farm, run and series names are
   user-controlled and the files are opened in Excel by other project members,
-  so any text cell starting with `= + - @`, tab or CR gets a leading `'`
-  (`backend/src/export/csv.ts`, OWASP "CSV injection"), and a cell holding a
-  comma, quote or line break is RFC 4180-quoted. Numbers are written as
+  so any text cell a spreadsheet may read as a formula gets a leading `'`
+  (`backend/src/export/csv.ts` `FORMULA_START`, OWASP "CSV injection"), and a
+  cell holding a comma, quote or line break is RFC 4180-quoted. The rule is
+  one rule everywhere (the frontend's copy is `names.ts` `FORMULA_START`, which
+  `defuse` and the readers' `undefuse` share): a leading `= + - @`, the same
+  after any leading whitespace, a full-width `＝ ＋ － ＠` (OWASP lists them: a
+  formula in some locales), or a leading tab, CR or LF. Leading whitespace
+  counts since issue #902: LibreOffice Calc 26.2's CSV import, with its
+  "Trim spaces" option on, trims an unquoted ` =1+1` and evaluates it (tested
+  headless on 2026-11-26; with the option off, the default, the cell stays
+  text, and ` +1`, ` -1` and ` @SUM(…)` stayed text either way). OWASP's page
+  doesn't mention leading spaces, and Excel, Google Sheets and Numbers weren't
+  tested; the rule doesn't depend on them. The apostrophe keeps ` =1+1` text
+  in the same test. Numbers are written as
   numbers. Export file names are ASCII slugs, so `Content-Disposition` can't be
   injected. `export/export.security.db.test.ts` sweeps every `GET … .csv`
   route in the live route table over a project seeded with formula-looking
@@ -3312,6 +3363,18 @@ In short:
   (`frontend/src/lib/spreadsheet/paste/grid.ts` `csvCell`): names go through
   the same `defuse` and RFC 4180 quoting, numbers are written as numbers, and
   pasting the file back drops the apostrophe again before matching a name.
+  The Invite farmers dialog's example CSV (`project/farmers.ts`
+  `inviteExampleCsv`, the project's own unit names) defuses the same way, and
+  `parseFarmerCsv` drops the apostrophe when it reads the file back.
+- **A CSV's raw `#` first line keeps typed text to one cell.** A `#` line is
+  written raw, not as a quoted cell (a quoted cell wouldn't start with `#`), so
+  its commas still split it into cells. Whatever a user typed in it (a unit's
+  name, a run's label) has its `%`, commas, quotes and control characters
+  percent-encoded first, so a name like `x,=HYPERLINK(…)` can't open a cell of
+  its own that a spreadsheet runs: the server's provenance lines
+  (`export/csv.ts` `provenanceValue`), the grouped series CSV
+  (`series/groupedCsv.ts` `commentLine`) and the observed actual ET CSV
+  (`crops/etObserved.ts` `etCsv`). Each has a unit test with such a name.
 - **The `.xlsx` workbook treats names the same way.** It is built in the
   browser from the same API data (`frontend/src/lib/spreadsheet/export/`):
   the summary sheets are the summary CSV's cells, already defused; names the
@@ -3413,6 +3476,11 @@ the key another way.
   `credential.test.ts`). The URL's host is written out, never a placeholder
   (`config.ts` `stationUrlProblem`): with `{station}` in the host, an edit of
   the station ID would move the key to another site under the same binding.
+  The check compares the URL's parsed origin with the placeholders filled
+  in several ways, not only the text after `https://`: the URL parser also
+  reads `https:\\host`, `https:host` and `https:/host` and drops tabs and
+  newlines, and `https:\\{station}%2ecom/` once passed as the site
+  `x.com` while the station ID chose the real one (`config.test.ts`).
 
 - **Who can open it: only the fetcher.** The private key
   (`FEED_CREDENTIAL_PRIVATE_KEY`) is the fetcher Lambda's runtime secret
@@ -4327,7 +4395,8 @@ PDF someone else asked for kept the person as a recipient
 | Data | Tables | Retention | Account deleted | Project deleted |
 | --- | --- | --- | --- | --- |
 | Account: email, display name, password hash, session watermark, when they last downloaded their data (052), whether SES suppressed the address (057), which terms and privacy notice they accepted and when (087) | `app_user`, `email_token` | Until the account is deleted; tokens a week past expiry | Deleted | – |
-| Sign-in attempts, keyed by the typed address (and a trusted device's id, 070) | `login_throttle`, `login_device_throttle` | A day without attempts | Not linked to the account | – |
+| A pending change of address (347): the new address they typed, the link's SHA-256, when it lapses and when asked; own row only under RLS; in "Download my data" (`pendingEmailChange`, never the hash) | `email_change` | 48 hours (the link's life), or until used or replaced by a newer one | Deleted (cascades from `app_user`) | – |
+| Sign-in attempts, keyed by the typed address (and a trusted device's id, 070): failure counts and a lock time. Not in "Download my data" (reviewed for #906): anyone can type any address, so a row is not the account's (no foreign key) and may be a stranger's attempts on it; it holds no more than a count, and is gone a day after the last attempt | `login_throttle`, `login_device_throttle` | A day without attempts | Not linked to the account | – |
 | Reset and verification emails sent, for the daily cap (and a trusted device's id, 078) | `account_mail_quota` | 24 hours | Deleted | – |
 | Elevation-model requests per account, for the hourly and running caps (184) | `dem_attempt` | 1 day | Deleted | – |
 | Ids of sessions the person signed out (102), and used two-step sign-in challenges (150) | `revoked_session` | Until the token would have expired, 7 days at most | Deleted | – |
@@ -4346,13 +4415,13 @@ PDF someone else asked for kept the person as a recipient
 | The yearly renewal notices sent to the person (329, issue #641; CPA s14(2)(c)): one per subscription and period, with the period end it was about, its send status, attempts, when it was claimed, sent and settled, and a short failure reason; the email's words aren't stored. Written only by the worker's definer functions; own rows readable under RLS; in "Download my data" (`billing.renewalNotices`: period end, status, when sent and when made) | `renewal_notice` | Kept as the record that the notice went, until its subscription or the person's account is deleted | Deleted (cascades from `app_user`, and from `subscription` with the billing account) | – |
 | The plan emails sent to the person (346, issue #641): the grace after a lapse started, the pause landed, a reverse trial ends in 3 days; one per account, kind, occurrence and recipient, with the account it was about (theirs, or a team's they administer), when the occurrence began (`about`), its send status, attempts, when it was claimed, sent and settled, and a short failure reason; the email's words aren't stored. The emails name only the catchments the recipient can read under RLS (others are counted). Written only by the worker's definer functions; own rows readable under RLS; in "Download my data" (`billing.planNotices`: kind, `about`, status, when sent and when made) | `billing_notice` | Kept as the record that the email went, until the account or the person's account is deleted | Deleted (cascades from `app_user` and from `billing_account`) | – |
 | The staff grants of the account's plan (330, issue #641): plan, until when, the reason, who granted or revoked it (the operator's name) and when, and each expiry. The reason is written for the customer to read. Written only by the schema owner's grant and revoke functions and the worker's expiry; read under RLS by the account's person and its team's admins; the person's in "Download my data" (`billing.grants`: action, plan, until, reason, granted by, when) | `billing_grant_log` | Kept as the audit record of the plan while the account exists | Deleted (cascades from `billing_account`, so from `app_user` or `team`) | – |
-| That a canonical email address has had the Pro reverse trial, and when (342, issue #641 "Once per canonical email"): a SHA-256 of the canonical address (lower-cased, `+tag` and Gmail's dots dropped), never the address, with no link to any account. Pseudonymous, not anonymous: anyone holding an address can hash it and test for a row, so it is personal information, kept to the least that enforces the rule. Owner only (no `water_app` privilege); written once by `app_reverse_trial_start`, read by nothing but it. Not in "Download my data": the row is not linked to the account, and finding it means hashing the address | `reverse_trial_claim` | Kept for good: the rule is once ever, so a row deleted with the account would give a second trial to whoever deletes and signs up again | **Kept** on account deletion (no foreign key): it names no account and holds no address | – |
+| That a canonical email address has had the Pro reverse trial, and when (342, issue #641 "Once per canonical email"): a SHA-256 of the canonical address (A-Z lower-cased, `+tag` and Gmail's dots dropped), never the address, with no link to any account. Pseudonymous, not anonymous: anyone holding an address can hash it and test for a row, so it is personal information, kept to the least that enforces the rule. Owner only (no `water_app` privilege); written once by `app_reverse_trial_start()`, which hashes the caller's own current address itself (397, issue #914), so no caller can claim another address's trial. In "Download my data" (`reverseTrialClaim`: the hash and when, 396) through `app_subject_reverse_trial()`, a `SECURITY DEFINER` reader that hashes the caller's own current canonical address (`canonical_email`, the SQL twin of `canonicalEmail`) and takes no hash from the caller, so it tests no one else's address; a claim made under an address the person has since changed is linked to nothing and isn't found | `reverse_trial_claim` | Kept for good: the rule is once ever, so a row deleted with the account would give a second trial to whoever deletes and signs up again | **Kept** on account deletion (no foreign key): it names no account and holds no address | – |
 | The assistant's messages per person in the current hour, for the hourly cap (262); no one reads it but the cap's own function | `assistant_rate` | Until its hour is over: the person's next message or the job tick deletes it | Deleted | – |
 | A running assistant turn's reserved budget (264): who began it, on which project, and how many weighted tokens; no one reads it but the assistant's own functions | `assistant_reservation` | While the turn runs: deleted when it is charged, or, if never charged, converted into the usage row in full once it expires (the turn's deadline + 120 s; the next turn or the job tick) | Kept without the name (`user_id` set null) until it is charged or expires | – |
 | Display preferences: the workspace sections a person hid from their sidebar (083); own row only under RLS | `user_preferences` | Until the account is deleted | Deleted | – |
 | Memberships and roles | `project_member`, `team_member` | Until removed or left | Deleted | Deleted |
 | Farmer ↔ farm link (a person tied to a farm's water use) | `farm_link` (`added_by`) | Until unlinked, removed or left | Deleted (with the membership) | Deleted |
-| Pending invites: an address, its language, a farmer invite's farms | `invite`, `invite_node` | 7 days live, then 90 days as expired, then purged by the job tick (048) | Deleted if they sent it; an invite *to* their address lapses and is purged | Deleted |
+| Pending invites: an address, its language, a farmer invite's farms | `invite`, `invite_node` | 7 days live, then 90 days as expired, then purged by the job tick (048) | Deleted if they sent it, and every invite *to* their address, live or expired (383), so the address doesn't wait out the 97 days and a later sign-up with it can't take up the invite (`account-deletion-leftovers.db.test.ts`) | Deleted |
 | A farm's figures, personal once linked to a named farmer | `publication_farm`, `run_series` (farm keys), `model_run` | The newest 12 publications and 20 manual runs; published runs kept while published | Stay (the farm's, not the person's; the link goes) | Deleted |
 | A farm's season figures in each publication, and the notice as announced (the season decision log, issue #119): staff-only, never a farmer's or applicant's to read; the Restriction log (`GET …/restriction-log` and its CSV, `…/restriction-log/export.csv`, viewers and above) shows the notices and who published them, never `perFarm` | `audit_event` (`publication.published` `perFarm`, `publication.notice_changed`) | For the life of the project, as the rest of the audit log | Stay (the farm's, not the person's; no account is named in them); left out of the publisher's data export | Deleted |
 | Notes: body, author | `note` | For the life of the project. A deleted note's text: 90 days, then erased by the tick (`app_purge_deleted_notes`, 158; the `note.deleted` event stays); on a submitted application or an issued pack, kept hidden with the licence record (s14(6)(b)) | Author cleared; body stays | Deleted |
@@ -4361,10 +4430,10 @@ PDF someone else asked for kept the person as a recipient
 | A team's privacy contact (168): the name (or office), email and optional postal address the team gives for questions about its projects' information (POPIA s18(1)(b)), shown to its projects' members and farmers and in invitation emails | `team` (`privacy_contact_*`) | Until an admin changes or removes it, or the team is deleted | Unaffected (it is the organisation's contact, not the account's; an admin removes it) | Unaffected (deleted with the team) |
 | Erasure log: the internal id of each deleted account, project and team (159), for a restore to delete them again | `erasure_log` (owner-only, no grant to `water_app`) | 40 days, above the 35-day backup maximum (`app_purge_erasure_log`, the tick) | The account's id, 40 days | The project's id, 40 days |
 | A public comment's author's display name, shown on the scenario's or pack's share link (115, 128) | `note` (`public_participation`), read by `app_share_scenario` and `app_share_pack` | While the comment and a live link stand | The comment shows "a former member" | Deleted |
-| Audit log: actor name, names and masked addresses in subjects | `audit_event` | For the life of the project (the regulator's audit trail; POPIA s14(1)(b)) | Pseudonymised: "Deleted user" as actor and subject (D12, 048), and the masked address in invitation entries blanked to `•••` (160). The entries stay and are **still treated as personal information** (owners and editors read them; deleted with the project), not as de-identified. Provisional position (pre-counsel research, 2026-10-01): s24(1)(b) reaches only what s14 no longer authorises, and s14(1)(b) authorises the audit trail. A team that keeps public records (`team.public_records`, 161) keeps the name in its projects' entries | Deleted |
+| Audit log: actor name, names and masked addresses in subjects | `audit_event` | For the life of the project (the regulator's audit trail; POPIA s14(1)(b)) | Pseudonymised: "Deleted user" as actor and subject (D12, 048), and as the leaver a team project was handed over from (`handedFrom`, 383: by `handedFromId`, or for older entries through the `member.removed` entry the same transaction wrote), and the masked address in invitation entries blanked to `•••` (160). The entries stay and are **still treated as personal information** (owners and editors read them; deleted with the project), not as de-identified. Provisional position (pre-counsel research, 2026-10-01): s24(1)(b) reaches only what s14 no longer authorises, and s14(1)(b) authorises the audit trail. A team that keeps public records (`team.public_records`, 161) keeps the name in its projects' entries | Deleted |
 | Model and series revisions: who saved | `model_revision`, `series_revision` | Model revisions for the life of the project; series revisions 180 days / 5 versions | Who cleared | Deleted |
 | API keys, share links, publications: who made, revoked, published | `api_key`, `share_link`, `run_publication` | Kept after revocation (the audit record) | Who cleared; a key keeps working, its automatic re-runs are skipped | Deleted |
-| Jobs, reports, render tokens: who asked | `job`, `report`, `report_schedule_recipient`, `render_token` | Jobs 30 days after finishing; report rows 8 days, PDFs 7; tokens single use, 5 minutes | Deleted | Deleted |
+| Jobs, reports, render tokens: who asked; a report's recipient addresses (`report.email_to`). Not in "Download my data" (reviewed for #906): operational rows kept 8 days; `email_to` is the addresses the requester typed, often someone else's, and the requester's own act is the `report.*` audit event; a schedule's recipients are in `reportSubscriptions` | `job`, `report`, `report_schedule_recipient`, `render_token` | Jobs 30 days after finishing; report rows 8 days, PDFs 7; tokens single use, 5 minutes | Deleted, and the PDFs of their reports removed from storage at the worker's next tick (395, issue #903: the trigger on `report` queues the ids in the owner-only `report_pdf_erasure`, the tick deletes each object, MinIO or the bucket, and retries a failed delete next tick; `reports/erasure.db.test.ts`). Residual: a render still in flight when the account goes stores its PDF after the removal; production's 7-day lifecycle deletes it (a local MinIO keeps it), and nothing can download it (the row and its route are gone) | Deleted, PDFs removed the same way |
 | Alerts: a person's choices and the mails sent to them; the rules and events | `alert_subscription`, `alert_delivery`; `alert_rule`, `alert_event` | Choices while a member; deliveries 180 days; events 180 days after clearing | Choices and deliveries deleted; a rule's creator cleared | Deleted |
 | Evidence pack emails: that a person (an editor, or the applicant) was emailed about a pack's issue or withdrawal, and whether it went; the email itself goes to their account address | `pack_notice` (133) | 30 days after it is sent, skipped or failed (`app_purge_pack_notices`, the tick) | Deleted | Deleted |
 | Known engine bug emails: that a project owner was emailed about an erratum that may affect the project's runs, and whether it went | `erratum_notice` (153) | 30 days after it is sent, skipped or failed (`app_purge_erratum_notices`, the tick) | Deleted | Deleted |
@@ -4372,13 +4441,14 @@ PDF someone else asked for kept the person as a recipient
 | Registered water users' names (WARMS) | `allocation_holder` | For the life of the project ([§ Allocations](#allocations-popia-minimisation-038_allocationssql); D3: editors, owners and the linked farmer only) | Not linked to an account | Deleted |
 | A pseudonym of each registered user's name, frozen with each run to count holders (219, #523): `md5` of a per-project salt and the name | `run_allocation_holder`, `allocation_holder_salt` (owner-only) | With the run; reset to `gone` in every run once the name leaves the project (`allocation_holder_erased`, indexed on the normalised name: undoing a 2 500-row import in a 5 000-row project takes about 70 ms locally) | Not linked to an account | Deleted |
 | Registered users' names in issued evidence: none as a field. A run's input and the evidence report carry no holder name (§ 5 names units; Appendix A.1's model rows and A.2's diff have no holder field), so a frozen pack manifest has none either. A name can reach one only as text someone typed (a unit named after its owner, notes, the applicant statement) | `evidence_pack.manifest` (frozen, hashed) | With the pack: an issued pack is never edited (its hash is verified publicly); whether issued evidence is kept against an erasure request is a legal-hold question for counsel (#92) | Not linked to an account | Kept while the project is a licence record |
+| Co-workers on an application (115): who was added to which applicant's scenario, by whom and when; read under RLS by those who read the scenario; in "Download my data" (`scenarioMemberships`) through `app_subject_scenario_memberships()` (396), every row of the person's, past RLS (a role drop below contributor deletes the share itself, 049 `project_member_prune_shares`, so nothing is left behind) | `scenario_member` (`user_id`, `added_by`) | While the scenario and the membership stand | Deleted (with the project membership); who added cleared | Deleted |
 | An application's decision: the assessor who made it | `scenario.decided_by` | Kept (the decision on the application) | Who cleared; the outcome and note stay (052) | Deleted |
 | What followed a decision (an appeal lodged, upheld, set aside or varied): the member who recorded it (228) | `decision_event.recorded_by` | Kept with its scenario (the record of the appeal) | Who cleared; the event stays | Deleted |
 | An applicant's "Ask the assessors why" question and the assessors' answer (164): the application's name, the line as they read it, the changes it names, the rule in its real words; no account id (who asked and answered is the audit trail's), but the applicant's own typed text (`scenario_name`, `problem`, and `ops` with their node names and free text), which may be personal information | `application_question` | With the project. Kept when its draft is deleted, `scenario_id` cleared (234, issue #523 G7): the application's record for the authority's s42 written reasons, read by the editors only | The account id is never on the row, but the typed text is **not** removed: a detached question keeps `scenario_name`, `problem` and `ops` after the draft and the account are gone (the scenario's owner is set null, 138; the question no longer goes with the scenario, 234). Whether erasure should redact them is open for counsel ([followups.md](./followups.md) "Redact detached questions on account erasure", #92) | Deleted |
 | Sign-offs: typed name and registration | `signoff` | With the run or pack it signs: for the life of the project, and where the project is kept as a licence record (a nomination or a pack past draft), until the record's closing date the project holds (161): the licence's expiry, or any other outcome (refused, rejected, not considered or withdrawn) (233), + 3 years, with a 5-yearly review while no outcome is recorded; the tick tells the owners and the operator, and the operator removes the project on the client's written confirmation (deployment.md § Runbooks, item 16; § Authorization, "Tamper evidence"; POPIA s14(1)(b), s14(6)(b); provisional position, pre-counsel research, 2026-10-01) | Account cleared; name stays ([§ Liability](#liability)) | Refused while a nomination or an issued pack holds the project |
 | Registration checks (167): the name and number the host found on the public SACNASP or ECSA register, the outcome, who checked (the organisation) and when, who recorded it | `registration_check`, `signoff_registration_check` | A check no issued pack rests on: until the account is deleted; one bound to an issued pack's sign-off: as the sign-off (the licence record) | Account cleared; an unbound check deleted (`registration_check_forget`), a bound one stays without the account, as the sign-off's typed name does | Deleted with the project |
 | Evidence packs: who drafted and issued them; the signers' names and registrations, printed and returned by the public verify lookup; the frozen evidence report in the manifest, which prints the display names of who made its runs, ensembles and nominations and of the application's applicant; the reproduction bundle (the manifest and both runs' inputs: the model's farm and node names, as the manifest already holds them; no account or email) | `evidence_pack` (`created_by`, `issued_by`, `manifest`), `signoff`; the bundle in the packs bucket (`packs/<project>/<pack>/<sha256>.zip`, 122) | Once issued, until the licence record's closing date (as sign-offs, 161) | Who drafted and issued cleared (SET NULL, allowed past the pack's guard only when the account is gone); a signer's typed name stays, as on any sign-off; the names printed in the manifest and the bundle stay, because they are hashed (the verify lookup and the signatures rest on the hash) | Refused while a pack is past draft (`project_pack_guard`, 112) |
-| Evidence that names its maker: a project or team created, a run, a nomination, an ensemble, a scenario or licence application, an import | `project`, `team`, `model_run`, `run_nomination`, `run_uncertainty`, `scenario`, `project_import` | With the project (runs are pruned as above) | Kept, maker cleared (SET NULL, 138): the API shows no name, the History "Deleted user". Never reassigned (that would make the record false, s16). Removed with the account: an ensemble they started and never completed, and their **draft** applications with those drafts' runs (unless the project keeps the draft: public comments, a pack, or a pinned, nominated or cited run). A submitted, withdrawn or decided application stays, applicant cleared *(confirm the rule, #90)* | Deleted, unless nominated (`project_evidence_guard`) |
+| Evidence that names its maker: a project or team created, a run, a nomination, an ensemble, a scenario or licence application, an import. The scenarios a person owns (their licence applications and modelling scenarios) are in "Download my data" as metadata (`scenarios`: name, origin, status, outcome, dates; 396, `app_subject_scenarios()`, kept after they leave the project or lose the role that reads them), never the ops or description, the project's model record (reviewed for #906: an application names its applicant, so it is theirs to see) | `project`, `team`, `model_run`, `run_nomination`, `run_uncertainty`, `scenario`, `project_import` | With the project (runs are pruned as above) | Kept, maker cleared (SET NULL, 138): the API shows no name, the History "Deleted user". Never reassigned (that would make the record false, s16). Removed with the account: an ensemble they started and never completed, and their **draft** applications with those drafts' runs (unless the project keeps the draft: public comments, a pack, or a pinned, nominated or cited run). A submitted, withdrawn or decided application stays, applicant cleared *(confirm the rule, #90)* | Deleted, unless nominated (`project_evidence_guard`) |
 | The Map's records of who made them: a map import, a feature, a delineation proposed or decided (175) | `geo_source.imported_by`, `map_feature.created_by`, `delineation_proposal.created_by` and `decided_by` | With the project (superseded and rejected proposals past the newest 50 a project are pruned) | Kept, maker cleared (SET NULL); a proposal's polygon, dataset and method hold nothing about the person; its decision stays final (175 `delineation_proposal_final`, only the foreign key clears `decided_by`) | Deleted |
 | A model proposed from the map (178): who proposed and decided it | `start_proposal.created_by` and `decided_by` | With the project (superseded and discarded ones past the newest 50 a project are pruned) | Kept, maker cleared (SET NULL); the plan (units, areas, outlines from the project's map) and the decision hold nothing about the person; the decision stays final (178 `start_proposal_final`) | Deleted |
 | Logs: request logs, database logs | CloudWatch | 30 days (`lambda_log_retention_days`, `db_log_retention_days`) | Not searchable by person, except a page crash's `client_error` line, which names the user's id (§ Client error reports); it ages out with the log group | – |
@@ -4411,19 +4481,25 @@ same way.
 **Data-subject requests.**
 - **Access / export: self-service.** Account → Your data → **Download my
   data** (`GET /auth/me/export`, [api.md § Auth](./api.md)) saves one JSON
-  file: the account (never the password hash), memberships, farm links with
+  file: the account (never the password hash), a pending change of address
+  (`pendingEmailChange`: the new address and when its link lapses, never the
+  link's hash, 347), memberships, the applications they were added to as a
+  co-worker (`scenarioMemberships`) and the scenarios they own (`scenarios`, metadata), whether their address had the reverse trial (`reverseTrialClaim`), farm links with
   those farms' current published figures (as the farm page shows them) and
   the registered volumes and holder names matched to them, notes written,
   sign-offs, invites to their verified address, alert and report choices,
   alert mails sent, their "Was this useful?" answers and comments on alert emails (`alertFeedback`, 151), evidence pack emails sent (`packNotices`, 133), known engine bug emails sent (`erratumNotices`, 153), their display preferences (the sections they hid), and every audit event they made or that names them.
   The rows RLS hides from the person (the audit log for a farmer, invites,
   anything in a project they've left) come through `app_subject_export()`
-  (052), a `SECURITY DEFINER` reader with no user argument that reads only
+  (052; and 396's `app_subject_scenario_memberships()`,
+  `app_subject_scenarios()` and `app_subject_reverse_trial()`), a `SECURITY DEFINER` reader with no user argument that reads only
   the caller's own rows. Nothing about another farm or person beyond what
   those records name (the actor who linked them, the people named in events
   they made). One export a minute per account. Every foreign key to
   `app_user` is classified as exported or left out, with why, in
-  `auth/export.ts` `USER_FK_COVERAGE` (guarded by `export.db.test.ts`; `personal-data.security.db.test.ts` checks each exported key's section holds exactly the person's rows, and every exported `app_user` column its stored value): the
+  `auth/export.ts` `USER_FK_COVERAGE`, and every column reaching a person
+  through a composite key to `project_member` or `team_member` (`farm_link`,
+  `scenario_member`) in `MEMBER_FK_COVERAGE` (both guarded by `export.db.test.ts`; `personal-data.security.db.test.ts` checks each exported key's section holds exactly the person's rows, and every exported `app_user` column its stored value): the
   project's own records that name the person only as their maker (runs,
   revisions, keys, publications…) are left out, because the act is in the
   audit events. The project exports (`export.json`, CSV, the farm CSV)

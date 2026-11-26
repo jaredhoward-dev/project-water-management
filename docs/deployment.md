@@ -1373,7 +1373,8 @@ runs in production as `JOB_TRANSPORT=sqs` (infra/jobs.tf):
   permission or target broken; with no retries each failed tick counts once); the oldest due job waiting longer than `jobs_backlog_alarm_seconds`
   (default 15 minutes; each tick logs `OldestDueJobAgeSeconds` as a
   CloudWatch embedded metric in `water-management/Jobs`); and any dead job
-  (a metric filter on the worker's `job_dead` log line). A project with the
+  (a metric filter on the worker's `job_dead` log line; a cancelled or
+  superseded job logs `job_cancelled` or `job_superseded` instead). A project with the
   `job_dead` alert on also emails its owners ([§ Alert emails](#alert-emails)).
   On a first deploy the worker is Terraform's stub, which throws on every
   tick until the first backend release: `worker-errors` goes to ALARM (and
@@ -2232,10 +2233,14 @@ only the fetcher does, so start a backfill only once both carry it.
    `rnl` starts in 1981-01, `sat` in 2000-06 (its first byMonth file; its daily files start in 1998). Stop at the month before the
    current one: the daily `monthly` runs write the newest month, and a
    backfill of the same year at the same moment would race them on that
-   year's chunks.
+   year's chunks. One execution takes at most 173 months (the plan refuses
+   more: its history must hold every month's worst-case retries, issue #896,
+   `infra/ingest_backfill.tf`), so split a longer range with `--from`/`--to`
+   (`rnl` 1981-01 to 1995-05, then 1995-06 to 2009-10, and so on) and start
+   the next once the last has ended.
 2. Start it: `aws stepfunctions start-execution --state-machine-arn <arn> --input file:///tmp/rnl-plan.json`.
-   About 550 `rnl` months take ~1.5 days (a ~40 s download and the wait per
-   month); `sat` about 1 day. One execution at a time (or one with both
+   About 550 `rnl` months (four executions) take ~1.5 days in all (a ~40 s
+   download and the wait per month); `sat` about 1 day (two). One execution at a time (or one with both
    products' months, above): the feeds wait for its whole run.
 3. If an execution fails, read the failed month's error in the execution's
    history and the `mirror-ingest` log group. After a 403, wait (and write to
@@ -4058,7 +4063,11 @@ workflow's log prints the file it loaded and the one it replaced (key,
 SHA-256 and when it was loaded): that replaced file is the one to restore
 to undo the load. A local `pnpm import:*` of the same label names no
 bucket file, so it deletes the record rather than leave it describing data
-that is gone. The table is owner-only (the app reads only versions and
+that is gone. Quaternaries and waterbodies are one row per code (or uid)
+whatever dataset loaded it, so a load under a new label moves the codes it
+names out of the older dataset; one that it leaves with no row loses its
+record in the same transaction (`forgetEmptiedOrigins`), and the new
+load's log names no replaced file, since its label had none. The table is owner-only (the app reads only versions and
 dates, through `app_reference_provenance()`); to read it outside a load,
 run the `reference-provenance` check ([§ Read-only production
 checks](#read-only-production-checks)), or locally `SELECT * FROM
@@ -4920,7 +4929,7 @@ function as the local script, so production and `pnpm dev:billing:grant`,
 
 | action | fields | does (as the local script) | answers |
 |---|---|---|---|
-| `billing-grant` | one of `accountId`, `userId`, `teamId` (or `email`, direct invoke only); `plan` (`pro`, `team`); `until` (YYYY-MM-DD, SAST, optional: until revoked); `reason` (1–500); `by` (1–100); `replace` (optional) | `dev:billing:grant <who> <plan> …` | `accountId`, `kind`, `plan`, `endsAt` (SAST), `replaced` |
+| `billing-grant` | one of `accountId`, `userId`, `teamId` (or `email`, direct invoke only); `plan` (`pro`, `team`); `until` (YYYY-MM-DD, SAST, optional: until revoked); `reason` (1–500); `by` (1–100); `replace` (optional); `seats` (optional, a whole number 1–100000: the editor seats in all, as `--seats`; absent or null: the plan's included seats; the database refuses fewer than included and extra seats on Pro) | `dev:billing:grant <who> <plan> … [--seats n]` | `accountId`, `kind`, `plan`, `seats`, `endsAt` (SAST), `replaced` |
 | `billing-revoke` | one of `accountId`, `userId`, `teamId` (or `email`, direct invoke only); `reason`; `by` | `… --revoke` | `accountId`, `kind`, `plan` |
 | `billing-grants` | one of those, or none | `… --list`; none: every live grant | one account: `accountId`, `kind`, `planNow`, its `log` (with reasons); all: `grants` (account, kind, person or team id, plan, since, until) |
 | `billing-report` | `month` (YYYY-MM, optional: this SAST month) | `dev:billing:report --month …` (never `--show-emails`) | `report`, redacted as the script prints it |
@@ -5083,7 +5092,11 @@ Every step is an ordinary app action by an owner unless it says "operator".
    random id only, never an address or a name. Both paths, the self-service
    one and the SQL below, also write the id to the `erasure_log` table (159),
    which a restore reads to delete the account again
-   ([§ Restoring the database](#restoring-the-database), step 6a). Otherwise
+   ([§ Restoring the database](#restoring-the-database), step 6a), and
+   queue their report PDFs for removal (395, issue #903): the worker's next
+   tick deletes them from the reports bucket, so there is nothing to delete
+   in S3 by hand (a delete it couldn't make logs
+   `report_pdf_erasure_failed` and is retried each tick). Otherwise
    (they can't sign in, or ask another way): a request may come by email or
    any other expedient way (POPIA s24,
    Regulation 3); act on it as soon as reasonably practicable. Confirm it
@@ -5474,7 +5487,9 @@ Every step is an ordinary app action by an owner unless it says "operator".
       -f account_id=<account id> -f plan=team -f until=2026-12-31 -f reason="<reason>"`
       (or `-f user_id=<person id>` for a person with no account yet, `-f
       team_id=<team id>` for a team; no `until`: until revoked; `-f
-      replace=true` to end a live manual or mock subscription). The grant
+      replace=true` to end a live manual or mock subscription; `-f seats=12`
+      for 12 editor seats in all on Team, else the plan's included seats;
+      a grant's seats change by a new grant with `replace=true`). The grant
       lasts through that South African date. The reason holds no address.
     - **Revoke:** `-f action=billing-revoke -f account_id=<account id> -f
       reason="<reason>"`.
@@ -5506,7 +5521,9 @@ Every step is an ordinary app action by an owner unless it says "operator".
        that South African date and ends at the next SAST midnight (`NULL`:
        until revoked, a founding user's; a 30-day trial is `now() +
        interval '30 days'`); the reason (1–500 characters); who grants it
-       (1–100 characters); and `p_replace`. With an end the plan page says
+       (1–100 characters); `p_replace`; and, optionally, the editor seats
+       in all (374; omitted or `NULL`: the plan's included seats, Team 3;
+       more only on Team, e.g. `…, false, 6)`). With an end the plan page says
        it ends and the renewal notice never picks it up. A live **Stripe**
        subscription on the account is always refused, with `p_replace` or
        without: cancel it in Stripe, let the webhook end it, then grant. A

@@ -144,7 +144,10 @@ in `infra/feeds.tf`):
   timeout and a 4 MB cap per response.
 - **Pacing:** the fetcher's reserved concurrency (`fetcher_reserved_concurrency`,
   default 2) caps requests in flight. A 429 or 503 pauses the host by its
-  `Retry-After` (at most 15 min, 60 s when it gives none); a 403 pauses it
+  `Retry-After` (at most 15 min, 60 s when it gives none), and the
+  scheduler then backs the feed off 1 h × 2ⁿ⁻¹ and at least that
+  `Retry-After`, up to a day, which the stored error names
+  (`377_feed_throttle_backoff.sql`, issue #877); a 403 pauses it
   for an hour in that process, and the scheduler then backs the feed off
   2 h × 2ⁿ (`242_feed_refused_backoff.sql`).
 - **User-Agent:** `water-management-feeds/1 (+https://github.com/jaredhoward-dev/project-water-management)`,
@@ -336,11 +339,24 @@ in `infra/feeds.tf`):
   one descriptive user agent with a contact; one request at a time per host,
   about one a second (`hostPacer`); `Retry-After` honoured on 429 and 503 (the host is
   left alone for it by every station feed in the process, 60 s without one, at most
-  15 minutes, then the scheduler's backoff; `stationHttp.ts`); a **401 or 403
+  15 minutes, then the scheduler's throttle backoff: an hour doubling, and at
+  least the `Retry-After`, up to a day; `stationHttp.ts`, 377); a **401 or 403
   stops the feed and backs it off for hours** (2 h × 2ⁿ, 242), never a retry
   storm against the owner's provider account; a 30 s deadline and an 8 MB cap
   per answer; no compression. No conditional GETs: these APIs answer a query,
   not a file.
+- **A `Retry-After` past 15 minutes (issues #866, #877):** the 15-minute
+  cap is the in-process pause (`http.ts` `THROTTLE_MAX_SECONDS`, shared
+  with CHC and DWS). Past it, the scheduler honours it: a throttled fetch
+  stores "the source asked us to slow down and to wait 6 hours
+  (Retry-After: 21600 s) …" (`feeds/errors.ts` `FeedThrottledError`; "…
+  but gave no Retry-After …" when it sent none), and
+  `app_feed_next_attempt` (`377_feed_throttle_backoff.sql`) reads that
+  text: a throttled feed waits 1 h × 2ⁿ⁻¹ and at least those seconds, at
+  most a day (the daily schedule's own instant). No `retry_not_before`
+  column was needed: the function already reads the feed's last error, as
+  it does for a refusal. A provider asking for more than a day is still
+  asked once a day.
 - **Offline:** `FEED_SOURCE=fixtures` (the default) serves a synthetic
   station API on a reserved `station.example` host
   (`backend/src/feeds/stationFixtures.ts`), so dev, CI and e2e never call out.

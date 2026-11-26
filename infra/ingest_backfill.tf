@@ -48,9 +48,18 @@
 #     the pause plus 5 minutes after the month that was running ends (the
 #     running month's own deadline plus that, if stopped mid-month), or delete
 #     ingest-state/hosts/chc/lease.json by hand (docs/deployment.md § Backfill).
-#   - A plain (inline) Map over the list: ~900 months at ~10 history events
-#     each stays well under a Standard execution's 25,000-event history, and
-#     needs no S3 item reader or child executions.
+#   - A plain (inline) Map over the list, which needs no S3 item reader or
+#     child executions, so the whole run shares one Standard execution's
+#     25,000-event history (issue #896). A month is 9 events, and each retry
+#     adds 3 (TaskFailed, TaskScheduled, TaskStarted); Step Functions counts
+#     each Retry rule's attempts separately, so a month can be retried
+#     3 + 5 + 30 + 3 + 4 = 45 times: 144 events at worst. With the
+#     execution's own 24 (ReleaseHold's retries included), 173 months fit
+#     even if every month used every retry, and ingest/backfill_plan.py
+#     refuses a longer list (MAX_ITEMS; split it with --from/--to).
+#     test_backfill_plan reads the MaxAttempts back from this file: change a
+#     rule's MaxAttempts, or add a rule or a state to the item processor, and
+#     update backfill_plan.py's INGEST_RETRIES and its arithmetic with it.
 #
 # Created only once the ingest function exists (ingest_image_tag). Its role
 # may invoke that one function and nothing else.

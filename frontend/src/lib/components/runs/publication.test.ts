@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { damsWithoutStopLevel, draftFrom, emptyDraft, noticeTextFields, noticeLanguages, parseDraft, publishBlocker, publishedRunIds, restrictionSummary } from './publication';
+import { basisOf, damsWithoutStopLevel, draftFrom, emptyDraft, noticeTextFields, noticeLanguages, parseDraft, publishBlocker, publishedRunIds, restrictionSummary } from './publication';
 
 describe('damsWithoutStopLevel', () => {
 	it('counts farm dams whose stop level is 0, not farms without a dam or gauges', () => {
@@ -48,6 +48,11 @@ describe('the notice draft', () => {
 			{ code: 'af', label: 'Notice in Afrikaans' }
 		]);
 		expect(emptyDraft().notice).toEqual({ en: '', af: '' });
+	});
+	it('names the publication a form was filled in from, or none (issue #863)', () => {
+		expect(basisOf({ id: 'p1', revision: 1 })).toEqual({ id: 'p1', revision: 1 });
+		expect(basisOf({ id: 'p1', revision: 7 })).toEqual({ id: 'p1', revision: 7 });
+		expect(basisOf(null)).toEqual({ id: null, revision: null });
 	});
 	it('round-trips a publication', () => {
 		const p = { restriction: { level: 'restricted' as const, pct: 25.5, notice: { en: 'Cut' } }, nextExpectedOn: '2024-02-01' };

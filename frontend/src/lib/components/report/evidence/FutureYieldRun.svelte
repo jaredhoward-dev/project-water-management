@@ -7,10 +7,11 @@
 	// newest job comes with GET …/future-yield, so a reload or another tab
 	// picks it up. Cancel stops a waiting job at once and a running one at its
 	// next step, before it stores anything (POST …/future-yield/:jobId/cancel,
-	// 284_cancel_future_jobs). Never on a pack: a pack freezes § 8 as it was drafted.
+	// 284_cancel_future_jobs). Says when the catchment boundary changed or went
+	// since the result was read over it (issue #889). Never on a pack: a pack freezes § 8 as it was drafted.
 	import { onDestroy, untrack } from 'svelte';
 	import { api, type FutureYieldState } from '#lib/api/index.js';
-	import { fmtDate } from '#lib/format/number.js';
+	import { fmtProjectDay } from '#lib/components/project/project.js';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { cancellableJobStatus, jobStatus } from '#lib/components/yield/yield.js';
 
@@ -18,7 +19,8 @@
 		projectId,
 		runId,
 		assessed,
-		onchange
+		onchange,
+		timeZone
 	}: {
 		projectId: string;
 		runId: string;
@@ -26,6 +28,8 @@
 		assessed: boolean;
 		/** The job finished: read the report again. */
 		onchange: () => Promise<void> | void;
+		/** The project's IANA zone, which the result's run date is read in, as § 8 dates it (issue #864); undefined = the default zone. */
+		timeZone?: string;
 	} = $props();
 
 	let fy = $state.raw<FutureYieldState | null>(null);
@@ -95,13 +99,20 @@
 	<p class="board-h"><span id="ev-future-h">§ 8 Future yield</span> <HelpTip key="future-climate" label="About the future climate" /></p>
 	<p class="small muted">
 		{#if assessed && fy?.result}
-			Run {fmtDate(fy.result.createdAt)}{fy.result.createdBy ? ` by ${fy.result.createdBy}` : ''}. Run it again when the climate projections or this application run change; a pack
+			Run {fmtProjectDay(fy.result.createdAt, timeZone)}{fy.result.createdBy ? ` by ${fy.result.createdBy}` : ''}. Run it again when the climate projections or this application run change; a pack
 			drafted now freezes what § 8 shows.
 		{:else}
 			§ 8 hasn’t been run for this application run, so it reads “Not assessed”. It runs the baseline and the application again under each climate model’s change factors, about 40
 			runs, in the background.
 		{/if}
 	</p>
+	{#if assessed && fy?.result && !status?.busy && (fy.result.boundary === 'changed' || fy.result.boundary === 'none')}
+		<p class="alert alert-warning" data-testid="evidence-future-boundary">
+			{fy.result.boundary === 'none'
+				? 'The catchment boundary this result’s change factors were read over has since been removed from the Map tab. Draw or upload one there, then run it again.'
+				: 'The catchment boundary has changed since this result’s change factors were read over it. Run it again to read them over the new one; until then the pack can’t be issued.'}
+		</p>
+	{/if}
 	{#if status?.busy}
 		<div class="job">
 			<p class="small" role="status" data-testid="evidence-future-job">{status.text}</p>

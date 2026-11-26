@@ -26,6 +26,22 @@ describe('canonicalEmail', () => {
 		expect(canonicalEmail('a.b@googlemail.com')).toBe('ab@gmail.com');
 		expect(canonicalEmail('a.b@example.org')).toBe('a.b@example.org');
 	});
+
+	it('keeps a local part that starts with + whole: no base address to fold it into (issue #893)', () => {
+		expect(canonicalEmail('+Promo@Example.org')).toBe('+promo@example.org');
+		expect(canonicalEmail('+a@example.org')).not.toBe(canonicalEmail('+b@example.org'));
+		expect(canonicalEmail('+a.b@gmail.com')).toBe('+ab@gmail.com'); // Gmail's dots still go
+		expect(canonicalEmail('+@example.org')).toBe('+@example.org');
+		// Positive control: a tag after a base still goes, even a second +.
+		expect(canonicalEmail('a+b+c@example.org')).toBe('a@example.org');
+	});
+
+	it('folds and trims ASCII only, as its SQL twin canonical_email (397, issue #914): a non-ASCII letter stays as written', () => {
+		expect(canonicalEmail('İnci@Example.COM')).toBe('İnci@example.com');
+		expect(canonicalEmail('ÉLODIE@BÜCHER.de')).toBe('Élodie@bÜcher.de');
+		expect(canonicalEmail('\u00a0a@example.org')).toBe('\u00a0a@example.org');
+		expect(canonicalEmail('\u000b\tA@example.org \r\n')).toBe('a@example.org');
+	});
 });
 
 describe('percentile', () => {

@@ -104,7 +104,8 @@ export const USER_FK_COVERAGE: Record<string, { section: string } | { excluded: 
 	// An evidence pack (112_evidence_pack): who drafted and issued it is in the audit events (pack.drafted, pack.issued), exported with them.
 	'evidence_pack.created_by': { excluded: 'the project’s evidence pack; its maker only, and the drafting is an exported audit event' },
 	'evidence_pack.issued_by': { excluded: 'the project’s evidence pack; its issuer only, and the issue is an exported audit event' },
-	'email_change.user_id': { excluded: 'a pending change of address (347): the new address, not yet proven, and a link hash, 48 hours at most' },
+	// A pending change of address (347): the new address they typed and when the link lapses, never the link's hash.
+	'email_change.user_id': { section: 'pendingEmailChange' },
 	'email_token.user_id': { excluded: 'secrets (verify / reset token hashes), a week at most' },
 	// The "known engine bug" emails sent to the person as an owner (153_erratum_notices), 30 days.
 	'erratum_notice.user_id': { section: 'erratumNotices' },
@@ -139,7 +140,8 @@ export const USER_FK_COVERAGE: Record<string, { section: string } | { excluded: 
 	'scenario.decided_by': { excluded: 'the project’s application decision; its assessor only' },
 	// What followed a decision (228_decision_events): the project's record; scenario.appeal_recorded is in auditEvents.
 	'decision_event.recorded_by': { excluded: 'the project’s record of an appeal on a decision; who recorded it only, and scenario.appeal_recorded is in auditEvents' },
-	'scenario.owner_user_id': { excluded: 'the project’s scenario; scenario.created is in auditEvents' },
+	// The scenarios the person owns (396): their licence applications and modelling scenarios, as metadata (never the ops).
+	'scenario.owner_user_id': { section: 'scenarios' },
 	'scenario_member.added_by': { excluded: 'people the person added to a scenario; its maker only' },
 	'assessment.created_by': { excluded: 'the project’s cumulative assessment; who asked only' },
 	'scenario_sweep.created_by': { excluded: 'the project’s scenario sweep; its maker only' },
@@ -179,6 +181,18 @@ export const USER_FK_COVERAGE: Record<string, { section: string } | { excluded: 
 	// § 8 of an evidence report (280): the project's result, as yield_result.
 	'future_yield.created_by': { excluded: 'the project’s future yield result; its maker only' },
 	'climate_factors.created_by': { excluded: 'the project’s climate change factors; their maker only' }
+};
+
+/**
+ * Every column that points at a person through a composite key to
+ * project_member or team_member ((project_id, user_id)), which the
+ * USER_FK_COVERAGE query can't see. The same guard (export.db.test.ts) fails
+ * when a new one isn't listed.
+ */
+export const MEMBER_FK_COVERAGE: Record<string, { section: string } | { excluded: string }> = {
+	'farm_link.user_id': { section: 'farms' },
+	// The scenarios (licence applications) the person was added to as a co-worker (115).
+	'scenario_member.user_id': { section: 'scenarioMemberships' }
 };
 
 /** The RLS-hidden sections, as app_subject_export returns them (054_subject_export.sql). */
@@ -301,7 +315,24 @@ export async function buildSubjectExport(userId: string, now = new Date()) {
 		);
 		const farms = [];
 		for (const link of links) farms.push(await farmSection(db, link));
+		// The scenarios they were added to (scenario_member) and the ones they own (their applications, and modelling
+		// scenarios as metadata): definer readers of the caller's own rows (396), since RLS hides an applicant's own draft once
+		// their role drops below contributor or they leave the project, while the row stands.
+		const { rows: memberships } = await db.query<{ m: unknown[] }>('SELECT app_subject_scenario_memberships() AS m');
+		const scenarioMemberships = memberships[0]?.m ?? [];
+		const { rows: owned } = await db.query<{ s: unknown[] }>('SELECT app_subject_scenarios() AS s');
+		const scenarios = owned[0]?.s ?? [];
+		// That their current address had the reverse trial (342): the claim's hash and when, or null. Owner-only table, so a
+		// definer reader that hashes the caller's own canonical address (396); a claim under an earlier address isn't theirs to find.
+		const { rows: trial } = await db.query<{ c: unknown }>('SELECT app_subject_reverse_trial() AS c');
+		const reverseTrialClaim = trial[0]?.c ?? null;
+		// A pending change of address (347): own row only under RLS; never the link's hash.
+		const { rows: emailChange } = await db.query(
+			`SELECT new_email AS "newEmail", created_at AS "createdAt", expires_at AS "expiresAt" FROM email_change WHERE user_id = $1`,
+			[userId]
+		);
 		const { rows: alertDeliveries } = await db.query(
+			// mode: their choice when it was queued; via: how it went out (the choice at send time wins, 370, issue #890).
 			`SELECT d.project_id AS "projectId", e.kind, d.mode, d.status, d.via, d.created_at AS "createdAt", d.sent_at AS "sentAt"
 			 FROM alert_delivery d LEFT JOIN alert_event e ON e.id = d.event_id
 			 WHERE d.user_id = $1 ORDER BY d.created_at DESC`,
@@ -426,9 +457,12 @@ export async function buildSubjectExport(userId: string, now = new Date()) {
 			version: SUBJECT_EXPORT_VERSION,
 			exportedAt: now.toISOString(),
 			account: acct[0],
+			pendingEmailChange: emailChange[0] ?? null,
 			projectMemberships,
 			authorityDelegations,
 			teamMemberships,
+			scenarioMemberships,
+			scenarios,
 			farms,
 			notes: rest.notes,
 			publicComments: participation[0]?.p ?? [],
@@ -444,6 +478,7 @@ export async function buildSubjectExport(userId: string, now = new Date()) {
 			assistantUsage,
 			assistantDays,
 			billing,
+			reverseTrialClaim,
 			twoStepSignIn,
 			twoStepSignInResets,
 			twoStepEmail,

@@ -301,6 +301,92 @@ describe('storing the result', () => {
 			}
 		});
 
+		// Issue #897: a baseline stored on another engine has that engine's figures; the paired job re-runs its kept sets
+		// on the baseline run's inputs too, so the difference holds no engine change. Synthetic: a baseline row on runB is
+		// stored as the schema owner with an older engine version and every figure nudged, as another engine might give.
+		it('re-run a baseline stored on another engine on its own inputs, so the same inputs give exactly zero', async () => {
+			const original = (await owner.call('GET', `${base(runA)}/uncertainty/${uid}`)).body.ensemble.result as { header: unknown; members: MemberResult[]; coverage: unknown };
+			const nudge = (v: unknown): unknown => JSON.parse(JSON.stringify(v), (_k, x: unknown) => (typeof x === 'number' && x !== 0 ? x * 1.01 + 0.5 : x));
+			const members = original.members.map((m) => (m.metrics ? { ...m, metrics: nudge(m.metrics) as MemberResult['metrics'] } : m));
+			const older = (await start(owner, runB)).body.ensemble.id as string;
+			const json = JSON.stringify({ engineVersion: '0.0.0-older', header: original.header, members, coverage: original.coverage });
+			expect(json).not.toContain('$j$');
+			// The complete trigger lets only the starter complete a row: the owner's connection acts as them.
+			await asOwner(
+				`BEGIN; SELECT set_config('app.current_user_id', '${owner.id}', true);
+				 UPDATE run_uncertainty u SET status = 'complete', engine_version = '0.0.0-older', options = o.options, seed = o.seed, members = o.members,
+				   accepted = o.accepted, summary = o.summary, result = $j$${json}$j$::jsonb FROM run_uncertainty o WHERE u.id = '${older}' AND o.id = '${uid}'; COMMIT;`
+			);
+			// runC: the same inputs as runB (the model with the dam, the same series).
+			const runC = await newRun(owner, 'With dam, again');
+			const start1 = await start(owner, runC, { baselineId: older });
+			expect(start1.status).toBe(201);
+			const row = start1.body.ensemble.id as string;
+			const [inputB, inputC] = await Promise.all([inputOf(owner, runB), inputOf(owner, runC)]);
+			const baseline = { options, header: original.header as never, members, engineVersion: '0.0.0-older' };
+			const paired = runPairedEnsemble(inputC, baseline, { baselineInput: inputB });
+			const post = (body: unknown) => owner.call('POST', `${base(runC)}/uncertainty/${row}/result`, body);
+			// The re-run is required, and checked like the pairs.
+			const without = await post({ members: paired.members });
+			expect([without.status, without.body.error]).toEqual([400, expect.stringMatching(/stored on engine 0\.0\.0-older: post its kept sets re-run/)]);
+			const forged = paired.rerun!.members.map((p) => ({ ...p, metrics: { ...p.metrics, marOutflowMm3: p.metrics.marOutflowMm3 + 1 } }));
+			const bad = await post({ members: paired.members, rerun: { members: forged } });
+			expect(bad.status).toBe(422);
+			expect(JSON.stringify(bad.body)).toMatch(/baseline re-run: pair \d+ metrics/);
+			const done = await post({ members: paired.members, rerun: { members: paired.rerun!.members } });
+			expect(done.status).toBe(200);
+			const s = done.body.ensemble.summary;
+			expect(s.members).toBe(pairedMembers({ members }).length);
+			for (const b of [s.ewrDaysNotMet, s.shortfallMm3, s.marOutflowMm3, s.marNaturalMm3, s.noFlowDays]) expect([b.p5, b.p50, b.p95, b.min, b.max]).toEqual([0, 0, 0, 0, 0]);
+			expect(s.baselineRerunFrom).toBe('0.0.0-older');
+			// Both engines recorded: the pairs' on the row, the baseline's on its re-run.
+			const stored = (await owner.call('GET', `${base(runC)}/uncertainty/${row}`)).body.ensemble;
+			expect(stored.result.rerun.baselineEngineVersion).toBe('0.0.0-older');
+			expect(stored.result.engineVersion).toBe(stored.engineVersion);
+			expect(stored.result.rerun.members).toEqual(paired.rerun!.members);
+			// A baseline on this engine takes no re-run: the stored figures are this engine's.
+			const same = (await start(owner, runC, { baselineId: uid })).body.ensemble.id as string;
+			const onUid = runPairedEnsemble(inputC, { options, header: original.header as never, members: original.members });
+			const extra = await owner.call('POST', `${base(runC)}/uncertainty/${same}/result`, { members: onUid.members, rerun: { members: onUid.members } });
+			expect([extra.status, extra.body.error]).toEqual([400, 'the baseline ensemble was stored on this engine: a paired result has no rerun']);
+		});
+
+		// The #897 review: the baseline run's inputs, which the job re-runs the kept sets on, are checked against the stored
+		// ensemble when the paired job starts (paired_baseline_mismatch), not only in the browser job.
+		it('refuse up front a cross-engine baseline whose run no longer matches its stored ensemble, and start a matching one', async () => {
+			const original = (await owner.call('GET', `${base(runA)}/uncertainty/${uid}`)).body.ensemble.result as { header: unknown; members: MemberResult[]; coverage: unknown };
+			expect(options.panOffset).toBeGreaterThan(0);
+			const json = JSON.stringify({ engineVersion: '0.0.0-older', header: original.header, members: original.members, coverage: original.coverage });
+			expect(json).not.toContain('$j$');
+			// Copy uid's options and result (a varied pan coefficient) onto a row of `runId`, stored as on an older engine.
+			const olderOn = async (runId: string) => {
+				const row = (await start(owner, runId)).body.ensemble.id as string;
+				await asOwner(
+					`BEGIN; SELECT set_config('app.current_user_id', '${owner.id}', true);
+					 UPDATE run_uncertainty u SET status = 'complete', engine_version = '0.0.0-older', options = o.options, seed = o.seed, members = o.members,
+					   accepted = o.accepted, summary = o.summary, result = $j$${json}$j$::jsonb FROM run_uncertainty o WHERE u.id = '${row}' AND o.id = '${uid}'; COMMIT;`
+				);
+				return row;
+			};
+			// A baseline run on a monthly PE row, which never reads the pan coefficient the stored ensemble varies.
+			const pe = { kind: 'monthly', mm: [90, 120, 150, 170, 150, 130, 90, 60, 45, 45, 55, 70], source: 'Station FAO-56 ET₀ × 1.0' };
+			const before = (await owner.call('GET', `/projects/${projectId}`)).body.project.settings.pe;
+			expect((await owner.call('PATCH', `/projects/${projectId}`, { settings: { pe } })).status).toBe(200);
+			const runMonthly = await newRun(owner, 'Monthly PE baseline');
+			expect((await owner.call('PATCH', `/projects/${projectId}`, { settings: { pe: before } })).status).toBe(200);
+			const mismatched = await olderOn(runMonthly);
+			const other = await newRun(owner, 'Daily PE, against the monthly baseline');
+			const refused = await start(owner, other, { baselineId: mismatched });
+			expect([refused.status, refused.body.code]).toEqual([400, 'paired_baseline_mismatch']);
+			expect(refused.body.error).toMatch(/stored on engine 0\.0\.0-older, and its run's inputs no longer match it \(.*monthly PE row does not use.*\); start a new ensemble/);
+			// Nothing was started for it.
+			const list = (await owner.call('GET', `${base(other)}/uncertainty`)).body.ensembles as { baselineId: string | null }[];
+			expect(list.some((e) => e.baselineId === mismatched)).toBe(false);
+			// Positive control: the same stored ensemble on a run whose inputs match it starts.
+			const matching = await olderOn(runB);
+			expect((await start(owner, other, { baselineId: matching })).status).toBe(201);
+		});
+
 		it('refuse a baseline of the same run, one not complete, and one from another project', async () => {
 			const same = await start(owner, runA, { baselineId: uid });
 			expect(same.status).toBe(400);

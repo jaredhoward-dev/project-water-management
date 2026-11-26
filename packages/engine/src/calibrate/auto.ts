@@ -14,7 +14,7 @@ import { ENGINE_VERSION } from '../version';
 import { resolvePe, type CalibrationFlowKind, type ModelInput, type ProjectSettings } from '../project';
 import { mergeSettings } from '../prepare';
 import { runModel } from '../run';
-import { calibrate, prepareCalibration, prepareCalibrationFits, type CalibrateOptions, type CalibrationProgress, type CalibrationReport, type FitOutcome, type FitStepOptions } from './calibrate';
+import { calibrate, DSST_MIN_WATER_YEARS, plannedFits, prepareCalibration, prepareCalibrationFits, qualifyingWaterYears, type CalibrateOptions, type CalibrationProgress, type CalibrationReport, type FitOutcome, type FitStepOptions } from './calibrate';
 import type { DdsState } from './dds';
 import type { ObjectiveId } from './objectives';
 import { flaggedYearExclusions, type FlaggedYearShare } from './dayFlags';
@@ -133,7 +133,11 @@ export interface AutoCalibrationPlan {
 	cases: Pick<AutoCase, 'pan' | 'bounds' | 'objective' | 'label'>[];
 	/** The rules' own warnings (an invalid stored set fell back to the defaults). */
 	notes: string[];
-	/** Model runs one case makes at most: every start, both validation fits, and the fit without the WR2012 penalty when it is on. */
+	/**
+	 * Model runs one case makes: one budget per optimisation its fit plans (plannedFits): every start, the split-sample
+	 * test, the dry → wet test only when the case's record has DSST_MIN_WATER_YEARS qualifying water years (issue #913;
+	 * before, it was always counted), and the fit without the WR2012 penalty where that penalty applies.
+	 */
 	caseEvaluations: number;
 }
 
@@ -155,7 +159,11 @@ export function planAutoCalibration(input: ModelInput): AutoCalibrationPlan {
 				const pan = { id, label: rulePanLabel(id), values: rulePanValues(id) };
 				cases.push({ pan, bounds, objective, label: `${pan.label} · ${bounds} bounds · ${objective}` });
 			}
-	const penalty = settings.wr2012.calibrationPenalty.enabled && !!settings.wr2012.reference;
+	// The optimisations each case's fit plans, by the fit's own rule (plannedFits), so the server's estimate (which
+	// refuses rules that would run too long) doesn't count a dry → wet test a short record skips (issue #913). Every
+	// case fits the same days (ruleCaseWaterYears), and the penalty is the fit's own (the headline location only).
+	const years = caseWaterYears(input, flagged.exclusions);
+	const fits = plannedFits({ starts: rules.run.starts, validate: true, dsst: years.length >= DSST_MIN_WATER_YEARS, penalty: !!pb.marPenalty, unpriored: false });
 	return {
 		rules,
 		engineVersion: ENGINE_VERSION,
@@ -166,8 +174,21 @@ export function planAutoCalibration(input: ModelInput): AutoCalibrationPlan {
 		ruleExclusions: flagged.exclusions,
 		cases,
 		notes,
-		caseEvaluations: rules.run.budget * (rules.run.starts + 2 + (penalty ? 1 : 0))
+		caseEvaluations: rules.run.budget * fits.length
 	};
+}
+
+const caseWaterYears = (input: ModelInput, ruleExclusions: CalibrationExclusion[]): number[] =>
+	qualifyingWaterYears(input, { model: 'gr4j', exclusions: exclusionRanges(ruleExclusions).map(({ start, end }) => ({ start, end })) });
+
+/**
+ * The qualifying water years each case of the rules fits on (issue #894): the headline's record once the rules'
+ * flagged-year exclusions are out, as caseSetup gives every case (a pan preset changes the forcing, never the days
+ * scored), so an estimate made before a run knows whether the dry → wet test runs (DSST_MIN_WATER_YEARS). Throws
+ * where planAutoCalibration refuses the rules.
+ */
+export function ruleCaseWaterYears(input: ModelInput): number[] {
+	return caseWaterYears(input, planAutoCalibration(input).ruleExclusions);
 }
 
 /** Case `i` of a plan as a fit sees it: its input (under its pan preset) and the fit's options, the seed and search the rules'. */

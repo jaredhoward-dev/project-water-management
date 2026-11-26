@@ -545,6 +545,84 @@ describe('the "enrolled" check knows the emailed factor', () => {
 	});
 });
 
+describe('adding a second factor needs a session that gave a code', () => {
+	// The password-only session from before the first factor (u.cookie) lives on for its 7 days. With the password
+	// it must not add a factor of its own beside the owner's, nor become two-step by confirming one: the factor the
+	// owner has would then guard nothing.
+	it('a password-only session can’t add the app beside codes by email, nor become two-step through it', async () => {
+		const u = await emailEnrolled('MeNoBypassApp');
+		expect(claimsOf(u.cookie).amr).toEqual(['pwd']);
+		const r = await anon('POST', '/auth/mfa/totp/enrol', { password: 'correct horse' }, u.cookie);
+		expect(r).toMatchObject({ status: 403, body: { code: 'mfa_step_up' } });
+		expect(await asOwner('SELECT 1 FROM user_totp WHERE user_id = $1', [u.id])).toEqual([]);
+		// Positive control: the two-step session the confirm gave adds it.
+		expect((await anon('POST', '/auth/mfa/totp/enrol', { password: 'correct horse' }, u.twoStep)).status).toBe(200);
+	});
+
+	it('an app started before codes by email went on can’t be confirmed from a password-only session', async () => {
+		const u = await signUp('MeNoBypassPending');
+		const { secret } = (await u.call('POST', '/auth/mfa/totp/enrol', { password: 'correct horse' })).body;
+		expect((await u.call('POST', '/auth/mfa/email/enrol', { password: 'correct horse' })).status).toBe(202);
+		const email = await anon('POST', '/auth/mfa/email/confirm', { code: codeIn(u.email) }, u.cookie);
+		expect(email.status).toBe(200);
+		const before = await failures(u.id);
+		const r = await anon('POST', '/auth/mfa/totp/confirm', { code: totp(base32Decode(secret)!, Date.now()) }, u.cookie);
+		expect(r).toMatchObject({ status: 403, body: { code: 'mfa_step_up' } });
+		expect(cookieOf(r.headers, SESSION_COOKIE)).toBeUndefined();
+		// The refusal is no code guess: the session check runs before the throttle counts (issue #881).
+		expect(await failures(u.id)).toBe(before);
+		expect(await asOwner('SELECT confirmed_at FROM user_totp WHERE user_id = $1', [u.id])).toEqual([{ confirmed_at: null }]);
+		// Positive control: the two-step session confirms it.
+		const ok = await anon('POST', '/auth/mfa/totp/confirm', { code: totp(base32Decode(secret)!, Date.now()) }, cookieOf(email.headers, SESSION_COOKIE)!);
+		expect(ok).toMatchObject({ status: 200, body: { recoveryCodes: null } });
+	});
+
+	it('codes by email started before the app went on can’t be confirmed from a password-only session, and the refusal isn’t counted', async () => {
+		const u = await signUp('MeNoBypassPendingEmail');
+		expect((await u.call('POST', '/auth/mfa/email/enrol', { password: 'correct horse' })).status).toBe(202);
+		const code = codeIn(u.email);
+		const { secret } = (await u.call('POST', '/auth/mfa/totp/enrol', { password: 'correct horse' })).body;
+		const app = await anon('POST', '/auth/mfa/totp/confirm', { code: totp(base32Decode(secret)!, Date.now()) }, u.cookie);
+		expect(app.status).toBe(200);
+		const before = await failures(u.id);
+		const r = await anon('POST', '/auth/mfa/email/confirm', { code }, u.cookie);
+		expect(r).toMatchObject({ status: 403, body: { code: 'mfa_step_up' } });
+		expect(cookieOf(r.headers, SESSION_COOKIE)).toBeUndefined();
+		expect(await failures(u.id)).toBe(before);
+		expect(await asOwner('SELECT confirmed_at FROM user_email_otp WHERE user_id = $1', [u.id])).toEqual([{ confirmed_at: null }]);
+		// Positive control: the two-step session the app's confirm gave turns it on with the same code.
+		const ok = await anon('POST', '/auth/mfa/email/confirm', { code }, cookieOf(app.headers, SESSION_COOKIE)!);
+		expect(ok).toMatchObject({ status: 200, body: { recoveryCodes: null } });
+	});
+
+	it('refused confirms never reach the code lockout: past five of them the two-step session still confirms', async () => {
+		const u = await signUp('MeNoBypassNoLock');
+		expect((await u.call('POST', '/auth/mfa/email/enrol', { password: 'correct horse' })).status).toBe(202);
+		const code = codeIn(u.email);
+		const { secret } = (await u.call('POST', '/auth/mfa/totp/enrol', { password: 'correct horse' })).body;
+		const app = await anon('POST', '/auth/mfa/totp/confirm', { code: totp(base32Decode(secret)!, Date.now()) }, u.cookie);
+		expect(app.status).toBe(200);
+		for (let i = 0; i < 6; i++) {
+			expect(await anon('POST', '/auth/mfa/email/confirm', { code }, u.cookie)).toMatchObject({ status: 403, body: { code: 'mfa_step_up' } });
+		}
+		expect(await failures(u.id)).toBe(0);
+		expect((await anon('POST', '/auth/mfa/email/confirm', { code }, cookieOf(app.headers, SESSION_COOKIE)!)).status).toBe(200);
+	});
+
+	it('a password-only session can’t add codes by email beside the app', async () => {
+		const u = await signUp('MeNoBypassEmail');
+		const { secret } = (await u.call('POST', '/auth/mfa/totp/enrol', { password: 'correct horse' })).body;
+		const app = await anon('POST', '/auth/mfa/totp/confirm', { code: totp(base32Decode(secret)!, Date.now()) }, u.cookie);
+		expect(app.status).toBe(200);
+		const before = mailCount(u.email);
+		expect(await anon('POST', '/auth/mfa/email/enrol', { password: 'correct horse' }, u.cookie)).toMatchObject({ status: 403, body: { code: 'mfa_step_up' } });
+		expect(await asOwner('SELECT 1 FROM user_email_otp WHERE user_id = $1', [u.id])).toEqual([]);
+		expect(mailCount(u.email)).toBe(before);
+		// Positive control: the two-step session adds it.
+		expect((await anon('POST', '/auth/mfa/email/enrol', { password: 'correct horse' }, cookieOf(app.headers, SESSION_COOKIE)!)).status).toBe(202);
+	});
+});
+
 describe('turning codes by email off, and living beside the app', () => {
 	it('needs a code; then the factor and (the last factor) the recovery codes go, and other sessions are signed out', async () => {
 		vi.useFakeTimers({ toFake: ['Date'], now: Date.now() });

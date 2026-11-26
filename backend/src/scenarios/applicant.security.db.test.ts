@@ -255,7 +255,7 @@ beforeAll(async () => {
 		   AND NOT has_table_privilege('water_app', c.oid, 'SELECT')
 		 ORDER BY 1`
 	);
-	expect(unreadable.map((r: { t: string }) => r.t)).toEqual(['allocation_holder_salt', 'assistant_reservation']);
+	expect(unreadable.map((r: { t: string }) => r.t)).toEqual(['allocation_holder_salt', 'assistant_reservation', 'report_pdf_erasure']);
 	tables = await Promise.all(scoped.map(async ({ t }: { t: string }) => ({ t, key: await keyExpr(t) })));
 }, 180_000);
 

@@ -15,7 +15,7 @@
 // Pure but for the DEM reads; tiles are cached by the caller.
 import type { Position } from '../geo/geojson.js';
 import type { Dem, DemInfo } from './dem.js';
-import { DelineationRefused, EARTH_RADIUS_M, readWindow, TARGET_ZOOM, toLonLat, toPx, worldPx } from './delineate.js';
+import { DelineationRefused, EARTH_RADIUS_M, readWindow, TARGET_ZOOM, tileInBox, toLonLat, toPx, worldPx } from './delineate.js';
 import { accumulate, d8, DX, DY, edgeMask, fill, OUT } from './flow.js';
 import { simplifyLine, type Pt } from './outline.js';
 import { CHANNEL_FLOOR_KM2 } from './place.js';
@@ -138,8 +138,10 @@ export async function channelTile(dem: Dem, tile: [number, number], opts: { wind
 	const z = Math.min(TARGET_ZOOM, info.maxZoom);
 	const cLon = (w + e) / 2;
 	const cLat = (s + n) / 2;
-	const probe = toPx(Math.min(Math.max(cLon, dw), de), Math.min(Math.max(cLat, ds), dn), 2 ** z);
-	const here = await dem.tile(z, Math.floor(probe[0]), Math.floor(probe[1]));
+	// The tile side from a tile of the DEM in the channel tile (the part within the DEM's bounds), the one under its centre
+	// first: the centre may fall in a hole of the data, or past its edge, where the rest of the tile has data (issue #874).
+	const box: [number, number, number, number] = [Math.max(w, dw), Math.max(s, ds), Math.min(e, de), Math.min(n, dn)];
+	const here = await tileInBox(dem, z, box, [Math.min(Math.max(cLon, dw), de), Math.min(Math.max(cLat, ds), dn)]);
 	if (!here) throw new DelineationRefused('no_data', 'The elevation model has no data there.');
 	const W = worldPx(z, here.size);
 	const [gx, gy] = toPx(cLon, cLat, W);

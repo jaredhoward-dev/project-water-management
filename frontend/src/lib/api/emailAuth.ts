@@ -82,6 +82,19 @@ export function passwordProblem(password: string, confirm: string): Msg | null {
 }
 
 /**
+ * Which of the two fields a passwordProblem is about: the new password for a
+ * length problem, the repeat for a mismatch. The page marks that field
+ * `aria-invalid`, points it at the message and moves focus to it (WCAG 3.3.1,
+ * 1.3.1), so a screen reader hears which box to fix, not only that something
+ * on the form is wrong.
+ */
+export function passwordProblemField(password: string, confirm: string): 'password' | 'confirm' | null {
+	if (password.length < 8 || password.length > 200) return 'password';
+	if (password !== confirm) return 'confirm';
+	return null;
+}
+
+/**
  * Display-name rule shared with the server (backend/src/http/visibleName.ts,
  * format/visibleName.ts): 1–100 characters once whitespace runs are one space
  * and the controls are dropped, with at least one letter, digit, symbol or

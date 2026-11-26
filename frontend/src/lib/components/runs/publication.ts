@@ -1,7 +1,7 @@
 // The Runs tab's publication panel (WP-2.3, docs/ui.md § Publishing a run):
 // pure helpers for its wording and the notice form. The panel is
 // PublicationPanel.svelte.
-import type { Publication, PublicationMeta, PublicationRestriction, RunMeta } from '#lib/api/types.js';
+import type { Publication, PublicationBasis, PublicationMeta, PublicationRestriction, RunMeta } from '#lib/api/types.js';
 import { LANGUAGES, LOCALES, type Locale, type NoticeText, type RestrictionLevel } from '@water-management/engine';
 import { PUBLICATION_TEXT_MAX } from '#lib/api/types.js';
 import { isScenarioRun, type ScenarioRunFields } from './scenarioRun';
@@ -65,6 +65,18 @@ export function noticeLanguages(notice: NoticeText): { code: Locale; name: strin
 const emptyNotice = () => Object.fromEntries(LOCALES.map((code) => [code, ''])) as Record<Locale, string>;
 
 export const emptyDraft = (): NoticeDraft => ({ level: 'none', pct: '', notice: emptyNotice(), nextExpectedOn: '' });
+
+/** The basis a form sends with its save (issue #863): the publication it was filled in from, as read. */
+export function basisOf(p: Pick<Publication, 'id' | 'revision'> | null): PublicationBasis {
+	return p ? { id: p.id, revision: p.revision } : { id: null, revision: null };
+}
+
+/** The 409 code the server answers when that basis is no longer the current publication (backend publish/publish.ts). */
+export const PUBLICATION_CHANGED = 'publication_changed';
+
+/** What the form says once it has reloaded after a 409 publication_changed. */
+export const PUBLICATION_CHANGED_TEXT =
+	'Another editor published or changed the notice since you opened this form, so nothing was saved. The form now shows the publication as it stands: check it and try again.';
 
 export function draftFrom(p: Pick<Publication, 'restriction' | 'nextExpectedOn'> | null): NoticeDraft {
 	if (!p) return emptyDraft();

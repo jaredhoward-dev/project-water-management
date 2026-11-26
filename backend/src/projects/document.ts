@@ -11,7 +11,7 @@
 // yourself, and re-authoring them as the importer would misattribute them
 // (docs/data-model.md § Notes).
 import { settingSeriesIds } from './flowMissingSettings.js';
-import { isUnitRainKind } from '../series/site.js';
+import { isUnitRainKind, siteProblem } from '../series/site.js';
 import { cleanModelNames, DAY_BOUNDARIES, ENGINE_VERSION, SERIES_KINDS, type DayBoundary, type ProjectModel, type RainStationMeta } from '@water-management/engine';
 import { z } from 'zod';
 import type { Db } from '../db/tx.js';
@@ -226,18 +226,23 @@ export async function loadProjectDocument(db: Db, projectId: string, now = new D
 	);
 	// A site whose node has left the model (084: the record keeps it, the run warns) has nothing to point at in the file.
 	// A gauge's record then goes as the outlet's, as before; a land unit's own rain (209) is left out, since without its
-	// unit it would come back as the catchment's rain, which no run of this project reads it as.
-	const nodeIds = new Set(model.nodes.map((n) => n.id));
+	// unit it would come back as the catchment's rain, which no run of this project reads it as. So does a site whose node
+	// is still there but is no site any more (a gauge made a farm or the outlet, a land unit made a gauge: PUT /model
+	// allows it, the record keeps its site and the run warns), since the import refuses such a site (import.ts
+	// projectFileProblems) and the file would not import back. A land unit with no area keeps its rain (the import takes
+	// it, as a restore does).
+	const byId = new Map(model.nodes.map((n) => [n.id, n]));
+	const siteOk = (kind: string, siteNodeId: string | null) => siteNodeId !== null && siteProblem(kind, byId.get(siteNodeId), { anyArea: true }) === null;
 	// A series carries its id when the settings name it (a rainfall station, issue #553; a record with unreliable or missing
 	// periods, or a kept data check's, issue #611), so an import can follow it. Before #611 every station carried it when
 	// settings.rainStations was set at all; that stays, so such a file reads the same.
 	const rainStations = p.settings !== null && typeof p.settings === 'object' && typeof (p.settings as { rainStations?: unknown }).rainStations === 'object' && (p.settings as { rainStations?: unknown }).rainStations !== null;
 	const named = settingSeriesIds(p.settings);
-	const series = stored.filter((s) => !(s.siteNodeId !== null && !nodeIds.has(s.siteNodeId) && isUnitRainKind(s.kind))).map(({ id, product, productVersion, dayBoundary, siteNodeId, source, sourceUnit, sourceUnitFactor, handDays, station, ...s }) => ({
+	const series = stored.filter((s) => !(s.siteNodeId !== null && !siteOk(s.kind, s.siteNodeId) && isUnitRainKind(s.kind))).map(({ id, product, productVersion, dayBoundary, siteNodeId, source, sourceUnit, sourceUnitFactor, handDays, station, ...s }) => ({
 		...s,
 		...(product !== null && productVersion !== null ? { product, productVersion } : {}),
 		...(dayBoundary !== null ? { dayBoundary } : {}),
-		...(siteNodeId !== null && nodeIds.has(siteNodeId) ? { siteNodeId } : {}),
+		...(siteNodeId !== null && siteOk(s.kind, siteNodeId) ? { siteNodeId } : {}),
 		...(source !== null ? { source } : {}),
 		...(sourceUnit !== null && sourceUnitFactor !== null ? { sourceUnit, sourceUnitFactor } : {}),
 		...(handDays !== null ? { handDays } : {}),

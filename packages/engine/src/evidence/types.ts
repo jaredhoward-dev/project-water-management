@@ -235,6 +235,12 @@ import type { EvidenceAuthorisedImpact } from './authorised';
  * paired when the alternative's run has a paired ensemble on the cited one.
  * The combined row isn't assessed for an alternative. A pack drafted before
  * keeps its document, without them.
+ * Also evidence-26 (issue #889): § 8 says when the catchment boundary isn't the
+ * one its factor table was read over (`futureYield.boundary`: `changed`,
+ * `none` when it was removed, `unrecorded` for a result stored before the
+ * backend kept its hash; absent when it is the same), and the `futureYield`
+ * check holds issue back on `changed` or `none` until the future yield is run
+ * again. A pack drafted before keeps its document, without it.
  */
 export const EVIDENCE_REPORT_VERSION = 'evidence-26';
 
@@ -555,8 +561,15 @@ export interface EvidenceAlternativeInput {
 	verified: boolean;
 }
 
-/** What the backend found for § 8 (evidence-23). */
-export type EvidenceFutureYieldInput = { result: FutureYieldResult; createdAt: string; createdBy: string | null } | { notRun: true };
+/**
+ * A stored § 8 result's catchment boundary against the project's now (issue #889, as the Scenarios tab's
+ * climate_factors): `same`, `changed` (drawn again since), `none` (removed since) or `unrecorded` (a result
+ * stored before the backend kept the boundary's hash, 390_future_yield_boundary).
+ */
+export type FutureYieldBoundary = 'same' | 'changed' | 'none' | 'unrecorded';
+
+/** What the backend found for § 8 (evidence-23). `boundary` absent reads as `same`. */
+export type EvidenceFutureYieldInput = { result: FutureYieldResult; createdAt: string; createdBy: string | null; boundary?: FutureYieldBoundary } | { notRun: true };
 
 /**
  * § 8, Future yield (evidence-23, evidence/future.ts): the stored result, frozen whole (its factor table
@@ -564,7 +577,15 @@ export type EvidenceFutureYieldInput = { result: FutureYieldResult; createdAt: s
  * as it stood when the report was built; or `notRun`, printed as Not assessed.
  */
 export type EvidenceFutureYield =
-	| ({ status: 'ok'; createdAt: string; createdBy: string | null; complete: boolean; caveat: FutureYieldCaveat } & FutureYieldResult)
+	| ({
+			status: 'ok';
+			createdAt: string;
+			createdBy: string | null;
+			complete: boolean;
+			caveat: FutureYieldCaveat;
+			/** Set only when the boundary isn't the one the factors were read over, or that is unknown (issue #889); absent: the same. */
+			boundary?: Exclude<FutureYieldBoundary, 'same'>;
+	  } & FutureYieldResult)
 	| { status: 'notRun'; note: string; caveat: FutureYieldCaveat };
 
 /** A map feature (152 map_feature) as § 1's locality map reads it. */

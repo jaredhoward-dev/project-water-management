@@ -1223,10 +1223,14 @@ cumulativeImpact(baseline, singles, combined): CumulativeReport
   base: a `node.remove` re-links the nodes draining into it, so it writes
   their downstream link too; an op on a transfer, patch, borehole, demand
   object or registered volume uses its node(s); a `demand.scale` without
-  `nodeIds` writes every farm's (or user's) demand; a `series.scale` writes
+  `nodeIds` writes every farm's (or user's) demand, and (engine 1.123.0)
+  meets a farm (or user) another scenario adds, which it would cut in one
+  order and not the other; a `series.scale` writes
   the series (two scalings stack, and whose climate assumption it is isn't
   for either to settle); a `climate.delta` writes every series, `apanMm`
-  and `pe` (engine 1.107.0); a unit's `irrigationEfficiency` writes every
+  and `pe` (engine 1.107.0), and needs no write on an added unit: a
+  `node.add` or `node.insert` can't bring a `mapMm` (issue #888), so the
+  climate scales no new unit's MAP in one order only; a unit's `irrigationEfficiency` writes every
   planting on the unit, and a crop's `irrigationEfficiency` or
   `irrigationSystemId` every planting of the crop (engine ≥ 1.72.0 puts
   those plantings on a system; a planting another scenario adds would get it
@@ -1947,7 +1951,9 @@ scenario is `'team'`, and behaves exactly as above).
   one. An owner who has since become a viewer or above (who reads the member
   list anyway) shares with any contributor-or-above member, by id or email.
   Moving someone out of a party (or changing a role) ends the shares the
-  rule no longer allows (`project_member_prune_shares`); the rule lives in
+  rule no longer allows (`project_member_prune_shares`), and so does a
+  member joining or leaving (393, issue #901): an applicant who leaves stops
+  sharing their applications, and comes back sharing with nobody; the rule lives in
   `app_share_allowed`, which the insert trigger checks too.
 - **Runs.** The owner and the people it is shared with run it, and so may an
   assessor. A contributor's run answers with the run's metadata only (its
@@ -2053,9 +2059,10 @@ scenario is `'team'`, and behaves exactly as above).
   closed). The points are whole and never come with a volume. The
   Applicant view shows it all under the changes (ui.md § Applications).
 - **The log.** `scenario.created / changed / submitted / withdrawn /
-  reopened / decided / shared / unshared / deleted` and `run.created` carry
-  `application: true` and no name until the application is decided (every
-  viewer reads the project's history).
+  reopened / decided / shared / unshared / deleted`, `run.created` and an
+  assessor's `run.deleted` of one of its runs carry `application: true` and
+  no name or run label until the application is decided (every viewer reads
+  the project's history).
 
 ### The WULA reference
 

@@ -1687,6 +1687,8 @@ describe('a viewer kept from each farm’s registered volume (D3, issue #523 G1)
 		const res = await viewer.call('GET', packPath(current));
 		expect(res.status).toBe(200);
 		expect(res.body.volumesWithheld).toBe(true);
+		// Redacted for the pack's own runs' volumes, not only to the boards' verdicts (#870).
+		expect(res.body.manifestVerdictsOnly).toBe(false);
 		expect(res.body.manifestMatches).toBe(true);
 		const report = res.body.manifest.report;
 		expect(report.appendix.baselineInputs.model.allocations).toEqual([]);
@@ -1752,14 +1754,49 @@ describe('a viewer kept from each farm’s registered volume (D3, issue #523 G1)
 			({ ...r, alternatives: [{ label: 'With a volume', runId, runLabel: '', engineVersion: ENGINE_VERSION, createdAt: '', createdBy: null, scenarioId: '', scenarioName: '', opsSha256: '', ops: [], proposals: 0, assumptions: 0, allocationMode: null, pairedId: null, notAssessed }] }) as PackManifest['report'];
 		const pack = await plant('evidence-26', { scenario: plain, edit: cite(voluminous.runId, null) });
 		withheld(await viewer.call('GET', `${packPath(pack)}/bundle`));
-		// The page says so: the bundle alone is withheld, the manifest isn't.
-		expect((await viewer.call('GET', packPath(pack))).body).toMatchObject({ volumesWithheld: false, bundleWithheld: true });
+		// The page says so: the bundle is withheld; the manifest is served with the boards' verdicts only, so it is flagged too (#870).
+		expect((await viewer.call('GET', packPath(pack))).body).toMatchObject({ volumesWithheld: true, manifestVerdictsOnly: true, bundleWithheld: true });
 		expect((await editor.call('GET', packPath(pack))).body).toMatchObject({ volumesWithheld: false, bundleWithheld: false });
 		// The pack's own runs carry none: its manifest isn't withheld for that viewer (only the bundle holds the alternative's inputs).
 		expect(await withUser(viewer.id, (db) => packVolumesWithheld(db, projectId, { baselineRunId: baseRun, scenarioRunId: plain.runId }, 'viewer'))).toBe(false);
 		// Positive control: an alternative page 1 doesn't assess carries no run in the bundle, so the viewer passes the check (a draft: 409).
 		const unassessed = await plant('evidence-26', { scenario: plain, edit: cite(voluminous.runId, 'Not assessed: another baseline.') });
 		expect((await viewer.call('GET', `${packPath(unassessed)}/bundle`)).status).toBe(409);
+	});
+
+	it('#870: says the manifest is redacted whenever it is, also on a pack whose own runs carry no volume (the boards’ verdicts only); an editor and an allowed viewer read it whole and unflagged', async () => {
+		// The pack's runs carry no registered volume (packVolumesWithheld is false), yet a viewer kept from each volume
+		// still reads page 1's licence-impact boards as verdicts only (#523 I): the served manifest isn't the hashed one.
+		const plain = await teamScenario('870 dam on Upper', baseRun, [{ op: 'node.set', nodeId: farmId, field: 'damCapacityM3', value: 90_000 }]);
+		expect(await withUser(viewer.id, (db) => packVolumesWithheld(db, projectId, { baselineRunId: baseRun, scenarioRunId: plain.runId }, 'viewer'))).toBe(false);
+		const pack = await plant('evidence-26', { scenario: plain });
+		const whole = (await editor.call('GET', packPath(pack))).body;
+		// Positive control: the editor reads the hashed manifest, its board with the year classes' bounds in m³, and no flag.
+		expect(whole).toMatchObject({ volumesWithheld: false, manifestVerdictsOnly: false });
+		expect(sha256(packManifestText(whole.manifest))).toBe(whole.pack.manifestSha256);
+		type Bounds = { lowerM3: number | null; upperM3: number | null }[];
+		const classes = whole.manifest.report.licenceImpact?.result?.impact?.classes as Bounds | undefined;
+		expect(classes?.some((c) => c.lowerM3 !== null || c.upperM3 !== null), JSON.stringify(whole.manifest.report.licenceImpact)).toBe(true);
+		// The viewer: the boards' verdicts only, so the manifest no longer hashes, and the flag says so (it didn't before #870).
+		const read = await viewer.call('GET', packPath(pack));
+		expect(read.status, JSON.stringify(read.body)).toBe(200);
+		expect(read.body.manifestMatches).toBe(true);
+		expect(sha256(packManifestText(read.body.manifest))).not.toBe(read.body.pack.manifestSha256);
+		expect((read.body.manifest.report.licenceImpact.result.impact.classes as Bounds).every((c) => c.lowerM3 === null && c.upperM3 === null)).toBe(true);
+		expect(read.body.volumesWithheld).toBe(true);
+		expect(read.body.manifestVerdictsOnly).toBe(true);
+		// Nothing in its bundle or PDF carries a volume: those stay open to the viewer (a draft: 409, past the check).
+		expect(read.body.bundleWithheld).toBe(false);
+		expect((await viewer.call('GET', `${packPath(pack)}/bundle`)).status).toBe(409);
+		// Positive control: once the owner lets viewers read each volume, the viewer reads it whole and unflagged.
+		await viewerUnits(true);
+		try {
+			const allowed = (await viewer.call('GET', packPath(pack))).body;
+			expect(allowed.volumesWithheld).toBe(false);
+			expect(sha256(packManifestText(allowed.manifest))).toBe(allowed.pack.manifestSha256);
+		} finally {
+			await viewerUnits(false);
+		}
 	});
 
 	it('counts a run the viewer can’t read as carrying volumes (fail closed)', async () => {

@@ -88,7 +88,9 @@ const summary = (r: ProjectRow) => ({
 	// The project's calendar date (its time zone, 058): the list counts dataUntil's age to it, as the portfolio does.
 	today: localDate(new Date(), r.time_zone),
 	lastRunAt: r.last_run_at ? r.last_run_at.toISOString() : null,
-	publishedAt: r.published_at ? r.published_at.toISOString() : null
+	publishedAt: r.published_at ? r.published_at.toISOString() : null,
+	// Its IANA zone (058): a run picker over several projects (Compare) dates each project's runs on its own clock (issue #899).
+	timeZone: r.time_zone
 });
 // settings.autoRun, settings.outcomes, settings.outlook, settings.responsibleAuthority, settings.ewrHeadline and settings.referenceGauge aren't in the engine's defaults (they're no model inputs), so they are resolved here: clients see every field.
 // rerunQueuedFor: when the pending re-run is due (the header's "Re-run queued for 14:05"), or null.
@@ -97,7 +99,6 @@ const full = (r: ProjectRow) => ({
 	// The caller's role in the team (null outside it): only a team admin reads the team's plan
 	// (app_billing_account_readable, 323), so Compare plans opens it only for them (docs/billing.md § Who the plan belongs to).
 	team: r.team_id ? { id: r.team_id, name: r.team_name, role: r.team_role ?? null } : null,
-	timeZone: r.time_zone,
 	wuaName: r.wua_name,
 	settings: {
 		...mergeSettings(r.settings),
@@ -379,6 +380,7 @@ export const projectRoutes = new Hono<AuthEnv>()
 			// requires it now, so turning the requirement off needs it (auth/stepUp.ts).
 			await requireRole(db, id, body.teamId !== undefined || body.requireMfa !== undefined ? 'owner' : 'editor');
 			if (body.teamId) await requireTeamContributor(db, body.teamId);
+			if (body.teamId !== undefined) await requireTeamAdminToLeave(db, id, body.teamId);
 			if (body.teamId !== undefined) {
 				// Someone who owns the project only through the current team would
 				// lose access by moving it out; keep them as a direct owner.
@@ -514,8 +516,9 @@ export const projectRoutes = new Hono<AuthEnv>()
 			await saveModel(db, newId, copied);
 			// A gauge record's site (084_gauge_records) follows its gauge to the copy's id; one whose
 			// node has left the model has nothing to follow, so it keeps no site in the copy. A land unit's
-			// own rain (209) follows its unit the same way, and one whose unit has gone is left out: with no
-			// site it would become the copy's catchment rain. A rainfall station's details (239, issue #553) copy with it
+			// own rain (209) follows its unit the same way, and one whose unit has gone, or is no land unit any more (a
+			// farm made a gauge: the record keeps its site, and 209's trigger refuses rain at a node that is no farm), is
+			// left out: with no site it would become the copy's catchment rain. A rainfall station's details (239, issue #553) copy with it
 			// (only a catchment rain series with no site has them, so its site stays null).
 			const [from, to] = [[...ids.keys()], [...ids.values()]];
 			await db.query(
@@ -524,8 +527,8 @@ export const projectRoutes = new Hono<AuthEnv>()
 				 SELECT $2, t.kind, t.name, t.unit, t.start_date, t."values", t.product, t.product_version, t.day_boundary, m.new_id,
 					t.source, t.source_unit, t.source_unit_factor, t.hand_days, t.station_map_mm, t.station_map_source, t.station_lat, t.station_lon
 				 FROM time_series t LEFT JOIN unnest($3::uuid[], $4::uuid[]) AS m(old_id, new_id) ON m.old_id = t.site_node_id
-				 WHERE t.project_id = $1 AND NOT (t.site_node_id IS NOT NULL AND m.new_id IS NULL AND t.kind = ANY($5::text[]))`,
-				[srcId, newId, from, to, [...UNIT_RAIN_KINDS]]
+				 WHERE t.project_id = $1 AND NOT (t.site_node_id IS NOT NULL AND t.kind = ANY($5::text[]) AND (m.new_id IS NULL OR NOT m.new_id = ANY($6::uuid[])))`,
+				[srcId, newId, from, to, [...UNIT_RAIN_KINDS], copied.nodes.filter((n) => n.kind === 'farm').map((n) => n.id)]
 			);
 			// The series the settings name by id (the rainfall stations, issue #553; each flow record's missing periods and the
 			// kept data checks, issue #611) follow them to the copy's ids, by kind and name (one series per kind and name in a
@@ -726,4 +729,21 @@ async function assertNotLastOwner(db: import('../db/tx.js').Db, projectId: strin
  */
 async function requireTeamContributor(db: import('../db/tx.js').Db, teamId: string) {
 	await requireTeamRole(db, teamId, 'member', 'team not found');
+}
+
+/**
+ * Taking a project out of its team, or into a different one, needs admin on the team it leaves (issue #900): a plain
+ * member, or an outside person the team shared it with, may own it directly, and moving it would take it from the
+ * team's admins. 392_team_project_move_admin's trigger enforces the same. Not stepped up here: the move is an owner's
+ * action, already stepped up where the project requires it.
+ */
+async function requireTeamAdminToLeave(db: import('../db/tx.js').Db, projectId: string, to: string | null) {
+	const { rows } = await db.query<{ team_id: string | null; role: string | null }>(
+		'SELECT team_id, app_team_role(team_id) AS role FROM project WHERE id = $1',
+		[projectId]
+	);
+	const from = rows[0]?.team_id ?? null;
+	if (from && from !== to && rows[0]?.role !== 'admin') {
+		throw ApiError.coded(403, 'team_move_admin', 'only an admin of the team this project is in can take it out of the team or move it to another');
+	}
 }

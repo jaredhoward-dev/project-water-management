@@ -284,6 +284,9 @@
 				mode = 'merge';
 				guessed = g.name ? `${kindLabel(g.kind)} · ${g.name}` : kindLabel(g.kind);
 			}
+			// A DWS export states its unit (m³/s): read it in that, never in a unit left from another file (l/s would store it 1 000 × small).
+			const stated = parsed?.dws?.unit;
+			if (stated && unitOptions(kind).includes(stated)) unit = stated;
 		} catch (err) {
 			parseError = err instanceof CsvError ? err.message : `Could not read ${what}: ${msg(err)}`;
 		}

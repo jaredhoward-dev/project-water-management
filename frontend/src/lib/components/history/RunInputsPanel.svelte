@@ -11,8 +11,13 @@
 	import { api, type HistoryRevision, type Relink, type RunMeta } from '#lib/api/index.js';
 	import Dialog from '#lib/components/common/Dialog.svelte';
 	import ChangesList from '#lib/components/compare/ChangesList.svelte';
-	import { fmtStamp } from '#lib/format/number.js';
+	import { fmtProjectStamp } from '#lib/components/project/project.js';
+	import { projectTimeZoneReader } from '#lib/components/project/projectClock.js';
 	import { revisionLines, revisionTitle } from './timeline';
+
+	// Run names and dates on the project's clock, as its run report (issue #899).
+	const timeZone = projectTimeZoneReader();
+	const fmtStamp = (iso: string) => fmtProjectStamp(iso, timeZone());
 
 	let {
 		projectId,

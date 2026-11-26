@@ -12,7 +12,8 @@
 	import { damEndPctFromSummary, damInRun, type DamEnd, damLevel, damLevelsFromSummary, damsInRun, loadDamLevels, type DamLevel } from '#lib/components/overview/damLevels.js';
 	import { historyEnd } from '#lib/components/overview/latestRun.js';
 	import { farmPlanting } from '#lib/components/crops/farmDrawer.js';
-	import { fmtDate } from '#lib/format/number.js';
+	import { fmtProjectDay, runDisplayName } from '#lib/components/project/project.js';
+	import { projectTimeZoneReader } from '#lib/components/project/projectClock.js';
 	import { ranAgo, supplyByNode } from './supplyColour';
 	import { damColouring, supplyColouring, zoneColouring, type ColourMode, type Colouring } from './farmColour';
 	import { zoneGroups } from '#lib/calibration/zoneGroups.js';
@@ -47,6 +48,10 @@
 	import { countByNode, linkedNote, removeMessage } from './farmerLinks';
 	import Lazy from '#lib/components/common/Lazy.svelte';
 	import { fillHeader } from '#lib/components/workspace/headerSlot.svelte.js';
+
+	// Run names and dates on the project's clock, as its run report (issue #899).
+	const timeZone = projectTimeZoneReader();
+	const runName = (r: { label?: string | null; createdAt: string }) => runDisplayName(r, timeZone());
 
 	// The Yield panel (WP-3.6) and its chart load only when a farm is focused.
 	const loadYield = () => import('#lib/components/yield/YieldPanel.svelte');
@@ -117,7 +122,7 @@
 		return v === undefined ? 'after a run' : fmtPct(v, 2);
 	};
 	const shareSum = $derived(runShares ? [...runShares.values()].reduce((a, b) => a + b, 0) : null);
-	const shareDate = $derived(latestRun ? fmtDate(latestRun.createdAt) : null);
+	const shareDate = $derived(latestRun ? fmtProjectDay(latestRun.createdAt, timeZone()) : null);
 
 	async function loadSupply(id: string) {
 		supplyFor = id;
@@ -210,7 +215,7 @@
 		if (colourBy === 'none' || !farms.length) return null;
 		if (colourBy === 'zone') return zones ? zoneColouring(nodes, zones) : null;
 		if (!latestRun || supplyRun?.id !== latestRun.id) return null;
-		const run = { name: latestRun.label || fmtDate(latestRun.createdAt, true), ago: ranAgo(latestRun.createdAt) };
+		const run = { name: runName(latestRun), ago: ranAgo(latestRun.createdAt, new Date(), timeZone()) };
 		const changed = changedDams.size ? { changed: changedDams } : {};
 		if (colourBy === 'supply') return { ...supplyColouring(nodes, supplyRun.summary, run, editor.dirty), ...changed };
 		return damLevels?.runId === latestRun.id ? { ...damColouring(nodes, damLevels.levels, run, editor.dirty), ...changed } : null;
@@ -458,7 +463,7 @@
 		return () => cancelAnimationFrame(frame);
 	});
 	const latestSupply = $derived(latestRun && supplyRun?.id === latestRun.id ? supplyByNode(nodes, supplyRun.summary) : null);
-	const latestName = $derived(latestRun ? latestRun.label || fmtDate(latestRun.createdAt, true) : null);
+	const latestName = $derived(latestRun ? runName(latestRun) : null);
 	const dotBand = (id: string) => colouring?.byNode.get(id)?.band ?? null;
 	// The Tables menu closes on Escape (focus back on its button) and on a click outside it, like the other pop-ups.
 	// The Map layout fills the window below its own top edge (issue #17: A2 uses the whole screen),

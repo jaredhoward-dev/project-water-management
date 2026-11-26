@@ -776,6 +776,7 @@ run "lambda_logs_scoped" {
         data.aws_iam_policy_document.renderer_packs.statement,
         data.aws_iam_policy_document.renderer_ecr_pull.statement,
         data.aws_iam_policy_document.worker_reports.statement,
+        data.aws_iam_policy_document.worker_report_erasure.statement,
         data.aws_iam_policy_document.worker_packs.statement,
         data.aws_iam_policy_document.lambda_ses.statement,
         data.aws_iam_policy_document.lambda_ses_release.statement,

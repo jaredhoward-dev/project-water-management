@@ -899,7 +899,15 @@ alerts plug in as a further kind.
   job (`app_cancel_job_outcome`, 285, which kills a waiting job outright and
   flags a running one, and says whether this call changed it) or the lease
   was lost, and the handler then stops: dead, `cancelled`, its work rolled
-  back. `future_yield` and `climate_factors` report after each model read
+  back. A cancel is not a dead letter: logged as `job_cancelled`, not
+  `job_dead`, so no alarm, and the job_dead alert counts neither a
+  cancelled job nor a superseded one (below; `alerts/evaluate.ts`). Which of
+  the three a death is lives in `job.dead_reason` (`cancelled`, `superseded`,
+  `failed`; 394, issue #904), set by the SQL that kills the job, and the
+  runner's logs and the alert read it, not the error text. A cancelled running
+  job that hands itself back (`JobRelease`), fails in a way worth retrying,
+  or loses its worker is dead as cancelled too, never queued again to redo
+  work until its next progress report. `future_yield` and `climate_factors` report after each model read
   from the copy, and `future_yield` after each case it runs
   (`runFutureYieldAsync`), so a cancel lands before the next.
 - **`yield`** (WP-3.6, `jobs/handlers/yield.ts`, [api.md § Yield](./api.md#yield)):
@@ -982,7 +990,10 @@ alerts plug in as a further kind.
   job, so it is finished as `dead` ("… (a newer job with the same key is
   queued)") and the newer one does the work: logged as `job_superseded`, not
   `job_dead`, so no alarm or `job_dead` alert (`jobs/runner.ts`
-  `recordFailure`).
+  `recordFailure`). A running job handed back (`JobRelease`) while a newer
+  one with its key waits is superseded the same way: going back to `queued`
+  would break the same index, and until 2026-11 the throw ended the tick each
+  time the job was claimed again.
 
 Adding a kind: write `jobs/handlers/<kind>.ts` with `defineHandler({ role,
 payload, run })` (`jobs/registry.ts` documents the contract) and list it in
@@ -1124,7 +1135,10 @@ flowchart LR
    the job holds no network I/O, and its writes commit with its "done".
 3. **Send** (`alerts/send.ts`, the last step of every tick, so after the
    job committed). The kill switch first: `ALERTS_ENABLED=false` skips every
-   waiting delivery. Then `app_alert_claim` claims pending deliveries,
+   waiting delivery. Then `app_alert_claim` moves each waiting delivery to
+   the queue its recipient's choice now says (the mode at send time wins,
+   370: right away → pending, once a day → digest; a line the cap put in the
+   digest stays) and claims pending deliveries,
    turning those past the daily cap (5 since the last 06:00 in the project's
    time zone, 059_local_day) into
    digest lines; after 06:00 there `app_alert_claim_digest` claims each person's
@@ -1175,7 +1189,7 @@ row names a source, where to read it and the series it merges into:
 | `ecmwf_ens` | The ECMWF ENS ensemble mean, 15 days from each 00 UTC run, from **our copy only** (`ecmwf/<issue>`, 0.1°): each feed cell's centre falls in a 0.1° cell, weighted as listed (same cells or box as CHIRPS) | `rain_forecast_mm`, mm, quantile-mapped to our rain once the operator's fit is in the copy, else labelled not yet calibrated | Zarr written by the Python ingest job from ECMWF's open data GRIB2 (`ingest/ecmwf_forecast.py`, below); no feed ever asks ECMWF |
 | `agera5_et0` | Daily FAO-56 reference evapotranspiration from **our copy only** (issue #604 R5-E): AgERA5 v2.0 (`agera5_et0`, 0.1°) on the days its copy holds, else the ET₀ the ingest computes from NASA POWER's daily weather (`power_et0`, 0.1°) on the newest days; each feed cell's centre falls in a 0.1° cell, weighted as listed, cells with no value left out (same cells or box as CHIRPS, or the catchment boundary's own 0.1° cells, area weighted, from Data → Data feeds → Attach a feed → Area: the catchment boundary, `…/feeds/agera5_et0/from-boundary`: [maps.md § Rain from the boundary](./maps.md#rain-from-the-boundary)) | `evap_et0_mm`, mm/day, read by GR4J only under a monthly PE row (model.md §2.4a *Daily reference ET*) | Zarr written by the Python ingest job (`ingest/agera5.py`, `ingest/nasapower.py`); the feed re-reads the last 75 days, so a day POWER filled becomes AgERA5's once its month lands; a start date after yesterday reads nothing until it has passed, never a day before it |
 | `dws` | A DWS gauge's verified daily mean flow | `flow_observed_m3s` (or reference / logger), m³/s | `HyData.aspx?Station=<code>100.00&DataType=Daily&…`: a `<pre>` holding a fixed-width `DATE     D AVG F/R  QUAL` table (date, flow in m³/s, quality code; a gap row leaves the flow blank and keeps the code); the site allows 20 years per request, the feed asks for two (`DWS_WINDOW_DAYS`, the window below). A start date after today asks for nothing until it comes. Only river gauges (third letter `H`, sent as `SiteType=RIV`): DWS's station catalogue lists only H codes as River and only R codes as Reservoir, archived pages ask for R stations with `SiteType=RES` and E with `MET`, and a reservoir's daily table (variable 100.00) is its spillway discharge derived from the dam level, not the river's flow, so `R`, `E` and every other letter are refused by the config schema (`DWS_RIVER_GAUGE`). Our network gets HTTP 403 from the site, so the request follows two open-source clients and the layout an archived page (web.archive.org, 2024) (see [followups.md](./followups.md)) |
-| `station_api` | A rainfall station's own web API (issue #784; Data → Data feeds → Attach a feed → Weather station (API), on while `STATION_API_FEEDS=on`): any HTTPS URL the owner types, a template with `{station}`, `{start}` and `{end}`, and a key sent as a bearer token, a named header, a query parameter or Basic | `rain_catchment_mm`, mm | Whatever the provider answers, described by the owner as an engine `StationFormat` (`@water-management/engine/station-format`): CSV or JSON, daily totals or sub-daily readings summed into rain days (08:00 to 08:00 by default), a time zone, a scale, missing markers. The same parser reads the attach card's "Try it on a sample", so the preview and the feed never read one answer two ways |
+| `station_api` | A rainfall station's own web API (issue #784; Data → Data feeds → Attach a feed → Weather station (API), on while `STATION_API_FEEDS=on`): any HTTPS URL the owner types, a template with `{station}`, `{start}` and `{end}`, and a key sent as a bearer token, a named header, a query parameter or Basic | `rain_catchment_mm`, mm | Whatever the provider answers, described by the owner as an engine `StationFormat` (`@water-management/engine/station-format`): CSV or JSON, daily totals or sub-daily readings summed into rain days (08:00 to 08:00 by default), a time zone (in one with daylight saving, a sub-daily time without an offset in the hour the autumn change repeats is told apart by record order: the answer's direction comes from its first and last unambiguous times, so oldest first the first record at that wall time is the earlier instant and the second the later, and newest first the other way round (issue #912); an answer whose direction can't be told (one record, or every time in the repeated hour) is read as oldest first; one in the hour the spring change skips fails the read naming the line; issue #908), a scale, missing markers, a decimal comma (under which a dot is a thousands separator only in whole groups, 1.234,5, and a value like 1.5 fails the read rather than landing as 15 mm; a day whose readings add up to 1000 mm or more fails the read too, engine 1.123.0, `STATION_MAX_DAY_MM`, lowered from 2000 so that a 0.254 mm bucket's 1.016 mis-read under a decimal comma as 1016 mm is caught, as is a wrong scale or a running total). The same parser reads the attach card's "Try it on a sample", so the preview and the feed never read one answer two ways |
 
 - **A station API feed** (`station_api`, issue #784; `feeds/sources/station.ts`,
   `feeds/stationHttp.ts`, `feeds/credential.ts`, `feeds/stationFixtures.ts`):
@@ -1222,7 +1236,8 @@ row names a source, where to read it and the series it merges into:
     windows (72 requests) the first day and 24 a day after, plus any Run now
     (rate limited per feed). A failing fetch
     stops at its first failed request and retries on the scheduler's backoff
-    (15 minutes doubling, hours after a refused key).
+    (15 minutes doubling, an hour and at least its `Retry-After` after a
+    429/503, hours after a refused key).
   - *The guard* (`stationHttp.ts`): the one feed path that asks a URL a
     person typed, from a fetcher with open egress. https on port 443 only,
     no `user:password@`; the host resolved at connect time and the whole
@@ -1812,9 +1827,11 @@ row names a source, where to read it and the series it merges into:
   together: a failure between them rolls the claim back and the next tick
   tries again, and one feed's failure doesn't hold up the rest (#32). A
   failing feed retries sooner: 15 minutes after one failure, doubling up to
-  the day (2 hours, doubling, when the source refused it with HTTP 403;
-  Throttling below). When that is (`app_feed_next_attempt`,
-  243_feed_next_attempt.sql, the same rule `app_feed_is_due` now reads) is
+  the day (2 hours, doubling, when the source refused it with HTTP 403; an
+  hour, doubling, and at least its `Retry-After`, when it throttled with
+  429 or 503; Throttling below). When that is (`app_feed_next_attempt`,
+  243_feed_next_attempt.sql, last defined in 377_feed_throttle_backoff.sql,
+  the same rule `app_feed_is_due` now reads) is
   the feed list's `nextAttemptAt`, and a failing feed's card says it ("It
   tries again after 10:13."; ui.md § Data feeds). **A feed whose fetch is
   still out is not due** (276, `app_feed_fetch_out`): in production a fetch
@@ -2054,9 +2071,15 @@ For a source still fetched per feed (`FEED_FETCHER`, `jobs/transport.ts`):
   15 minutes, `THROTTLE_*` in `feeds/http.ts`), remembered across a warm
   Lambda's invocations, so the fetches queued behind it (in the pacer, too:
   the pause is checked once a request holds its slot) fail without asking.
-  The feed records the failure and the scheduler's backoff takes it from
-  there (15 minutes, doubling up to a day); a success restarts the backfill
-  chain. An HTTP 403 is a `FeedRefusedError` (also a `FeedUnavailableError`,
+  The feed records the failure, its stored message naming the
+  `Retry-After` the source sent ("… asked us to slow down and to wait 2
+  minutes (Retry-After: 120 s) …", or that it gave none; `FeedThrottledError`
+  in `feeds/errors.ts`; a fetch refused locally while the host is paused names
+  the time left only when the source gave a `Retry-After`, never our own 60 s
+  default, issue #898), and the scheduler backs a throttled feed off on its
+  own floor: an hour, doubling, and at least that `Retry-After`, up to a day
+  (`377_feed_throttle_backoff.sql`, issue #877); a success restarts the
+  backfill chain. An HTTP 403 is a `FeedRefusedError` (also a `FeedUnavailableError`,
   `refused` in the fetcher's log), kept apart from throttling: CHC answers
   403 to an address it has blocked for volume (2026-10-25: each new
   fetcher environment, with its own outbound address, got through a fetch
@@ -3204,7 +3227,13 @@ sequenceDiagram
   A missed week is sent once, late; older misses aren't replayed.
 - **Retention:** PDFs 7 days (the bucket's lifecycle in production); the
   tick deletes report rows after 8 days (`app_purge_reports`), and locally
-  their MinIO objects too.
+  their MinIO objects too. A row deleted sooner (its requester's account
+  or its project deleted, by the API or the operator's SQL) queues its PDF's
+  removal: a trigger on `report` writes the ids to the owner-only
+  `report_pdf_erasure` (395, issue #903), and each tick deletes up to 100 of
+  those PDFs from storage (`reports/erasure.ts`; MinIO or the bucket, the
+  worker's role holding `s3:DeleteObject` on `reports/*` only), dropping
+  each entry once its object is gone and retrying the rest next tick.
 
 Where the render runs (`REPORT_RENDERER`, `jobs/transport.ts`):
 
@@ -3367,7 +3396,17 @@ sequenceDiagram
   settled in one transaction. A reservation never settled (its Lambda was
   killed) expires `ASSISTANT_TURN_SECONDS` + 120 s after it began, past the
   Lambda's timeout, and is then charged in full (Bedrock may have billed all
-  of it), at the next begin or the job tick. So the month's spend plus every
+  of it), at the next begin or the job tick. A charge that arrives after its
+  reservation was charged that way finds no reservation for its id and
+  charges its tokens again (counted twice, never too little, by design);
+  `app_assistant_charge` says so in its `reservation_missing` column
+  (388_assistant_charge_missing_reservation), and the backend logs a warn
+  `assistant_charge_no_reservation` with the reservation id and the turn's
+  input and output tokens, nothing personal, so how often it happens can be
+  counted in the logs (issue #880). The begin takes a reservation of
+  at most 3600 s, so `ASSISTANT_TURN_SECONDS` is capped at 3480
+  (`config.ts` `MAX_TURN_SECONDS`; a longer value, set for a slow local
+  model, had made every message a 500). So the month's spend plus every
   reservation never passes a cap, however many turns run at once; turns
   aren't limited to one a person, since the second's budget is only what the
   first left.

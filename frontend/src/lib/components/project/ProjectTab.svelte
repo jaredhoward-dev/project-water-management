@@ -201,7 +201,7 @@
 
 	<!-- Who can open the project: the owning team, the people shared directly, then the farmers (their own farms only). -->
 	<div class="col access" data-nav-group="People and access">
-		<TeamPanel {project} {isOwner} {currentUserId} {onProjectChange} />
+		<TeamPanel {project} {isOwner} {onProjectChange} />
 		<MembersPanel projectId={project.id} team={project.team} {isOwner} {currentUserId} {onLeftProject} {authorityVersion} />
 		<!-- The host's checks of signers' registrations (167_signers): editors read them, owners record them. -->
 		{#if canEdit}<RegistrationChecksPanel projectId={project.id} {isOwner} actsForAuthority={project.actsForAuthority ?? false} />{/if}

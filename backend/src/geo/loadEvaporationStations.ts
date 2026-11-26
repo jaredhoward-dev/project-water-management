@@ -92,7 +92,7 @@ export function evaporationStationRecords(
 	return { stations, problems };
 }
 
-/** Replace every row of `dataset` with `stations`, in one transaction, as the schema owner. Returns how many rows it wrote. */
+/** Replace every row of `dataset` with `stations`, in one transaction, as the schema owner. Returns how many rows it wrote: the distinct codes (a repeated code keeps its last record). */
 export async function replaceEvaporationStations(client: pg.ClientBase, dataset: string, stations: readonly EvaporationStationRecord[]): Promise<number> {
 	await client.query('BEGIN');
 	try {
@@ -108,7 +108,8 @@ export async function replaceEvaporationStations(client: pg.ClientBase, dataset:
 			);
 		}
 		await client.query('COMMIT');
-		return stations.length;
+		// A repeated code is upserted over its earlier row, so count codes, not records.
+		return new Set(stations.map((r) => r.code)).size;
 	} catch (e) {
 		await client.query('ROLLBACK');
 		throw e;

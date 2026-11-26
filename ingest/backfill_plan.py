@@ -35,8 +35,40 @@ FIRST_MONTH = {"rnl": "1981-01", "sat": "2000-06"}
 # A CHC byMonth file's URL names its month: the same pattern as manifest.py file_month.
 _FILE_MONTH = re.compile(r"\.(\d{4})\.(0[1-9]|1[0-2])\.days_p05\.nc$")
 _MONTH = re.compile(r"^(\d{4})-(0[1-9]|1[0-2])$")
-# A Standard execution's history holds 25,000 events; a month takes ~10.
-MAX_ITEMS = 2000
+# How many months one execution of infra/ingest_backfill.tf's state machine
+# may walk (issue #896). A Standard execution's history holds 25,000 events,
+# and the cap is sized for the worst case, every month using every retry the
+# Ingest task allows, since each month that doesn't exhaust a retrier
+# carries on to the next:
+#
+#   - a month that succeeds first time is 9 events: MapIterationStarted;
+#     TaskStateEntered, TaskScheduled, TaskStarted, TaskSucceeded,
+#     TaskStateExited; WaitStateEntered, WaitStateExited (Pace);
+#     MapIterationSucceeded;
+#   - each retry adds 3: the failed attempt's TaskFailed (or TaskTimedOut),
+#     then TaskScheduled and TaskStarted again (a retry doesn't re-enter the
+#     state);
+#   - Step Functions counts each retrier's attempts separately, so a month
+#     can be retried the sum of every rule's MaxAttempts (INGEST_RETRIES,
+#     which test_backfill_plan reads back from the .tf);
+#   - the rest of the execution, once: ExecutionStarted; MapStateEntered,
+#     MapStateStarted, MapStateSucceeded/Failed, MapStateExited; ReleaseHold's
+#     5 task events plus 3 per retry of its 3; the Outcome Choice's 2; Done's
+#     2 (or MonthFailed's 1); ExecutionSucceeded/Failed.
+HISTORY_LIMIT = 25_000
+EVENTS_PER_MONTH = 9
+EVENTS_PER_RETRY = 3
+# The Ingest task's Retry rules, error → MaxAttempts (infra/ingest_backfill.tf).
+INGEST_RETRIES = {"Lambda": 3, "MirrorBusy": 5, "HostBusy": 30, "TruncatedDownload": 3, "RetryLater": 4}
+RELEASE_HOLD_RETRIES = 3
+FIXED_EVENTS = 1 + 4 + (5 + EVENTS_PER_RETRY * RELEASE_HOLD_RETRIES) + 2 + 2 + 1
+
+
+def worst_case_events_per_month() -> int:
+    return EVENTS_PER_MONTH + EVENTS_PER_RETRY * sum(INGEST_RETRIES.values())
+
+
+MAX_ITEMS = (HISTORY_LIMIT - FIXED_EVENTS) // worst_case_events_per_month()  # 173
 
 
 class PlanError(ValueError):

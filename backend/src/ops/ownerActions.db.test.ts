@@ -55,7 +55,7 @@ describe('billing-grant, billing-grants, billing-revoke through the migrate Lamb
 		const out = await lambda({ action: 'billing-grant', email: viaLambda.email.toUpperCase(), plan: 'team', until: '2099-03-31', reason, by: 'octocat' });
 		await script([viaScript.email, 'team', '--until', '2099-03-31', '--reason', reason]);
 		const account = await accountOf(viaLambda);
-		expect(out).toEqual({ action: 'billing-grant', accountId: account, kind: 'user', plan: 'team', endsAt: '2099-04-01 00:00', replaced: false });
+		expect(out).toEqual({ action: 'billing-grant', accountId: account, kind: 'user', plan: 'team', seats: 3, endsAt: '2099-04-01 00:00', replaced: false });
 		expect(JSON.stringify(out)).not.toContain('@');
 		expect(await planOf(viaLambda)).toBe('team');
 		const lambdaRows = await rows(account);
@@ -130,7 +130,11 @@ describe('the workflow’s id targets and the operator’s private lookup', () =
 	it('grants to the person by id (making the account), as the workflow sends it; then names the account by id', async () => {
 		const out = await lambda({ action: 'billing-grant', via: 'workflow', userId: person.id, plan: 'pro', reason: 'Founding user', by: 'octocat', replace: false });
 		const account = await accountOf(person);
-		expect(out).toEqual({ action: 'billing-grant', accountId: account, kind: 'user', plan: 'pro', endsAt: null, replaced: false });
+		expect(out).toEqual({ action: 'billing-grant', accountId: account, kind: 'user', plan: 'pro', seats: 1, endsAt: null, replaced: false });
+		// Seats as `--seats` (374, issue #891): Pro sells no extra seats, so the database refuses 2, before it looks at the live grant.
+		expect(
+			await failure({ action: 'billing-grant', via: 'workflow', accountId: account, plan: 'pro', seats: 2, reason: 'More seats', by: 'octocat', replace: true })
+		).toMatchObject({ code: 'invalid' });
 		expect(await lambda({ action: 'billing-account', email: person.email })).toEqual({ action: 'billing-account', kind: 'user', ownerId: person.id, accountId: account, planNow: 'pro' });
 		expect(await lambda({ action: 'billing-grants', via: 'workflow', accountId: account })).toMatchObject({ action: 'billing-grants', kind: 'user', accountId: account, planNow: 'pro' });
 		expect(await lambda({ action: 'billing-revoke', via: 'workflow', accountId: account, reason: 'Pilot ended', by: 'octocat' })).toEqual({

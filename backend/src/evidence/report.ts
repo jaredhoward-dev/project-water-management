@@ -31,6 +31,7 @@ import {
 	type MemberResult,
 	type ModelInput,
 	type PairedMember,
+	type PairedRerun,
 	type ResolvedEnsembleOptions,
 	type RunInputsSnapshot,
 	type RunSummary,
@@ -61,11 +62,11 @@ import { verifiedRuns } from '../runs/stamp.js';
 import { loadDamObservations } from './damObservations.js';
 import { futureYieldEnabled, latestFutureYield } from '../future/store.js';
 
-/** § 8's input: the stored result, `notRun` when none, null while FUTURE_YIELD is off. */
+/** § 8's input: the stored result and whether the boundary changed since (issue #889), `notRun` when none, null while FUTURE_YIELD is off. */
 async function loadFutureYield(db: Db, projectId: string, applicationRunId: string, baselineRunId: string): Promise<EvidenceInput['futureYield']> {
 	if (!futureYieldEnabled()) return null;
 	const row = await latestFutureYield(db, projectId, applicationRunId, baselineRunId);
-	return row ? { result: row.result, createdAt: row.createdAt, createdBy: row.createdBy } : { notRun: true };
+	return row ? { result: row.result, createdAt: row.createdAt, createdBy: row.createdBy, boundary: row.boundary } : { notRun: true };
 }
 import { listNominations } from '../runs/evidence.js';
 
@@ -201,7 +202,8 @@ async function loadEnsembles(
 	});
 	const baseline = base.map((r) => toInput(r, r.status === 'complete' ? (r.summary as EnsembleSummary) : null, null));
 	if (!applicationRunId) return { baseline, paired: [] };
-	const { rows: pairedRows } = await db.query<EnsembleRow & { result: { header: EnsembleHeader; members: PairedMember[] } | null }>(
+	// `rerun`: the baseline's kept sets on the engine the pairs ran on, when the baseline was stored on another (issue #897).
+	const { rows: pairedRows } = await db.query<EnsembleRow & { result: { header: EnsembleHeader; members: PairedMember[]; rerun?: PairedRerun } | null }>(
 		`SELECT ${ENSEMBLE_COLUMNS}, u.result FROM run_uncertainty u LEFT JOIN app_user au ON au.id = u.created_by
 		 WHERE u.project_id = $1 AND u.run_id = $2 AND u.baseline_id = ANY($3::uuid[]) ORDER BY u.created_at DESC, u.id`,
 		[projectId, applicationRunId, base.map((r) => r.id)]

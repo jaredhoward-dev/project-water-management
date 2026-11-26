@@ -8,7 +8,8 @@ import { Rng } from '../random';
 import { runModel } from '../run';
 import type { Gr4jParams } from '../runoff/params';
 import { ENGINE_VERSION } from '../version';
-import { autoCalibrate, planAutoCalibration, prepareAutoCase, runAutoCase } from './auto';
+import { autoCalibrate, planAutoCalibration, prepareAutoCase, ruleCaseWaterYears, runAutoCase } from './auto';
+import { DSST_MIN_WATER_YEARS, plannedFits } from './calibrate';
 import type { FitOutcome } from './calibrate';
 import type { DdsState } from './dds';
 import { autoFitRecordOf } from './provenance';
@@ -187,6 +188,43 @@ describe('autoCalibrate', () => {
 		expect(rec.chosen).toBe(r.chosen);
 		expect(rec.cases).toHaveLength(2);
 		expect(rec.cases[r.chosen!]).toMatchObject({ eligible: true, reasons: [], bounds: r.cases[r.chosen!]!.bounds, params: r.cases[r.chosen!]!.report!.params });
+	});
+});
+
+describe('ruleCaseWaterYears (issue #894): the water years each case fits on, before a run', () => {
+	it('tells whether every case makes the dry → wet test, as the case’s own fit plans it', () => {
+		for (const years of [2, 8]) {
+			const input = synthetic(TRUTH, {}, years);
+			const plan = planAutoCalibration(input);
+			const n = ruleCaseWaterYears(input).length;
+			expect(n >= DSST_MIN_WATER_YEARS).toBe(years === 8);
+			for (let i = 0; i < plan.cases.length; i++) {
+				const job = prepareAutoCase(input, plan, i);
+				if (!('finish' in job)) throw new Error(`case ${i} could not start: ${job.error}`);
+				expect(job.count).toBe(plannedFits({ starts: plan.rules.run.starts, validate: true, dsst: n >= DSST_MIN_WATER_YEARS, penalty: false, unpriored: false }).length);
+			}
+		}
+	});
+});
+
+describe('planAutoCalibration’s caseEvaluations (issue #913): the model runs each case’s fit plans', () => {
+	it('counts the dry → wet test on a long record and not on a short one, as each case’s own fit runs', () => {
+		const counts: Record<number, number> = {};
+		for (const years of [2, 8]) {
+			const input = synthetic(TRUTH, {}, years);
+			const plan = planAutoCalibration(input);
+			const { starts, budget } = plan.rules.run;
+			counts[years] = plan.caseEvaluations;
+			for (let i = 0; i < plan.cases.length; i++) {
+				const job = prepareAutoCase(input, plan, i);
+				if (!('finish' in job)) throw new Error(`case ${i} could not start: ${job.error}`);
+				// The estimate is the case's fit, optimisation for optimisation.
+				expect(plan.caseEvaluations).toBe(job.count * job.budget);
+			}
+			// Every start and the split-sample test; the dry → wet test only with four qualifying water years.
+			expect(plan.caseEvaluations).toBe(budget * (starts + (years === 8 ? 2 : 1)));
+		}
+		expect(counts[2]).toBeLessThan(counts[8]!);
 	});
 });
 

@@ -285,6 +285,49 @@ describe('changing the email address', () => {
 		expect((await anon('GET', '/auth/me', undefined, sessionOf(await login(second)))).body.user.email).toBe(second);
 	});
 
+	// A link someone else asked for with a stolen session and password (to their own inbox) must not outlive the
+	// owner securing the account: otherwise it moves the address to them after the owner changed the password.
+	describe('a pending change dies when the owner secures the account', () => {
+		async function pending(name: string) {
+			const u = await signUp(name);
+			const next = fresh(name.toLowerCase());
+			expect((await u.call('POST', '/auth/change-email', { newEmail: next, currentPassword: PASSWORD })).status).toBe(202);
+			return { u, next, token: tokenIn(lastMailTo(next)) };
+		}
+		const refused = async (u: { id: string; email: string }, token: string) => {
+			const res = await anon('POST', '/auth/confirm-email-change', { token });
+			expect(res.status).toBe(400);
+			expect(res.body.code).toBe('link_invalid');
+			expect((await asOwner('SELECT email FROM app_user WHERE id = $1', [u.id]))[0]!.email).toBe(u.email);
+		};
+
+		it('changing the password voids it', async () => {
+			const { u, token } = await pending('Changed');
+			expect((await u.call('POST', '/auth/change-password', { currentPassword: PASSWORD, newPassword: 'another horse' })).status).toBe(200);
+			await refused(u, token);
+		});
+
+		it('a password reset voids it', async () => {
+			const { u, token } = await pending('Reset');
+			expect((await anon('POST', '/auth/forgot-password', { email: u.email })).status).toBe(202);
+			const reset = tokenIn(lastMailTo(u.email));
+			expect((await anon('POST', '/auth/reset-password', { token: reset, password: 'another horse' })).status).toBe(204);
+			await refused(u, token);
+		});
+
+		it('signing out everywhere voids it', async () => {
+			const { u, token } = await pending('Everywhere');
+			expect((await u.call('POST', '/auth/logout-everywhere')).status).toBe(204);
+			await refused(u, token);
+		});
+
+		it('positive control: an unrelated action (renaming) leaves the link working', async () => {
+			const { u, next, token } = await pending('Kept');
+			expect((await u.call('PATCH', '/auth/me', { displayName: 'Kept Too' })).status).toBe(200);
+			expect((await anon('POST', '/auth/confirm-email-change', { token })).body).toEqual({ changed: true, email: next });
+		});
+	});
+
 	it('RLS: a person sees only their own pending change (positive control: their own row)', async () => {
 		const u = await signUp('Own');
 		const other = await signUp('Peer');

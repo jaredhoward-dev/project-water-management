@@ -1,7 +1,8 @@
-import { defaultCalibrationRules } from '@water-management/engine';
+import { defaultCalibrationRules, ruleCaseCount } from '@water-management/engine';
 import { describe, expect, it } from 'vitest';
 import type { AutoCalibration, AutoCalibrationCase } from '#lib/api/types.js';
-import { applyBlocker, autoCaseRows, autoRunsTotal, autoState, rulesUnsaved, runBlocker, selectionText, triggerText } from './autoFit';
+import { applyBlocker, autoCaseRows, autoRunsTotal, autoState, ruleWaterYears, rulesUnsaved, runBlocker, selectionText, triggerText } from './autoFit';
+import { planRuns } from './fit';
 
 const kase = (over: Partial<AutoCalibrationCase> = {}): AutoCalibrationCase => ({
 	label: 'x',
@@ -72,6 +73,20 @@ describe('a server run of the calibration rules, in the page', () => {
 		// 2 fits × 1 500 × (5 starts + 2 validation fits).
 		expect(autoRunsTotal(defaultCalibrationRules(), false)).toBe(21_000);
 		expect(autoRunsTotal(defaultCalibrationRules(), true)).toBe(24_000);
+	});
+
+	it('plans each case as the fit panel does: no dry → wet test where the record is too short (issue #894)', () => {
+		// 2 fits × 1 500 × (5 starts + split): the record has 3 qualifying water years.
+		expect(autoRunsTotal(defaultCalibrationRules(), false, 3)).toBe(18_000);
+		expect(autoRunsTotal(defaultCalibrationRules(), true, 3)).toBe(21_000);
+		// Enough years, or not known yet: the test is counted.
+		expect(autoRunsTotal(defaultCalibrationRules(), false, 4)).toBe(21_000);
+		expect(autoRunsTotal(defaultCalibrationRules(), false, null)).toBe(21_000);
+		// The same per-location plan as the panel's estimate: one step at the headline, times the cases.
+		const r = defaultCalibrationRules();
+		expect(autoRunsTotal(r, true, 3)).toBe(ruleCaseCount(r) * planRuns([{ headline: true, waterYears: 3 }], r.run.budget, true, true, r.run.starts, false));
+		// An input the engine refuses (no record) is not known, so the test stays counted.
+		expect(ruleWaterYears({ settings: {}, model: { nodes: [], crops: [], cropAreas: [], transfers: [] }, series: {} } as unknown as Parameters<typeof ruleWaterYears>[0])).toBeNull();
 	});
 
 	it('says where a run stands: fitting i of n, stopped with its job, failed, or complete', () => {
