@@ -35,6 +35,13 @@ describe('canonicalEmail', () => {
 		// Positive control: a tag after a base still goes, even a second +.
 		expect(canonicalEmail('a+b+c@example.org')).toBe('a@example.org');
 	});
+
+	it('folds and trims ASCII only, as its SQL twin canonical_email (397, issue #914): a non-ASCII letter stays as written', () => {
+		expect(canonicalEmail('İnci@Example.COM')).toBe('İnci@example.com');
+		expect(canonicalEmail('ÉLODIE@BÜCHER.de')).toBe('Élodie@bÜcher.de');
+		expect(canonicalEmail('\u00a0a@example.org')).toBe('\u00a0a@example.org');
+		expect(canonicalEmail('\u000b\tA@example.org \r\n')).toBe('a@example.org');
+	});
 });
 
 describe('percentile', () => {

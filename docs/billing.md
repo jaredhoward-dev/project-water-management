@@ -1029,13 +1029,22 @@ granting it then would spend the person's once-per-email trial for nothing.
 
 **Granting.** When an address is verified for the first time (the
 verification link, a password reset that proves an unverified inbox, or a
-sign-up through an invite for that address), the backend hashes the
-address's canonical form (`canonicalEmail` in `billing/metrics.ts`:
-lower-cased, `+tag` dropped, Gmail's dots dropped, googlemail.com as
-gmail.com; a local part that starts with `+` is kept whole, since with no
-base address dropping it would fold different people's mailboxes at a
-domain into one, issue #893) with SHA-256 and calls `app_reverse_trial_start(hash)` as the
-person, inside its own savepoint, so a trial that fails never fails the
+sign-up through an invite for that address), the backend calls
+`app_reverse_trial_start()` as the person, and the database hashes the
+caller's own current address itself (397, issue #914): SHA-256 of its
+canonical form (`canonical_email`, the SQL twin of `canonicalEmail` in
+`billing/metrics.ts`: A-Z lower-cased, `+tag` dropped, Gmail's dots dropped,
+googlemail.com as gmail.com; a local part that starts with `+` is kept
+whole, since with no base address dropping it would fold different people's
+mailboxes at a domain into one, issue #893). No caller names an address, so
+no one can use up another address's trial; 342's
+`app_reverse_trial_start(hash)` stays only for a backend on older code
+during a release, ignores its hash and starts the caller's own (a later
+migration drops it). Lower-casing and trimming are ASCII only on both sides
+(A-Z, and ASCII whitespace at the ends): JavaScript's `toLowerCase()` and
+Postgres's locale-bound `lower()` disagree on some non-ASCII letters (`İ`),
+so a non-ASCII letter is kept as written; `export.db.test.ts` checks the two
+agree. The call runs inside its own savepoint, so a trial that fails never fails the
 verification, the password reset or the invite sign-up around it (logged as
 `reverse_trial_start_failed`, the error's name and code only), and unless
 the address is on a disposable domain (`auth/disposable.ts`,

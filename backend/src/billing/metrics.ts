@@ -49,6 +49,11 @@ export const ACTIVATION_DAYS = 7;
 /** Mail providers whose clusters are expected at scale; flagged, not hidden. */
 const COMMON_PROVIDERS = new Set(['gmail.com', 'googlemail.com', 'outlook.com', 'hotmail.com', 'live.com', 'yahoo.com', 'icloud.com', 'proton.me', 'protonmail.com']);
 
+/** The ASCII whitespace canonical_email's btrim strips (space, \t, \n, \v, \f, \r), at either end. */
+const EDGE_SPACE = /^[ \t\n\v\f\r]+|[ \t\n\v\f\r]+$/g;
+/** A-Z to a-z and nothing else, as canonical_email's translate(). */
+const asciiLower = (s: string): string => s.replace(/[A-Z]+/g, (m) => m.toLowerCase());
+
 /**
  * The address one allowance is keyed to: lower-cased, a `+tag` removed, and
  * for Gmail the dots too (googlemail.com is gmail.com). Issue #641, "One
@@ -61,9 +66,16 @@ const COMMON_PROVIDERS = new Set(['gmail.com', 'googlemail.com', 'outlook.com', 
  * Subaddressing needs a base (Gmail's, Outlook's and Fastmail's usernames
  * can't start with `+`), so such an address is its own mailbox, as a
  * catch-all domain's `a@` and `b@` are, which no canonical form can join.
+ *
+ * Lower-casing and trimming are ASCII only (issue #914): A-Z to a-z, and the
+ * six ASCII whitespace characters off the ends, so the SQL twin
+ * canonical_email (396, 397) gives the same string byte for byte. Unicode
+ * case rules differ between JavaScript's toLowerCase() and Postgres's
+ * locale-bound lower() (`İ`), and String.trim() strips Unicode spaces btrim
+ * keeps; a non-ASCII letter stays as written on both sides.
  */
 export function canonicalEmail(email: string): string {
-	const lower = email.trim().toLowerCase();
+	const lower = asciiLower(email.replace(EDGE_SPACE, ''));
 	const at = lower.lastIndexOf('@');
 	if (at < 1) return lower;
 	let local = lower.slice(0, at);
