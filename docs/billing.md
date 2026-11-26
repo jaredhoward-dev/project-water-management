@@ -861,7 +861,9 @@ seats* control ([ui.md § Plan and usage](./ui.md#plan-and-usage)):
    included 3 while keeping every editor. Make some editors viewers first.
    Off (shadow mode) it is counted, never refused. The count is read before
    the provider call, so an editor added in that moment can still leave the
-   team one over; the seat guard then refuses the next new editor.
+   team one over: the webhook's seat write then counts it under the seat
+   guard's lock and records the team over its seats (§ Team seats, 403), and
+   the seat guard refuses the next new editor.
 5. **The provider** changes the subscription, outside any transaction. The
    route writes **no seats**: the provider's `customer.subscription.updated`
    brings them back through the webhook and `app_billing_apply`, as
@@ -995,6 +997,24 @@ invites"; Enforcement design, "Editors per catchment / Team seats").
   of every transaction (and sets nothing when off, so off costs no round
   trip). Nothing from a request reaches the setting. The committed dev and
   e2e env files leave it off.
+- **Over its seats (403, issue #926).** Stripe's customer portal can change
+  a subscription item's quantity, around this route's check. Every write of
+  a subscription's seats, status or plan (the webhook's `app_billing_apply`,
+  a staff grant, an invoice grant) fires `subscription_seats_sync`, which
+  takes the same account lock as the seat guard and counts the editors in use
+  in a fresh statement: more than the paid seats sets
+  `billing_account.over_seats_since` (kept from the first time), within them
+  clears it. The lock orders a seat cut against an editor add either way: an
+  add that commits first is counted by the cut (recorded over), a cut that
+  commits first is read by the add's guard (refused, enforced). The seat
+  guard refuses any new seat while the team is over, as before; nobody loses
+  a seat. The plan page reads `team.overSeats { seats, editors, since }` from
+  `app_account_plan`, worked out at each read (null within its seats), and
+  the job tick clears the marker once editors are made viewers or seats
+  bought. **What the portal should allow:** configure Stripe's customer
+  portal without quantity changes on the extra-seat item (seats change
+  through *Change seats*, which refuses a cut below the editors in use); the
+  record is the backstop if it is ever allowed.
 - **Confirming an address.** `markVerified` accepts the person's pending
   invites through `app_accept_invites`, which takes each invite in its own
   subtransaction (360_accept_invites_each): one that would pass a Team's
@@ -1017,7 +1037,10 @@ invites"; Enforcement design, "Editors per catchment / Team seats").
   team, the invite left pending, only the refused one of several left
   pending and the rest accepted, any other refusal on confirming rethrown,
   a project billed to the team's account with no `team_id`, two parallel
-  grants of the last seat), `db/tx.db.test.ts` (the flag set only for
+  grants of the last seat), `billing/overSeats.db.test.ts` (a portal cut
+  replayed through the mock webhook recorded, shown and refusing a new
+  editor, cleared at the tick; the cut and an add racing in both orders; a
+  paused catchment's move), `db/tx.db.test.ts` (the flag set only for
   `BILLING_ENFORCED=true`) and `http/errors.test.ts` (402 with only the
   numbers).
 
@@ -1504,6 +1527,24 @@ Built but off: nothing is paused unless `BILLING_ENFORCED` is on.
   run and edit it (Free never limits modelling), and its published farm
   views stay up with their last publication. `app_project_plan_paused(project)`
   answers when it was paused, or null.
+- **A queued fetch (issue #943).** A `feed_fetch` job queued before the
+  pause landed, or retried after it, checks `app_project_plan_paused` when it
+  runs and ends done without fetching (logged `feed_fetch_paused`); the
+  scheduler picks the feed up again after a resume.
+- **Readings pushed by API key are accepted (decided 2026-11-26, issue
+  #943).** `/ingest` still merges a key's readings into a paused catchment:
+  they are the catchment's data, sent by the user's own logger, and refusing
+  them would lose days the logger may not resend, while Free never limits
+  data or modelling. What the pause holds is the operation they would start:
+  the automatic re-run (`app_enqueue_rerun` skips a paused catchment, so the
+  answer's `rerunQueuedFor` is null) and, through it, alerts. The next push
+  after a resume queues the re-run as usual.
+- **Moving accounts (403).** A project whose billing account changes (moved
+  into or out of a team) re-syncs both accounts in the move's transaction
+  (`project_billing_move_sync`, both locks in id order): the moved
+  catchment's pause marker and the old account's `over_free_since` follow
+  the move at once instead of at the next tick, and both accounts'
+  over-seats markers are re-counted.
 - **Resuming.** A live subscription again (the subscription trigger, at
   once), switching the extra catchments' operations off so the account is
   back within Free, or enforcement turned off: the markers go and the grace
@@ -1525,6 +1566,10 @@ Built but off: nothing is paused unless `BILLING_ENFORCED` is on.
   the kept one; members read the marker, strangers don't; the owner's
   choice moves the pause and a stranger's is refused; an upgrade resumes
   everything; a never-paid account isn't paused; only the worker sweeps.
+  `feeds/feeds.db.test.ts` (a fetch queued before the pause ends without
+  fetching, and fetches after a resume), `ingest/ingest.db.test.ts` (a key's
+  readings accepted into a paused catchment, no re-run until it resumes) and
+  `billing/overSeats.db.test.ts` (a move re-syncs both accounts).
 
 ## Plan emails
 
