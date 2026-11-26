@@ -9825,7 +9825,17 @@ calibration's line points at *How the shown run fits* for NSE and PBIAS.
   the estimates then read that one, as does the rules panel after the
   rules are saved. The server's own estimate, which refuses rules that
   would run too long, counts each case the same way
-  (`planAutoCalibration`'s `caseEvaluations`). The button is on the
+  (`planAutoCalibration`'s `caseEvaluations`). A disabled button says why
+  beside it (`fit-blocker`, `fit.ts` `fitBlocker`): "Tick at least one
+  parameter to fit." or "Fix the model runs per fit under Search first."
+  (the penalty weight, starts and seed the same way). A number field
+  holding text it can't take keeps the stored value, so it holds the
+  button too (the panel's own invalid-fields registry, which still counts
+  them in the page's, `common/forwardingInvalidFields.svelte.ts`): the fit
+  never runs on a number the field no longer shows. **Cancel** takes the
+  button's place while the data loads and the fit runs, and works in
+  both; the focus moves between the two as they swap
+  (`fit-blocker-focus.spec.ts`). The button is on the
   first screen of the section at 1440×900 (`fit-panel-layout.spec.ts`). The
   seed's, starts' and second record's explanations are under the page's
   *Explain each setting* switch. It takes

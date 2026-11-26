@@ -415,6 +415,37 @@ export function seedError(seed: number | null): string | null {
 	return seed !== null && Number.isInteger(seed) && seed >= 0 && seed <= SEED_MAX ? null : `The seed must be a whole number from 0 to ${fmtNum(SEED_MAX)}.`;
 }
 
+/** Model runs per fit: the field's bounds (the search needs at least 50 to sample the box). */
+export const BUDGET_MIN = 50;
+export const BUDGET_MAX = 10_000;
+
+/** Why the model runs per fit can't be used, or null. */
+export function budgetError(budget: number | null): string | null {
+	return budget !== null && Number.isInteger(budget) && budget >= BUDGET_MIN && budget <= BUDGET_MAX
+		? null
+		: `Model runs per fit must be a whole number from ${fmtNum(BUDGET_MIN)} to ${fmtNum(BUDGET_MAX)}.`;
+}
+
+/** And-joined, for a sentence: "a", "a and b", "a, b and c". */
+const andList = (xs: readonly string[]) => (xs.length < 2 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
+
+/**
+ * Why Fit automatically can't start, for the line beside its disabled button, or null when it can. `fix` names the
+ * fields to fix: a value the fit can't use, or text a number field can't take (it keeps the stored value, so the fit
+ * would otherwise run on a number the field no longer shows). A field inside the closed Search fold is named with
+ * the fold, so the reader knows where to look. The plan's own error, and a missing record, are said on their own
+ * lines already, so they aren't repeated here.
+ */
+export function fitBlocker(s: { hasObserved: boolean; planError: boolean; free: number; busy: boolean; fix: readonly { name: string; inSearch: boolean }[] }): string | null {
+	if (!s.hasObserved || s.planError || s.busy) return null;
+	if (s.free === 0) return 'Tick at least one parameter to fit.';
+	const names = (inSearch: boolean) => [...new Set(s.fix.filter((f) => f.inSearch === inSearch).map((f) => f.name))];
+	const other = names(false);
+	const search = names(true);
+	const parts = [other.length ? `the ${andList(other)}` : null, search.length ? `the ${andList(search)} under Search` : null].filter((x) => x !== null);
+	return parts.length ? `Fix ${parts.join(', and ')} first.` : null;
+}
+
 /**
  * The fit record Apply stores with the parameters: the report plus the form
  * it ran on (window, exclusions), whether validation was asked for, the
