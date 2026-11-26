@@ -30,10 +30,12 @@ export const WORKFLOW_ACTIONS = ['billing-grants', 'billing-grant', 'billing-rev
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DAY = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
 const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
+/** A grant's editor seats in all, as `pnpm dev:billing:grant --seats n` takes them; the Lambda bounds it at 100000 (MAX_GRANT_SEATS). */
+const SEATS = /^[1-9][0-9]{0,5}$/;
 const ID_INPUTS = /** @type {const} */ (['account_id', 'user_id', 'team_id', 'project_id']);
 /** The inputs each action reads; any other given a value is refused, so nothing is silently ignored. */
 const READS = {
-	'billing-grant': ['account_id', 'user_id', 'team_id', 'plan', 'until', 'replace', 'reason'],
+	'billing-grant': ['account_id', 'user_id', 'team_id', 'plan', 'until', 'seats', 'replace', 'reason'],
 	'billing-revoke': ['account_id', 'user_id', 'team_id', 'reason'],
 	'billing-grants': ['account_id', 'user_id', 'team_id'],
 	'billing-report': ['month'],
@@ -82,7 +84,9 @@ export function buildPayload(inputs, actor) {
 			if (plan !== 'pro' && plan !== 'team') errors.push('input plan must be pro or team');
 			const until = str(i.until);
 			if (until && !DAY.test(until)) errors.push('input until is not YYYY-MM-DD');
-			payload = { ...payload, plan, replace: i.replace === true || i.replace === 'true', ...(until ? { until } : {}) };
+			const seats = str(i.seats);
+			if (seats && (!SEATS.test(seats) || Number(seats) > 100000)) errors.push('input seats is not a whole number of editor seats from 1 to 100000');
+			payload = { ...payload, plan, replace: i.replace === true || i.replace === 'true', ...(until ? { until } : {}), ...(seats ? { seats: Number(seats) } : {}) };
 		}
 	} else if (action === 'billing-grants') {
 		if (targets.length > 1) errors.push('give at most one of account_id, user_id and team_id');

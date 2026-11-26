@@ -36,9 +36,24 @@ describe('publicHolidays', () => {
 
 	it('a Sunday Christmas or Day of Goodwill moves to the Monday (2022, 2027), and a Sunday New Year (2023)', () => {
 		expect(publicHolidays(2022).has('2022-12-26')).toBe(true);
-		expect(publicHolidays(2022).has('2022-12-27')).toBe(false); // 26 Dec 2022 is the Monday holiday itself
 		expect(publicHolidays(2027).has('2027-12-27')).toBe(true);
 		expect(publicHolidays(2023).has('2023-01-02')).toBe(true);
+	});
+
+	it('a Sunday Christmas makes Tuesday the 27th a holiday too, as declared under s2A in 2011, 2016 and 2022 (issue #893)', () => {
+		for (const y of [2011, 2016, 2022, 2033]) {
+			expect(new Date(Date.UTC(y, 11, 25)).getUTCDay()).toBe(0);
+			expect(publicHolidays(y).has(`${y}-12-26`)).toBe(true);
+			expect(publicHolidays(y).has(`${y}-12-27`)).toBe(true);
+			expect(isBusinessDay(`${y}-12-27`)).toBe(false);
+		}
+		// Positive control: the 28th is a business day, and in another year (Christmas on a Friday) the 27th is a Sunday, not added.
+		expect(isBusinessDay('2022-12-28')).toBe(true);
+		expect(publicHolidays(2026).has('2026-12-27')).toBe(false);
+		// 2022: the 10 fixed dates, Good Friday, Family Day, 2 May (Workers' Day on a Sunday) and the 27th; the Monday after Christmas is the 26th, already counted.
+		expect(publicHolidays(2022).size).toBe(14);
+		// Across that Christmas: 23 Dec (Fri) to 29 Dec (Thu) has only the 28th between them.
+		expect(businessDaysBetween('2022-12-23', '2022-12-29')).toBe(1);
 	});
 });
 

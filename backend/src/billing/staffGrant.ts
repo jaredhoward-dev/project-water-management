@@ -184,6 +184,8 @@ export interface Granted {
 	/** When it ends, SAST (YYYY-MM-DD HH24:MI), or null: until revoked. */
 	endsAt: string | null;
 	replaced: boolean;
+	/** Editor seats in all on the granted subscription (374). */
+	seats: number;
 }
 
 /** In a transaction of its own: ROLLBACK on any failure, and rethrow. */
@@ -209,11 +211,11 @@ export function grantPlan(client: pg.ClientBase, req: GrantRequest): Promise<Gra
 			[req.until, accountId, req.plan, req.reason, req.by, req.replace, req.seats ?? null]
 		);
 		const subscriptionId = granted[0]!.id;
-		const { rows } = await client.query<{ until: string | null }>(
-			`SELECT to_char(period_end AT TIME ZONE 'Africa/Johannesburg', 'YYYY-MM-DD HH24:MI') AS until FROM subscription WHERE id = $1`,
+		const { rows } = await client.query<{ until: string | null; seats: number }>(
+			`SELECT to_char(period_end AT TIME ZONE 'Africa/Johannesburg', 'YYYY-MM-DD HH24:MI') AS until, seats FROM subscription WHERE id = $1`,
 			[subscriptionId]
 		);
-		return { accountId, kind: owned.kind, subscriptionId, plan: req.plan, endsAt: rows[0]?.until ?? null, replaced: req.replace };
+		return { accountId, kind: owned.kind, subscriptionId, plan: req.plan, endsAt: rows[0]?.until ?? null, replaced: req.replace, seats: rows[0]!.seats };
 	});
 }
 

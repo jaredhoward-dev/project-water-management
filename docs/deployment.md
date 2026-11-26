@@ -4929,7 +4929,7 @@ function as the local script, so production and `pnpm dev:billing:grant`,
 
 | action | fields | does (as the local script) | answers |
 |---|---|---|---|
-| `billing-grant` | one of `accountId`, `userId`, `teamId` (or `email`, direct invoke only); `plan` (`pro`, `team`); `until` (YYYY-MM-DD, SAST, optional: until revoked); `reason` (1–500); `by` (1–100); `replace` (optional) | `dev:billing:grant <who> <plan> …` | `accountId`, `kind`, `plan`, `endsAt` (SAST), `replaced` |
+| `billing-grant` | one of `accountId`, `userId`, `teamId` (or `email`, direct invoke only); `plan` (`pro`, `team`); `until` (YYYY-MM-DD, SAST, optional: until revoked); `reason` (1–500); `by` (1–100); `replace` (optional); `seats` (optional, a whole number 1–100000: the editor seats in all, as `--seats`; absent or null: the plan's included seats; the database refuses fewer than included and extra seats on Pro) | `dev:billing:grant <who> <plan> … [--seats n]` | `accountId`, `kind`, `plan`, `seats`, `endsAt` (SAST), `replaced` |
 | `billing-revoke` | one of `accountId`, `userId`, `teamId` (or `email`, direct invoke only); `reason`; `by` | `… --revoke` | `accountId`, `kind`, `plan` |
 | `billing-grants` | one of those, or none | `… --list`; none: every live grant | one account: `accountId`, `kind`, `planNow`, its `log` (with reasons); all: `grants` (account, kind, person or team id, plan, since, until) |
 | `billing-report` | `month` (YYYY-MM, optional: this SAST month) | `dev:billing:report --month …` (never `--show-emails`) | `report`, redacted as the script prints it |
@@ -5487,7 +5487,9 @@ Every step is an ordinary app action by an owner unless it says "operator".
       -f account_id=<account id> -f plan=team -f until=2026-12-31 -f reason="<reason>"`
       (or `-f user_id=<person id>` for a person with no account yet, `-f
       team_id=<team id>` for a team; no `until`: until revoked; `-f
-      replace=true` to end a live manual or mock subscription). The grant
+      replace=true` to end a live manual or mock subscription; `-f seats=12`
+      for 12 editor seats in all on Team, else the plan's included seats;
+      a grant's seats change by a new grant with `replace=true`). The grant
       lasts through that South African date. The reason holds no address.
     - **Revoke:** `-f action=billing-revoke -f account_id=<account id> -f
       reason="<reason>"`.
