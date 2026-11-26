@@ -10442,7 +10442,10 @@ it never changes a run's results.
   four thresholds). An evidence report cites the **first** complete, unpaired
   ensemble on its baseline whose resolved options match that rule exactly
   (`declaredRuleMismatches` empty; seed, records and rain sources are not
-  part of the rule), and the first complete paired ensemble on it. First,
+  part of the rule; the parameters varied are: the model's default free set,
+  so an ensemble started through the API with its own `free`, a narrower
+  band over fewer parameters, departs from the rule as *Parameters varied*),
+  and the first complete paired ensemble on it. First,
   not newest or kindest: the database draws each seed, so once one ensemble
   on the rule has completed, starting more changes nothing the report cites,
   and there is nothing to re-roll. Every other start is listed with how it

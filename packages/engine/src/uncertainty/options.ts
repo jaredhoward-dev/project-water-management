@@ -2,7 +2,7 @@
 // defaults and limits, the labels, and the diff of two ensembles' rules.
 // Apart from the ensemble itself (./ensemble.ts), so the Runs panels and
 // run comparison that show them don't load the model runs (issue #9).
-import type { CalibrationBounds } from '../calibrate/params';
+import { CALIBRATION_PARAMS, type CalibrationBounds } from '../calibrate/params';
 import { OBJECTIVE_LABELS, type ObjectiveId } from '../calibrate/objectives';
 import type { CalibrationFlowKind } from '../project';
 import type { Wr2012FlagLevel } from '../reference/wr2012';
@@ -240,15 +240,25 @@ export function declaredRuleText(v: unknown): string {
  * Where an ensemble's resolved options depart from the declared rule, as
  * rows `{ label, a: declared, b: the ensemble's }`; empty when it follows the
  * rule. The ensemble's own seed, records and rain sources are not part of the
- * rule (the database draws the seed; the records are the project's).
+ * rule (the database draws the seed; the records are the project's). The
+ * parameters varied are: the rule's are the model's default free set.
  */
 export function declaredRuleMismatches(rule: DeclaredUncertaintyRule, o: ResolvedEnsembleOptions): OptionChange[] {
 	const asRule: DeclaredUncertaintyRule = { members: o.members, bounds: o.bounds, panOffset: o.panOffset, thresholds: o.thresholds };
-	return ruleRows.flatMap(([label, f]) => {
+	const rows: OptionChange[] = ruleRows.flatMap(([label, f]) => {
 		const a = f(rule);
 		const b = f(asRule);
 		return a === b ? [] : [{ label, a, b }];
 	});
+	// The rule varies the model's default parameters (what declaredRuleRequest's start resolves to): an ensemble that
+	// posted its own `free` samples fewer (a narrower band) or more dimensions, so it isn't the rule's ensemble.
+	const specs = CALIBRATION_PARAMS[o.model as keyof typeof CALIBRATION_PARAMS] as (typeof CALIBRATION_PARAMS)['gr4j'] | undefined;
+	if (specs) {
+		const want = specs.filter((s) => !s.fixedByDefault).map((s) => s.key).join(', ');
+		const got = (o.free ?? []).join(', ');
+		if (want !== got) rows.push({ label: 'Parameters varied', a: want, b: got });
+	}
+	return rows;
 }
 
 /** The request an editor's "start the declared ensemble" sends (resolveEnsembleOptions fills the rest). */
