@@ -198,7 +198,30 @@ describe('dwsChecks (issue #925)', () => {
 			['unstated', 'confirm']
 		]);
 		expect(cs[1]!.confirm).toBe('These values are daily flows in l/s');
-		// An unstated unit as rain: not a stated flow, so nothing is refused (the unit is the person's to choose).
-		expect(dwsChecks(parseDwsExport(unstated).dws, 'rain_catchment_mm')).toEqual([]);
+		// An unstated unit as rain: not a stated flow, so not refused, but a reservoir's table is confirmed (below).
+		expect(ids(dwsChecks(parseDwsExport(unstated).dws, 'rain_catchment_mm'))).toEqual([['flow-station', 'confirm']]);
+	});
+
+	it('asks before a river gauge\'s or reservoir\'s table with no stated unit goes in as rain or evaporation', () => {
+		const strip = (t: string) => t.replace('Daily avg flow rate in cubic metres/sec', 'Daily average value');
+		const gauge = parseDwsExport(strip(fixture)).dws;
+		const dam = parseDwsExport(strip(reservoir)).dws;
+		for (const kind of ['rain_catchment_mm', 'evap_apan_mm']) {
+			const g = dwsChecks(gauge, kind, undefined, 'mm');
+			expect(ids(g)).toEqual([['flow-station', 'confirm']]);
+			expect(g[0]!.message).toContain('X0H000 is a river gauge');
+			expect(g[0]!.confirm).toBe('These values are daily depths in mm, not a flow or discharge');
+			expect(dwsChecks(dam, kind)[0]!.message).toContain('X0R000 is a reservoir station');
+		}
+		// Headerless rows: the code from the file name.
+		const bare = parseDwsExport('20210101  1.5  1\n').dws;
+		expect(ids(dwsChecks(bare, 'rain_catchment_mm', 'X0H000.txt'))).toEqual([['flow-station', 'confirm']]);
+		expect(ids(dwsChecks(bare, 'evap_apan_mm', 'X0R000.txt'))).toEqual([['flow-station', 'confirm']]);
+		// A weather station (E) or no code asks nothing; a stated flow is refused instead, not confirmed.
+		expect(dwsChecks(bare, 'evap_apan_mm', 'X0E000.txt')).toEqual([]);
+		expect(dwsChecks(bare, 'rain_catchment_mm', 'rain.txt')).toEqual([]);
+		expect(ids(dwsChecks(parseDwsExport(fixture).dws, 'rain_catchment_mm'))).toEqual([['flow-not-depth', 'refused']]);
+		// Taken as a flow, a river gauge's unstated table keeps only the unstated-unit question.
+		expect(ids(dwsChecks(gauge, 'flow_observed_m3s'))).toEqual([['unstated', 'confirm']]);
 	});
 });

@@ -7123,7 +7123,12 @@ The code is read from the file's text outside its data rows (a heading such
 as `X0R000 (…)`, or a saved page's `Station=X0R000100.00`), else from the
 file name (`X0R000.txt`); a river gauge (H) asks nothing. And a block that
 states m³/s is refused as a rain or evaporation kind (*A flow, not a depth*,
-no tick to get past it: pick a flow kind). A plain date,value CSV reads
+no tick to get past it: pick a flow kind). A river gauge's (H) or a
+reservoir's (R) table that states no unit, taken as rain or evaporation, asks
+first (*A flow station*: the station measures a flow or a spill, not rain;
+*These values are daily depths in (the chosen unit), not a flow or
+discharge*); headerless rows take the code from the file name, and a weather
+station (E) asks nothing. A plain date,value CSV reads
 a negative value as a gap too (issue #51: every kind is a rain, flow or
 evaporation, so −999 or −1 is a "no reading" placeholder), and its summary
 adds a *Negative values* line with how many (`csv.ts` `negativeGaps`). In number fields, a comma is a thousands separator only in a

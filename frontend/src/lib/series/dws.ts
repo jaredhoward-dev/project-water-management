@@ -95,7 +95,7 @@ export function dwsFlowCheck(dws: DwsImport | undefined, kind: string): string |
  * lets the upload go ahead, null when the upload is refused for this kind (another kind is the answer).
  */
 export interface DwsCheck {
-	id: 'unstated' | 'reservoir' | 'flow-not-depth';
+	id: 'unstated' | 'reservoir' | 'flow-not-depth' | 'flow-station';
 	title: string;
 	message: string;
 	confirm: string | null;
@@ -104,7 +104,8 @@ export interface DwsCheck {
 /**
  * Every check on uploading this DWS export as `kind` (issues #909, #925): an unstated unit taken as a flow
  * (dwsFlowCheck), a reservoir station's table taken as a flow (its daily "flow" is the spillway discharge,
- * not the river's), and a stated flow (m³/s) taken as rain or evaporation, which is refused. `fileName`
+ * not the river's), a stated flow (m³/s) taken as rain or evaporation, which is refused, and a
+ * river gauge's or reservoir's table with no stated unit taken as rain or evaporation, which is confirmed. `fileName`
  * gives the station code when the text names none. `unit` is the form's unit, for the checkbox's words.
  */
 export function dwsChecks(dws: DwsImport | undefined, kind: string, fileName?: string, unit = 'm³/s'): DwsCheck[] {
@@ -120,6 +121,17 @@ export function dwsChecks(dws: DwsImport | undefined, kind: string, fileName?: s
 		});
 	}
 	const station = dws.station ?? dwsStationInName(fileName);
+	// A river gauge's (H) or a reservoir's (R) table with no stated unit, taken as rain or evaporation: the station
+	// measures a flow or a spill, so the person says it is a depth first (the stated-m³/s case is refused above).
+	if (!flowKind && dws.quantity !== 'flow' && station && (station[2] === 'H' || station[2] === 'R')) {
+		const what = station[2] === 'R' ? 'a reservoir station, whose daily table is the spillway discharge' : 'a river gauge, whose daily table is a flow';
+		checks.push({
+			id: 'flow-station',
+			title: 'A flow station',
+			message: `${station} is ${what} (m³/s), not rain or evaporation, though the file states no unit.`,
+			confirm: `These values are daily depths in ${unit}, not a flow or discharge`
+		});
+	}
 	if (flowKind && isReservoirStation(station)) {
 		checks.push({
 			id: 'reservoir',
