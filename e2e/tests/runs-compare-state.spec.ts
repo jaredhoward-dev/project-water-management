@@ -1,6 +1,8 @@
 // Selection and URL state on Runs & results and Compare runs when the page moves under a pick still out: a run
 // shown from the cache while another run's results are loading, a run that finishes after its tab was left, and a
-// compare card's project pick left waiting when Back changes the pair.
+// compare card's project pick left waiting when Back changes the pair, the comparison marked as of the runs before
+// while a card waits on a project with no runs, and the pick after the run on screen is deleted (issue #924).
+import { answerConfirm } from '../support/confirm.ts';
 import { createProject, createRun, seedRunnableProject } from '../support/api.ts';
 import { runCard, runSelect } from '../support/compare.ts';
 import { sections } from '../support/data.ts';
@@ -96,4 +98,66 @@ test('Back on Compare runs drops a project picked for a card that had no run to 
 	await expect(whatIfProject).toHaveValue(project.id);
 	await expect(runSelect(page, 'What-if 1')).toBeEnabled();
 	await expect(runSelect(page, 'What-if 1')).toHaveValue(second);
+});
+
+test('while a card waits on a project with no runs, the comparison says it is still of the runs before', async ({ page, owner }) => {
+	void owner;
+	const project = await seedRunnableProject(page.request, 'Compare stale pair');
+	const first = await createRun(page.request, project.id, 'Baseline');
+	const second = await createRun(page.request, project.id, 'Second');
+	const empty = await createProject(page.request, 'Compare stale empty');
+
+	await page.goto(`/compare?a=${project.id}:${first}&b=${project.id}:${second}`);
+	await expect(page.getByRole('heading', { level: 2, name: 'Full comparison' })).toBeVisible();
+	await expect(page.getByTestId('compare-stale')).toHaveCount(0);
+
+	await runCard(page, 'What-if 1').getByRole('combobox', { name: 'Project' }).selectOption(empty.id);
+	await expect(runSelect(page, 'What-if 1')).toBeDisabled();
+	// The URL keeps the pair, and the comparison below is marked as of it, not of the card's empty project.
+	await expect(page).toHaveURL(new RegExp(`b=${project.id}%3A${second}`));
+	await expect(page.getByTestId('compare-stale')).toHaveText(
+		"What-if 1's project, Compare stale empty, has no runs, so the comparison below is still of the runs chosen before. Pick a project with runs, or go Back."
+	);
+	await expect(runCard(page, 'What-if 1').getByText('No run chosen')).toBeVisible();
+	await expect(runCard(page, 'What-if 1').getByTestId('what-if-change')).toHaveCount(0);
+
+	// Back to a project with runs: a run is picked and the note goes.
+	await runCard(page, 'What-if 1').getByRole('combobox', { name: 'Project' }).selectOption(project.id);
+	await expect(runSelect(page, 'What-if 1')).toBeEnabled();
+	await expect(page.getByTestId('compare-stale')).toHaveCount(0);
+});
+
+test('the standalone page’s Back to runs opens the Runs tab on the run being looked at', async ({ page, owner }) => {
+	void owner;
+	const project = await seedRunnableProject(page.request, 'Compare back keeps run');
+	const first = await createRun(page.request, project.id, 'Baseline');
+	await createRun(page.request, project.id, 'Second');
+	const third = await createRun(page.request, project.id, 'Third');
+
+	// What-if 1 is not the newest run, so the Runs tab's own default would show another.
+	await page.goto(`/compare?a=${project.id}:${third}&b=${project.id}:${first}`);
+	const back = page.getByRole('link', { name: 'Back to runs' });
+	await expect(back).toHaveAttribute('href', `/projects/${project.id}?tab=runs&run=${first}`);
+	await back.click();
+	await expect(page).toHaveURL(new RegExp(`tab=runs&run=${first}`));
+	await expect(page.getByRole('heading', { level: 2, name: 'Baseline' })).toBeVisible();
+});
+
+test('deleting the run on screen shows the run first load would', async ({ page, owner }) => {
+	void owner;
+	const project = await seedRunnableProject(page.request, 'Runs delete default');
+	await createRun(page.request, project.id, 'Baseline');
+	const second = await createRun(page.request, project.id, 'Second');
+	const third = await createRun(page.request, project.id, 'Third');
+
+	await openRuns(page, project.id);
+	await expect(page.getByRole('heading', { level: 2, name: 'Third' })).toBeVisible();
+	await expect(page).toHaveURL(new RegExp(`run=${third}`));
+
+	await runsList(page).getByRole('button', { name: 'Delete run Third' }).click();
+	await answerConfirm(page, true);
+	// An editor's default (runList.ts defaultRunId): the newest run left.
+	await expect(page).toHaveURL(new RegExp(`run=${second}`));
+	await expect(page.getByRole('heading', { level: 2, name: 'Second' })).toBeVisible();
+	await expect(runsList(page).getByRole('button', { name: 'Delete run Third' })).toHaveCount(0);
 });

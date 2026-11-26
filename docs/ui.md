@@ -11255,7 +11255,8 @@ read it before.
   latest", a new run) is a step in history, so Back returns to the run before,
   as a unit, dam or run pick does on EWR, Hydrological units, Dams
   and Allocations; the default pick and the fallback after a delete replace
-  the entry (issue #521; until then a pick here replaced it); editors delete one with its ✕ (a run already gone, deleted
+  the entry (issue #521; until then a pick here replaced it), and that fallback
+  is the default pick itself (`defaultRunId`, issue #924; it was the newest run); editors delete one with its ✕ (a run already gone, deleted
   elsewhere or trimmed, just leaves the list; a run that can't be opened
   because it's gone says so in words, `runs/runList.ts` `runErrorText`, never
   the API's "not found", with **Show the newest run** in place of a Try

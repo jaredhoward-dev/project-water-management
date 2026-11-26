@@ -483,7 +483,8 @@
 		if (selectedId === r.id) {
 			detail = null;
 			detailFor = '';
-			select(runs[0]?.id ?? null);
+			// The same pick as first load (issue #924): for a viewer the published baseline, else the newest.
+			select(defaultRunId(runs, project.role));
 		}
 		// Its row, and the ✕ that had the focus, have gone: the run now in its place takes it.
 		await focusAfterRemove(at, 'ul.runs button.pick', 'runs-h');
