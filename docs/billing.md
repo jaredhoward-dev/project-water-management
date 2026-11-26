@@ -1454,7 +1454,9 @@ Built but off: nothing is paused unless `BILLING_ENFORCED` is on.
   as the user left them, and nothing is deleted. The feed scheduler
   (`app_due_feeds`), the automatic re-run (`app_enqueue_rerun`), the forecast
   run (`enqueueForecastRun`) and the alert checks (`app_alert_schedule`,
-  `alertsOn`) pass a paused catchment by. Everyone can still read, export,
+  `alertsOn`) pass a paused catchment by, and a feed's *Fetch now* (`POST
+  …/feeds/:feedId/run-now`) answers `409` with `details.code: plan_paused`
+  and queues nothing (it had queued the fetch the pause holds). Everyone can still read, export,
   run and edit it (Free never limits modelling), and its published farm
   views stay up with their last publication. `app_project_plan_paused(project)`
   answers when it was paused, or null.
@@ -1475,7 +1477,8 @@ Built but off: nothing is paused unless `BILLING_ENFORCED` is on.
   off; past it, enforced, two of three catchments paused, the most recent
   kept, nothing deleted or switched off; the paused one's feeds, re-runs,
   forecast run and alert checks skipped and the kept one's still scheduled
-  (positive control); members read the marker, strangers don't; the owner's
+  (positive control); *Fetch now* refused on the paused one and fetching on
+  the kept one; members read the marker, strangers don't; the owner's
   choice moves the pause and a stranger's is refused; an upgrade resumes
   everything; a never-paid account isn't paused; only the worker sweeps.
 
@@ -1584,19 +1587,24 @@ them on together.
 - **What it refuses.** On a project whose billing account has no live
   subscription (Free; trialing, active and past-due accounts are never
   gated, as 338 counts them), the caller can't start an assistant turn
-  (`POST …/assistant/messages`) or switch a data feed on (`POST
-  …/feeds` with the feed enabled, or `PATCH …/feeds/:feedId` taking it from
-  off to on) while their email is unverified (`403 email_unverified`) or on
-  a disposable domain (`403 email_disposable`). The gate is the caller's,
-  whatever their role: an unverified viewer on a verified owner's Free
-  project is refused the assistant. Attaching a feed switched off, saving a
-  feed already on, a project with no billing account, and every route that
-  isn't one of those three are never refused. The refusal comes after the
+  (`POST …/assistant/messages`) or switch a data feed on (any route that
+  attaches a feed switched on: `POST …/feeds` with the feed enabled, the
+  boundary's Apply `POST …/feeds/{chirps,agera5_et0}/from-boundary` and the
+  units' Apply `POST …/feeds/chirps/from-units`; or `PATCH …/feeds/:feedId`
+  taking it from off to on) while their email is unverified (`403
+  email_unverified`) or on a disposable domain (`403 email_disposable`). The
+  gate is the caller's, whatever their role: an unverified viewer on a
+  verified owner's Free project is refused the assistant. Attaching a feed
+  switched off, saving a feed already on (the Applies keep an existing
+  feed's on or off), a project with no billing account, and every other
+  route are never refused. The refusal comes after the
   role check (a non-member still gets 404) and before anything is counted
   or reserved.
 - **Where.** `backend/src/billing/emailGate.ts` (`requireFreeVerifiedEmail`),
-  called from `assistant/routes.ts` before `beginTurn` and from
-  `feeds/routes.ts`; whether it applies comes from `app_free_email_gate`
+  called from `assistant/routes.ts` before `beginTurn`, from `feeds/store.ts`
+  `createFeed` (every attach goes through it, so the boundary's and the units'
+  Apply can't skip the gate, as they did before round 2026-11-27) and from
+  `feeds/routes.ts`'s PATCH; whether it applies comes from `app_free_email_gate`
   (343_free_email_gate), a definer function run as the caller, since
   `app_entitlements` hides the plan below editor. It answers NULL unless
   billing is enforced and the caller is a member of a project on Free, and
@@ -1633,7 +1641,9 @@ them on together.
   connection and checks it answers promptly and is counted.
 - **Tests.** `backend/src/billing/emailGate.db.test.ts` (off allowed; on,
   unverified and disposable refused for the assistant and for attaching and
-  switching on a feed; verified, paid and attached-off allowed; a
+  switching on a feed, and for the boundary's and the units' Apply
+  (counted; a verified owner applies, the positive control); verified, paid
+  and attached-off allowed; a
   non-member's 404; the function's answers; each refusal counted once on
   the SAST day and logged with no address),
   `backend/src/auth/disposable.test.ts`,

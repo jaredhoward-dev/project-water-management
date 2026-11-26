@@ -36,6 +36,7 @@ import { compareSeriesNames } from '@water-management/engine';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import type { AuthEnv } from '../auth/middleware.js';
+import { countGateRefusals } from '../billing/emailGate.js';
 import { withUser, type Db } from '../db/tx.js';
 import type { Geometry } from '../geo/geojson.js';
 import { geometryHash } from '../geo/geomHash.js';
@@ -301,108 +302,110 @@ export const feedFromUnitsRoutes = new Hono<AuthEnv>()
 	.post('/:id/feeds/chirps/from-units', async (c) => {
 		const body = ApplyBody.parse(await readJson(c));
 		const id = c.req.param('id');
-		const out = await withUser(c.get('userId'), async (db) => {
-			await requireRole(db, id, 'owner');
-			// One request at a time per project, counted against the feed cap as one (attachSlot's lock).
-			await db.query(`SELECT pg_advisory_xact_lock(hashtextextended('data_feed_cap:' || $1::text, 0))`, [id]);
-			// The product as the proposal chose it: the one asked for, else the units' feeds' own, else rnl.
-			const p = await plan(db, id, body.product);
-			const product = p.product;
-			const startDate = body.startDate ?? CHIRPS_PRODUCT_FIRST_DAY[product];
-			if (startDate < CHIRPS_PRODUCT_FIRST_DAY[product]) {
-				throw new ApiError(400, `CHIRPS v3’s ${product} daily product begins on ${CHIRPS_PRODUCT_FIRST_DAY[product]}; for earlier days use the rnl product`, { code: 'start_date' });
-			}
-			const listed = new Set(p.units.map((u) => u.nodeId));
-			if (body.nodeIds) {
-				const named = new Set(body.nodeIds);
-				const blocked = [...p.refused.map((r) => ({ ...r })), ...p.withoutPolygon.map((u) => ({ ...u, reason: 'the unit has no polygon on the map' }))].filter((u) => named.has(u.nodeId));
-				if (blocked.length) {
-					throw new ApiError(409, `${blocked.map((u) => `“${u.name}”: ${u.reason}`).join('; ')}`, { code: 'unit_refused', units: blocked });
+		const out = await countGateRefusals(() =>
+			withUser(c.get('userId'), async (db) => {
+				await requireRole(db, id, 'owner');
+				// One request at a time per project, counted against the feed cap as one (attachSlot's lock).
+				await db.query(`SELECT pg_advisory_xact_lock(hashtextextended('data_feed_cap:' || $1::text, 0))`, [id]);
+				// The product as the proposal chose it: the one asked for, else the units' feeds' own, else rnl.
+				const p = await plan(db, id, body.product);
+				const product = p.product;
+				const startDate = body.startDate ?? CHIRPS_PRODUCT_FIRST_DAY[product];
+				if (startDate < CHIRPS_PRODUCT_FIRST_DAY[product]) {
+					throw new ApiError(400, `CHIRPS v3’s ${product} daily product begins on ${CHIRPS_PRODUCT_FIRST_DAY[product]}; for earlier days use the rnl product`, { code: 'start_date' });
 				}
-				const unknown = body.nodeIds.filter((n) => !listed.has(n));
-				if (unknown.length) throw new ApiError(400, 'nodeIds: not a land unit of this project', { code: 'unit_unknown' });
-			}
-			const chosen = p.units.filter((u) => !body.nodeIds || body.nodeIds.includes(u.nodeId));
-			const creating = chosen.filter((u) => u.action === 'create').length;
-			const { rows: count } = await db.query<{ n: number }>('SELECT count(*)::int AS n FROM data_feed WHERE project_id = $1', [id]);
-			if (count[0]!.n + creating > MAX_FEEDS) {
-				throw new ApiError(409, `a project can have at most ${MAX_FEEDS} feeds; it has ${count[0]!.n}, and this would add ${creating}: choose fewer units (nodeIds), or remove feeds it no longer needs`, {
-					code: 'feed_limit'
-				});
-			}
-			const feeds: { nodeId: string; feedId: string }[] = [];
-			const changed: { nodeId: string; name: string; feedId: string; action: 'created' | 'updated' | 'replaced' | 'marked'; cells: number }[] = [];
-			for (const u of chosen) {
-				const d = p.detail.get(u.nodeId)!;
-				if (u.action === 'none') {
-					feeds.push({ nodeId: u.nodeId, feedId: d.feed!.id });
-					continue;
+				const listed = new Set(p.units.map((u) => u.nodeId));
+				if (body.nodeIds) {
+					const named = new Set(body.nodeIds);
+					const blocked = [...p.refused.map((r) => ({ ...r })), ...p.withoutPolygon.map((u) => ({ ...u, reason: 'the unit has no polygon on the map' }))].filter((u) => named.has(u.nodeId));
+					if (blocked.length) {
+						throw new ApiError(409, `${blocked.map((u) => `“${u.name}”: ${u.reason}`).join('; ')}`, { code: 'unit_refused', units: blocked });
+					}
+					const unknown = body.nodeIds.filter((n) => !listed.has(n));
+					if (unknown.length) throw new ApiError(400, 'nodeIds: not a land unit of this project', { code: 'unit_unknown' });
 				}
-				const config = { cells: u.cells.map(({ lat, lon, weight }) => ({ lat, lon, weight })), unit: d.mark, product, startDate };
-				if (u.action === 'update' || u.action === 'replace' || u.action === 'mark') {
-					const cur = d.feed!;
-					// As the boundary's Apply: hold the feed's row, and refuse while a fetch is out, whose answer was asked for
-					// with the old cells (fetch_job_id, 029; app_take_feed_fetch waits on this lock).
-					// And refuse a feed saved since the proposal was worked out (a PATCH takes no lock of ours): its settings
-					// would otherwise be overwritten with the ones read before.
-					const { rows: held } = await db.query<{ fetching: boolean; updatedAt: Date }>(
-						'SELECT fetch_job_id IS NOT NULL AS fetching, updated_at AS "updatedAt" FROM data_feed WHERE id = $1 AND project_id = $2 FOR UPDATE',
-						[cur.id, id]
-					);
-					if (held[0]?.fetching) {
-						throw new ApiError(409, `a fetch for the feed of “${u.name}” is still out: set up the units’ rain once it has come back`, { code: 'feed_fetching' });
-					}
-					if (!held[0] || new Date(held[0].updatedAt).getTime() !== new Date(cur.updatedAt).getTime()) {
-						throw new ApiError(409, `the feed of “${u.name}” changed meanwhile: look at the new proposal and try again`, { code: 'feed_changed' });
-					}
-					const old = cur.config as GridConfig;
-					if (u.action === 'mark') {
-						// The outline changed, the cells didn't: the feed's config as it is, with the parcel's mark now. Its
-						// series isn't touched, and neither is its progress: data_feed_stamp leaves it when only the config's
-						// mark changes (358), so its next fetch carries on where the last one stopped.
-						const input = FeedInput.parse({ source: 'chirps', config: { ...old, unit: d.mark }, targetKind: cur.targetKind, targetName: cur.targetName, schedule: cur.schedule, enabled: cur.enabled });
-						if (!(await updateFeed(db, id, cur.id, input).catch(conflict))) throw new ApiError(404, 'not found');
-						feeds.push({ nodeId: u.nodeId, feedId: cur.id });
-						changed.push({ nodeId: u.nodeId, name: u.name, feedId: cur.id, action: 'marked', cells: u.cells.length });
+				const chosen = p.units.filter((u) => !body.nodeIds || body.nodeIds.includes(u.nodeId));
+				const creating = chosen.filter((u) => u.action === 'create').length;
+				const { rows: count } = await db.query<{ n: number }>('SELECT count(*)::int AS n FROM data_feed WHERE project_id = $1', [id]);
+				if (count[0]!.n + creating > MAX_FEEDS) {
+					throw new ApiError(409, `a project can have at most ${MAX_FEEDS} feeds; it has ${count[0]!.n}, and this would add ${creating}: choose fewer units (nodeIds), or remove feeds it no longer needs`, {
+						code: 'feed_limit'
+					});
+				}
+				const feeds: { nodeId: string; feedId: string }[] = [];
+				const changed: { nodeId: string; name: string; feedId: string; action: 'created' | 'updated' | 'replaced' | 'marked'; cells: number }[] = [];
+				for (const u of chosen) {
+					const d = p.detail.get(u.nodeId)!;
+					if (u.action === 'none') {
+						feeds.push({ nodeId: u.nodeId, feedId: d.feed!.id });
 						continue;
 					}
-					if (d.targetName !== cur.targetName) await placeSeries(db, id, u.nodeId, d.targetName, startDate, d.series?.name === cur.targetName ? d.series.id : null);
-					let input = FeedInput.parse({
-						source: 'chirps',
-						config: { ...config, ...(old.staleAfterDays !== undefined ? { staleAfterDays: old.staleAfterDays } : {}) },
-						targetKind: UNIT_TARGET_KIND,
-						targetName: d.targetName,
-						schedule: cur.schedule,
-						enabled: cur.enabled
-					});
-					// New cells under a record (296): its whole record re-read over them, staged and swapped in once complete.
-					// The start date must reach its first own day (a later one is a 409 series_backfill, routes.ts areaCheck).
-					const area = u.action === 'replace' ? await areaCheck(db, id, cur, input, true, true) : { input };
-					input = area.input;
-					if (!(await updateFeed(db, id, cur.id, input, area.replaceFrom, area.replaceConfigFrom ?? null).catch(conflict))) throw new ApiError(404, 'not found');
-					feeds.push({ nodeId: u.nodeId, feedId: cur.id });
-					changed.push({ nodeId: u.nodeId, name: u.name, feedId: cur.id, action: u.action === 'replace' ? 'replaced' : 'updated', cells: u.cells.length });
-					continue;
+					const config = { cells: u.cells.map(({ lat, lon, weight }) => ({ lat, lon, weight })), unit: d.mark, product, startDate };
+					if (u.action === 'update' || u.action === 'replace' || u.action === 'mark') {
+						const cur = d.feed!;
+						// As the boundary's Apply: hold the feed's row, and refuse while a fetch is out, whose answer was asked for
+						// with the old cells (fetch_job_id, 029; app_take_feed_fetch waits on this lock).
+						// And refuse a feed saved since the proposal was worked out (a PATCH takes no lock of ours): its settings
+						// would otherwise be overwritten with the ones read before.
+						const { rows: held } = await db.query<{ fetching: boolean; updatedAt: Date }>(
+							'SELECT fetch_job_id IS NOT NULL AS fetching, updated_at AS "updatedAt" FROM data_feed WHERE id = $1 AND project_id = $2 FOR UPDATE',
+							[cur.id, id]
+						);
+						if (held[0]?.fetching) {
+							throw new ApiError(409, `a fetch for the feed of “${u.name}” is still out: set up the units’ rain once it has come back`, { code: 'feed_fetching' });
+						}
+						if (!held[0] || new Date(held[0].updatedAt).getTime() !== new Date(cur.updatedAt).getTime()) {
+							throw new ApiError(409, `the feed of “${u.name}” changed meanwhile: look at the new proposal and try again`, { code: 'feed_changed' });
+						}
+						const old = cur.config as GridConfig;
+						if (u.action === 'mark') {
+							// The outline changed, the cells didn't: the feed's config as it is, with the parcel's mark now. Its
+							// series isn't touched, and neither is its progress: data_feed_stamp leaves it when only the config's
+							// mark changes (358), so its next fetch carries on where the last one stopped.
+							const input = FeedInput.parse({ source: 'chirps', config: { ...old, unit: d.mark }, targetKind: cur.targetKind, targetName: cur.targetName, schedule: cur.schedule, enabled: cur.enabled });
+							if (!(await updateFeed(db, id, cur.id, input).catch(conflict))) throw new ApiError(404, 'not found');
+							feeds.push({ nodeId: u.nodeId, feedId: cur.id });
+							changed.push({ nodeId: u.nodeId, name: u.name, feedId: cur.id, action: 'marked', cells: u.cells.length });
+							continue;
+						}
+						if (d.targetName !== cur.targetName) await placeSeries(db, id, u.nodeId, d.targetName, startDate, d.series?.name === cur.targetName ? d.series.id : null);
+						let input = FeedInput.parse({
+							source: 'chirps',
+							config: { ...config, ...(old.staleAfterDays !== undefined ? { staleAfterDays: old.staleAfterDays } : {}) },
+							targetKind: UNIT_TARGET_KIND,
+							targetName: d.targetName,
+							schedule: cur.schedule,
+							enabled: cur.enabled
+						});
+						// New cells under a record (296): its whole record re-read over them, staged and swapped in once complete.
+						// The start date must reach its first own day (a later one is a 409 series_backfill, routes.ts areaCheck).
+						const area = u.action === 'replace' ? await areaCheck(db, id, cur, input, true, true) : { input };
+						input = area.input;
+						if (!(await updateFeed(db, id, cur.id, input, area.replaceFrom, area.replaceConfigFrom ?? null).catch(conflict))) throw new ApiError(404, 'not found');
+						feeds.push({ nodeId: u.nodeId, feedId: cur.id });
+						changed.push({ nodeId: u.nodeId, name: u.name, feedId: cur.id, action: u.action === 'replace' ? 'replaced' : 'updated', cells: u.cells.length });
+						continue;
+					}
+					await placeSeries(db, id, u.nodeId, d.targetName, startDate, null);
+					const input = FeedInput.parse({ source: 'chirps', config, targetKind: UNIT_TARGET_KIND, targetName: d.targetName });
+					const fid = await createFeed(db, id, input).catch(conflict);
+					feeds.push({ nodeId: u.nodeId, feedId: fid });
+					changed.push({ nodeId: u.nodeId, name: u.name, feedId: fid, action: 'created', cells: u.cells.length });
 				}
-				await placeSeries(db, id, u.nodeId, d.targetName, startDate, null);
-				const input = FeedInput.parse({ source: 'chirps', config, targetKind: UNIT_TARGET_KIND, targetName: d.targetName });
-				const fid = await createFeed(db, id, input).catch(conflict);
-				feeds.push({ nodeId: u.nodeId, feedId: fid });
-				changed.push({ nodeId: u.nodeId, name: u.name, feedId: fid, action: 'created', cells: u.cells.length });
-			}
-			const created = changed.filter((x) => x.action === 'created').length;
-			// marked: the feeds whose mark alone was rewritten (followups F7b); updated counts the others changed, the
-			// feeds re-reading their record too; replaced, those alone (296).
-			const marked = changed.filter((x) => x.action === 'marked').length;
-			const updated = changed.length - created - marked;
-			const replaced = changed.filter((x) => x.action === 'replaced').length;
-			// One History entry for the whole action, naming each unit it set up.
-			if (changed.length)
-				await recordAudit(db, id, 'feed.configured', { action: 'units', source: 'chirps', targetKind: UNIT_TARGET_KIND, product, startDate, created, updated, ...(marked ? { marked } : {}), units: changed });
-			// The units left out (refused, or with no polygon) say why, so the caller sees what wasn't done.
-			const skipped = body.nodeIds ? [] : [...p.refused, ...p.withoutPolygon.map((u) => ({ ...u, reason: 'the unit has no polygon on the map' }))];
-			return { created, updated, replaced, marked, feeds, skipped };
-		});
+				const created = changed.filter((x) => x.action === 'created').length;
+				// marked: the feeds whose mark alone was rewritten (followups F7b); updated counts the others changed, the
+				// feeds re-reading their record too; replaced, those alone (296).
+				const marked = changed.filter((x) => x.action === 'marked').length;
+				const updated = changed.length - created - marked;
+				const replaced = changed.filter((x) => x.action === 'replaced').length;
+				// One History entry for the whole action, naming each unit it set up.
+				if (changed.length)
+					await recordAudit(db, id, 'feed.configured', { action: 'units', source: 'chirps', targetKind: UNIT_TARGET_KIND, product, startDate, created, updated, ...(marked ? { marked } : {}), units: changed });
+				// The units left out (refused, or with no polygon) say why, so the caller sees what wasn't done.
+				const skipped = body.nodeIds ? [] : [...p.refused, ...p.withoutPolygon.map((u) => ({ ...u, reason: 'the unit has no polygon on the map' }))];
+				return { created, updated, replaced, marked, feeds, skipped };
+			})
+		);
 		return c.json(out);
 	});
 
