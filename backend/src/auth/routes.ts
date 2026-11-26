@@ -447,9 +447,11 @@ export const authRoutes = new Hono<AuthEnv>()
 	// now, so every session issued before it is rejected (session.ts).
 	.post('/logout-everywhere', requireUser, async (c) => {
 		// This server's clock, the one that stamps session iat_ms (see reset-password).
-		await withUser(c.get('userId'), (db) =>
-			db.query('UPDATE app_user SET sessions_revoked_at = $2 WHERE id = $1', [c.get('userId'), new Date()])
-		);
+		// A pending change of address goes too (347): whoever this signs out mustn't keep a link that moves the account.
+		await withUser(c.get('userId'), async (db) => {
+			await db.query('UPDATE app_user SET sessions_revoked_at = $2 WHERE id = $1', [c.get('userId'), new Date()]);
+			await db.query('DELETE FROM email_change WHERE user_id = $1', [c.get('userId')]);
+		});
 		clearSession(c);
 		// The watermark moved, so every device cookie is void anyway (device.ts); drop this one too.
 		clearDevice(c);
@@ -626,8 +628,11 @@ export const authRoutes = new Hono<AuthEnv>()
 			);
 			const updated = rows[0];
 			if (!updated) return undefined;
-			// Outstanding reset links die with the old password, and the lockout count clears.
+			// Outstanding reset links die with the old password, and the lockout count clears. So does a pending change
+			// of address (347): one asked for with a stolen session and the password would otherwise still move the
+			// account to the asker's inbox after the owner secured it.
 			await db.query("DELETE FROM email_token WHERE user_id = $1 AND purpose = 'reset'", [userId]);
+			await db.query('DELETE FROM email_change WHERE user_id = $1', [userId]);
 			await db.query('SELECT app_login_succeeded($1)', [updated.email]);
 			return updated;
 		});
