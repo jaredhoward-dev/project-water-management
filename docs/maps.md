@@ -3996,12 +3996,15 @@ point every ~320 m; the Relief layer is the same data drawn as shading.
 
 - **The points stay put.** The cells are picked on the global pixel grid
   (their index a multiple of 10), so a pan never shifts them
-  (`backend/src/delineation/demGrid.ts`).
+  (`backend/src/delineation/demGrid.ts`). The grid's tile side comes from a
+  tile the DEM has in the box (the one under its centre, else the first
+  found), never assumed, so a view over the data's edge still puts each
+  point on its own cell; a box the DEM has no tile in gives no points.
 - **The view decides what is asked.** `GET …/map/dem-grid?bbox=`
   ([api.md § Catchment map](./api.md#catchment-map)) with the view snapped
   out to 0.01° (`mapLayers.ts` `demGridViewBbox`, through the shared
   `snappedViewBbox`), at most 0.5° a side ("Zoom in to see the DEM grid");
-  more than 5 000 points (counted before a tile is read) comes back
+  more than 5 000 points (counted from the one tile read for its side, before the points' tiles) comes back
   `tooDense`. It reads the DEM's decoded tiles, cached per process
   (`dem.ts`), and isn't counted against the elevation-model cap, which is for
   delineation's work.
