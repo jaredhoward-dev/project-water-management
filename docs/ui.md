@@ -9771,10 +9771,17 @@ calibration's line points at *How the shown run fits* for NSE and PBIAS.
   locations, "*n* runs in all over *k* locations."): one budget per
   optimisation of the engine's own plan (`plannedFits`, the rule
   `calibrate()` builds its optimisations from; `fit.ts` `planRuns`), with the
-  fit without the WR2012 penalty at the headline's step only. The record
-  isn't loaded before Fit, so the estimate still counts a dry → wet test the
-  record may be too short for; the engine's `calibrationPlan(input, opts)`
-  gives the exact plan once it is (issue #865). The button is on the
+  fit without the WR2012 penalty at the headline's step only, and the dry
+  → wet test only at a step whose record has 4 qualifying water years: the
+  panel fetches the model input once when it opens and reads each step's
+  count with the engine's `qualifyingWaterYears` (the years the test
+  ranks; `fit.ts` `stepWaterYears`), with the form and network as they
+  stand, a moment after the last edit; until then, or where a step can't
+  be set up yet, the test is counted (issues #865, #894). The automated
+  calibration's "*n* model runs in all" plans each rule case the same way,
+  one step at the headline (`autoFit.ts` `autoRunsTotal`, its years from
+  the engine's `ruleCaseWaterYears`, the rules' flagged-year exclusions
+  out). The button is on the
   first screen of the section at 1440×900 (`fit-panel-layout.spec.ts`). The
   seed's, starts' and second record's explanations are under the page's
   *Explain each setting* switch. It takes

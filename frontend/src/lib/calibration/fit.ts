@@ -8,6 +8,8 @@ import {
 	withoutForecastTail,
 	OBJECTIVE_LABELS,
 	plannedFits,
+	qualifyingWaterYears,
+	DSST_MIN_WATER_YEARS,
 	waterYearLabel,
 	type CalibrationBounds,
 	type CalibrationPrior,
@@ -142,20 +144,48 @@ export function rankedByText(d: Pick<DifferentialTest, 'rankedBy'>): string {
  * Runs the fit will make: one budget per optimisation of the engine's own plan (plannedFits, the rule calibrate()
  * builds its optimisations from, issue #865): one per start, the split-sample and dry → wet tests with validation,
  * one without the WR2012 penalty where it applies, and one per start without the regional prior when asked
- * (`unpriored`). `dsst`: the record has the 4 water years a dry → wet test needs; the record isn't loaded before Fit,
- * so the estimate counts it unless told otherwise, and the progress bar then follows the engine's exact plan.
+ * (`unpriored`). `dsst`: the record has the DSST_MIN_WATER_YEARS qualifying water years a dry → wet test needs
+ * (planRuns reads it per step from stepWaterYears, issue #894); counted unless told otherwise.
  */
 export const totalRuns = (budget: number, validate: boolean, penalty = false, starts = 1, unpriored = false, dsst = true) =>
 	budget * plannedFits({ starts, validate, dsst, penalty, unpriored }).length;
 
+/** One step of a fit as the estimate reads it: the headline's or not, and its record's qualifying water years (null: not known). */
+export interface PlanRunsStep {
+	headline?: boolean;
+	/** Water years with enough scored days for the dry → wet test (engine qualifyingWaterYears); null or absent = not known, so the test is counted. */
+	waterYears?: number | null;
+}
+
+/** Whether a step's record has the water years the dry → wet test needs (engine DSST_MIN_WATER_YEARS); not known counts it. */
+export const stepHasDsst = (st: PlanRunsStep) => st.waterYears == null || st.waterYears >= DSST_MIN_WATER_YEARS;
+
 /**
  * Runs a fit over its calibration locations will make (issue #865): each step's totalRuns, with the unpenalised fit
- * at the headline's step only, since the WR2012 MAR penalty applies at the headline location alone (engine 1.110.0).
- * No steps (no network yet) is one step at the headline.
+ * at the headline's step only, since the WR2012 MAR penalty applies at the headline location alone (engine 1.110.0),
+ * and the dry → wet test only at a step whose record has DSST_MIN_WATER_YEARS qualifying water years (issue #894;
+ * a step whose count isn't known yet counts it). No steps (no network yet) is one step at the headline.
  */
-export function planRuns(steps: readonly { headline?: boolean }[] | null | undefined, budget: number, validate: boolean, penalty: boolean, starts: number, unpriored: boolean, dsst = true): number {
-	const list = steps?.length ? steps : [{ headline: true }];
-	return list.reduce((n, st) => n + totalRuns(budget, validate, penalty && !!st.headline, starts, unpriored, dsst), 0);
+export function planRuns(steps: readonly PlanRunsStep[] | null | undefined, budget: number, validate: boolean, penalty: boolean, starts: number, unpriored: boolean): number {
+	const list: readonly PlanRunsStep[] = steps?.length ? steps : [{ headline: true }];
+	return list.reduce((n, st) => n + totalRuns(budget, validate, penalty && !!st.headline, starts, unpriored, stepHasDsst(st)), 0);
+}
+
+/**
+ * Each step's qualifying water years from the fit's input (issue #894), by the engine's own rule (qualifyingWaterYears,
+ * what the dry → wet test ranks), so the estimate before Fit leaves out a test a short record skips. A step the
+ * engine can't set up yet (no record there, a refused input) is null: not known, and Fit says why.
+ */
+export function stepWaterYears<S extends { zoneNodeId: string | null }>(input: ModelInput, steps: readonly S[]): (S & { waterYears: number | null })[] {
+	return steps.map((st) => {
+		let waterYears: number | null = null;
+		try {
+			waterYears = qualifyingWaterYears(input, { model: 'gr4j', zone: st.zoneNodeId }).length;
+		} catch {
+			waterYears = null;
+		}
+		return { ...st, waterYears };
+	});
 }
 
 export const STAGE_LABEL: Record<CalibrationStage, string> = {

@@ -11,7 +11,7 @@ import { GR4J_NO_PET } from '../runoff/pet';
 import { runoffForcing, simulateRunoff } from '../runoff/simulate';
 import { randomInput } from '../testing/fuzz';
 import { checkAll } from '../testing/invariants';
-import { calibrate, calibrationPlan, plannedFits, prepareCalibration, prepareCalibrationFits, startSeed, startsNotes, validationNotes, type CalibrateOptions, type DifferentialTest, type FitOutcome, type ValidationTest } from './calibrate';
+import { calibrate, calibrationPlan, DSST_MIN_WATER_YEARS, plannedFits, qualifyingWaterYears, prepareCalibration, prepareCalibrationFits, startSeed, startsNotes, validationNotes, type CalibrateOptions, type DifferentialTest, type FitOutcome, type ValidationTest } from './calibrate';
 import type { DdsState } from './dds';
 import { MAX_STARTS } from './params';
 import { BOOTSTRAP_LEVEL, BOOTSTRAP_RESAMPLES, CLIMATOLOGY_HALF_WINDOW } from './bootstrap';
@@ -401,6 +401,25 @@ describe('calibrate', () => {
 		// And the plan before the fit leaves it out too (issue #865).
 		expect(calibrationPlan(synthetic({ x1: 420, x2: 0, x3: 85, x4: 2.3 }, 2.5), { budget: 60 })).toEqual([{ stage: 'full' }, { stage: 'split' }]);
 		expect(report.notes.join(' ')).toMatch(/too few to fit on dry years and test on wet ones.*weakly constrained/);
+	});
+
+	it('counts the qualifying water years the dry → wet test needs before any fit, by the rule the fit uses (issue #894)', () => {
+		const short = synthetic({ x1: 420, x2: 0, x3: 85, x4: 2.3 }, 2.5);
+		const long = synthetic({ x1: 420, x2: 0, x3: 85, x4: 2.3 }, 8);
+		expect(qualifyingWaterYears(short).length).toBeLessThan(DSST_MIN_WATER_YEARS);
+		expect(qualifyingWaterYears(long).length).toBeGreaterThanOrEqual(DSST_MIN_WATER_YEARS);
+		// Ascending, and the same years the fit's dry → wet test splits.
+		const years = qualifyingWaterYears(long);
+		expect(years).toEqual([...years].sort((a, b) => a - b));
+		const d = calibrate(long, { budget: 30, seed: 2 }).differential!;
+		for (const y of [...d.dryYears, ...d.wetYears]) expect(years).toContain(y);
+		// Whether it reaches DSST_MIN_WATER_YEARS is whether the plan has the test.
+		for (const input of [short, long]) {
+			expect(calibrationPlan(input, { budget: 60 }).some((p) => p.stage === 'dsst')).toBe(qualifyingWaterYears(input).length >= DSST_MIN_WATER_YEARS);
+		}
+		// Exclusions the fit is given leave their years out of the count too.
+		const mid = years[3]!;
+		expect(qualifyingWaterYears(long, { exclusions: [{ start: `${mid}-01-01`, end: `${mid}-12-31` }] }).length).toBeLessThan(years.length);
 	});
 
 	it('states how representative the record is against the whole run’s rain (CR-34)', () => {
