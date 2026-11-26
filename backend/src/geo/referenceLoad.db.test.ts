@@ -127,7 +127,7 @@ afterAll(async () => {
 	await client.query('DELETE FROM gazetteer_reference WHERE dataset = ANY($1::text[])', [[GZ, GZN]]);
 	await client.query('DELETE FROM rain_map_dataset WHERE dataset = ANY($1::text[])', [[MG, LY]]);
 	await client.query('DELETE FROM waterbody_reference WHERE dataset = ANY($1::text[])', [[WB, WB2]]);
-	// Put back the rows the WB loads moved (an exact copy, whatever dataset they were in), and their loads' records.
+X
 	await client.query('INSERT INTO waterbody_reference SELECT * FROM jsonb_populate_recordset(NULL::waterbody_reference, $1::jsonb) ON CONFLICT (uid) DO NOTHING', [
 		JSON.stringify(waterbodiesBefore)
 	]);
