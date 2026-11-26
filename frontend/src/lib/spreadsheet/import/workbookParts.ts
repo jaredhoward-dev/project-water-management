@@ -75,19 +75,34 @@ export function readWorkbookXml(bytes: Uint8Array, part: string): WorkbookXml {
 	return out;
 }
 
-/** SheetJS's built-in number formats (SSF_init_table). */
+/**
+ * The built-in number formats, by id: openpyxl 3.1.5's BUILTIN_FORMATS
+ * (openpyxl/styles/numbers.py; the version scripts/wbt-import/requirements.txt
+ * pins), verbatim. openpyxl decides date vs number from this table keyed by
+ * the cell style's numFmtId (Stylesheet._normalise_numbers), so the browser
+ * reader uses the same one. It is not SheetJS's SSF table, which this reader
+ * otherwise follows: SheetJS also has id 56, a time format, that openpyxl
+ * lacks, so a cell styled with it is a number in Python (issue #895); its
+ * other differences (5–8, 37–44, 14's spelling) never change date vs number.
+ * An id in neither the table nor the workbook's own formats has no format:
+ * a number, as in openpyxl. Re-check this table when the openpyxl pin moves.
+ */
 const BUILTIN_FORMATS: [number, string][] = [
 	[0, 'General'],
 	[1, '0'],
 	[2, '0.00'],
 	[3, '#,##0'],
 	[4, '#,##0.00'],
+	[5, '"$"#,##0_);("$"#,##0)'],
+	[6, '"$"#,##0_);[Red]("$"#,##0)'],
+	[7, '"$"#,##0.00_);("$"#,##0.00)'],
+	[8, '"$"#,##0.00_);[Red]("$"#,##0.00)'],
 	[9, '0%'],
 	[10, '0.00%'],
 	[11, '0.00E+00'],
 	[12, '# ?/?'],
 	[13, '# ??/??'],
-	[14, 'm/d/yy'],
+	[14, 'mm-dd-yy'],
 	[15, 'd-mmm-yy'],
 	[16, 'd-mmm'],
 	[17, 'mmm-yy'],
@@ -96,16 +111,19 @@ const BUILTIN_FORMATS: [number, string][] = [
 	[20, 'h:mm'],
 	[21, 'h:mm:ss'],
 	[22, 'm/d/yy h:mm'],
-	[37, '#,##0 ;(#,##0)'],
-	[38, '#,##0 ;[Red](#,##0)'],
-	[39, '#,##0.00;(#,##0.00)'],
-	[40, '#,##0.00;[Red](#,##0.00)'],
+	[37, '#,##0_);(#,##0)'],
+	[38, '#,##0_);[Red](#,##0)'],
+	[39, '#,##0.00_);(#,##0.00)'],
+	[40, '#,##0.00_);[Red](#,##0.00)'],
+	[41, '_(* #,##0_);_(* \\(#,##0\\);_(* "-"_);_(@_)'],
+	[42, '_("$"* #,##0_);_("$"* \\(#,##0\\);_("$"* "-"_);_(@_)'],
+	[43, '_(* #,##0.00_);_(* \\(#,##0.00\\);_(* "-"??_);_(@_)'],
+	[44, '_("$"* #,##0.00_)_("$"* \\(#,##0.00\\)_("$"* "-"??_)_(@_)'],
 	[45, 'mm:ss'],
 	[46, '[h]:mm:ss'],
 	[47, 'mmss.0'],
 	[48, '##0.0E+0'],
-	[49, '@'],
-	[56, '"上午/下午 "hh"時"mm"分"ss"秒 "']
+	[49, '@']
 ];
 
 /** Formats SheetJS rewrites on load (a Google Sheets quirk). */

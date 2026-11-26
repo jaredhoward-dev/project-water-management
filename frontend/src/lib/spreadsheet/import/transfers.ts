@@ -1,7 +1,7 @@
 // [Transfers] "Draw from dam" columns → transfer rules (extract_project.py
 // read_transfers). One column per rule: the source farm heads it, and the
 // rows above hold its destination, months, max rate and minimum storage.
-import { type Cell, cellAddress, clean, columnLetter, isName, num, pyRepr, pyStr } from './cells';
+import { type Cell, PY_WS_CLASS, cellAddress, clean, columnLetter, isName, num, pyRepr, pyStr, pyStrip } from './cells';
 import { InvalidWorkbookError } from './errors';
 import { monthList, substringExtraMonths } from './months';
 import type { Report } from './report';
@@ -20,10 +20,13 @@ export interface WorkbookTransfer {
 	enabled: boolean;
 }
 
+/** extract_project.py _ZERO_FORMULA, with Python's \\s (wider than JavaScript's; issue #895). Its 0s are ASCII, as in Python. */
+const ZERO_FORMULA = new RegExp(`^=?${PY_WS_CLASS}*0+(?:\\.0*)?${PY_WS_CLASS}*$`);
+
 /** A [Transfers] text-copy formula that is the constant 0 ("=0", or "0"): the transfer is switched off (is_zero_formula). */
 export function isZeroFormula(v: Cell): boolean {
 	if (typeof v === 'number') return v === 0;
-	return typeof v === 'string' && /^=?\s*0+(?:\.0*)?\s*$/.test(v.trim());
+	return typeof v === 'string' && ZERO_FORMULA.test(pyStrip(v));
 }
 
 /** The WARNING for a switched-off transfer (transfer_off_note; same text). */

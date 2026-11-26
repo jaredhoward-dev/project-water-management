@@ -41,6 +41,9 @@ const WS_EDGES = new RegExp(`^[${PY_WS}]+|[${PY_WS}]+$`, 'g');
 /** extract_project.py _CLEAN_RUN: whitespace and the C0, DEL and C1 control characters (issue #385). */
 const CLEAN_RUN = new RegExp(`[${PY_WS}\\x00-\\x1f\\x7f-\\x9f]+`, 'g');
 
+/** A character class of Python's whitespace, for building regexes that match as Python's \\s does. */
+export const PY_WS_CLASS = `[${PY_WS}]`;
+
 /** Python str.strip(). */
 export function pyStrip(s: string): string {
 	return s.replace(WS_EDGES, '');
