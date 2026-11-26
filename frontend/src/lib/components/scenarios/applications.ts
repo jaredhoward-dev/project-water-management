@@ -86,8 +86,16 @@ export function statusPill(a: Pick<Scenario, 'status' | 'outcome'>): { text: str
 	return a.outcome ? { text: OUTCOME_LABEL[a.outcome], tone: TONE[a.outcome] } : { text: 'Decided', tone: 'neutral' };
 }
 
-/** What the Application panel adds to a refused move's error once it has read the application again. */
-export const APPLICATION_CHANGED_TEXT = 'It changed since this page read it (someone else may have withdrawn, reopened or decided it): it now shows where it stands.';
+/**
+ * The Application panel's error for a move the server refused as a conflict,
+ * once it has read the application again: one sentence (issue #934), with the
+ * server's own words, which start lower-case and end without a stop, in
+ * brackets rather than glued on with ". ".
+ */
+export function applicationConflictText(serverText: string): string {
+	const said = serverText.trim().replace(/[.\s]+$/, '');
+	return `The application changed since this page read it, so the move was refused${said ? ` (${said})` : ''}; someone else may have withdrawn, reopened or decided it, and it now shows where it stands.`;
+}
 
 /**
  * After the server refused a move on an application: a 409 is a conflict

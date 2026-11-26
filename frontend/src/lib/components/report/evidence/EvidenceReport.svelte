@@ -1165,7 +1165,7 @@
 				{:else}
 					<p class="small">Errata: none recorded for these runs’ engines in docs/engine-errata.md.</p>
 				{/if}
-				<h3>B.2 Sign-off <HelpTip key={frozen ? 'pack-signoff' : 'signoff-statement'} label="About the sign-off" /></h3>
+				<h3 id="ev-b2-h">B.2 Sign-off <HelpTip key={frozen ? 'pack-signoff' : 'signoff-statement'} label="About the sign-off" /></h3>
 				{#if signoffs && signoffTarget}
 					<SignoffSection {projectId} target={signoffTarget} list={signoffs} onchange={(n) => onsignoffchange?.(n)} timeZone={timeZone ?? DEFAULT_TIME_ZONE} />
 				{:else}

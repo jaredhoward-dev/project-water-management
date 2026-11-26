@@ -142,6 +142,12 @@ test('a baseline pack is created, signed, issued and verified signed out; a copy
 	await expect(checklist).toContainText('The frozen report may be issued');
 	await expect(checklist).toContainText('Not signed under the current pack statement');
 	await expect(checklist).toContainText('Its manifest records every known erratum of its runs’ engines.');
+	// The "Not signed" line links to Appendix B.2 further down the page, where it is signed (issue #934).
+	const toSignoff = checklist.getByRole('link', { name: 'Go to Appendix B.2' });
+	await expect(toSignoff).toHaveAttribute('href', '#ev-b2-h');
+	await toSignoff.click();
+	await expect(page).toHaveURL(/#ev-b2-h$/);
+	await expect(page.locator('#ev-b2-h')).toBeInViewport();
 	await expect(actions.getByRole('button', { name: 'Issue pack' })).toBeDisabled();
 	await expect(page.locator('main')).toHaveAttribute('data-report-footer', /^Draft pack · not issued · /);
 	await expectNoViolations(page);
@@ -245,6 +251,8 @@ test('a baseline pack is created, signed, issued and verified signed out; a copy
 	await page.getByTestId('pack-send-open').click();
 	const sendDialog = page.getByRole('dialog', { name: 'Send evidence pack v1 to the responsible authority' });
 	await expect(sendDialog.getByTestId('pack-send-none')).toContainText('No other member acts for the responsible authority');
+	// It links to the Project page's Acts for the authority panel, where the authority confirms them (issue #934).
+	await expect(sendDialog.getByTestId('pack-send-delegates')).toHaveAttribute('href', new RegExp(`/projects/${project.id}\\?tab=project#delegates-h$`));
 	await sendDialog.getByRole('button', { name: 'Close', exact: true }).click();
 	const assessor = await signIn('Authority assessor');
 	await addMember(page.request, project.id, assessor.user.email, 'editor');

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Scenario } from '#lib/api/types.js';
 import {
+	applicationConflictText,
 	applicationCounts,
 	applicationsContext,
 	daysSince,
@@ -119,5 +120,23 @@ describe('rereadAfterConflict', () => {
 				throw new Error('offline');
 			})
 		).toBeNull();
+	});
+});
+
+describe('applicationConflictText', () => {
+	it('composes one sentence, the server’s words in brackets (issue #934)', () => {
+		const t = applicationConflictText("a withdrawn scenario can't become submitted");
+		expect(t).toBe(
+			"The application changed since this page read it, so the move was refused (a withdrawn scenario can't become submitted); someone else may have withdrawn, reopened or decided it, and it now shows where it stands."
+		);
+		// One sentence: a capital first, one full stop, at the end.
+		expect(t.match(/\./g)).toHaveLength(1);
+		expect(t).not.toContain('. ');
+	});
+	it('drops a trailing stop from the server’s words, and the brackets when there are none', () => {
+		expect(applicationConflictText('already decided. ')).toContain('(already decided);');
+		expect(applicationConflictText('  ')).toBe(
+			'The application changed since this page read it, so the move was refused; someone else may have withdrawn, reopened or decided it, and it now shows where it stands.'
+		);
 	});
 });
