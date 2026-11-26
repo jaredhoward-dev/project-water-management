@@ -338,8 +338,19 @@ export const uncertaintyRoutes = new Hono<AuthEnv>()
 				if (base.runId === runId) throw new ApiError(400, 'a paired band compares two different runs');
 				const refusal = engine(() => pairedRefusal(input, { options: base.options, header: base.result!.header }));
 				if (refusal) throw new ApiError(400, `no paired band: ${refusal}`);
-				// Stored on another engine: the job re-runs its kept sets on the baseline run's inputs too (issue #897), so they must still load (409 if not).
-				if (pairedNeedsRerun(base)) await runModelInput(db, id, base.runId);
+				// Stored on another engine: the job re-runs its kept sets on the baseline run's inputs too (issue #897), so they
+				// must still load (409 if not) and still match the stored ensemble, refused here rather than only in the job.
+				if (pairedNeedsRerun(base)) {
+					const baselineInput = await runModelInput(db, id, base.runId);
+					const baseRefusal = engine(() => pairedRefusal(baselineInput, { options: base.options, header: base.result!.header }));
+					if (baseRefusal) {
+						throw ApiError.coded(
+							400,
+							'paired_baseline_mismatch',
+							`no paired band: the baseline ensemble was stored on engine ${base.engineVersion}, and its run's inputs no longer match it (${baseRefusal}); start a new ensemble on the baseline run`
+						);
+					}
+				}
 				options = base.options;
 				baselineId = body.baselineId;
 			} else {

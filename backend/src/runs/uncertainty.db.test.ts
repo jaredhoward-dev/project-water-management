@@ -351,6 +351,42 @@ describe('storing the result', () => {
 			expect([extra.status, extra.body.error]).toEqual([400, 'the baseline ensemble was stored on this engine: a paired result has no rerun']);
 		});
 
+		// The #897 review: the baseline run's inputs, which the job re-runs the kept sets on, are checked against the stored
+		// ensemble when the paired job starts (paired_baseline_mismatch), not only in the browser job.
+		it('refuse up front a cross-engine baseline whose run no longer matches its stored ensemble, and start a matching one', async () => {
+			const original = (await owner.call('GET', `${base(runA)}/uncertainty/${uid}`)).body.ensemble.result as { header: unknown; members: MemberResult[]; coverage: unknown };
+			expect(options.panOffset).toBeGreaterThan(0);
+			const json = JSON.stringify({ engineVersion: '0.0.0-older', header: original.header, members: original.members, coverage: original.coverage });
+			expect(json).not.toContain('$j$');
+			// Copy uid's options and result (a varied pan coefficient) onto a row of `runId`, stored as on an older engine.
+			const olderOn = async (runId: string) => {
+				const row = (await start(owner, runId)).body.ensemble.id as string;
+				await asOwner(
+					`BEGIN; SELECT set_config('app.current_user_id', '${owner.id}', true);
+					 UPDATE run_uncertainty u SET status = 'complete', engine_version = '0.0.0-older', options = o.options, seed = o.seed, members = o.members,
+					   accepted = o.accepted, summary = o.summary, result = $j$${json}$j$::jsonb FROM run_uncertainty o WHERE u.id = '${row}' AND o.id = '${uid}'; COMMIT;`
+				);
+				return row;
+			};
+			// A baseline run on a monthly PE row, which never reads the pan coefficient the stored ensemble varies.
+			const pe = { kind: 'monthly', mm: [90, 120, 150, 170, 150, 130, 90, 60, 45, 45, 55, 70], source: 'Station FAO-56 ET₀ × 1.0' };
+			const before = (await owner.call('GET', `/projects/${projectId}`)).body.project.settings.pe;
+			expect((await owner.call('PATCH', `/projects/${projectId}`, { settings: { pe } })).status).toBe(200);
+			const runMonthly = await newRun(owner, 'Monthly PE baseline');
+			expect((await owner.call('PATCH', `/projects/${projectId}`, { settings: { pe: before } })).status).toBe(200);
+			const mismatched = await olderOn(runMonthly);
+			const other = await newRun(owner, 'Daily PE, against the monthly baseline');
+			const refused = await start(owner, other, { baselineId: mismatched });
+			expect([refused.status, refused.body.code]).toEqual([400, 'paired_baseline_mismatch']);
+			expect(refused.body.error).toMatch(/stored on engine 0\.0\.0-older, and its run's inputs no longer match it \(.*monthly PE row does not use.*\); start a new ensemble/);
+			// Nothing was started for it.
+			const list = (await owner.call('GET', `${base(other)}/uncertainty`)).body.ensembles as { baselineId: string | null }[];
+			expect(list.some((e) => e.baselineId === mismatched)).toBe(false);
+			// Positive control: the same stored ensemble on a run whose inputs match it starts.
+			const matching = await olderOn(runB);
+			expect((await start(owner, other, { baselineId: matching })).status).toBe(201);
+		});
+
 		it('refuse a baseline of the same run, one not complete, and one from another project', async () => {
 			const same = await start(owner, runA, { baselineId: uid });
 			expect(same.status).toBe(400);

@@ -223,6 +223,12 @@ export const ERROR_CODES = [
  *     admin of the team it is in (a plain member, or an outside person the
  *     team made a direct owner; issue #900, 392_team_project_move_admin).
  *     The project settings page is an English workspace page.
+ *   paired_baseline_mismatch (400): POST …/runs/:runId/uncertainty with a
+ *     `baselineId` whose ensemble was stored on another engine, when the
+ *     baseline run's inputs, which the job re-runs its kept sets on (issue
+ *     #897), no longer match that ensemble (the engine's pairedRefusal: another
+ *     runoff model, period, or a monthly PE under a varied pan coefficient).
+ *     The workspace's uncertainty panel shows the message.
  */
 export const MACHINE_ERROR_CODES = [
 	'render_token_refused',
@@ -262,7 +268,8 @@ export const MACHINE_ERROR_CODES = [
 	'team_plan_not_cancelled',
 	'email_unverified',
 	'email_disposable',
-	'team_move_admin'
+	'team_move_admin',
+	'paired_baseline_mismatch'
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number] | (typeof MACHINE_ERROR_CODES)[number];
 
