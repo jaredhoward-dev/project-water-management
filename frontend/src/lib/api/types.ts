@@ -4808,6 +4808,11 @@ export interface Subscription {
 	 * older API.
 	 */
 	reverseTrial?: boolean;
+	/**
+	 * A plan the operator gave (provider `manual`, status `active`): `staff` for a staff grant (330), `invoice` for a
+	 * paid B2B invoice (335); null for a subscription the payment provider holds. Absent from an older API.
+	 */
+	granted?: 'staff' | 'invoice' | null;
 }
 
 /** One counted thing this month; `limit: null` is unlimited. */

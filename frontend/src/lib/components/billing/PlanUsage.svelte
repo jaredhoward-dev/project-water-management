@@ -34,6 +34,7 @@
 		billingRedirect,
 		checkoutNotice,
 		editorsHint,
+		grantNote,
 		hasPaidSubscription,
 		monthName,
 		priceLine,
@@ -191,6 +192,7 @@
 	const sub = $derived(subscriptionLine(plan.subscription));
 	// The reverse trial's last 3 days (349, trialEnding.ts): when it ends, what Free means, and Upgrade (offered below).
 	const trialEnding = $derived(plan.subscription?.reverseTrial ? trialEndingText(plan.subscription.trialEnd) : null);
+	const grant = $derived(grantNote(plan.subscription));
 	const seatsLine = $derived(subscriptionSeatsLine(plan));
 	const totalLine = $derived(subscriptionTotalLine(plan));
 	const editors = $derived(editorsHint(plan.team?.editorCount));
@@ -213,6 +215,7 @@
 		{:else}
 			<p class="muted sub" data-subscription="none">No subscription: {whose} is on {plan.plan.name}.</p>
 		{/if}
+		{#if grant}<p class="muted sub" data-grant-note>{grant}</p>{/if}
 		{@render assistantShare?.()}
 		{#if note}
 			<p class="note" data-shadow>{note}</p>

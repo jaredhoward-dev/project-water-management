@@ -1745,6 +1745,13 @@ defaults to the operator's login.
   the next SAST midnight, whatever the machine's time zone. Without it the
   grant lasts until revoked. With an end, `cancel_at_period_end` is true, so
   the plan page says it ends and the renewal notice never picks a grant up.
+  The plan page reads a grant from `subscription.granted` (`staff` or
+  `invoice`; `entitlements.ts` `subscriptionSource`, from 333's
+  `app_billing_live_subscription_ref`): *Granted by the operator until …*,
+  with no Upgrade or Manage billing (there is nothing at the provider to
+  manage) and a line to ask the operator; a paid invoice's grant reads
+  *Paid by invoice; runs until …* and keeps Manage billing (its Stripe
+  customer's portal holds the invoices).
   `free` can't be granted (revoke instead), the end must be in the future and
   a reason (≤ 500 characters) is required.
 - **Seats** (374). `app_staff_grant_plan(…, replace, seats)` and `--seats`

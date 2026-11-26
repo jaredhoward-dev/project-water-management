@@ -9,7 +9,7 @@ vi.mock('../jobs/queue.js', () => ({ enqueueJob: vi.fn() }));
 
 const { enqueueJob } = await import('../jobs/queue.js');
 const { createReport } = await import('../reports/store.js');
-const { accountPlan, atLimit, billingEnforced, countUsage, listPlans, myAccountId, projectEntitlements, teamAccountId, toPublicPlan } = await import('./entitlements.js');
+const { accountPlan, atLimit, billingEnforced, countUsage, listPlans, myAccountId, projectEntitlements, subscriptionSource, teamAccountId, toPublicPlan } = await import('./entitlements.js');
 
 const P = '11111111-1111-4111-8111-111111111111';
 const A = '22222222-2222-4222-8222-222222222222';
@@ -132,7 +132,7 @@ describe('accountPlan', () => {
 		expect(db.queries).toHaveLength(1);
 	});
 
-	it('marks the reverse trial (manual + trialing), asking the provider only of a trialing subscription', async () => {
+	it('marks the reverse trial (manual + trialing) and a granted plan (manual + active), asking only of a trialing or active subscription', async () => {
 		const sub = (status: string) => ({ ...plan, plan: { code: 'pro' }, subscription: { status, trialEnd: '2026-12-07T10:00:00.000Z' } });
 		const answer = (status: string, provider: string) => (sql: string) =>
 			sql.includes('app_account_plan') ? [{ plan: sub(status) }] : [{ ref: { provider, externalRef: null } }];
@@ -142,13 +142,31 @@ describe('accountPlan', () => {
 		// A Stripe trial (set by hand in Stripe's dashboard) isn't one.
 		const stripe = fakeDb(answer('trialing', 'stripe'));
 		expect(((await accountPlan(stripe as never, A, {}))?.subscription as { reverseTrial: boolean }).reverseTrial).toBe(false);
-		// A staff grant (manual, active): not a trial, and no second query.
+		// A staff grant (manual, active, no ref): not a trial, granted by staff.
 		const grant = fakeDb(answer('active', 'manual'));
-		expect(((await accountPlan(grant as never, A, {}))?.subscription as { reverseTrial: boolean }).reverseTrial).toBe(false);
-		expect(grant.queries).toHaveLength(1);
+		expect((await accountPlan(grant as never, A, {}))?.subscription).toMatchObject({ reverseTrial: false, granted: 'staff' });
+		expect(grant.queries).toHaveLength(2);
+		// A paid card subscription: neither.
+		const card = fakeDb(answer('active', 'stripe'));
+		expect((await accountPlan(card as never, A, {}))?.subscription).toMatchObject({ reverseTrial: false, granted: null });
+		// A past-due or ended one asks nothing more.
+		const late = fakeDb(answer('past_due', 'stripe'));
+		expect((await accountPlan(late as never, A, {}))?.subscription).toMatchObject({ reverseTrial: false, granted: null });
+		expect(late.queries).toHaveLength(1);
 		// No subscription (Free): left as it is.
 		const free = fakeDb(() => [{ plan }]);
 		expect((await accountPlan(free as never, A, {}))?.subscription).toBeNull();
+	});
+});
+
+describe('subscriptionSource', () => {
+	it('tells the reverse trial, a staff grant and a paid invoice from a provider’s subscription', () => {
+		expect(subscriptionSource('trialing', { provider: 'manual', externalRef: null })).toEqual({ reverseTrial: true, granted: null });
+		expect(subscriptionSource('active', { provider: 'manual', externalRef: null })).toEqual({ reverseTrial: false, granted: 'staff' });
+		expect(subscriptionSource('active', { provider: 'manual', externalRef: 'in_123' })).toEqual({ reverseTrial: false, granted: 'invoice' });
+		expect(subscriptionSource('active', { provider: 'stripe', externalRef: 'sub_1' })).toEqual({ reverseTrial: false, granted: null });
+		expect(subscriptionSource('trialing', { provider: 'stripe', externalRef: 'sub_1' })).toEqual({ reverseTrial: false, granted: null });
+		expect(subscriptionSource('active', null)).toEqual({ reverseTrial: false, granted: null });
 	});
 });
 

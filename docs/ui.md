@@ -3265,7 +3265,9 @@ The page is two cards, side by side where they fit and stacked on a phone:
 
 - **Plan**: its name, its price from the minor units (`R 899.00 a month or
   R 8 990.00 a year`; *No charge* for Free; another currency by its code),
-  then the subscription: *Renews 1 Dec 2026*, *Trial ends …*, or in the
+  then the subscription: *Renews 1 Dec 2026*, *Trial ends …*, *Granted by
+  the operator until …* (a staff grant) or *Paid by invoice; runs until …*
+  (a paid B2B invoice, 335), those two never in the warning colour, or in the
   warning colour *Ends …; it won't renew*, *Payment overdue*, *Cancelled* or
   *Expired*. No subscription says the account is on its plan (Free). Phase 3
   adds the billing buttons, shown only when the API's `provider` is `mock` or
@@ -3273,7 +3275,9 @@ The page is two cards, side by side where they fit and stacked on a phone:
   up): with no subscription, *Upgrade to Pro, monthly (R 899.00 a month)* and
   *…, yearly (R 8 990.00 a year)* (*Team* on a team's page), priced from
   `GET /billing/plans` (unpriced until it answers, or if it fails); with one,
-  *Manage billing*, except during a live reverse trial
+  *Manage billing*, except on a staff grant (`subscription.granted:
+  'staff'`, 330), which offers neither and says *To change or end this plan,
+  ask the operator. Nothing is charged for it here.* (`grantNote`), and
   (`subscription.reverseTrial`, 342), where the Upgrade buttons stay, since
   checkout replaces the trial (344; `plan.ts` `billingActions`,
   `onReverseTrial`). In the trial's last 3 days a note above them says when

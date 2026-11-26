@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AccountPlan, Subscription } from '#lib/api/types.js';
 import {
+	grantNote,
 	CONFIRM_DELAYS_MS,
 	MAX_CHECKOUT_SEATS,
 	billingActions,
@@ -110,6 +111,15 @@ describe('monthName', () => {
 describe('subscriptionLine', () => {
 	it('is nothing on Free (no subscription)', () => {
 		expect(subscriptionLine(null)).toBeNull();
+	});
+	it('says a granted plan is the operator’s, with its end, never in the warning colour', () => {
+		expect(subscriptionLine(sub({ granted: 'staff', cancelAtPeriodEnd: true }))).toEqual({ text: 'Granted by the operator until 1 Dec 2026', warn: false });
+		expect(subscriptionLine(sub({ granted: 'staff', periodEnd: null }))).toEqual({ text: 'Granted by the operator, with no end date', warn: false });
+		expect(subscriptionLine(sub({ granted: 'invoice', cancelAtPeriodEnd: true }))).toEqual({ text: 'Paid by invoice; runs until 1 Dec 2026', warn: false });
+		expect(grantNote(sub({ granted: 'staff' }))).toMatch(/ask the operator/);
+		expect(grantNote(sub({ granted: 'invoice' }))).toBeNull();
+		expect(grantNote(sub({}))).toBeNull();
+		expect(grantNote(null)).toBeNull();
 	});
 	it('gives the renewal day, or the end when it won’t renew', () => {
 		expect(subscriptionLine(sub({}))).toEqual({ text: 'Renews 1 Dec 2026', warn: false });
@@ -261,6 +271,12 @@ describe('billingActions (Phase 3)', () => {
 	});
 	it('offers Manage billing, not Upgrade, once there is a subscription', () => {
 		expect(billingActions(plan({ subscription: sub({}) }))).toEqual({ upgrade: null, manage: true });
+	});
+	it('offers neither on a staff grant (nothing at the provider to manage), and Manage billing on a paid invoice', () => {
+		expect(billingActions(plan({ subscription: sub({ granted: 'staff' }) }))).toEqual({ upgrade: null, manage: false });
+		expect(billingActions(plan({ provider: 'stripe', subscription: sub({ granted: 'staff' }) }))).toEqual({ upgrade: null, manage: false });
+		expect(billingActions(plan({ subscription: sub({ granted: 'invoice' }) }))).toEqual({ upgrade: null, manage: true });
+		expect(billingActions(plan({ subscription: sub({ granted: null }) }))).toEqual({ upgrade: null, manage: true });
 	});
 	it('offers Upgrade during a live reverse trial (checkout replaces it, 344), Manage billing on any other trial', () => {
 		const trial = sub({ status: 'trialing', trialEnd: '2026-12-07T10:00:00.000Z', reverseTrial: true });

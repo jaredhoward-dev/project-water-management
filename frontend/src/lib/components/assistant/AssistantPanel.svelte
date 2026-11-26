@@ -26,6 +26,7 @@
 	import AnswerText from './AnswerText.svelte';
 	import EmailGateNotice from '#lib/components/billing/EmailGateNotice.svelte';
 	import { planLink, useBillingTeam } from '#lib/components/billing/planLink.js';
+	import { assistantTimesFree, planFigures } from '#lib/components/pricing/pricing.js';
 	import { tick } from 'svelte';
 	import type { AssistantProposal } from '#lib/api/types.js';
 	import { fmtDay, fmtPct, fmtWhen } from '#lib/format/number.js';
@@ -58,6 +59,8 @@
 	 */
 	const billingTeam = useBillingTeam();
 	const capPlans = $derived(planLink(billingTeam(), basePath()));
+	// Pro's allowance against Free's, from the plan figures the pricing page reads (engine plans.ts), never typed here.
+	const proTimesFree = assistantTimesFree(planFigures('pro'));
 
 	/** This site's address, for the disclaimer's `{site}` (the Terms link), as liability/Disclaimer.svelte. */
 	const site = typeof location === 'undefined' ? basePath() : `${location.origin}${basePath()}`;
@@ -330,7 +333,7 @@
 				<p class="note warn" role="alert" data-testid="assistant-cap" data-code={chat.refusal.code}>
 					{chat.refusal.message}
 					Back {fmtWhen(chat.refusal.resetsAt)} your time.
-					{#if capOffersPlans(chat.refusal) && chat.refusal.code === 'assistant_monthly_cap'}Pro includes about 15 times as much.{/if}
+					{#if capOffersPlans(chat.refusal) && chat.refusal.code === 'assistant_monthly_cap'}Pro includes about {proTimesFree} times as much.{/if}
 					{#if capOffersPlans(chat.refusal)}
 						{#if capPlans.note}<span data-testid="plan-ask-admin">{capPlans.note}</span>{/if}
 						<a class="cap-plans" href={capPlans.href} data-testid="assistant-compare-plans">Compare plans</a>

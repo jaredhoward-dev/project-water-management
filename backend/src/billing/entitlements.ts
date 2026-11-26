@@ -115,20 +115,35 @@ export async function accountPlan(db: Db, accountId: string | null, env: NodeJS.
 }
 
 /**
- * The plan with `subscription.reverseTrial` added: true when the live subscription is the reverse trial (342: provider
- * `manual`, status `trialing`; docs/billing.md § The reverse trial), so the Plan page offers Upgrade in its place and
- * warns before it ends. app_account_plan doesn't say which provider holds the subscription, so a trialing one is asked
- * of app_billing_live_subscription_ref (333; the same caller check). Exported for its test.
+ * Who holds a live subscription, from its status and app_billing_live_subscription_ref (333): `reverseTrial` for the
+ * reverse trial (342: provider `manual`, status `trialing`; docs/billing.md § The reverse trial), and `granted` for a
+ * plan the operator gave: `staff` (330: `manual`, `active`, no external ref) or `invoice` (335: `manual`, `active`,
+ * the paid invoice's id as its ref). Null for a subscription the payment provider holds. Exported for its test.
+ */
+export function subscriptionSource(status: unknown, ref: { provider?: string; externalRef?: string | null } | null | undefined): { reverseTrial: boolean; granted: 'staff' | 'invoice' | null } {
+	const manual = ref?.provider === 'manual';
+	if (!manual) return { reverseTrial: false, granted: null };
+	if (status === 'trialing') return { reverseTrial: true, granted: null };
+	if (status === 'active') return { reverseTrial: false, granted: ref?.externalRef ? 'invoice' : 'staff' };
+	return { reverseTrial: false, granted: null };
+}
+
+/**
+ * The plan with `subscription.reverseTrial` and `subscription.granted` added (subscriptionSource), so the Plan page
+ * offers Upgrade in a reverse trial's place and warns before it ends, and says a granted plan is the operator's
+ * rather than offering Manage billing, which has no provider subscription to manage. app_account_plan doesn't say
+ * which provider holds the subscription, so a live one is asked of app_billing_live_subscription_ref (333; the same
+ * caller check). Exported for its test.
  */
 export async function withReverseTrial(db: Db, accountId: string, plan: Record<string, unknown>): Promise<Record<string, unknown>> {
 	const sub = plan.subscription as { status?: unknown } | null | undefined;
 	if (!sub || typeof sub !== 'object') return plan;
-	let reverseTrial = false;
-	if (sub.status === 'trialing') {
-		const { rows } = await db.query<{ ref: { provider?: string } | null }>('SELECT app_billing_live_subscription_ref($1) AS ref', [accountId]);
-		reverseTrial = rows[0]?.ref?.provider === 'manual';
+	let source: ReturnType<typeof subscriptionSource> = { reverseTrial: false, granted: null };
+	if (sub.status === 'trialing' || sub.status === 'active') {
+		const { rows } = await db.query<{ ref: { provider?: string; externalRef?: string | null } | null }>('SELECT app_billing_live_subscription_ref($1) AS ref', [accountId]);
+		source = subscriptionSource(sub.status, rows[0]?.ref);
 	}
-	return { ...plan, subscription: { ...sub, reverseTrial } };
+	return { ...plan, subscription: { ...sub, ...source } };
 }
 
 /** The signed-in person's own billing account (created on first ask). */
