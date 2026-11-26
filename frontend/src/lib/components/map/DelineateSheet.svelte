@@ -114,6 +114,11 @@
 		}
 		await send([lon.value, lat.value]);
 	}
+	/** The coordinates were edited: the last attempt's error and channel offer answered the old point, so they go (issue #938). */
+	function edited() {
+		error = null;
+		larger = null;
+	}
 	/** Ask the server for the catchment above `at`; `keepPoint` keeps it beside a much larger channel. */
 	async function send(at: [number, number], keepPoint = false) {
 		busy = 'propose';
@@ -251,12 +256,12 @@
 				<div class="form-row">
 					<div class="field">
 						<label for="{uid}-lat">Latitude</label>
-						<input id="{uid}-lat" inputmode="decimal" placeholder="-33.54" bind:value={latText} aria-invalid={tried && 'error' in lat ? 'true' : undefined} aria-describedby="{uid}-lat-e" />
+						<input id="{uid}-lat" inputmode="decimal" placeholder="-33.54" bind:value={latText} oninput={edited} aria-invalid={tried && 'error' in lat ? 'true' : undefined} aria-describedby="{uid}-lat-e" />
 						<span class="hint" id="{uid}-lat-e">{#if tried && 'error' in lat}<span class="err">{lat.error}</span>{:else}Decimal degrees; south is negative.{/if}</span>
 					</div>
 					<div class="field">
 						<label for="{uid}-lon">Longitude</label>
-						<input id="{uid}-lon" inputmode="decimal" placeholder="20.74" bind:value={lonText} aria-invalid={tried && 'error' in lon ? 'true' : undefined} aria-describedby="{uid}-lon-e" />
+						<input id="{uid}-lon" inputmode="decimal" placeholder="20.74" bind:value={lonText} oninput={edited} aria-invalid={tried && 'error' in lon ? 'true' : undefined} aria-describedby="{uid}-lon-e" />
 						<span class="hint" id="{uid}-lon-e">{#if tried && 'error' in lon}<span class="err">{lon.error}</span>{:else}Decimal degrees; east is positive.{/if}</span>
 					</div>
 				</div>

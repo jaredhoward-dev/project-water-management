@@ -6,7 +6,8 @@
 // about 100 km takes by itself. The sheet says it is queued (and still does
 // after a reload), the worker's tick runs the job (support/jobs.ts, no
 // sleeps: the sheet asks every 2 s), and the proposal is reviewed and
-// accepted as any other. Axe-scanned while it waits.
+// accepted as any other. Axe-scanned while it waits. Closed while the worker
+// has it, the map asks for it instead and announces the outcome (issue #938).
 //
 // Enter coordinates opens the sheet from a press made while the map is still
 // loading (issue #719): the delineation lines' key used to be added above the
@@ -57,6 +58,37 @@ test('a catchment sent to the background: the sheet waits for the worker, then t
 	await r.getByTestId('delineate-accept-area').click();
 	await expect(page.getByTestId('map-notice')).toContainText('Saved Catchment above the outlet (delineated), 5');
 	await expect(page.getByRole('dialog')).toHaveCount(0);
+});
+
+test('a background delineation that finishes with its sheet closed is announced, with a link that opens the sheet again (#938)', async ({ page, owner }) => {
+	void owner;
+	const project = await seedRunnableProject(page.request, 'Delineate with the sheet closed');
+	await openMap(page, project.id);
+	await page.getByTestId('map-tools').getByRole('button', { name: 'Delineate', exact: true }).click();
+	await page.getByTestId('map-enter-coordinates').click();
+	const s = sheet(page);
+	await expect(s).toBeVisible();
+	await s.getByRole('radio', { name: 'The catchment’s outlet' }).check();
+	await s.getByLabel('Latitude').fill(String(FIXTURE_OUTLET[1]));
+	await s.getByLabel('Longitude').fill(String(FIXTURE_OUTLET[0]));
+	await s.getByTestId('delineate-background').check();
+	await s.getByTestId('delineate-submit').click();
+	await expect(s.getByTestId('delineate-waiting')).toHaveAttribute('data-status', 'queued');
+
+	// Closed while the worker has it: the map keeps asking, and says so in its live region when it is done.
+	await s.getByRole('button', { name: 'Close', exact: true }).click();
+	await expect(page.getByRole('dialog')).toHaveCount(0);
+	await runJobsTick({ projects: [project.id], schedule: false });
+	const notice = page.getByTestId('map-notice');
+	await expect(notice).toContainText(/^The background delineation is done: the catchment \(5[34]\d\.\d\d km²\) is drawn dashed on the map, waiting for your decision\./);
+	await expect(page.locator('.toast-wrap')).toHaveAttribute('role', 'status');
+	await expectNoViolations(page);
+
+	await notice.getByTestId('map-notice-next').click();
+	await expect(page).toHaveURL(/[?&]delineate=1(&|$)/);
+	const r = sheet(page, 'The delineated catchment');
+	await expect(r).toBeVisible();
+	await expect(r.getByTestId('delineate-fact-area')).toHaveText(/^5[34]\d\.\d\d km²$/);
 });
 
 test('Enter coordinates pressed while the map loads: the map drawing doesn’t move it, and the release opens the sheet', async ({ page, owner }) => {

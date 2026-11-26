@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { DelineationProposal, DelineationRequest } from '#lib/api/types.js';
-import { afterPollError, COPERNICUS_NOTICE, datasetNotice, failedText, POLL_GIVE_UP, isWaiting, openProposal, panFacts, proposalFacts, provenanceFacts, waitingText } from './delineation';
+import { afterPollError, backgroundOutcome, COPERNICUS_NOTICE, datasetNotice, failedText, POLL_GIVE_UP, isWaiting, openProposal, panFacts, proposalFacts, provenanceFacts, waitingText } from './delineation';
 
 const proposal = (over: Partial<DelineationProposal> = {}): DelineationProposal => ({
 	id: 'p1',
@@ -100,6 +100,22 @@ describe('a delineation the background worker has', () => {
 		createdAt: '2026-10-03T00:00:00.000Z',
 		finishedAt: null,
 		...over
+	});
+	it('says what a background delineation that finished with the sheet closed came to, and offers the sheet back (#938)', () => {
+		expect(backgroundOutcome(request({ status: 'proposed', proposal: proposal() }))).toEqual({
+			text: 'The background delineation is done: the catchment (547.19 km²) is drawn dashed on the map, waiting for your decision.',
+			label: 'Review it'
+		});
+		// A pruned proposal still says it is done.
+		expect(backgroundOutcome(request({ status: 'proposed' }))?.text).toBe('The background delineation is done: the catchment is drawn dashed on the map, waiting for your decision.');
+		expect(backgroundOutcome(request({ status: 'refused', refusal: { reason: 'no_channel', message: 'No terrain channel within 150 m.' } }))).toEqual({
+			text: 'The background delineation found no catchment: No terrain channel within 150 m.',
+			label: 'Delineate again'
+		});
+		const failed = request({ status: 'failed', error: 'The elevation model could not be read just now.' });
+		expect(backgroundOutcome(failed)).toEqual({ text: failedText(failed), label: 'Delineate again' });
+		// Still with the worker, or superseded by a newer click: nothing to say.
+		for (const status of ['queued', 'running', 'superseded'] as const) expect(backgroundOutcome(request({ status })), status).toBeNull();
 	});
 
 	it('is waited for only while queued or running', () => {

@@ -40,6 +40,21 @@ export function waitingText(r: DelineationRequest): string {
 export const failedText = (r: DelineationRequest) =>
 	`The background delineation failed${r.error && r.error !== 'cancelled' ? `: ${r.error.replace(/\.$/, '')}` : ''}. Try again, or draw or import the boundary.`;
 
+/**
+ * The Map's notice for a background delineation that finished while its sheet was closed (issue #938): what came of it,
+ * and the label of the link that reopens the sheet. Null while the worker still has it, or once a newer click
+ * superseded it (that click is the one waited for).
+ */
+export function backgroundOutcome(r: DelineationRequest): { text: string; label: string } | null {
+	if (r.status === 'proposed') {
+		const area = r.proposal ? ` (${fmtNum(r.proposal.areaM2 / 1e6, 2)} km²)` : '';
+		return { text: `The background delineation is done: the catchment${area} is drawn dashed on the map, waiting for your decision.`, label: 'Review it' };
+	}
+	if (r.status === 'refused') return { text: `The background delineation found no catchment: ${r.refusal?.message ?? 'the point was refused.'}`, label: 'Delineate again' };
+	if (r.status === 'failed') return { text: failedText(r), label: 'Delineate again' };
+	return null;
+}
+
 /** The Copernicus licence's notice for adapted data (Art. 6(b)), plain text: a delineated polygon is adapted DEM data. */
 export const COPERNICUS_NOTICE =
 	'Produced using Copernicus WorldDEM-30 © DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved.';

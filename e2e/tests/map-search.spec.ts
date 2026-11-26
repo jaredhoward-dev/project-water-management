@@ -7,7 +7,7 @@
 // from the map → Delineate with Enter at the crosshair places its point exactly
 // there, and Delineate… delineates the valley from it. A viewer searches codes: one match
 // moves the map at once, a quaternary is framed whole, Escape closes a
-// list; one place is picked at once with its credit shown; nothing found says
+// list, and so does emptying the box (issue #938); one place is picked at once with its credit shown; nothing found says
 // what to try. Axe-scanned with the list open.
 import type { Page } from '@playwright/test';
 import { expectNoViolations } from '../support/a11y.ts';
@@ -129,6 +129,11 @@ test('a viewer finds codes: one match moves the map at once, a quaternary is fra
 	await v.keyboard.press('Escape');
 	await expect(search(v).getByTestId('map-search-results')).toHaveCount(0);
 	await expect(search(v).getByRole('searchbox')).toBeFocused();
+	// Emptying the box (its clear button × sends the same input event as clearing it here) closes the list too (issue #938).
+	await find(v, 'Z01');
+	await expect(search(v).getByTestId('map-search-hit')).toHaveCount(3);
+	await search(v).getByRole('searchbox').fill('');
+	await expect(search(v).getByTestId('map-search-results')).toHaveCount(0);
 	// A match picked from the keyboard: the list goes with the focused button, and the focus comes back to the box, not the page.
 	await find(v, 'Z01');
 	await search(v).getByTestId('map-search-hit').nth(2).focus();
