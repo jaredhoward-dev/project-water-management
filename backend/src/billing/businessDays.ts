@@ -9,10 +9,30 @@
 // the 40-day edge would send a notice that is in fact late.
 //
 // The holidays are the Public Holidays Act 36 of 1994's schedule: ten fixed
-// dates, Good Friday and Family Day (the Monday after Easter), and s2(2)'s
-// rule that a holiday falling on a Sunday makes the Monday a holiday too. A
-// day the President declares a holiday later (an election day) is not known
-// here: renewal.ts keeps a margin for those (RENEWAL_LATEST_BUSINESS_DAYS).
+// dates, Good Friday and Family Day (the Monday after Easter), and s2(1)'s
+// rule that "whenever any public holiday falls on a Sunday, the following
+// Monday shall be a public holiday" (s2(2) only lets an employer and employee
+// exchange a holiday for another day).
+//
+// Christmas on a Sunday (issue #893). s2(1) applied to 25 December makes
+// Monday the 26th a holiday, which it already is (the Day of Goodwill), so
+// the Act alone gives the year 11 holidays, not 12. Each time it has happened
+// the President has declared Tuesday the 27th a holiday under s2A, in lieu of
+// Christmas: 2011, 2016 ("President Jacob Zuma declares 27 December 2016 a
+// public holiday", The Presidency, 19 Sep 2016, gov.za) and 2022 ("President
+// Cyril Ramaphosa declares 27 December as public holiday", The Presidency,
+// 8 Dec 2022, gov.za, which quotes s2(1) and gives the reason: workers would
+// otherwise have 11 paid public holidays). So the 27th is counted a holiday
+// in such a year (the next is 2033), ahead of its declaration. Counting it is
+// the safe side either way: one business day fewer moves a notice earlier,
+// away from the Act's 40-day floor, and renewal.ts sends at most 60 business
+// days out, far inside the 80-day ceiling. Any other day the President
+// declares later (an election day) is not known here: renewal.ts keeps a
+// margin for those (RENEWAL_LATEST_BUSINESS_DAYS).
+//
+// No other Sunday holiday can meet a holiday on its Monday: the only fixed
+// pair a day apart is 25/26 December, and Easter (22 March to 25 April) never
+// puts Family Day on the Monday after 21 March or 27 April.
 //
 // Every date here is a calendar date in South Africa, `YYYY-MM-DD`, worked out
 // in UTC arithmetic so the process's own time zone never moves a day.
@@ -67,9 +87,11 @@ export function publicHolidays(year: number): ReadonlySet<string> {
 	for (const md of FIXED) {
 		const d = `${pad}-${md}`;
 		days.add(d);
-		// s2(2): a holiday on a Sunday makes the Monday after it a holiday.
+		// s2(1): a holiday on a Sunday makes the Monday after it a holiday.
 		if (new Date(ms(d)).getUTCDay() === 0) days.add(addDays(d, 1));
 	}
+	// Christmas on a Sunday: its Monday is the Day of Goodwill already, so the 27th, as declared under s2A each time (above).
+	if (new Date(ms(`${pad}-12-25`)).getUTCDay() === 0) days.add(`${pad}-12-27`);
 	const easter = easterSunday(year);
 	days.add(addDays(easter, -2)); // Good Friday
 	days.add(addDays(easter, 1)); // Family Day

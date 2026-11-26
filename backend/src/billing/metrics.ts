@@ -53,6 +53,14 @@ const COMMON_PROVIDERS = new Set(['gmail.com', 'googlemail.com', 'outlook.com', 
  * The address one allowance is keyed to: lower-cased, a `+tag` removed, and
  * for Gmail the dots too (googlemail.com is gmail.com). Issue #641, "One
  * allowance per person".
+ *
+ * A local part that starts with `+` (`+tag@example.org`) is kept whole (issue
+ * #893): there is no base address before the tag, so dropping it would leave
+ * `@example.org` and fold every such address at a domain, different
+ * mailboxes of different people, into one trial and one abuse cluster.
+ * Subaddressing needs a base (Gmail's, Outlook's and Fastmail's usernames
+ * can't start with `+`), so such an address is its own mailbox, as a
+ * catch-all domain's `a@` and `b@` are, which no canonical form can join.
  */
 export function canonicalEmail(email: string): string {
 	const lower = email.trim().toLowerCase();
@@ -61,7 +69,7 @@ export function canonicalEmail(email: string): string {
 	let local = lower.slice(0, at);
 	let domain = lower.slice(at + 1);
 	const plus = local.indexOf('+');
-	if (plus > 0) local = local.slice(0, plus);
+	if (plus > 0) local = local.slice(0, plus); // not at 0: a leading `+` has no base address (above)
 	if (domain === 'googlemail.com') domain = 'gmail.com';
 	if (domain === 'gmail.com') local = local.replaceAll('.', '');
 	return `${local}@${domain}`;
