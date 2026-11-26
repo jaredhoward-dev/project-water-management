@@ -17,6 +17,8 @@
 	import FarmStatus from '#lib/components/farm/FarmStatus.svelte';
 	import { farmSummaryLine, farmsPrivacy, levelWord, stateText } from '#lib/components/farm/cards.js';
 	import { t } from '#lib/i18n/locale.svelte.js';
+	import { ApiError } from '#lib/api/client.js';
+	import { errorText } from '#lib/i18n/apiError.js';
 	import { cardOnFailure, classify, farmHref, worstFirst } from '#lib/components/farm/load.js';
 	import { clearSaved, readSaved } from '#lib/components/farm/savedCopy.js';
 
@@ -30,6 +32,8 @@
 		view: FarmView | null;
 		/** Neither the live figures nor a saved copy could be had: the card says so rather than show a blank line. */
 		viewFailed: boolean;
+		/** The figures are withheld from this viewer (403 farm_preview_withheld): the card says why, never the saved copy (#875). */
+		withheld: boolean;
 	}
 
 	let rows = $state<Row[] | null>(null);
@@ -65,7 +69,8 @@
 						several: ix.farms.length > 1,
 						publication: ix.publication,
 						view: null,
-						viewFailed: false
+						viewFailed: false,
+						withheld: false
 					});
 				}
 			});
@@ -86,6 +91,7 @@
 				ordered.map(async (row) => {
 					if (!row.publication) return;
 					let view: FarmView | null;
+					let withheld = false;
 					try {
 						view = await api.farm.view(row.projectId, row.nodeId);
 					} catch (e) {
@@ -96,13 +102,15 @@
 							return;
 						}
 						view = next.view;
+						withheld = next.withheld;
 					}
 					// A reload since (Try again, a new list) owns the cards now.
 					if (gen !== generation || !rows) return;
 					const live = rows.find((r) => r.projectId === row.projectId && r.nodeId === row.nodeId);
 					if (!live) return;
 					live.view = view;
-					live.viewFailed = view == null;
+					live.withheld = withheld;
+					live.viewFailed = view == null && !withheld;
 				})
 			);
 		} catch (e) {
@@ -136,9 +144,18 @@
 								{#if r.publication}<span class="level {r.publication.restriction.level}">{levelWord(r.publication.restriction.level)}</span>{/if}
 							</span>
 							<span class="sub">{r.projectName}</span>
-							<!-- While the figures load, "Updating…"; if they can't be had (no signal, no saved copy), the page's own error title, never a blank line. -->
+							<!-- While the figures load, "Updating…"; if they can't be had (no signal, no saved copy), the page's own error title, never a blank line;
+							     withheld from this viewer, why, worded from the API's code as the farm page words it (#875). -->
 							<span class:pending={r.publication && !r.view}
-								>{r.publication ? (r.view ? farmSummaryLine(r.view.farm) : r.viewFailed ? stateText('errorTitle') : stateText('updating')) : t('Not published yet')}</span
+								>{r.publication
+									? r.view
+										? farmSummaryLine(r.view.farm)
+										: r.withheld
+											? errorText(new ApiError(403, '', undefined, 'farm_preview_withheld'))
+											: r.viewFailed
+												? stateText('errorTitle')
+												: stateText('updating')
+									: t('Not published yet')}</span
 							>
 						</a>
 					</li>

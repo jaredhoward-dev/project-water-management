@@ -15392,7 +15392,10 @@ published.
   can be had, "We couldn’t load your hydrological unit", never a blank
   line; a farm whose figures answer 403/404, unlinked since the list loaded,
   leaves the list and its saved copy goes, as a project the list's own
-  403/404 leaves out: `farm/load.ts` `cardOnFailure`), and goes straight to the only one. `/farm/[projectId]` is one farm (`?node=` and a
+  403/404 leaves out, while one whose preview is withheld (403
+  `farm_preview_withheld`) stays and says why, as the farm page does, with
+  no saved figures shown as current, its saved copy kept (issue #875):
+  `farm/load.ts` `cardOnFailure`), and goes straight to the only one. `/farm/[projectId]` is one farm (`?node=` and a
   switcher when the farmer has several there: a row of links above the name
   for up to 4 farms; past that, folded under "Your hydrological units in this catchment
   (N farms)", so the name and the WUA's notice stay on the first screen,
