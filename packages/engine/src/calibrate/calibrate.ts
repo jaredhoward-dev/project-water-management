@@ -182,6 +182,13 @@ export interface CalibrationProgress {
 	budget: number;
 	/** Best objective score so far in this stage (higher is better). */
 	best: number;
+	/**
+	 * Which of the fit's optimisations this is (1-based), of how many, in the order calibrate() runs them. The plan is
+	 * the one the fit runs, so it leaves out a stage the engine skips (no dry → wet test with fewer than 4 qualifying
+	 * water years, no unpenalised fit where no WR2012 penalty applies), and the progress bar needn't guess.
+	 */
+	optimisation?: number;
+	optimisations?: number;
 }
 
 export interface ScoredPeriod {
@@ -1236,7 +1243,9 @@ function runFitTask(c: CalibrationSetup, k: number, onProgress: CalibrateOptions
 	const t = c.tasks[k];
 	if (!t) throw new Error(`the fit has no optimisation ${k + 1}`);
 	const noPrior = t.prior === false;
-	return fit(c.pb, t.idx, c.free, c.objective, c.budget, t.seed, t.stage, onProgress, t.penalty ? c.penalty : null, noPrior ? unpriorBounds(c.bounds) : c.bounds, t.start, noPrior ? null : c.prior, step, t.x0);
+	const plan = { optimisation: k + 1, optimisations: c.tasks.length };
+	const progress: CalibrateOptions['onProgress'] = onProgress && ((p) => onProgress({ ...p, ...plan }));
+	return fit(c.pb, t.idx, c.free, c.objective, c.budget, t.seed, t.stage, progress, t.penalty ? c.penalty : null, noPrior ? unpriorBounds(c.bounds) : c.bounds, t.start, noPrior ? null : c.prior, step, t.x0);
 }
 
 /**

@@ -56,6 +56,7 @@ import {
 	type Wr2012Scaling
 } from '@water-management/engine';
 import type { RunEvidence } from '../runs/evidence.js';
+import { DEFAULT_TIME_ZONE, localDate } from '../projects/timeZone.js';
 import { csvRow } from './csv.js';
 import { supplyAssuranceLines } from './supply-assurance.js';
 
@@ -135,6 +136,8 @@ export interface SummaryMeta {
 	startDate: string;
 	endDate: string;
 	createdAt: string;
+	/** The project's time zone: the day the run's data-source credits are dated, its creation day there (issue #860); absent, DEFAULT_TIME_ZONE. */
+	timeZone?: string;
 	/** The modeller's written explanation of the run (007_run_notes); '' or absent = none. */
 	notes?: string;
 	/** When and by whom the notes last changed (ISO timestamp, display name). */
@@ -1389,13 +1392,15 @@ export function* summaryCsvLines(meta: SummaryMeta, summary: RunSummary): Genera
 	yield* chirpsFactorLines(summary.chirpsCorrection);
 	yield '';
 
+	// The credits are read on the run's creation day in the project's zone, not UTC's (issue #860).
+	const accessed = localDate(new Date(meta.createdAt), meta.timeZone ?? DEFAULT_TIME_ZONE);
 	// Only on a run with a gap-filling product (engine ≥ 1.101.0, issue #604): other exports are unchanged.
 	if (summary.gapRain) {
-		yield* gapRainLines(summary.gapRain, runRainCredits({ summary }, meta.createdAt.slice(0, 10)));
+		yield* gapRainLines(summary.gapRain, runRainCredits({ summary }, accessed));
 		yield '';
 	}
 	// Only on a run whose GR4J read an AgERA5 feed's reference ET (issue #604 R5-E): other exports are unchanged.
-	const et0 = et0CreditLines(summary.et0Daily, runRainCredits({ et0Products: meta.et0Products }, meta.createdAt.slice(0, 10)));
+	const et0 = et0CreditLines(summary.et0Daily, runRainCredits({ et0Products: meta.et0Products }, accessed));
 	if (et0.length) {
 		yield* et0;
 		yield '';

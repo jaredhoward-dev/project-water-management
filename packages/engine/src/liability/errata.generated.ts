@@ -312,5 +312,25 @@ export const ENGINE_ERRATA: readonly Erratum[] = [
 		"appliesWhen": "A sensitivity run (rain × 0.9 / × 1.1) on a project with a rainfall station on the catchment (settings.rainStations.catchment), under Fragmentation, or under per-unit rain with an entered catchment MAP",
 		"summary": "The rain range left the station's record and the MAPs its ratio reads unscaled, so the catchment rain didn't move: under Fragmentation GR4J's rain and the whole run stayed at the central case, and under per-unit rain the catchment forcing (effective rain on the crops, rain on the dams) did, so the range under-reported the effect of rain. A unit read from its own station was right",
 		"source": "model.md §2.10g"
+	},
+	{
+		"id": "ER-32",
+		"keyedOn": "run",
+		"firstAffected": "1.42.0",
+		"fixedIn": "1.121.0",
+		"severity": "Medium",
+		"appliesWhen": "An application (a scenario classed against the applicant's units) that changes or removes (transfer.set, transfer.remove) a river off-take of the applicant's whose seepage rejoins the river below another party's unit (lossReturnNodeId)",
+		"summary": "The change was classed as the applicant's proposal though it changes the seepage credited below the other party's unit: the evidence pack showed no red \"Baseline assumptions changed\" callout, its \"No baseline assumption is changed\" check passed so the pack could be issued, and the off-take was judged by protectsEwr as the applicant's own river works rather than stopping issue as a changed baseline assumption",
+		"source": "scenarios.md § Classification: proposal or baseline assumption; model.md §2.6a (the seepage return) (issue #852)"
+	},
+	{
+		"id": "ER-33",
+		"keyedOn": "run",
+		"firstAffected": "0.0.0",
+		"fixedIn": "1.121.0",
+		"severity": "Medium",
+		"appliesWhen": "An application whose node.remove removes one of the applicant's units that a transfer rule comes from or goes to (or, engine ≥ 1.114.0, sends a split share to) when the rule also reaches another party's unit (its other end, or the unit its seepage rejoins below); the removal drops that rule",
+		"summary": "The removal was classed as the applicant's proposal though the rule it drops reaches another party's unit: the evidence pack showed no red \"Baseline assumptions changed\" callout and its \"No baseline assumption is changed\" check passed, so the pack could be issued",
+		"source": "scenarios.md § Classification: proposal or baseline assumption; present at the first recorded engine, 1.15.0 (issue #852)"
 	}
 ];

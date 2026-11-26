@@ -124,7 +124,7 @@ describe('ModelEditor', () => {
 		expect(ed.issues).toEqual([]);
 	});
 
-	it('an off-take whose seepage rejoined below a removed node returns none (engine 1.42.0)', () => {
+	it('an off-take whose seepage rejoined below a removed node draining into the outflow gauge rejoins at the off-take, so it still reaches the gauge (issue #853)', () => {
 		const ed = new ModelEditor();
 		const g = ed.addNode();
 		const low = ed.addNode();
@@ -136,7 +136,26 @@ describe('ModelEditor', () => {
 		const t = ed.addTransfer();
 		Object.assign(t, { fromNodeId: up.id, toNodeId: canal.id, source: 'river', lossPct: 0.2, lossReturnPct: 0.5, lossReturnNodeId: low.id });
 		ed.removeNode(low.id);
-		expect(ed.model.transfers.find((x) => x.id === t.id)).toMatchObject({ lossReturnPct: 0, lossReturnNodeId: null });
+		expect(ed.model.transfers.find((x) => x.id === t.id)).toMatchObject({ lossReturnPct: 0.5, lossReturnNodeId: null });
+	});
+
+	it('an off-take whose seepage rejoined below a removed node rejoins above it on its path, not below the farm it drained into, as node.remove (issue #853)', () => {
+		const ed = new ModelEditor();
+		const g = ed.addNode();
+		const lower = ed.addNode();
+		const low = ed.addNode();
+		const up = ed.addNode();
+		const canal = ed.addNode();
+		lower.downstreamNodeId = g.id;
+		low.downstreamNodeId = lower.id;
+		up.downstreamNodeId = low.id;
+		canal.downstreamNodeId = g.id;
+		const t = ed.addTransfer();
+		Object.assign(t, { fromNodeId: up.id, toNodeId: canal.id, source: 'river', lossPct: 0.2, lossReturnPct: 0.5, lossReturnNodeId: low.id });
+		ed.removeNode(low.id);
+		// up drained into low, so the seepage joins up's outflow (null: the source), which reaches lower as before.
+		expect(ed.model.transfers.find((x) => x.id === t.id)).toMatchObject({ lossReturnPct: 0.5, lossReturnNodeId: null });
+		expect(ed.issues).toEqual([]);
 	});
 
 	it('a crop supply table that drew on a removed unit’s dam keeps its share and loses the unit, which the save rules then ask for (engine 1.73.0)', () => {

@@ -4,8 +4,8 @@
 // mismatch flags the API worked out (backend dams/observed/compare.ts). Pure:
 // the fold's one line, the chart's series and flag lanes, the summary
 // sentence, the match notes, the sources line, the credit and the table of
-// views. A day several sources saw goes to the sharpest (Sentinel-2, WOfS,
-// Sentinel-1 radar, Waterbodies; issue #624), and radar is shown as radar:
+// views. A day several sources saw goes to the most trusted (Sentinel-2, WOfS,
+// Waterbodies, then Sentinel-1 radar: SOURCE_ORDER; issue #624), and radar is shown as radar:
 // its own doubled strip, never a flag.
 import { beforeForecast, fromEpochDay, toEpochDay, type DailySeries } from '@water-management/engine';
 import type { DamObservations, ObservedDam, ObservedPoint, ObservedSkip, ObservedSource } from '#lib/api/types.js';

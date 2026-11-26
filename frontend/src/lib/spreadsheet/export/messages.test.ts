@@ -12,6 +12,10 @@ describe('parseStartMessage', () => {
 		});
 	});
 
+	it("keeps the project's time zone (issue #860)", () => {
+		expect(parseStartMessage({ type: 'start', request: { ...request, timeZone: 'Africa/Johannesburg' } })?.request).toEqual({ ...request, timeZone: 'Africa/Johannesburg' });
+	});
+
 	it('copies only the known fields', () => {
 		const msg = parseStartMessage({ type: 'start', request });
 		expect(msg?.request).not.toBe(request);
@@ -31,7 +35,9 @@ describe('parseStartMessage', () => {
 		['an empty projectId', { type: 'start', request: { ...request, projectId: '' } }],
 		['a missing runId', { type: 'start', request: { apiBase: '/api', projectId: 'p1' } }],
 		['an empty auditNodeId', { type: 'start', request: { ...request, auditNodeId: '' } }],
-		['a non-string auditNodeId', { type: 'start', request: { ...request, auditNodeId: 7 } }]
+		['a non-string auditNodeId', { type: 'start', request: { ...request, auditNodeId: 7 } }],
+		['an empty timeZone', { type: 'start', request: { ...request, timeZone: '' } }],
+		['a non-string timeZone', { type: 'start', request: { ...request, timeZone: 2 } }]
 	])('refuses %s', (_, data) => {
 		expect(parseStartMessage(data)).toBeNull();
 	});

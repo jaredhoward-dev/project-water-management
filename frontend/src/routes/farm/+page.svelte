@@ -17,8 +17,8 @@
 	import FarmStatus from '#lib/components/farm/FarmStatus.svelte';
 	import { farmSummaryLine, farmsPrivacy, levelWord, stateText } from '#lib/components/farm/cards.js';
 	import { t } from '#lib/i18n/locale.svelte.js';
-	import { classify, farmHref, worstFirst } from '#lib/components/farm/load.js';
-	import { readSaved } from '#lib/components/farm/savedCopy.js';
+	import { cardOnFailure, classify, farmHref, worstFirst } from '#lib/components/farm/load.js';
+	import { clearSaved, readSaved } from '#lib/components/farm/savedCopy.js';
 
 	interface Row {
 		projectId: string;
@@ -37,8 +37,11 @@
 	let failed = $state<{ offline: boolean; attempts: number } | null>(null);
 	/** Failed loads in a row: the error state adds a contact line after the second. */
 	let failures = 0;
+	/** Bumped by each load, so a slower earlier load's figures never land on the newer list. */
+	let generation = 0;
 
 	async function load() {
+		const gen = ++generation;
 		failed = null;
 		rows = null;
 		try {
@@ -76,17 +79,30 @@
 			// unpublished), each level in the projects' order: a restricted farm is never a screen down.
 			const ordered = worstFirst(list);
 			rows = ordered;
-			// The figures on each card: live when published, else the phone's saved copy.
+			// The figures on each card: live when published, else the phone's saved copy; a farm
+			// unlinked since the list loaded (403/404) leaves the list, its copy with it (cardOnFailure).
 			const user = session.user?.id ?? null;
 			await Promise.all(
-				ordered.map(async (row, i) => {
+				ordered.map(async (row) => {
 					if (!row.publication) return;
-					const view = await api.farm.view(row.projectId, row.nodeId).catch(() =>
-						user ? (readSaved(user, row.projectId, row.nodeId)?.view ?? null) : null
-					);
-					if (!rows || !rows[i]) return;
-					rows[i]!.view = view;
-					rows[i]!.viewFailed = view == null;
+					let view: FarmView | null;
+					try {
+						view = await api.farm.view(row.projectId, row.nodeId);
+					} catch (e) {
+						const next = cardOnFailure(e, () => (user ? (readSaved(user, row.projectId, row.nodeId)?.view ?? null) : null));
+						if (next.drop) {
+							clearSaved(row.projectId, row.nodeId);
+							if (gen === generation && rows) rows = rows.filter((r) => r.projectId !== row.projectId || r.nodeId !== row.nodeId);
+							return;
+						}
+						view = next.view;
+					}
+					// A reload since (Try again, a new list) owns the cards now.
+					if (gen !== generation || !rows) return;
+					const live = rows.find((r) => r.projectId === row.projectId && r.nodeId === row.nodeId);
+					if (!live) return;
+					live.view = view;
+					live.viewFailed = view == null;
 				})
 			);
 		} catch (e) {

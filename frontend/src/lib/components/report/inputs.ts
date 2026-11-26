@@ -2,6 +2,7 @@
 // and transfers the run used (its own snapshot, never today's model), and the
 // coverage of each input series over the run's period. Pure, so the page stays
 // a thin template.
+import { projectDay } from '#lib/components/project/project.js';
 import { gapRainChoiceText } from '#lib/components/series/gapRain.js';
 import { arealRainText, resolveGapRain, runRainCredits, type RainCredit, DEFAULT_UNIT_MAP_PERIOD, defaultProjectSettings, describeEwrDailySource, diversionMonthsOf, diversionMonthsProblem, fitPeriodText, hasMonthlyDiversion, hasMonthlyRates, isRiverOfftake, isSplitTransfer, transferDestinations, type MonthDiversion, modelFarmEfficiency, upgradeLegacyModel, resolveArealRain, rainSourceText, toEpochDay, transferRatesM3s, type ProjectModel, type ProjectSettings, type SeriesMeta, type StoredRunoffModelId, type Transfer, type EwrSplitInfo } from '@water-management/engine';
 import { findSystem, systemLabel } from '#lib/model/systems.js';
@@ -333,9 +334,10 @@ export function stationPairingRows(summary: unknown): string[][] {
  * ERA5-Land's Copernicus notice and citation and IMERG Late's citation when
  * the run read them, ECMWF's for a forecast an ECMWF feed wrote, AgERA5's
  * and NASA POWER's for the reference ET GR4J read (R5-E, `et0Products`),
- * each word for word; read on the run's creation day. Empty for a run on CHIRPS alone
+ * each word for word; read on the run's creation day in the project's time
+ * zone (issue #860; DEFAULT_TIME_ZONE when none is given), not UTC's. Empty for a run on CHIRPS alone
  * and an uploaded forecast, whose reports read as before.
  */
-export function reportRainCredits(run: { createdAt: string; forecastRainSource?: string | null; forecastRainEcmwf?: boolean; et0Products?: readonly string[]; summary?: Parameters<typeof runRainCredits>[0]['summary'] }): RainCredit[] {
-	return runRainCredits(run, run.createdAt.slice(0, 10));
+export function reportRainCredits(run: { createdAt: string; forecastRainSource?: string | null; forecastRainEcmwf?: boolean; et0Products?: readonly string[]; summary?: Parameters<typeof runRainCredits>[0]['summary'] }, timeZone?: string): RainCredit[] {
+	return runRainCredits(run, projectDay(run.createdAt, timeZone));
 }

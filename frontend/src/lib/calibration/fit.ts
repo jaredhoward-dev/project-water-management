@@ -153,22 +153,15 @@ export const STAGE_LABEL: Record<CalibrationStage, string> = {
 };
 
 /**
- * Overall progress 0–1 across the stages, each weighted by its runs: the
- * full fit once per start, then the validation stages, the unpenalised fit,
- * the unpriored fit last (once per start, as the full fit).
+ * Overall progress 0–1 across the fit's optimisations, each one budget of runs, from the plan the engine sends with
+ * every progress event (`optimisation` of `optimisations`). The engine counts only what it will run, so a dry → wet
+ * test skipped for too few water years, or an unpenalised fit where no WR2012 penalty applies (a non-headline step of
+ * a stepwise fit), never takes a share of the bar. An event without the plan is read as one optimisation.
  */
-export function progressFraction(p: CalibrationProgress, validate: boolean, penalty = false, starts = 1, unpriored = false): number {
-	const stages: CalibrationStage[] = [
-		...(validate ? (['full', 'split', 'dsst'] as const) : (['full'] as const)),
-		...(penalty ? (['unpenalised'] as const) : []),
-		...(unpriored ? (['unpriored'] as const) : [])
-	];
-	const runs = (s: CalibrationStage) => (s === 'full' || s === 'unpriored' ? starts : 1);
-	const i = Math.max(0, stages.indexOf(p.stage));
-	// Optimisations before this one: each earlier stage's, then the earlier starts of this one.
-	const before = stages.slice(0, i).reduce((a, s) => a + runs(s), 0) + (runs(stages[i]!) > 1 ? (p.start ?? 1) - 1 : 0);
-	const total = stages.reduce((a, s) => a + runs(s), 0);
-	return Math.min(1, (before + p.evaluations / p.budget) / total);
+export function progressFraction(p: CalibrationProgress): number {
+	const k = p.optimisation ?? 1;
+	const n = p.optimisations ?? 1;
+	return Math.min(1, (k - 1 + p.evaluations / p.budget) / n);
 }
 
 /**

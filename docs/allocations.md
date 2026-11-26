@@ -130,7 +130,9 @@ is listed as "not read", never guessed.
   phone, cell, fax or email** column refuses the whole file, before anything
   is stored (POPIA minimisation, [security.md](./security.md)). A cell in the
   holder, reference, property or farm column that is a 13-digit number is a
-  row problem ("looks like an ID number").
+  row problem ("looks like an ID number"). Hand entry (**+ Add volume**, **Change**) refuses the
+  same in the holder, reference, property or a condition (400), so an ID
+  number reaches the database neither way (`parse.ts` `idNumberProblem`).
 - **Row problems** (listed per row; those rows are not imported): an unknown
   authorisation or water source, a missing volume, a volume or storage that
   isn't a number ≥ 0, a date that isn't `YYYY-MM-DD` (or `YYYY/MM/DD`), valid

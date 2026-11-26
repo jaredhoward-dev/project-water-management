@@ -33,8 +33,8 @@
 	import { page } from '$app/state';
 	import { fdcPercentileTable, REPORT_FOOTER, toEpochDay, type NetworkNode, type ProjectModel, type SeriesMeta } from '@water-management/engine';
 	import { fdcReportDays, fdcReportRows } from '#lib/components/report/fdc.js';
-	import { loadImpactSeries, type ImpactSeries } from '#lib/components/report/impactSeries.js';
-	import { parseRef } from '#lib/components/compare/picker.js';
+	import type { ImpactSeries } from '#lib/components/report/impactSeries.js';
+	import { reportLoader } from '#lib/components/report/reportLoad.js';
 	import { apanDailyOfInput, chirpsSourceOfInput, originOfFit, runChirpsFactors } from '#lib/series/provenance.js';
 	import { api, ApiError, type Project, type Run, type RunCompareResponse, type RunPublication, type SignoffList } from '#lib/api/index.js';
 	import ChangesList from '#lib/components/compare/ChangesList.svelte';
@@ -64,10 +64,8 @@
 	import AssurancePanel from '#lib/components/reliability/AssurancePanel.svelte';
 	import { noticeLanguages, restrictionSummary } from '#lib/components/runs/publication.js';
 	import { disclaimerSection, forecastNote, isReportReady, readFirst, reportCharts, reportSections } from '#lib/components/report/sections.js';
-	import { cachedSeries } from '#lib/components/runs/cache.js';
-	import { latestModelRun } from '#lib/components/runs/scenarioRun.js';
 	import EwrAssurancePanel from '#lib/components/runs/EwrAssurancePanel.svelte';
-	import { CATCHMENT_FLOW_KEYS, EWR_RULE_CAPTION, EWR_RULE_KEY, ewrChartCaption, ewrChartSeries, hydrographSeries, observedCaption, observedSources, type CatchmentFlows, type ObservedSources } from '#lib/components/runs/flowSeries.js';
+	import { EWR_RULE_CAPTION, ewrChartCaption, ewrChartSeries, hydrographSeries, observedCaption, type CatchmentFlows, type ObservedSources } from '#lib/components/runs/flowSeries.js';
 	import { toDisplayUnit } from '#lib/components/runs/results.js';
 	import RunSummaryView from '#lib/components/runs/RunSummaryView.svelte';
 	import { calibrationHref } from '#lib/components/calibration/links.js';
@@ -117,6 +115,12 @@
 	let hydroDrawn = $state(false);
 	let ewrDrawn = $state(false);
 
+	// The land cover, groundwater and other users' tables are a chunk of their own (and the impact section, with a baseline): in before "ready".
+	const loadLatest = reportLoader({
+		api,
+		chunks: (withImpact) => Promise.all([loadOnce(loadHumanImpacts), loadOnce(loadRestrictionTables), withImpact ? loadOnce(loadImpact) : null])
+	});
+
 	async function load(id: string, want: string | null, against: string | null) {
 		status = 'loading';
 		impact = null;
@@ -126,70 +130,24 @@
 		hydroDrawn = false;
 		ewrDrawn = false;
 		try {
-			// A non-member gets 404 on the project, like the workspace.
-			const [p, list, sl] = await Promise.all([
-				api.projects.get(id),
-				want ? null : api.runs.list(id),
-				api.series.list(id).catch(() => [] as SeriesMeta[])
-			]);
-			project = p;
-			series = sl;
-			// Without ?run=, the latest run of the model (never a newer scenario or forecast run), as the server's PDF and schedules print.
-			const runId = want ?? (list ? latestModelRun(list)?.id : undefined);
-			if (!runId) {
-				status = 'no-runs';
+			// Latest wins (issue #859): a slower load of the previous ?run= answers { current: false } and is dropped.
+			const r = await loadLatest(id, want, against);
+			if (!r.current) return;
+			const v = r.value;
+			project = v.project;
+			series = v.series;
+			if (v.status !== 'loaded') {
+				status = v.status;
 				return;
 			}
-			let detail: Awaited<ReturnType<typeof api.runs.get>>;
-			try {
-				detail = await api.runs.get(id, runId);
-			} catch (e) {
-				if (e instanceof ApiError && (e.status === 404 || e.status === 400)) {
-					status = 'no-run';
-					return;
-				}
-				throw e;
-			}
-			const have = (k: string) => detail.series.some((r) => r.key === k && r.nodeId === null);
-			const againstRef = parseRef(against);
-			const [pairs, so, pub, cmp, boardSeries] = await Promise.all([
-				Promise.all(
-					[...CATCHMENT_FLOW_KEYS, EWR_RULE_KEY].filter(([, k]) => have(k)).map(
-						async ([slot, k]) => [slot, await cachedSeries(runId, k, null, () => api.runs.series(id, runId, k, null))] as const
-					)
-				),
-				api.signoffs.list(id, runId),
-				api.publication.ofRun(id, runId),
-				// The impact section: a baseline that can't be compared says why in its section; the report still loads.
-				against
-					? api.compare.runs(against, `${id}:${runId}`).catch((e: unknown) => {
-							impactError =
-								e instanceof ApiError && (e.status === 404 || e.status === 400)
-									? "The baseline doesn't exist any more, or its project isn't shared with you."
-									: e instanceof Error
-										? e.message
-										: String(e);
-							return null;
-						})
-					: null,
-				// The licence-impact board's series; one that can't be read is null, and the board says so.
-				againstRef ? loadImpactSeries((p, r, k) => api.runs.series(p, r, k, null), againstRef, { projectId: id, runId }) : null
-			]);
-			signoffs = so;
-			runPub = pub;
-			impact = cmp;
-			impactSeries = boardSeries;
-			// The land cover, groundwater and other users' tables are a chunk of their own: in before "ready".
-			// If it fails to download, only a reload can fetch it (lazy.ts), so it gets its own message, not "Try again".
-			try {
-				await Promise.all([loadOnce(loadHumanImpacts), loadOnce(loadRestrictionTables), against ? loadOnce(loadImpact) : null]);
-			} catch {
-				status = 'chunk-failed';
-				return;
-			}
-			flows = Object.fromEntries(pairs) as CatchmentFlows;
-			sources = observedSources(detail.series);
-			run = detail.run;
+			signoffs = v.signoffs;
+			runPub = v.runPub;
+			impact = v.impact;
+			impactSeries = v.impactSeries;
+			impactError = v.impactError;
+			flows = v.flows;
+			sources = v.sources;
+			run = v.run;
 			status = 'loaded';
 		} catch (e) {
 			if (e instanceof ApiError && e.status === 404) status = 'not-found';
@@ -455,7 +413,7 @@
 							coverageRows(series, run)
 						)}
 						<!-- The credits the run's data owe (issue #604 R4-E, R5-E): ERA5-Land, IMERG Late, the ECMWF forecast, AgERA5 and NASA POWER's reference ET, word for word. -->
-						{@const credits = reportRainCredits(run)}
+						{@const credits = reportRainCredits(run, project.timeZone)}
 						{#if credits.length}
 							<h3>Data credits</h3>
 							<ul class="credits" data-testid="report-rain-credits">

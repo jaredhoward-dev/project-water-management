@@ -2,7 +2,7 @@
 // and Transfers tabs. Tracks unsaved changes against the last loaded/saved
 // snapshot and re-validates on every edit.
 import type { ApanInput } from './systems';
-import { NEW_FARM_IRRIGATION_SYSTEM, newNetworkNode, OFFTAKE_DEFAULTS, type IrrigationSystemDef, transferDestinations, transferRatesM3s, type Borehole, type CropDef, type DemandObject, type DemandObjectCategory, newDemandObjectDefaults, type LandCoverPatch, type NetworkNode, type ProjectModel, type Transfer } from '@water-management/engine';
+import { NEW_FARM_IRRIGATION_SYSTEM, newNetworkNode, OFFTAKE_DEFAULTS, type IrrigationSystemDef, transferDestinations, transferRatesM3s, type Borehole, type CropDef, type DemandObject, type DemandObjectCategory, newDemandObjectDefaults, seepageAbove, type LandCoverPatch, type NetworkNode, type ProjectModel, type Transfer } from '@water-management/engine';
 import { bySortOrder } from './order';
 import { renumberSupplyOrder } from '#lib/components/network/demandObjectOrder.js';
 import { systemsOf } from './systems';
@@ -181,16 +181,27 @@ export class ModelEditor {
 		const m = this.model;
 		const removed = m.nodes.find((n) => n.id === id);
 		// Re-route anything that drained into the removed node to where it drained.
+		const drainedInto = new Set<string>();
 		for (const n of m.nodes) {
-			if (n.downstreamNodeId === id) n.downstreamNodeId = removed?.downstreamNodeId ?? null;
+			if (n.downstreamNodeId !== id) continue;
+			drainedInto.add(n.id);
+			n.downstreamNodeId = removed?.downstreamNodeId ?? null;
 		}
 		m.nodes = m.nodes.filter((n) => n.id !== id);
 		m.cropAreas = m.cropAreas.filter((a) => a.nodeId !== id);
 		// A rule split between destinations (engine ≥ 1.114.0) goes with any of them, as a scenario's node.remove does.
 		m.transfers = m.transfers.filter((t) => t.fromNodeId !== id && !transferDestinations(t).some((d) => d.nodeId === id));
-		// An off-take whose seepage rejoined below it returns none now, as a scenario's node.remove leaves it (engine ≥ 1.42.0).
+		// An off-take whose seepage rejoined below it (engine ≥ 1.42.0) rejoins at the nearest point above it on its path
+		// (the last farm, or the source), as a scenario's node.remove re-points it (engine ≥ 1.122.0, issue #853), so the
+		// water still reaches the unit below; it returns none only when no such point exists.
+		const byId = new Map(m.nodes.map((n) => [n.id, n] as const));
 		for (const t of m.transfers) {
 			if (t.lossReturnNodeId !== id) continue;
+			const target = seepageAbove(t.fromNodeId, drainedInto, byId);
+			if (target !== undefined) {
+				t.lossReturnNodeId = target;
+				continue;
+			}
 			t.lossReturnNodeId = null;
 			t.lossReturnPct = 0;
 		}

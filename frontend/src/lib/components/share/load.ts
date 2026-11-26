@@ -42,13 +42,21 @@ export async function loadFlow(api: ShareApi, token: string): Promise<FlowMonth[
 	}
 }
 
+/** The series' 404 also means a dead link: thrown by loadShare's re-check, so the page says the link is dead. */
+class DeadLink extends Error {}
+
 export async function loadShare(api: ShareApi, token: string | null): Promise<ShareLoad> {
 	if (!token) return { state: 'nolink' };
 	try {
 		const view = await api.view(token);
 		try {
-			return { state: 'ready', view, months: await loadFlow(api, token), chartFailed: false };
-		} catch {
+			const months = await loadFlow(api, token);
+			// The series answer the same 404 for "not shown for privacy" and a dead link (backend share/routes.ts),
+			// so a chart-less answer asks the view again: a link revoked or expired since the page loaded is dead, not private.
+			if (months == null) await api.view(token).catch((e) => Promise.reject(is404(e) ? new DeadLink() : e));
+			return { state: 'ready', view, months, chartFailed: false };
+		} catch (e) {
+			if (e instanceof DeadLink) return { state: 'dead' };
 			return { state: 'ready', view, months: null, chartFailed: true };
 		}
 	} catch (e) {

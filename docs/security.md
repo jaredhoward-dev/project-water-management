@@ -3444,7 +3444,10 @@ the key another way.
 blocked us: the feed's error says to check or replace the key, and the
 scheduler backs it off 2 h × 2ⁿ (242_feed_refused_backoff) rather than
 retrying, so a wrong or revoked key never hammers the owner's provider
-account into a lockout. A 429 or 503 waits for its `Retry-After`.
+account into a lockout. A 429 or 503 fails the fetch, and no station feed
+in that process asks the host again for its `Retry-After` (60 s without
+one, at most 15 minutes; `stationHttp.ts` `STATION_THROTTLED`): before
+this, a second feed on the same provider's API asked it straight away.
 
 **What remains (accepted).** Sign-up is open (§ Sign-up by invitation), so
 anyone with an account and a second factor can create a project, own it and
@@ -3581,7 +3584,9 @@ database:
   cell, telephone, fax or email column, before anything is stored, and says
   which columns to delete. A 13-digit number in the holder, reference,
   property or farm column is a row problem, so a mislabelled ID column can't
-  slip in as a name.
+  slip in as a name. Hand entry (`POST`/`PATCH …/allocations`) refuses a
+  13-digit number in the holder, reference, property or a condition the same
+  way (`idNumberProblem`).
 - The registered user's **name** is the only personal field kept, in
   `allocation_holder`, readable by editors and owners and by the linked farmer
   for their own farm; **viewers never read it** (RLS, decision D3). The

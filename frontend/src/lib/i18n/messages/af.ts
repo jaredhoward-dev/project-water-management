@@ -1879,6 +1879,8 @@ export const af: Catalogue = {
 	'97a7286a': 'Hierdie aansoek is nie nou oop vir kommentaar nie.',
 	// You can’t post a comment here.
 	'0aac72bd': 'Jy kan nie hier kommentaar plaas nie.',
+	// This hydrological unit’s published figures are worked out from a registered water volume, which this project shows only to its editors and owners. Ask one of them to let you see registered volumes.
+	'74561d30': 'Hierdie hidrologiese eenheid se gepubliseerde syfers word bereken uit ’n geregistreerde watervolume wat hierdie projek net aan sy redigeerders en eienaars wys. Vra een van hulle om jou toegang tot geregistreerde volumes te gee.',
 	// This link doesn’t work any more.
 	'8db26af3': 'Hierdie skakel werk nie meer nie.',
 	// You downloaded your data a moment ago. Try again in {wait}.

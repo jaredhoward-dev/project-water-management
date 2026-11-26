@@ -21,8 +21,8 @@
 //            outline traced in the wrong place.
 //   matched  waterbodyShare ≥ MATCH_WATERBODY_SHARE (0.7): at least 70 % of
 //            the waterbody is this dam, so its wet area is this dam's; and
-//            no other waterbody holds MAX_OTHER_DAM_SHARE (0.1) or more of the
-//            dam, so the dam isn't spread over several. The 30 % slack is
+//            the other waterbodies together hold less than MAX_OTHER_DAM_SHARE
+//            (0.1) of the dam, so the dam isn't spread over several. The 30 % slack is
 //            for the historical extent spilling past a traced outline along
 //            the inflow and the wall, and for tracing error.
 //   merged   otherwise: the waterbody also holds other water (another dam,

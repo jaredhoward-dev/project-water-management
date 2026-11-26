@@ -624,8 +624,10 @@ function applyOne(d: Draft, op: ScenarioOp, see: Visibility = SEE_ALL): string[]
 		case 'node.remove': {
 			const n = findNode(d, op.nodeId);
 			if (n.downstreamNodeId === null) fail(`"${n.name}" is the outflow hydrological unit and can't be removed`);
+			const drainedInto = new Set<string>();
 			for (const u of m.nodes) {
 				if (u.downstreamNodeId !== n.id) continue;
+				drainedInto.add(u.id);
 				u.downstreamNodeId = n.downstreamNodeId;
 				notes.push(`"${u.name}" now drains into ${n.downstreamNodeId}`);
 			}
@@ -640,12 +642,28 @@ function applyOne(d: Draft, op: ScenarioOp, see: Visibility = SEE_ALL): string[]
 			m.cropAreas = drop(m.cropAreas, (a) => a.nodeId === n.id, 'crop area(s)', (a) => see.node(a.nodeId) && see.item(a.cropId));
 			// A rule split between destinations (engine ≥ 1.114.0) goes with any of them, as a rule goes with its one.
 			m.transfers = drop(m.transfers, (t) => t.fromNodeId === n.id || transferDestinations(t).some((x) => x.nodeId === n.id), 'transfer(s)', (t) => see.item(t.id));
-			// An off-take whose seepage rejoined below it (engine ≥ 1.42.0) returns none now: the conservative side, said in a note.
+			// An off-take whose seepage rejoined below it (engine ≥ 1.42.0) now rejoins at the nearest point above it on
+			// the off-take's path (engine ≥ 1.122.0, issue #853): the last farm on the way from the source down to it, or the
+			// source itself. Returned seepage joins that unit's outflow (model.md §2.6a), and only gauges lie between there
+			// and where the removed unit was, so the water reaches the unit below exactly as before, hidden off-takes
+			// included. Zeroing it (before 1.122.0) sent it out of the catchment and scored the drop below as the
+			// proposal's. It returns none only when no such point exists, a guard a valid rule never meets.
+			// Either way a hidden off-take gets no note, so the applicant learns nothing of it.
+			const byId = new Map(m.nodes.map((x) => [x.id, x] as const));
 			for (const t of m.transfers) {
 				if (t.lossReturnNodeId !== n.id) continue;
+				const target = seepageAbove(t.fromNodeId, drainedInto, byId);
+				if (target !== undefined) {
+					t.lossReturnNodeId = target;
+					if (see.item(t.id)) {
+						const at = target === null ? 'at the off-take' : `below "${byId.get(target)?.name ?? target}"`;
+						notes.push(`a river off-take's seepage now rejoins the river ${at} (it rejoined below "${n.name}"), so it reaches the same unit below`);
+					}
+					continue;
+				}
 				t.lossReturnNodeId = null;
 				t.lossReturnPct = 0;
-				if (see.item(t.id)) notes.push(`a river off-take's seepage no longer returns to the river (it rejoined below "${n.name}")`);
+				if (see.item(t.id)) notes.push(`a river off-take's seepage no longer returns to the river (it rejoined below "${n.name}", and no farm above it on the off-take's path can take it)`);
 			}
 			if (m.landCover) m.landCover = drop(m.landCover, (p) => p.nodeId === n.id, 'land-cover patch(es)', (p) => see.item(p.id));
 			if (m.boreholes) m.boreholes = drop(m.boreholes, (b) => b.nodeId === n.id, 'borehole(s)', (b) => see.item(b.id));
@@ -1342,7 +1360,8 @@ export function classifyOp(op: ScenarioOp, ownedNodeIds: Iterable<string>, input
 			// It drops every rule from or to it: each must reach only the applicant's units, as transfer.remove asks, else
 			// removing a node would take another party's rule as the proposal. Only rules from or to it: the owner of a node
 			// sees each of those (applicant.ts); an off-take whose seepage alone rejoins below it may be hidden from them,
-			// and classing by it would tell an applicant it exists (the removal's note leaves it out for the same reason).
+			// and classing by it would tell an applicant it exists (the removal's note leaves it out for the same reason). Its
+			// seepage now rejoins one unit lower (issue #853), so it stays in the river rather than going as the proposal's loss.
 			const touched = (input?.model.transfers ?? []).filter((t) => t.fromNodeId === op.nodeId || transferDestinations(t).some((x) => x.nodeId === op.nodeId));
 			return ok(mine(op.nodeId) && !!n && !sharesRunoff(n) && !ewrSite && touched.every(allEndsMine));
 		}
@@ -1449,4 +1468,23 @@ export function classifyScenario(base: ModelInput, ops: readonly ScenarioOp[], o
 		if (added.has(i) && op.op === 'crop.add') crops.add(op.crop.id);
 		return c;
 	});
+}
+
+/**
+ * Where a removed unit's returned seepage rejoins instead (issue #853): walking down from the off-take's source, the
+ * last farm before the path reached the removed unit (one of `drainedInto`, the units that drained into it), or null
+ * for the source itself when no farm lies between. Undefined when the path never reached it.
+ */
+export function seepageAbove(sourceId: string, drainedInto: ReadonlySet<string>, byId: ReadonlyMap<string, NetworkNode>): string | null | undefined {
+	let best: string | null = null;
+	const seen = new Set<string>();
+	for (let id: string | null = sourceId; id !== null && !seen.has(id); ) {
+		seen.add(id);
+		const node = byId.get(id);
+		if (!node) return undefined;
+		if (id !== sourceId && node.kind === 'farm') best = id;
+		if (drainedInto.has(id)) return best;
+		id = node.downstreamNodeId;
+	}
+	return undefined;
 }

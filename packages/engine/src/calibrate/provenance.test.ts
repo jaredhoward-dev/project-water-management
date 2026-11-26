@@ -228,6 +228,75 @@ describe('fit record', () => {
 		expect(calibrationFitStatus({ ...s, fitRecord: rec }, 'flow_observed_m3s')).toBe('otherPeriod');
 	});
 
+	it('compares exclusions and missing periods by the days they leave out, not their reasons or order', () => {
+		const wy = { waterYear: 2015, reason: 'suspect rain' };
+		const range = { start: '2013-01-01', end: '2013-02-01', reason: 'weir silted up' };
+		const s = { ...gr4jSettings(), calibrationStart: '2012-10-01', calibrationExclusions: [wy, range] };
+		const fm = { 'series-1': [{ start: '2014-01-01', end: '2014-02-01', reason: 'logger stolen' }] };
+		const rec = fitRecordFromReport(report(), { ...ctx, settings: { ...ctx.settings, calibrationExclusions: s.calibrationExclusions, flowMissing: fm } });
+		const at = (over: Partial<ProjectSettings>) => calibrationFitStatus({ ...s, flowMissing: fm, ...over, fitRecord: rec } as never, 'flow_logger_m3s');
+		// Positive control: the fit's own exclusions.
+		expect(at({})).toBe('fitted');
+		// A reworded reason, the list in another order, or the same days written another way leave the same days scored.
+		expect(at({ calibrationExclusions: [{ ...wy, reason: 'CHIRPS suspect in WY 2015/16 (checked against stations)' }, range] })).toBe('fitted');
+		expect(at({ calibrationExclusions: [range, wy] })).toBe('fitted');
+		expect(at({ calibrationExclusions: [{ start: '2015-10-01', end: '2016-09-30', reason: 'same year as dates' }, range] })).toBe('fitted');
+		expect(at({ calibrationExclusions: [wy, { start: '2013-01-01', end: '2013-01-15', reason: 'a' }, { start: '2013-01-16', end: '2013-02-01', reason: 'b' }] })).toBe('fitted');
+		expect(at({ flowMissing: { 'series-1': [{ ...fm['series-1'][0]!, reason: 'logger stolen (police case 12)' }] } })).toBe('fitted');
+		// Other days are another period (negative controls): a day more, a day less, another record's missing period.
+		expect(at({ calibrationExclusions: [wy, { ...range, end: '2013-02-02' }] })).toBe('otherPeriod');
+		expect(at({ calibrationExclusions: [wy] })).toBe('otherPeriod');
+		expect(at({ flowMissing: { 'series-2': fm['series-1'] } })).toBe('otherPeriod');
+	});
+
+	it('compares only the days a run scores: an invalid exclusion or one outside the fit’s window is no change', () => {
+		const wy = { waterYear: 2015, reason: 'suspect rain' };
+		const window = { calibrationStart: '2012-10-01', calibrationEnd: '2016-09-30' };
+		const s = { ...gr4jSettings(), ...window, calibrationExclusions: [wy] };
+		const fm = { 'series-1': [{ start: '2014-01-01', end: '2014-02-01', reason: 'logger stolen' }] };
+		const rec = fitRecordFromReport(report(), { ...ctx, settings: { ...ctx.settings, ...window, calibrationExclusions: [wy], flowMissing: fm } });
+		const status = (over: Partial<ProjectSettings>) => fitRecordStatus({ ...s, flowMissing: fm, ...over } as never, rec);
+		const at = (over: Partial<ProjectSettings>) => calibrationFitStatus({ ...s, flowMissing: fm, ...over, fitRecord: rec } as never, 'flow_logger_m3s');
+		// Positive control: the fit's own days.
+		expect(at({})).toBe('fitted');
+		// An invalid stored entry, which a run drops with a warning (sanitizeExclusions), leaves out no day here either.
+		const invalid = [
+			{ start: '2014-13-01', end: '2014-13-31', reason: 'bad month' },
+			{ start: '2014-03-01', end: '2014-02-01', reason: 'reversed' },
+			{ start: '2014-03-01', end: '2014-03-31', reason: '' },
+			{ waterYear: 2014.5, reason: 'half a year' },
+			'not an exclusion'
+		];
+		for (const x of invalid) {
+			expect(at({ calibrationExclusions: [wy, x] as never }), JSON.stringify(x)).toBe('fitted');
+			expect(status({ calibrationExclusions: [wy, x] as never }).exclusionsChanged, JSON.stringify(x)).toBe(false);
+		}
+		expect(at({ flowMissing: { 'series-1': [...fm['series-1'], invalid[0]] } as never })).toBe('fitted');
+		expect(at({ flowMissing: { ...fm, 'series-2': [invalid[1]] } as never })).toBe('fitted');
+		// Not a list at all: a run reads none, so the settings leave out nothing, and the fit's WY 2015 is scored again.
+		expect(at({ calibrationExclusions: 'WY 2015' as never })).toBe('otherPeriod');
+		// Wholly outside the window the fit scored (before its start, after its end): no scored day changes.
+		const before = { start: '2010-01-01', end: '2012-09-30', reason: 'before the window' };
+		const after = { waterYear: 2016, reason: 'after the window' };
+		expect(at({ calibrationExclusions: [wy, before, after] })).toBe('fitted');
+		expect(status({ calibrationExclusions: [wy, before, after] }).exclusionsChanged).toBe(false);
+		expect(at({ flowMissing: { ...fm, 'series-2': [after] } })).toBe('fitted');
+		// Only the part inside the window counts: a period running past the window's end with the same days inside it is no change.
+		expect(at({ calibrationExclusions: [{ start: '2015-10-01', end: '2017-03-31', reason: 'WY 2015 and on' }] })).toBe('fitted');
+		// Negative controls: a real change inside the window is another period, even one day of it.
+		expect(at({ calibrationExclusions: [wy, { ...before, end: '2012-10-01' }] })).toBe('otherPeriod');
+		expect(at({ calibrationExclusions: [wy, { start: '2015-09-30', end: '2015-09-30', reason: 'the day before WY 2015' }] })).toBe('otherPeriod');
+		expect(at({ calibrationExclusions: [] })).toBe('otherPeriod');
+		expect(status({ calibrationExclusions: [wy, { start: '2014-03-01', end: '2014-03-31', reason: 'valid this time' }] }).exclusionsChanged).toBe(true);
+		expect(at({ flowMissing: { 'series-1': [{ ...fm['series-1'][0]!, end: '2014-02-02' }] } })).toBe('otherPeriod');
+		// A window that changes is windowChanged (another period), whatever the exclusions say.
+		expect(at({ calibrationEnd: '2017-09-30', calibrationExclusions: [wy, after] })).toBe('otherPeriod');
+		expect(status({ calibrationEnd: '2017-09-30', calibrationExclusions: [wy, after] })).toMatchObject({ windowChanged: true, exclusionsChanged: false });
+		// An open-ended window bounds nothing on that side: the same WY 2016 is inside it, a change.
+		const open = fitRecordFromReport(report(), { ...ctx, settings: { ...ctx.settings, calibrationStart: '2012-10-01', calibrationEnd: null, calibrationExclusions: [wy] } });
+		expect(calibrationFitStatus({ ...s, calibrationEnd: null, calibrationExclusions: [wy, after], fitRecord: open } as never, 'flow_logger_m3s')).toBe('otherPeriod');
+	});
+
 	it('says when the fit no longer describes the settings', () => {
 		const s = { ...gr4jSettings(), calibrationStart: '2012-10-01', calibrationExclusions: [{ waterYear: 2015, reason: 'suspect rain' }] };
 		// The fit's own recorded forcing matches this settings object exactly, so forcingChanged starts false.

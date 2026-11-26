@@ -5,7 +5,20 @@
 // itself is WebCrypto's (sha256Hex).
 import { packManifestText, type PackManifest } from '@water-management/engine';
 import { fmtDate } from '#lib/format/number.js';
+import { localTimeZone } from '#lib/components/report/serverPdf.js';
 import type { Pack, PackBundleCheck, PackIssueChecks, PackReproductionState, PackStatus, PackVerification } from '#lib/api/index.js';
+
+/**
+ * The zone a pack's page dates its report's run by (EvidenceReport's
+ * `timeZone`): the project's when it was read; in a server render session,
+ * which never reads the project, the browser's own, since the renderer runs
+ * that browser in the project's zone (backend reports/render.ts
+ * renderTimeZone); otherwise undefined, the default zone.
+ */
+export function packTimeZone(project: { timeZone?: string } | null, renderSession: boolean, browserZone: () => string = localTimeZone): string | undefined {
+	if (project) return project.timeZone;
+	return renderSession ? browserZone() : undefined;
+}
 
 /** A pack's status in a word, as its badges say it. */
 export const PACK_STATUS_LABEL: Record<PackStatus, string> = {

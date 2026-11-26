@@ -99,6 +99,22 @@ describe('collectWorkbookInput', () => {
 		await expect(collectWorkbookInput(req, fn, () => {})).rejects.toThrow('You are not signed in');
 	});
 
+	it("dates the data-source credits by the run's day in the project's zone, not UTC's (issue #860)", async () => {
+		// 23:30 UTC on 26 October is already 27 October in Johannesburg (the default zone), and still the 26th in St John's.
+		const imerg = { ...run, createdAt: '2026-10-26T23:30:00Z', summary: { ...run.summary, gapRain: { products: [{ product: 'imerg_late', version: 'V07', present: true }] } } };
+		const credited = (timeZone?: string) => {
+			const { fn } = fakeFetch();
+			const exact = (async (input: RequestInfo | URL, init?: RequestInit) =>
+				new URL(String(input)).pathname === `/projects/${P}/runs/${R}` ? Response.json({ run: imerg, series: [] }) : fn(input, init)) as typeof fetch;
+			return collectWorkbookInput({ ...req, ...(timeZone ? { timeZone } : {}) }, exact, () => {}).then(({ input }) => input.credits![0]!.lines[0]!);
+		};
+		expect(await credited()).toContain('accessed 2026-10-27,');
+		expect(await credited('Africa/Johannesburg')).toContain('accessed 2026-10-27,');
+		expect(await credited('America/St_Johns')).toContain('accessed 2026-10-26,');
+		// An unknown zone reads as the default, never as the device's or UTC's day.
+		expect(await credited('Not/AZone')).toContain('accessed 2026-10-27,');
+	});
+
 	it('falls back to a generic file name without the server one', async () => {
 		const { fn } = fakeFetch({ 'summary.csv': () => new Response('Project,X\r\n') });
 		expect((await collectWorkbookInput(req, fn, () => {})).filename).toBe('run_workbook.xlsx');

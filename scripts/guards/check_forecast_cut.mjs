@@ -114,12 +114,12 @@ export const INVENTORY = [
 	{ path: 'frontend/src/lib/components/supply/UnitDetail.svelte', reads: 1, how: 'band', evidence: ['{band}'] },
 	{ path: 'frontend/src/lib/export/urls.ts', reads: 1, how: 'whole', evidence: ['withForecastFlag'], in: 'frontend/src/lib/spreadsheet/export/collect.ts', note: 'the .xlsx: every daily sheet leads with the forecast flag' },
 	{
-		path: 'frontend/src/routes/projects/[id]/report/+page.svelte',
+		path: 'frontend/src/lib/components/report/reportLoad.ts',
 		reads: 2,
 		how: 'cut+band',
 		evidence: ['forecastFrom: run.summary.forecast?.from ?? null', 'band={forecastBand(summary.forecast?.from)}', 'beforeForecast(s.values, s.startDate, forecastFrom)'],
 		in: ['frontend/src/routes/projects/[id]/report/+page.svelte', 'frontend/src/routes/projects/[id]/report/+page.svelte', 'frontend/src/lib/components/report/licenceImpact.ts'],
-		note: 'the FDC table, the printed charts, and the licence-impact board (licenceImpact.ts)'
+		note: 'the report page reads them (reportLoad.ts) for the FDC table, the printed charts, and the licence-impact board (licenceImpact.ts)'
 	},
 	// --- backend ----------------------------------------------------------------
 	{ path: 'backend/src/dams/observed/read.ts', reads: 1, how: 'cut', evidence: ['(input.forecastFrom && date >= input.forecastFrom)'], in: 'backend/src/dams/observed/compare.ts', note: 'views on a forecast run’s forecast days are left out of the comparison (outside-run)' },

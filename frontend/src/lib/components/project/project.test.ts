@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PROJECT_ANCHORS, projectAnchor, projectHref } from './links';
-import { byName, foldRows, PEOPLE_SHOWN, projectContext } from './project';
+import { byName, fmtProjectDay, foldRows, PEOPLE_SHOWN, projectContext, projectDay } from './project';
 
 describe('projectContext', () => {
 	// The created date is the viewer's calendar day (fmtDate), and no instant is
@@ -111,5 +111,35 @@ describe('byName', () => {
 	it('keeps the server’s groups in their order, sorting only within each', () => {
 		const rows = [p('Zed', 'owner'), p('Hydrologist 10', 'editor'), p('Hydrologist 2', 'editor'), p('Bea', 'viewer'), p('Al', 'viewer')];
 		expect(byName(rows, (r) => r.role).map((r) => r.displayName)).toEqual(['Zed', 'Hydrologist 2', 'Hydrologist 10', 'Al', 'Bea']);
+	});
+});
+
+describe('projectDay (issue #860)', () => {
+	it("is the project's calendar day at a moment, whatever the device's zone (the suite runs under a skewed TZ)", () => {
+		expect(projectDay('2026-10-26T23:30:00Z')).toBe('2026-10-27');
+		expect(projectDay('2026-10-26T21:59:00Z', 'Africa/Johannesburg')).toBe('2026-10-26');
+		expect(projectDay('2026-10-26T22:00:00Z', 'Africa/Johannesburg')).toBe('2026-10-27');
+		expect(projectDay('2026-10-27T01:00:00Z', 'America/St_Johns')).toBe('2026-10-26');
+	});
+
+	it('reads an unknown zone as the default one', () => {
+		expect(projectDay('2026-10-26T23:30:00Z', 'Not/AZone')).toBe('2026-10-27');
+	});
+});
+
+describe('fmtProjectDay (issue #860: the evidence report\'s run date)', () => {
+	it("prints the project's day near midnight, not UTC's (the old ISO slice) or the device's (the suite runs under a skewed TZ)", () => {
+		// 22:30 UTC is already the next day in Johannesburg: the old createdAt.slice(0, 10) printed 26 Oct.
+		expect(fmtProjectDay('2026-10-26T22:30:00Z', 'Africa/Johannesburg')).toBe('27 Oct 2026');
+		expect(fmtProjectDay('2026-10-26T22:30:00Z')).toBe('27 Oct 2026');
+		expect(fmtProjectDay('2026-10-26T21:59:00Z', 'Africa/Johannesburg')).toBe('26 Oct 2026');
+		// West of UTC the day is still the earlier one.
+		expect(fmtProjectDay('2026-10-27T01:00:00Z', 'America/St_Johns')).toBe('26 Oct 2026');
+	});
+
+	it('leaves a missing or unreadable date as it was', () => {
+		expect(fmtProjectDay(null)).toBe('–');
+		expect(fmtProjectDay('')).toBe('–');
+		expect(fmtProjectDay('not a date', 'UTC')).toBe('not a date');
 	});
 });

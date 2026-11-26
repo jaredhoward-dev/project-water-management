@@ -96,11 +96,14 @@ async function previewKeptFromVolumes(db: Db, projectId: string, nodeId: string,
 	return !rows[0]?.linked;
 }
 
-/** 403 for a preview of a farm whose current publication caps or fully allocates (#523 I). */
+/**
+ * 403 for a preview of a farm whose current publication caps or fully allocates (#523 I). Its own code, so the
+ * farm page tells the WUA viewer why rather than read it as "no longer yours" (and drop that phone's saved copies).
+ */
 const farmFiguresWithheld = () =>
 	ApiError.coded(
 		403,
-		'allocation_series_withheld',
+		'farm_preview_withheld',
 		'this farm’s published figures are worked out from a registered water volume, which this project shows to its editors and owners only'
 	);
 

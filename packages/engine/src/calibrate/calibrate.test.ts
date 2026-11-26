@@ -330,7 +330,9 @@ describe('calibrate', () => {
 	});
 
 	it('reports a split-sample test, and a dry → wet test when there are enough water years', () => {
-		const report = calibrate(synthetic({ x1: 420, x2: 0, x3: 85, x4: 2.3 }, 8), { budget: 150, seed: 2 });
+		const plan = new Set<string>();
+		const report = calibrate(synthetic({ x1: 420, x2: 0, x3: 85, x4: 2.3 }, 8), { budget: 150, seed: 2, onProgress: (p) => void plan.add(`${p.stage} ${p.optimisation}/${p.optimisations}`) });
+		expect([...plan]).toEqual(['full 1/3', 'split 2/3', 'dsst 3/3']);
 		const ss = report.splitSample!;
 		expect(ss.calibration.end < ss.validation.start).toBe(true);
 		expect(ss.calibration.scores.days + ss.validation.scores.days).toBe(report.fit.scores.days);
@@ -364,8 +366,11 @@ describe('calibrate', () => {
 	}, 60_000);
 
 	it('says plainly when the record can’t test wet years', () => {
-		const report = calibrate(synthetic({ x1: 420, x2: 0, x3: 85, x4: 2.3 }, 2.5), { budget: 60 });
+		const plan = new Set<string>();
+		const report = calibrate(synthetic({ x1: 420, x2: 0, x3: 85, x4: 2.3 }, 2.5), { budget: 60, onProgress: (p) => void plan.add(`${p.stage} ${p.optimisation}/${p.optimisations}`) });
 		expect(report.differential).toBeNull();
+		// The progress events' plan leaves the skipped dry → wet fit out, so the bar doesn't jump.
+		expect([...plan]).toEqual(['full 1/2', 'split 2/2']);
 		expect(report.notes.join(' ')).toMatch(/too few to fit on dry years and test on wet ones.*weakly constrained/);
 	});
 
@@ -492,10 +497,18 @@ describe('calibrate', () => {
 		expect(calibrate(input, { budget: 150, seed: 9, validate: false, starts: 1 })).toEqual(one);
 
 		const progress: { start?: number; starts?: number }[] = [];
-		const three = calibrate(input, { budget: 150, seed: 9, validate: false, starts: 3, onProgress: (p) => void progress.push({ start: p.start, starts: p.starts }) });
+		const planOf3: string[] = [];
+		const three = calibrate(input, {
+			budget: 150,
+			seed: 9,
+			validate: false,
+			starts: 3,
+			onProgress: (p) => void (progress.push({ start: p.start, starts: p.starts }), planOf3.push(`${p.optimisation}/${p.optimisations}`))
+		});
 		expect(three.starts).toBe(3);
 		expect(three.startResults.map((r) => r.seed)).toEqual([9, startSeed(9, 1), startSeed(9, 2)]);
 		expect(three.evaluations).toBe(3 * 150);
+		expect(new Set(planOf3)).toEqual(new Set(['1/3', '2/3', '3/3']));
 		// Start 0 is the single-start fit, so more starts never do worse.
 		expect(three.startResults[0]!.params).toEqual(one.params);
 		const best = three.startResults.filter((r) => r.best);

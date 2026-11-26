@@ -343,6 +343,30 @@ describe('POST /farmers/bulk', () => {
 		expect(mailCount(under)).toBe(1);
 	});
 
+	it('adds a row’s farm to a pending applicant invite, keeping its role and farms (control: a farmer invite gains it too)', async () => {
+		const applicant = newEmail('bulk-applicant');
+		expect((await owner.call('POST', `/projects/${projectId}/farmers`, { email: applicant, nodeIds: [farmB.id], role: 'contributor' })).status).toBe(201);
+		const farmer = newEmail('bulk-farmer');
+		expect((await owner.call('POST', `/projects/${projectId}/farmers`, { email: farmer, nodeIds: [farmB.id] })).status).toBe(201);
+		const res = await bulk(owner, [
+			{ email: applicant, farm: 'Hoek' },
+			{ email: farmer, farm: 'Hoek' }
+		]);
+		expect(res.body.results.map((r: { status: string }) => r.status)).toEqual(['invited', 'invited']);
+		const listed = (await owner.call('GET', `/projects/${projectId}/farmers`)).body.farmers;
+		expect(listed.find((f: { email: string }) => f.email === applicant)).toEqual(expect.objectContaining({ role: 'contributor', nodeIds: [farmB.id, farmC.id].sort() }));
+		expect(listed.find((f: { email: string }) => f.email === farmer)).toEqual(expect.objectContaining({ role: 'farmer', nodeIds: [farmB.id, farmC.id].sort() }));
+	});
+
+	it('refuses a row for an address with a pending invite of another role, and leaves that invite as it was', async () => {
+		const editor = newEmail('bulk-editor');
+		expect((await owner.call('POST', `/projects/${projectId}/members`, { email: editor, role: 'editor' })).status).toBe(201);
+		const res = await bulk(owner, [{ email: editor, farm: 'Hoek' }]);
+		expect(res.body.results[0]).toMatchObject({ status: 'error', error: 'already invited to this project (editor)' });
+		expect(await asOwner('SELECT project_role::text AS role FROM invite WHERE project_id = $1 AND email = $2', [projectId, editor])).toEqual([{ role: 'editor' }]);
+		expect(await asOwner('SELECT count(*)::int AS n FROM invite_node n JOIN invite i ON i.id = n.invite_id WHERE i.project_id = $1 AND i.email = $2', [projectId, editor])).toEqual([{ n: 0 }]);
+	});
+
 	it('is owner-only, and caps a request at 200 rows', async () => {
 		const row = { email: newEmail('cap'), farm: 'Hoek' };
 		expect((await bulk(viewer, [row])).status).toBe(403);

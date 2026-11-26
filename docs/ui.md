@@ -9798,8 +9798,12 @@ calibration's line points at *How the shown run fits* for NSE and PBIAS.
     fitted parameters scored against that record over its own days (model.md
     §2.10b). It costs no extra fit.
   - While it runs there is a progress bar (`role="progressbar"`) with the
-    stage and the best score so far. **Cancel** stops the worker at once and
-    discards it.
+    stage and the best score so far. The bar splits into equal parts by the
+    optimisations the engine will actually run, read from its progress events
+    (`optimisation` of `optimisations`, engine `CalibrationProgress`), so a
+    dry → wet test skipped for too few water years, or an unpenalised fit
+    where no WR2012 penalty applies, never leaves the bar to jump.
+    **Cancel** stops the worker at once and discards it.
   - The choices, the running fit and its result live in the workspace page's
     `FitSession` (`lib/calibration/fitSession.svelte.ts`), not the panel, as
     the unsaved settings do: opening another tab leaves the fit running, and
@@ -11761,7 +11765,7 @@ read it before.
   filled which days** (`summary.gapRain.segments`, the days `rain_source` 5
   and 6 mark, each IMERG run with its version; the first 8, the rest behind
   **Show all N runs of days**), and the credits of the products the run read,
-  word for word, read on the run's day,
+  word for word, read on the run's day in the project's time zone (issue #860),
   **Rain for each unit** for a run with `settings.unitRain` per unit
   (`UnitRainPanel`, its own chunk, `#res-unit-rain`, helpers in
   `runs/unitRain.ts`; shown only when the summary carries
@@ -14337,7 +14341,11 @@ March") is kept against what it is about.
 WP-2.15 Phase A, issue #19): a meeting-ready catchment report of one run, for
 anyone who can view the project. Without `?run=` it reports the latest run of the model
 (never a newer scenario or forecast run, unless the project has no other;
-`runs/scenarioRun.ts latestModelRun`, the run a scheduled PDF prints). It
+`runs/scenarioRun.ts latestModelRun`, the run a scheduled PDF prints). Its
+load (`report/reportLoad.ts`) is latest-only: when `?run=` (or `&against=`)
+changes while a slower load is still out, that earlier load's answer, or its
+error, is dropped, so the page always shows the run its address names (issue
+#859; [architecture.md § Stale responses](./architecture.md#stale-responses-frontend)). It
 reads the project, the run with its settings and model snapshot (one
 exception: the lede and headline cards follow the project's current Model
 settings → EWR the results are judged by, `settings.ewrHeadline`, issue #444, which runs don't
@@ -15382,7 +15390,9 @@ published.
   `worstFirst`), each with its notice level, received %, dam %, or "Not published yet" (while a card's
   figures load it says "Updating…", and when neither they nor a saved copy
   can be had, "We couldn’t load your hydrological unit", never a blank
-  line), and goes straight to the only one. `/farm/[projectId]` is one farm (`?node=` and a
+  line; a farm whose figures answer 403/404, unlinked since the list loaded,
+  leaves the list and its saved copy goes, as a project the list's own
+  403/404 leaves out: `farm/load.ts` `cardOnFailure`), and goes straight to the only one. `/farm/[projectId]` is one farm (`?node=` and a
   switcher when the farmer has several there: a row of links above the name
   for up to 4 farms; past that, folded under "Your hydrological units in this catchment
   (N farms)", so the name and the WUA's notice stay on the first screen,
@@ -15681,7 +15691,11 @@ published.
 - **States.** Skeleton cards with a hidden status and "Slow signal?" after
   3 s; no publication; an error with Try again (a contact line after the
   second failure, never raw error text); access removed (403/404), which
-  also clears the saved copy; and a link to a unit that isn't the farmer's
+  also clears the saved copy; a WUA viewer kept from registered volumes
+  previewing while a cap or full-allocation run is published (`403
+  farm_preview_withheld`, #523 I): the `withheld` state, saying why
+  (worded from the code, `apiError.ts`), clearing nothing, since the farm
+  is still there; and a link to a unit that isn't the farmer's
   (`?node=` the catchment's list doesn't hold, while it holds others): "This
   hydrological unit isn’t linked to your account. If it should be, contact
   …", never "no longer" (it may never have been theirs), with **Your
@@ -16347,7 +16361,11 @@ signed in or out, for someone outside the project, on a phone first.
   one 560 px card. `share-links.spec.ts` pins both layouts and axe in both
   themes.
 - **States:** loading; a dead link ("This link has expired or was
-  withdrawn. Ask whoever sent it for a new one.") for every `404`; a link
+  withdrawn. Ask whoever sent it for a new one.") for every `404`, the
+  flow chart's included: the series answer the same 404 for "not shown for
+  privacy" and a dead link, so a chart-less answer asks the view again, and
+  a link revoked or expired since the page loaded is dead, not private
+  (`share/load.ts`); a link
   without its token ("This page needs the whole link…"); and an error with
   Try again. Every string is in `lib/components/share/share.ts`, the chart
   in `share/chart.ts`, the loading rules in `share/load.ts`, all
