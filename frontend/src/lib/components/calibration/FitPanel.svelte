@@ -197,7 +197,7 @@
 	// A stepwise fit (issue #555): each step is one fit's fraction of the whole.
 	const stepOf = $derived(session.stepProgress);
 	const pct = $derived(
-		progress ? Math.round((100 * ((stepOf ? stepOf.step - 1 : 0) + progressFraction(progress, session.runValidate, penalty, session.runStarts, session.runPriorCost))) / (stepOf?.steps ?? 1)) : 0
+		progress ? Math.round((100 * ((stepOf ? stepOf.step - 1 : 0) + progressFraction(progress))) / (stepOf?.steps ?? 1)) : 0
 	);
 	const steps = $derived(session.steps && session.steps.length > 1 ? stepRows(session.steps, nodes) : null);
 	// The headline's step, shown in full below the steps (the last of a one-step fit).
@@ -250,9 +250,6 @@
 				};
 			},
 			() => {
-				session.runStarts = starts;
-				session.runValidate = validate;
-				session.runPriorCost = fitWithoutPrior;
 				const f = free;
 				const req = { input, model: 'gr4j' as const, objective, bounds, budget, free: f, validate, seed, starts, validationRecord: validationRecord ?? undefined, ...(fitWithoutPrior ? { fitWithoutPrior } : {}) };
 				return startStepwiseFit(

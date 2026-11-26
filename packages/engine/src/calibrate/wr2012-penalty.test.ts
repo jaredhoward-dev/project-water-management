@@ -111,12 +111,18 @@ describe('WR2012 MAR penalty in calibration', () => {
 
 	it('reports progress for the unpenalised stage after the others', () => {
 		const stages: string[] = [];
+		const plans: string[] = [];
 		calibrate(withReference(input, mar, 1.4, { enabled: true, weight: 1, marLowMm3: null, marHighMm3: null }), {
 			...opts,
 			budget: 20,
-			onProgress: (pr) => void (stages.at(-1) !== pr.stage && stages.push(pr.stage))
+			onProgress: (pr) => void (stages.at(-1) !== pr.stage && (stages.push(pr.stage), plans.push(`${pr.optimisation}/${pr.optimisations}`)))
 		});
 		expect(stages).toEqual(['full', 'unpenalised']);
+		// The plan the progress bar reads counts the unpenalised fit only when the penalty is on.
+		expect(plans).toEqual(['1/2', '2/2']);
+		const off: string[] = [];
+		calibrate(input, { ...opts, budget: 20, onProgress: (pr) => void off.push(`${pr.stage} ${pr.optimisation}/${pr.optimisations}`) });
+		expect(new Set(off)).toEqual(new Set(['full 1/1']));
 	});
 
 	it('is deterministic for a seed', () => {
