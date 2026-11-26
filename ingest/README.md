@@ -84,14 +84,6 @@ not in the image and never scheduled.
 { "mode": "release_hold", "hold": { "execution": "<execution id>" } }
 { "product": "imerg_late", "mode": "recent", "days": 10 }
 { "product": "ecmwf", "mode": "daily" }
-```
-
-`hold` and `release_hold` are the backfill state machine's (§ One process
-asking CHC at a time, below).
-
-A backfill names its month (from 1981-01 for `rnl`, 2000-06 for `sat`); a
-monthly run takes none. An `imerg_late` event takes an optional `days`
-(1–30, default 10; § IMERG Late). Any other key is refused.
 { "product": "era5l", "mode": "monthly" }
 { "product": "era5l", "mode": "backfill", "month": "YYYY-MM" }
 { "product": "agera5_et0", "mode": "monthly" }
@@ -101,11 +93,15 @@ monthly run takes none. An `imerg_late` event takes an optional `days`
 { "product": "c3s", "mode": "backfill", "month": "MM", "system": "ecmwf-51" }
 ```
 
+`hold` and `release_hold` are the backfill state machine's (§ One process
+asking CHC at a time, below).
+
 A backfill names its month (from 1981-01 for `rnl`, 2000-06 for `sat`); a
-monthly run takes none. Any other key is refused. An `era5l` backfill
-names a month from 1950-01 to the newest complete one, an `agera5_et0`
-backfill one from 1979-01. A `power_et0` event takes an optional `days`
-(1–60, default 30). A `c3s` backfill names a hindcast init month
+monthly run takes none. Any other key is refused. An `imerg_late` event
+takes an optional `days` (1–30, default 10; § IMERG Late). An `era5l`
+backfill names a month from 1950-01 to the newest complete one, an
+`agera5_et0` backfill one from 1979-01 to the newest complete one. A
+`power_et0` event takes an optional `days` (1–60, default 30). A `c3s` backfill names a hindcast init month
 (`"01"`–`"12"`) and, optionally, one system of `c3srequest.SYSTEMS`.
 
 | Variable | Meaning |
