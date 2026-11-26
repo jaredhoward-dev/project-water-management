@@ -598,10 +598,8 @@ export const packRoutes = new Hono<AuthEnv>()
 					throw volumesWithheld('this pack names other farms with their registered volume (it was drafted before its § 5 listed only an applicant’s own units, or is a team scenario’s)');
 				const { rows: signoffs } = await db.query<SignoffRow>(`${SIGNOFF_SELECT} WHERE project_id = $1 AND pack_id = $2 ORDER BY signed_at, id`, [id, packId]);
 				const errataFoundSince = await packErrataFoundSince(db, pack, manifest);
-				return c.json({
-					pack,
-					// The licence-impact boards' verdicts only, for any viewer kept from each volume, as the live report (#523 I).
-					manifest: scope
+				// The licence-impact boards' verdicts only, for any viewer kept from each volume, as the live report (#523 I).
+				const served = scope
 						? { ...manifest, report: redactReportAllocations(manifest.report, scope.own) }
 						: (await allocationUnitsHidden(db, id, role))
 							? {
@@ -614,11 +612,19 @@ export const packRoutes = new Hono<AuthEnv>()
 										cumulative: combinedDamVerdicts(manifest.report.cumulative, false)
 									}
 								}
-							: manifest,
+							: manifest;
+				const verdictsOnly = !withheld && served !== manifest && packManifestText(served) !== packManifestText(manifest);
+				return c.json({
+					pack,
+					manifest: served,
 					// False only if the stored manifest was altered past the guard (the owner, by hand).
 					manifestMatches: matches,
-					// The manifest above is redacted (it no longer hashes to manifestSha256), and the bundle is refused (#523 G1).
-					volumesWithheld: withheld,
+					// The manifest above is redacted: it no longer hashes to manifestSha256, so it doesn't download (#523 G1). Also on a
+					// pack whose own runs carry no volume, whose boards' verdicts-only redaction changed it (#870); the bundle is refused
+					// only by bundleWithheld.
+					volumesWithheld: withheld || verdictsOnly,
+					// #870: redacted only to the licence-impact boards' and combined dams' verdicts (the pack's own runs carry no volume).
+					manifestVerdictsOnly: verdictsOnly,
 					// bundle-3: the bundle also holds runs the pack's own two don't (an alternative's, the assessment's background), so it may be refused alone.
 					bundleWithheld: withheld || (await packBundleVolumesWithheld(db, id, pack, role)),
 					// Errata that apply to its runs now and that the manifest didn't record (132): shown beside the pack, never printed in it.

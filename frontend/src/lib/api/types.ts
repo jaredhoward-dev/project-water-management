@@ -2355,13 +2355,21 @@ export interface PackDetail {
 	/** The stored manifest still hashes to its recorded SHA-256. */
 	manifestMatches: boolean;
 	/**
+	 * `manifest` is redacted, so it no longer hashes to `pack.manifestSha256`.
 	 * A viewer the project doesn't let read each farm's registered volume, on a
-	 * pack whose runs carry them (D3, issue #523 G1): `manifest` comes without
-	 * Appendix A.1's allocation rows and the summaries' per-unit part, so it no
-	 * longer hashes to `pack.manifestSha256`, and the reproduction bundle is
-	 * refused (403 `pack_volumes_withheld`).
+	 * pack whose runs carry them (D3, issue #523 G1): without Appendix A.1's
+	 * allocation rows and the summaries' per-unit part, and the reproduction
+	 * bundle is refused (403 `pack_volumes_withheld`); or, on a pack whose runs
+	 * carry none, its boards' verdicts only (`manifestVerdictsOnly`, #870).
 	 */
 	volumesWithheld: boolean;
+	/**
+	 * `manifest` is redacted only to page 1's licence-impact boards' and the
+	 * combined dams' verdicts, for a viewer kept from each volume on a pack whose
+	 * own runs carry none (#870): `volumesWithheld` is true too (it no longer
+	 * hashes, so it doesn't download), but the bundle isn't refused for it.
+	 */
+	manifestVerdictsOnly: boolean;
 	/**
 	 * The reproduction bundle is refused this caller (403 `pack_volumes_withheld`): as `volumesWithheld`, or
 	 * because a run only the bundle holds (an alternative's, the cited assessment's background) carries a

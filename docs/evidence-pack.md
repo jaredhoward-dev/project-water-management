@@ -1552,7 +1552,11 @@ the manifest isn't, as those runs' inputs aren't in it). The same viewer reads
 the pack's manifest on `GET …/packs/:packId` without Appendix A.1's
 allocation rows and the run summaries' per-unit part (`volumesWithheld:
 true`; it no longer hashes to `manifestSha256`, which the server still
-checks against the stored manifest), and is refused (`403`, the same code)
+checks against the stored manifest; the flag is set whenever the served
+manifest isn't the stored text, so also on a pack whose runs carry no
+volume when page 1's boards and the combined dams come as verdicts only,
+with `manifestVerdictsOnly: true`, the manifest download hidden and the
+bundle open unless `bundleWithheld`, issue #870), and is refused (`403`, the same code)
 the manifest and the PDF of a pack whose frozen text names other farms'
 volumes: one drafted before `evidence-15`, whose § 5 and page-1 flag name
 every farm; a team scenario's whose § 5 lists a unit one by one (before
