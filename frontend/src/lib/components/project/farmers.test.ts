@@ -92,7 +92,8 @@ describe('inviteExampleCsv (issue #456)', () => {
 			.slice(1, 3)
 			.map((l) => l.slice(l.indexOf(',') + 1, l.lastIndexOf(',')).replace(/^"/, ''));
 		for (const cell of farmCells) expect(cell.startsWith("'")).toBe(true);
-		expect(parseFarmerCsv(csv).rows.map((r) => r.farm)).toEqual([' =1+1', '＋SUM(1)']);
+		// Read back without the apostrophe; the reader trims a cell, as the API trims a name.
+		expect(parseFarmerCsv(csv).rows.map((r) => r.farm)).toEqual(['=1+1', '＋SUM(1)']);
 	});
 
 	it('has one placeholder row when the project has no named units', () => {
