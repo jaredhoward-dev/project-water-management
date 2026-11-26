@@ -31,6 +31,7 @@ import { withUser } from '../db/tx.js';
 import { issueRenderToken } from '../reports/tokens.js';
 import { APP_USER_EXPORTED, USER_FK_COVERAGE } from './export.js';
 import { base32Decode, totp } from './totp.js';
+import { SESSION_COOKIE } from './session.js';
 
 // The feeds this file makes are switched off when it ends (db-setup.ts).
 disableFeedsAfterFile();
@@ -430,10 +431,13 @@ beforeAll(async () => {
 	// Two-step sign-in (150, issue #282), last, since it makes signing in two-step: an authenticator they set up
 	// (user_totp, user_recovery_code, account_security_event), codes by email, then a wrong code (mfa_throttle).
 	const enrol = await call(subject, 'POST', '/auth/mfa/totp/enrol', { password: 'correct horse' });
-	await call(subject, 'POST', '/auth/mfa/totp/confirm', { code: totp(base32Decode(enrol.secret)!, Date.now()) });
-	// Codes by email beside it (206): user_email_otp, and a code sent (mfa_email_code, mfa_email_send).
-	await call(subject, 'POST', '/auth/mfa/email/enrol', { password: 'correct horse' });
-	await call(subject, 'POST', '/auth/mfa/email/confirm', { code: lastMailTo(subject.email)!.text.match(/^(\d{6})$/m)![1] });
+	const confirmed = await anon('POST', '/auth/mfa/totp/confirm', { code: totp(base32Decode(enrol.secret)!, Date.now()) }, subject.cookie);
+	expect(confirmed.status).toBe(200);
+	// Codes by email beside it (206): user_email_otp, and a code sent (mfa_email_code, mfa_email_send). A second
+	// factor needs the two-step session the confirm gave (mfa-routes.ts requireCodeForAnotherFactor).
+	const twoStep = confirmed.headers.getSetCookie().find((c) => c.startsWith(`${SESSION_COOKIE}=`))!.split(';')[0]!;
+	expect((await anon('POST', '/auth/mfa/email/enrol', { password: 'correct horse' }, twoStep)).status).toBe(202);
+	expect((await anon('POST', '/auth/mfa/email/confirm', { code: lastMailTo(subject.email)!.text.match(/^(\d{6})$/m)![1] }, twoStep)).status).toBe(200);
 	expect((await subject.call('POST', '/auth/mfa/recovery-codes', { code: 'AAAAA-AAAAA' })).status).toBe(400);
 	// Asking for a reset of the factor at the sign-in's code step (205_mfa_recovery): mfa_reset, mfa_reset_quota.
 	const signIn = await anon('POST', '/auth/login', { email: subject.email, password: 'correct horse' });
