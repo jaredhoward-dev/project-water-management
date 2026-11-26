@@ -2795,6 +2795,16 @@ run "reports" {
     error_message = "The worker's report policy reaches the two render queues only (no bucket access)."
   }
   assert {
+    condition = (
+      length(data.aws_iam_policy_document.worker_report_erasure.statement) == 1 &&
+      toset(data.aws_iam_policy_document.worker_report_erasure.statement[0].actions) == toset(["s3:DeleteObject"]) &&
+      toset(data.aws_iam_policy_document.worker_report_erasure.statement[0].resources) == toset(["${aws_s3_bucket.reports.arn}/reports/*"]) &&
+      aws_iam_role_policy.worker_report_erasure.role == aws_iam_role.worker_lambda.id &&
+      aws_lambda_function.worker.environment[0].variables["REPORTS_BUCKET"] == aws_s3_bucket.reports.bucket
+    )
+    error_message = "The worker may only delete PDFs under reports/ (a deleted report's, issue #903): no read or list; it knows the bucket (REPORTS_BUCKET)."
+  }
+  assert {
     condition     = aws_iam_role_policy.worker_ses.role == aws_iam_role.worker_lambda.id && aws_iam_role_policy.worker_ses.name == "ses-send-no-reply"
     error_message = "The worker sends report emails under the same no-reply-only SES policy as the API (lambda_ses, pinned in run email_ses)."
   }
@@ -3055,7 +3065,7 @@ run "packs" {
       length(aws_vpc_endpoint.s3.subnet_ids) == 1 &&
       length(aws_vpc_endpoint.s3.security_group_ids) == 1 &&
       can(regex("security_group_ids\\s*=\\s*\\[aws_security_group\\.vpce_s3\\.id\\]", regex("(?s)resource \"aws_vpc_endpoint\" \"s3\" \\{.*?\\n\\}", file("packs.tf")))) &&
-      length(data.aws_iam_policy_document.s3_endpoint.statement) == 9 &&
+      length(data.aws_iam_policy_document.s3_endpoint.statement) == 10 &&
       toset(data.aws_iam_policy_document.s3_endpoint.statement[0].actions) == toset(["s3:GetObject"]) &&
       toset(data.aws_iam_policy_document.s3_endpoint.statement[0].resources) == toset(["${aws_s3_bucket.packs.arn}/packs/*"]) &&
       toset(one(data.aws_iam_policy_document.s3_endpoint.statement[0].principals).identifiers) == toset([aws_iam_role.worker_lambda.arn]) &&
@@ -3082,9 +3092,12 @@ run "packs" {
       toset(one(data.aws_iam_policy_document.s3_endpoint.statement[7].principals).identifiers) == toset([aws_iam_role.worker_lambda.arn]) &&
       toset(data.aws_iam_policy_document.s3_endpoint.statement[8].actions) == toset(["s3:PutObject"]) &&
       toset(data.aws_iam_policy_document.s3_endpoint.statement[8].resources) == toset(["${aws_s3_bucket.mirror.arn}/et/wanted.json"]) &&
-      toset(one(data.aws_iam_policy_document.s3_endpoint.statement[8].principals).identifiers) == toset([aws_iam_role.worker_lambda.arn])
+      toset(one(data.aws_iam_policy_document.s3_endpoint.statement[8].principals).identifiers) == toset([aws_iam_role.worker_lambda.arn]) &&
+      toset(data.aws_iam_policy_document.s3_endpoint.statement[9].actions) == toset(["s3:DeleteObject"]) &&
+      toset(data.aws_iam_policy_document.s3_endpoint.statement[9].resources) == toset(["${aws_s3_bucket.reports.arn}/reports/*"]) &&
+      toset(one(data.aws_iam_policy_document.s3_endpoint.statement[9].principals).identifiers) == toset([aws_iam_role.worker_lambda.arn])
     )
-    error_message = "The worker, the API and migrate reach S3 through one interface endpoint whose policy allows only the worker's read of packs/, the API's put of a bundle (packs/*.zip), the API's and the worker's reads of the delineation DEM (tiles/terrain.pmtiles), the API's of the dam-trace water (tiles/water.pmtiles), migrate's read of a reference file (reference/*), the worker's read of the data mirror (ingest.tf), the worker's put of the weekly DWS pass's station list (dws/stations.json, feeds.tf), the worker's put of the dam observations' wanted list (dams/wanted.json, dam_observations.tf), and the worker's put of the observed ET's wanted list (et/wanted.json, et_observations.tf)."
+    error_message = "The worker, the API and migrate reach S3 through one interface endpoint whose policy allows only the worker's read of packs/, the API's put of a bundle (packs/*.zip), the API's and the worker's reads of the delineation DEM (tiles/terrain.pmtiles), the API's of the dam-trace water (tiles/water.pmtiles), migrate's read of a reference file (reference/*), the worker's read of the data mirror (ingest.tf), the worker's put of the weekly DWS pass's station list (dws/stations.json, feeds.tf), the worker's put of the dam observations' wanted list (dams/wanted.json, dam_observations.tf), the worker's put of the observed ET's wanted list (et/wanted.json, et_observations.tf), and the worker's delete of a deleted report's PDF (reports/*, reports.tf worker_report_erasure)."
   }
   assert {
     condition = (

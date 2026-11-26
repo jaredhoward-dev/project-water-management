@@ -29,7 +29,7 @@ const NO_RLS = new Set(['schema_migrations']);
 // billing_event (326): the billing webhook's de-duplication, written only by app_billing_apply from a session with no user.
 // email_gate_refusal (348): the verified-email gate's daily refusal counts, written only by app_email_gate_refused, read by the owner's report.
 // render_slot (353): render requests in flight to the renderer and those waiting, only through app_render_slot_take / _free.
-const OWNER_ONLY = new Set(['render_slot', 'assistant_reservation', 'assistant_month_counter', 'assistant_pool_counter', 'assistant_pool_member', 'reverse_trial_claim', 'billing_event', 'erasure_log', 'reference_load', 'mfa_reset_cancel', 'mfa_reset_quota', 'allocation_holder_salt', 'run_allocation_holder', 'dam_observation_load_mark', 'et_observation_load_mark', 'email_gate_refusal']);
+const OWNER_ONLY = new Set(['render_slot', 'assistant_reservation', 'assistant_month_counter', 'assistant_pool_counter', 'assistant_pool_member', 'reverse_trial_claim', 'billing_event', 'erasure_log', 'reference_load', 'mfa_reset_cancel', 'mfa_reset_quota', 'allocation_holder_salt', 'run_allocation_holder', 'dam_observation_load_mark', 'et_observation_load_mark', 'email_gate_refusal', 'report_pdf_erasure']);
 /**
  * Views that may run with their owner's rights (security_invoker off), each
  * with why. An owner-rights view reads its tables as the schema owner, so RLS

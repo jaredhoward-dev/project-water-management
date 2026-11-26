@@ -359,4 +359,15 @@ data "aws_iam_policy_document" "s3_endpoint" {
       identifiers = [aws_iam_role.worker_lambda.arn]
     }
   }
+  # The worker deletes a deleted report's PDF (issue #903, reports.tf
+  # worker_report_erasure; backend/src/reports/erasure.ts).
+  statement {
+    sid       = "WorkerDeletesReportPdfs"
+    actions   = ["s3:DeleteObject"]
+    resources = ["${aws_s3_bucket.reports.arn}/reports/*"]
+    principals {
+      type        = "AWS"
+      identifiers = [aws_iam_role.worker_lambda.arn]
+    }
+  }
 }

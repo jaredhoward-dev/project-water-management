@@ -22,6 +22,7 @@ import { purgeInvites } from '../invites/invites.js';
 import { type LicenceRecordResult, sendLicenceRecordNotices } from '../licence/record.js';
 import { safeError, stackFrames } from '../logging/safeError.js';
 import { rank, requireRole } from '../projects/access.js';
+import { erasePendingReportPdfs, type ReportPdfErasureResult } from '../reports/erasure.js';
 import { purgeReports, type ReportScheduleResult, scheduleDueReports } from '../reports/schedule.js';
 import { describeFailure, JOB_ERROR_MAX, JobError, JobRelease, LeaseLostError } from './errors.js';
 import { handlers as builtInHandlers } from './handlers/index.js';
@@ -281,8 +282,8 @@ export interface TickResult {
 	dams?: DamsTickResult | null;
 	/** Observed actual ET's wanted list and loads (water-use/observed/tick.ts): null unless ET_OBSERVATIONS=on, absent when feeds were off. */
 	et?: EtTickResult | null;
-	/** Scheduled reports queued by this tick (absent when reports were off). */
-	reports?: ReportScheduleResult & { purged: number };
+	/** Scheduled reports queued by this tick, rows purged and deleted reports' PDFs removed from storage (395; absent when reports were off). */
+	reports?: ReportScheduleResult & { purged: number; pdfsErased: ReportPdfErasureResult };
 	/** Alert checks queued, alert rows purged (0 when alerts scheduling was off), and alert mails sent by this tick. */
 	alerts: SendResult & { scheduled: number; purged: number };
 	/** Evidence pack notices sent by this tick, and settled ones purged (133_pack_notices). */
@@ -388,7 +389,7 @@ export async function runTick(o: TickOptions = {}): Promise<TickResult> {
 		result.et = await runEtTick();
 		result.feeds = await scheduleDueFeeds({ all: o.allFeeds, projectIds: o.projectIds });
 	}
-	if (o.reports !== false) result.reports = { purged: await purgeReports(), ...(await scheduleDueReports()) };
+	if (o.reports !== false) result.reports = { purged: await purgeReports(), pdfsErased: await erasePendingReportPdfs(), ...(await scheduleDueReports()) };
 	let alertsScheduled = 0;
 	let alertsPurged = 0;
 	if (o.alerts !== false) {
