@@ -668,6 +668,9 @@ did, and refuses the whole file on any problem, listing them per feature:
   can't be imported twice into a project (409). Two identical imports at
   once both pass the duplicate check; the unique index `geo_source_sha_idx`
   stops the second, which gets the same 409, never a bare "already exists".
+  The upload sheet and Every feature list it cut to 12 characters, with
+  Copy for the full hash; where the browser refuses the clipboard, the full
+  hash is written out in its place, selected, to copy by hand.
 - **A file may mix kinds** (issue #326 D2). `POST …/map/import/preview`
   reads and checks the file as the import will, saves nothing, and proposes
   each feature's kind (`proposeKinds` in `geojson.ts`):
@@ -2140,7 +2143,8 @@ geocoder, so what is typed leaves the app for no one.
   its own country's; a place found by an alternate name is listed by its
   name with the one matched, "Tshabong (also Tsabong), Botswana",
   "Polokwane (also Pietersburg)", `mapSearch.ts` `hitName`), and picking one moves the map and
-  closes the list (Escape closes it too). A quaternary is framed whole; a
+  closes the list (Escape closes it too); either way the focus goes back to
+  the search box. A quaternary is framed whole; a
   point is centred, at zoom 14 for a gauge or dam and 13 for a place. The
   map's centre is then the match, so a Delineate or a placed point from the
   keyboard (Enter at the crosshair) lands on it. Nothing is drawn or saved:
