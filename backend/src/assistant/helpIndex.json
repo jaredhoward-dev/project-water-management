@@ -5036,7 +5036,7 @@
 				"aggregation"
 			],
 			"url": "/help/glossary/input-data#day-boundary",
-			"summary": "How several readings a day make days: 08:00 to 08:00, booked to the day it starts (the manual-gauge day), or midnight to midnight. Rain and evaporation are added up; a flow is averaged.",
+			"summary": "How readings make days: 08:00 to 08:00 (the manual-gauge day) or midnight to midnight. Rain and evaporation add up; a flow is averaged.",
 			"text": "A logger file with several readings a day is made into days before it is stored: rain and evaporation are added up into daily totals, and a flow, a rate, is averaged over the day. 08:00 to 08:00 is the manual rain gauge’s day: the total read at 08:00 is booked to the day the interval starts. Midnight to midnight is the calendar day. Each timestamp is taken as the end of its interval, so a reading at 08:00 closes the day before. The series records the choice, and a rain-source period compares like with like, since a one-day shift between a manual gauge and an automatic station wrecks a daily fit while leaving monthly totals unchanged. A first or last day the file covers only in part is left out rather than stored short. The summary says how many readings a day it found, the days left out, and how many kept days have fewer readings."
 		},
 		{
