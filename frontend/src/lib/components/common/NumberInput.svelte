@@ -88,9 +88,10 @@
 	});
 
 	// invalidFields.reset() (a Discard that restores the same value): back to the stored value.
-	let epoch = invalidFields.epoch;
+	// Per field: a part's own fields may not follow the form's Discard (ForwardingInvalidFields' local fields).
+	let epoch = untrack(() => invalidFields.epochFor(fieldId));
 	$effect(() => {
-		const e = invalidFields.epoch;
+		const e = invalidFields.epochFor(fieldId);
 		if (e === epoch) return;
 		epoch = e;
 		untrack(() => field.reset());

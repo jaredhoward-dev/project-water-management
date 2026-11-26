@@ -4,16 +4,17 @@
 // and a Discard of the outer registry (its epoch) resets the fields here too.
 //
 // A field the outer form never saves (Fit's own search fields, issue #922) is not unsaved work there: `local` picks
-// those, and they are recorded here only, so they hold the part's own button without lighting the page's save bar or
-// asking at its leave guard.
+// those, by field id, and they are recorded here only, so they hold the part's own button without lighting the page's
+// save bar or asking at its leave guard. Nor do they follow the outer form's Discard (its epoch): only this
+// registry's own reset puts them back (`epochFor`).
 import { InvalidFields, type InvalidField } from './invalidFields.svelte';
 
 export class ForwardingInvalidFields extends InvalidFields {
 	readonly #outer: InvalidFields;
-	readonly #local: (field: InvalidField) => boolean;
+	readonly #local: (id: string) => boolean;
 
-	/** `local` names the fields kept out of the outer registry (by default none). */
-	constructor(outer: InvalidFields, local: (field: InvalidField) => boolean = () => false) {
+	/** `local` names, by field id, the fields kept out of the outer registry and its resets (by default none). */
+	constructor(outer: InvalidFields, local: (id: string) => boolean = () => false) {
 		super();
 		this.#outer = outer;
 		this.#local = local;
@@ -23,9 +24,13 @@ export class ForwardingInvalidFields extends InvalidFields {
 		return super.epoch + this.#outer.epoch;
 	}
 
+	override epochFor(id: string): number {
+		return this.#local(id) ? super.epoch : this.epoch;
+	}
+
 	override set(key: string, field: InvalidField): void {
 		super.set(key, field);
-		if (this.#local(field)) this.#outer.delete(key);
+		if (this.#local(field.id)) this.#outer.delete(key);
 		else this.#outer.set(key, field);
 	}
 

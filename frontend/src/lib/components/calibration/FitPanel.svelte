@@ -134,9 +134,10 @@
 	// The panel's number fields that hold text they can't take: such a field keeps the stored value, so Fit would run on
 	// a number the field no longer shows. Counted here to hold the button. A saved setting's field shown here (the WR2012
 	// MAR penalty's, penaltyFields) still counts in the page's registry (the save bar, the leave guard, Discard); Fit's
-	// own fields (runs per fit, starts, seed, penalty weight: the session's, never saved) don't (issue #922).
+	// own fields (runs per fit, starts, seed, penalty weight: the session's, never saved) don't, nor do they follow the
+	// page's Discard (issue #922).
 	const OWN_FIELDS = ['budget', 'starts', 'seed', 'prior-w'];
-	const invalid = provideInvalidFields(new ForwardingInvalidFields(useInvalidFields(), (f) => OWN_FIELDS.some((k) => f.id === `${uid}-${k}`)));
+	const invalid = provideInvalidFields(new ForwardingInvalidFields(useInvalidFields(), (id) => OWN_FIELDS.some((k) => id === `${uid}-${k}`)));
 	const seedProblem = $derived(seedError(session.seed));
 	// Several searches from different seeds: nearly equal scores with scattered
 	// parameters show what the record can't pin down (calibration research CR-2).

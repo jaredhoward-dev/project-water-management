@@ -9853,7 +9853,8 @@ calibration's line points at *How the shown run fits* for NSE and PBIAS.
   the panel (the WR2012 MAR penalty's) also counts in the page's registry,
   its save bar and leave guard; Fit's own fields (model runs per fit,
   starts, seed and the prior's penalty weight, kept in the `FitSession`,
-  never saved) count in the panel's only (issue #922). **Cancel** takes the
+  never saved) count in the panel's only, and the page's Discard leaves
+  them as typed: only the panel's own reset puts them back (issue #922). **Cancel** takes the
   button's place while the data loads and the fit runs, and works in
   both; the focus moves between the two as they swap
   (`fit-blocker-focus.spec.ts`). The button is on the
