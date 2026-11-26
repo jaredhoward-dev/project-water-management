@@ -28,6 +28,10 @@
 	import SetupChecklist from './SetupChecklist.svelte';
 	import GuidedStart from './GuidedStart.svelte';
 	import SetupPill from './SetupPill.svelte';
+	import { projectTimeZoneReader } from '#lib/components/project/projectClock.js';
+
+	// How long ago a run ran, by the project's calendar, as its run report dates it (issue #899).
+	const timeZone = projectTimeZoneReader();
 
 	// Supply by farm waits for the run's record too: its own chunk keeps the page's first chunk under its budget.
 	const loadSupply = () => import('./SupplyByFarm.svelte');
@@ -264,7 +268,7 @@
 		{#if meta.evidence === 'current'}<span class="badge badge-owner">Evidence</span>{/if}
 		<span>· {fmtDay(meta.startDate)} – {fmtDay(meta.endDate)}</span>
 		<span>· engine {meta.engineVersion}</span>
-		<span>· ran {ranAgo(meta.createdAt)}</span>
+		<span>· ran {ranAgo(meta.createdAt, new Date(), timeZone())}</span>
 		<span>· <a href={runHref(meta.id)}>Open in Runs</a></span>
 	{/if}
 {/snippet}

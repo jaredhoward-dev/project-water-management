@@ -113,6 +113,13 @@ describe('ranAgo', () => {
 		expect(ranAgo('2026-09-23T10:30:00Z', new Date('2026-09-23T12:00:00Z'))).toBe('yesterday');
 		expect(ranAgo('2026-09-23T10:30:00Z', new Date('2026-09-23T10:45:00Z'))).toBe('today');
 	});
+	it("counts by the project's calendar when its zone is given, whatever the viewer's (issue #899)", () => {
+		process.env.TZ = 'Pacific/Pago_Pago'; // the viewer is still on 26 Oct
+		// 21:50 UTC is 23:50 on the 26th in Johannesburg; 22:30 UTC is 00:30 on the 27th.
+		expect(ranAgo('2026-10-26T21:50:00Z', new Date('2026-10-26T22:30:00Z'), 'Africa/Johannesburg')).toBe('yesterday');
+		expect(ranAgo('2026-10-26T21:50:00Z', new Date('2026-10-26T22:30:00Z'))).toBe('today');
+		expect(ranAgo('2026-10-26T22:10:00Z', new Date('2026-10-26T22:30:00Z'), 'Africa/Johannesburg')).toBe('today');
+	});
 	it('reads longer gaps and never says "in the future"', () => {
 		process.env.TZ = 'UTC';
 		expect(ranAgo('2026-09-01T10:00:00Z', new Date('2026-09-13T10:00:00Z'))).toBe('12 days ago');

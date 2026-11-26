@@ -205,7 +205,7 @@
 	const picked = $derived(pickDam(cards, damParam));
 	// A failed run list is not "no run yet": the header says which it is, as the alert below does.
 	const runText = $derived(
-		runs === null ? 'run list couldn’t be loaded' : latest ? damsRunText(latest, isNewest, ranAgo(latest.createdAt)) : null
+		runs === null ? 'run list couldn’t be loaded' : latest ? damsRunText(latest, isNewest, ranAgo(latest.createdAt, new Date(), timeZone())) : null
 	);
 	const summary = $derived(damsSummary(cards.length, cards.reduce((s, c) => s + c.nowCapacityM3, 0), runText));
 	// The card's sparkline is its record's, as its figures are (issue #51): a forecast run's stops before the forecast.

@@ -51,6 +51,10 @@
 	import Lazy from '#lib/components/common/Lazy.svelte';
 	import { hasHumanImpacts, loadHumanImpacts, usersTableOnSupply } from '#lib/components/runs/humanImpacts.js';
 	import { loadRestrictionTables } from '#lib/components/runs/restrictions.js';
+	import { projectTimeZoneReader } from '#lib/components/project/projectClock.js';
+
+	// How long ago a run ran, by the project's calendar, as its run report dates it (issue #899).
+	const timeZone = projectTimeZoneReader();
 
 	let {
 		projectId,
@@ -212,7 +216,7 @@
 	const pickedFarm = $derived(picked ? (summary?.farms.find((f) => f.nodeId === picked.nodeId) ?? null) : null);
 	const damCapacity = $derived(run ? runDamCapacity(run.model as Parameters<typeof runDamCapacity>[0], editor.model.nodes) : new Map<string, number>());
 	const modelUnits = $derived(modelFarmIds.size);
-	const runText = $derived(meta ? `run “${runName(meta)}”, ran ${ranAgo(meta.createdAt)}` : null);
+	const runText = $derived(meta ? `run “${runName(meta)}”, ran ${ranAgo(meta.createdAt, new Date(), timeZone())}` : null);
 	const headerLine = $derived(supplySummary(totals, modelUnits, runText, weekEnd));
 	const farmNames = $derived(Object.fromEntries(editor.model.nodes.map((n) => [n.id, n.name])));
 	/** The units the run compared with a registered volume (RunSummary.allocations): their cards link to it on Allocations. */

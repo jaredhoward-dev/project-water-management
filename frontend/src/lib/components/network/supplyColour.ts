@@ -4,6 +4,8 @@
 import type { FarmSummary, NetworkNode, RunSummary } from '@water-management/engine';
 import { fmtPct, localIsoDate } from '#lib/format/number.js';
 import { daysSince } from '#lib/components/projects/freshness.js';
+import { projectDay } from '#lib/components/project/project.js';
+import { daysBetween } from '#lib/format/age.js';
 import { LOW_SUPPLY, SUPPLY_TARGET } from './supplyThresholds';
 
 export { LOW_SUPPLY };
@@ -65,11 +67,11 @@ export function bandsPresent(supply: ReadonlyMap<string, FarmSupply>): SupplyBan
 	return (['met', 'short', 'low', 'none', 'absent'] as const).filter((b) => seen.has(b));
 }
 
-/** "today", "yesterday", "3 days ago" for a run's createdAt, by the viewer's calendar. */
-export function ranAgo(createdAt: string, now: Date = new Date()): string {
+/** "today", "yesterday", "3 days ago" for a run's createdAt, by the project's calendar when its zone is given (issue #899), else the viewer's. */
+export function ranAgo(createdAt: string, now: Date = new Date(), timeZone?: string): string {
 	const d = new Date(createdAt);
 	if (Number.isNaN(d.getTime())) return '';
-	const days = daysSince(localIsoDate(d), now);
+	const days = timeZone ? daysBetween(projectDay(createdAt, timeZone), projectDay(now.toISOString(), timeZone)) : daysSince(localIsoDate(d), now);
 	if (days <= 0) return 'today';
 	if (days === 1) return 'yesterday';
 	return `${days} days ago`;

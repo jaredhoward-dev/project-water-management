@@ -215,7 +215,7 @@
 		if (colourBy === 'none' || !farms.length) return null;
 		if (colourBy === 'zone') return zones ? zoneColouring(nodes, zones) : null;
 		if (!latestRun || supplyRun?.id !== latestRun.id) return null;
-		const run = { name: runName(latestRun), ago: ranAgo(latestRun.createdAt) };
+		const run = { name: runName(latestRun), ago: ranAgo(latestRun.createdAt, new Date(), timeZone()) };
 		const changed = changedDams.size ? { changed: changedDams } : {};
 		if (colourBy === 'supply') return { ...supplyColouring(nodes, supplyRun.summary, run, editor.dirty), ...changed };
 		return damLevels?.runId === latestRun.id ? { ...damColouring(nodes, damLevels.levels, run, editor.dirty), ...changed } : null;

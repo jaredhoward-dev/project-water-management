@@ -367,6 +367,8 @@ describe('the project’s time zone (058_project_time_zone, issue #45)', () => {
 		const ok = await owner.call('PATCH', `/projects/${projectId}`, { timeZone: 'Africa/Windhoek' });
 		expect(ok.status).toBe(200);
 		expect(ok.body.project.timeZone).toBe('Africa/Windhoek');
+		// The project list carries it too, so a picker over several projects dates each one's runs on its own clock (issue #899).
+		expect((await owner.call('GET', '/projects')).body.projects.find((p: { id: string }) => p.id === projectId)?.timeZone).toBe('Africa/Windhoek');
 		// A patch without it leaves it alone.
 		expect((await owner.call('PATCH', `/projects/${projectId}`, { description: 'x' })).body.project.timeZone).toBe('Africa/Windhoek');
 		const history = await owner.call('GET', `/projects/${projectId}/history`);

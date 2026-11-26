@@ -189,6 +189,8 @@ export interface ProjectSummary {
 	lastRunAt: string | null;
 	/** ISO timestamp of the current publication (022_publication), or null before any. Every member sees it, farmers included. */
 	publishedAt: string | null;
+	/** IANA zone (058_project_time_zone, Africa/Johannesburg by default): dates the project's downloads, and its runs on every screen (issue #899). Absent from an older API. */
+	timeZone?: string;
 }
 
 /**
@@ -277,8 +279,6 @@ export interface ResponsibleAuthority {
 }
 
 export interface Project extends ProjectSummary {
-	/** IANA zone (058_project_time_zone, Africa/Johannesburg by default): dates the project's downloads. Absent from an older API. */
-	timeZone?: string;
 	/** The WUA that publishes the figures (095_wua_name): the farm pages name it in their contact lines. null = "your WUA". Absent from an older API. */
 	wuaName?: string | null;
 	settings: ProjectSettings & { autoRun?: AutoRunSettings; outcomes?: OutcomeSettings; outlook?: OutlookSettings; responsibleAuthority?: ResponsibleAuthority | null; ewrHeadline?: EwrHeadline; referenceGauge?: ReferenceGauge | null };
@@ -1130,8 +1130,8 @@ export interface RunCatchmentDay {
 
 /** One side of GET /compare/runs. */
 export interface CompareSide {
-	/** `ewrHeadline`: the project's current choice of the EWR its results are judged by (issue #444); absent from an older API. */
-	project: { id: string; name: string; ewrHeadline?: EwrHeadline };
+	/** `ewrHeadline`: the project's current choice of the EWR its results are judged by (issue #444); `timeZone`: its IANA zone, which dates this side's run (issue #899); both absent from an older API. */
+	project: { id: string; name: string; ewrHeadline?: EwrHeadline; timeZone?: string };
 	/** `evidence` is null when the run was never nominated, absent from an older API. */
 	run: Omit<Run, 'evidence'> & { inputs: RunInputsSnapshot; evidence?: RunEvidence | null };
 	/** The scenario that made this side's run; null for a run of the model. Absent from an older API. */
