@@ -720,6 +720,22 @@ describe('paired bands on the difference between a run and its baseline', () => 
 			expect(verifyPaired(base, options, older.header, kept, forged, 1, () => 0).mismatches.join(' ')).toMatch(/marOutflowMm3/);
 		});
 
+		it('refuses baseline inputs its stored ensemble can’t run on as stored, before re-running anything', () => {
+			let calls = 0;
+			const onProgress = () => {
+				calls++;
+			};
+			const shorter = { ...base, settings: { ...base.settings, simulationEnd: '1994-09-30' } };
+			expect(() => runPairedEnsemble(application, older, { baselineInput: shorter, onProgress })).toThrow(/the baseline run's inputs don't match its stored ensemble: the runs cover different periods/);
+			const pe = { kind: 'monthly' as const, mm: new Array(12).fill(100) as never, source: 'invented' };
+			expect(() => runPairedEnsemble(application, older, { baselineInput: { ...base, settings: { ...base.settings, pe } }, onProgress })).toThrow(
+				/the baseline run's inputs don't match its stored ensemble: .*monthly PE row does not use/
+			);
+			expect(calls).toBe(0);
+			// The other run is still checked first, as before.
+			expect(() => runPairedEnsemble({ ...application, settings: { ...application.settings, simulationEnd: '1994-09-30' } }, older, { baselineInput: base })).toThrow(/^the runs cover different periods/);
+		});
+
 		it('stops when cancelled during the baseline’s re-run, with progress over both sides', () => {
 			const seen: number[] = [];
 			const r = runPairedEnsemble(application, older, {

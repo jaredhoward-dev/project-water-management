@@ -155,6 +155,10 @@ export function runPairedEnsemble(
 	if (!opts.baselineInput) {
 		throw new Error(`the baseline ensemble was stored on engine ${baseline.engineVersion}: its run's inputs are needed to re-run its kept sets on engine ${ENGINE_VERSION}`);
 	}
+	// The baseline side is re-run on inputs the caller hands in: they must be ones the kept sets can run on as
+	// stored (the same runoff model, the pan shift read, the same days), or "B − A" would pair different members.
+	const baseRefusal = pairedRefusal(opts.baselineInput, baseline);
+	if (baseRefusal) throw new Error(`the baseline run's inputs don't match its stored ensemble: ${baseRefusal}`);
 	const total = 2 * todo.length;
 	const tick = (offset: number) => (done: number) => opts.onProgress?.({ done: offset + done, total, accepted: offset + done }) === true;
 	const base = runKept(opts.baselineInput, baseline, todo, tick(0));
