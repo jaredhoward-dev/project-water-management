@@ -14337,7 +14337,11 @@ March") is kept against what it is about.
 WP-2.15 Phase A, issue #19): a meeting-ready catchment report of one run, for
 anyone who can view the project. Without `?run=` it reports the latest run of the model
 (never a newer scenario or forecast run, unless the project has no other;
-`runs/scenarioRun.ts latestModelRun`, the run a scheduled PDF prints). It
+`runs/scenarioRun.ts latestModelRun`, the run a scheduled PDF prints). Its
+load (`report/reportLoad.ts`) is latest-only: when `?run=` (or `&against=`)
+changes while a slower load is still out, that earlier load's answer, or its
+error, is dropped, so the page always shows the run its address names (issue
+#859; [architecture.md § Stale responses](./architecture.md#stale-responses-frontend)). It
 reads the project, the run with its settings and model snapshot (one
 exception: the lede and headline cards follow the project's current Model
 settings → EWR the results are judged by, `settings.ewrHeadline`, issue #444, which runs don't
