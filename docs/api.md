@@ -3725,24 +3725,29 @@ received. For a **forecast run** (WP-2.12) it is the day before
   force: the app's Publish dialog and an auto publish always send the
   current one, and words-only edits go through `PATCH`, which keeps the
   level unless `restriction` is sent (issue #861).
-- `basedOn = { id: uuid | null, updatedAt: string | null }` (issue #863):
-  the publication the form was filled in from, its `id` and `updatedAt`
-  exactly as `GET …/publication` gave them (`id: null` for a first
-  publication, when nothing was published). The server compares it with
-  the current publication under its row lock and refuses `409
-  publication_changed` when another editor has published or changed the
-  notice, note or next date since, so a stale form can't lift a new
-  restriction or put back a lifted one. Optional for backward
-  compatibility: a request without it is last-write-wins, as before. The
-  app's Publish dialog and Edit notice form always send it, and so does an
-  auto publish (which then leaves publishing to a person).
+- `basedOn = { id: uuid, revision: integer } | { id: null, revision: null }`
+  (issues #863, #885): the publication the form was filled in from, its
+  `id` and `revision` exactly as `GET …/publication` gave them (both
+  `null` for a first publication, when nothing was published; one without
+  the other is a `400`). The server compares it with the current
+  publication under its row lock and refuses `409 publication_changed`
+  when another editor has published or changed the notice, note or next
+  date since, so a stale form can't lift a new restriction or put back a
+  lifted one. `revision` is a counter, not a time, so two saves in the same
+  millisecond still differ (389_publication_revision). Optional: a request
+  without it is last-write-wins, as before (kept so scripts and tests that
+  publish don't break, and so an open tab of an older app keeps publishing
+  across a release; the app's Publish dialog and Edit notice form always
+  send it, and so does an auto publish, which then leaves publishing to a
+  person). The `updatedAt` basis of #863 never reached a release and is
+  refused (`400`).
 - `PublicationMeta = { id, runId, publishedAt, publishedBy, restriction: { level }, supersededAt, endorsement? }`;
   `publishedBy` is a display name (`null` once that account is gone).
   `endorsement = { endorsedAt, endorsedBy, note } | null` (163): the
   responsible authority's endorsement, `null` = not endorsed; to viewers and
   above only (a farmer's answer has no `endorsement`). The same field is on
   `Publication`.
-- `Publication = PublicationMeta & { note?, restriction: { level, pct, notice }, nextExpectedOn, catchmentView, updatedAt, updatedBy }`,
+- `Publication = PublicationMeta & { note?, restriction: { level, pct, notice }, nextExpectedOn, catchmentView, updatedAt, updatedBy, revision }`,
   `notice` as above (`{}` for none), only the languages the WUA wrote.
   `note` is the modeller's note to the project's staff: returned to viewers
   and above only, never to a farmer.

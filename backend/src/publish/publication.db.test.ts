@@ -302,16 +302,16 @@ describe('changing the notice', () => {
 	it('refuses a publish or notice save based on a publication another editor has changed since (409 publication_changed)', async () => {
 		const pid = await makeProject(owner, 'Based on');
 		expect((await owner.call('POST', `/projects/${pid}/members`, { email: editor.email, role: 'editor' })).status).toBe(201);
-		const get = async () => (await owner.call('GET', `/projects/${pid}/publication`)).body as { current: { id: string; updatedAt: string | null; restriction: unknown }; history: unknown[] };
-		const basisOf = (c: { id: string; updatedAt: string | null }) => ({ id: c.id, updatedAt: c.updatedAt });
+		const get = async () => (await owner.call('GET', `/projects/${pid}/publication`)).body as { current: { id: string; revision: number; restriction: unknown }; history: unknown[] };
+		const basisOf = (c: { id: string; revision: number }) => ({ id: c.id, revision: c.revision });
 		const changed = { status: 409, body: { error: PUBLICATION_CHANGED_MESSAGE, code: 'publication_changed' } };
 		// Positive control: a first publication based on none.
-		const first = await publish(owner, await run(owner, pid), { basedOn: { id: null, updatedAt: null } }, pid);
+		const first = await publish(owner, await run(owner, pid), { basedOn: { id: null, revision: null } }, pid);
 		expect(first.status).toBe(201);
 		const at = `/projects/${pid}/publication/${first.body.publication.id}`;
 		// Both editors open their forms on it.
 		const opened = basisOf((await get()).current);
-		expect(opened.updatedAt).toBeNull();
+		expect(opened.revision).toBe(1);
 		// The owner imposes a restriction from theirs (positive control: based on the current one, it lands).
 		const restricted = { level: 'restricted', pct: 30, notice: { en: 'Irrigation cut by 30 %.' } };
 		expect((await owner.call('PATCH', at, { restriction: restricted, nextExpectedOn: null, basedOn: opened })).status).toBe(200);
@@ -325,8 +325,8 @@ describe('changing the notice', () => {
 		expect(still.current).toEqual(after.current);
 		expect(still.history).toHaveLength(after.history.length);
 		// A basis of nothing published, or of another publication, is stale too.
-		expect(await publish(editor, runId, { basedOn: { id: null, updatedAt: null } }, pid)).toEqual(changed);
-		expect(await editor.call('PATCH', at, { note: 'x', basedOn: { id: crypto.randomUUID(), updatedAt: still.current.updatedAt } })).toEqual(changed);
+		expect(await publish(editor, runId, { basedOn: { id: null, revision: null } }, pid)).toEqual(changed);
+		expect(await editor.call('PATCH', at, { note: 'x', basedOn: { id: crypto.randomUUID(), revision: still.current.revision } })).toEqual(changed);
 		// Reloaded, the editor's form is based on the current one again: the save and the publish land.
 		const reloaded = basisOf(still.current);
 		const reworded = { ...restricted, notice: { en: 'Irrigate at night only.' } };
@@ -341,6 +341,85 @@ describe('changing the notice', () => {
 		expect((await editor.call('PATCH', at, { note: 'late', basedOn: basisOf(saved.body.publication) })).body.code).toBe('publication_changed');
 		// Without basedOn (an API client from before #863), last write wins, as before.
 		expect((await owner.call('PATCH', `/projects/${pid}/publication/${again.body.publication.id}`, { note: 'no basis' })).status).toBe(200);
+	});
+
+	// Issue #885: the basis is a revision counter (389_publication_revision), not updatedAt, which the API gives to the
+	// millisecond while Postgres keeps microseconds.
+	it('refuses a basis whose notice was changed within the same millisecond, by its revision (409 publication_changed)', async () => {
+		const pid = await makeProject(owner, 'Same millisecond');
+		expect((await owner.call('POST', `/projects/${pid}/members`, { email: editor.email, role: 'editor' })).status).toBe(201);
+		const get = async () => (await editor.call('GET', `/projects/${pid}/publication`)).body.current as { id: string; revision: number; updatedAt: string | null; note: string };
+		const changed = { status: 409, body: { error: PUBLICATION_CHANGED_MESSAGE, code: 'publication_changed' } };
+		const first = await publish(owner, await run(owner, pid), { basedOn: { id: null, revision: null } }, pid);
+		expect(first.status).toBe(201);
+		expect(first.body.publication.revision).toBe(1);
+		const at = `/projects/${pid}/publication/${first.body.publication.id}`;
+		// Each notice save counts one (positive control: the basis the save answered with lands the next one).
+		const saved = await owner.call('PATCH', at, { note: 'one', basedOn: { id: first.body.publication.id, revision: 1 } });
+		expect(saved.status).toBe(200);
+		expect(saved.body.publication.revision).toBe(2);
+		// Both editors open their forms on revision 2.
+		const opened = await get();
+		expect(opened.revision).toBe(2);
+		// The owner's save commits in the same millisecond as the one before: two writes in one transaction share now(),
+		// so updated_at doesn't move (by the timestamp, the editor's form would still look current).
+		await withUser(owner.id, async (db) => {
+			await db.query(`UPDATE run_publication SET note = 'two', updated_at = now() WHERE id = $1`, [opened.id]);
+			await db.query(`UPDATE run_publication SET note = 'three', updated_at = now() WHERE id = $1`, [opened.id]);
+		});
+		const now = await get();
+		expect(now.note).toBe('three');
+		expect(now.revision).toBe(4);
+		// Pin the same-millisecond case whatever the clock did: updated_at back to what the editor's form read (as the
+		// schema owner; updated_at isn't a notice column, so the revision stays).
+		await asOwner('UPDATE run_publication SET updated_at = $2 WHERE id = $1', [opened.id, opened.updatedAt]);
+		expect((await get()).updatedAt).toBe(opened.updatedAt);
+		// The editor's form, on revision 2, is refused for a save and a publish, and nothing is written.
+		const stale = { id: opened.id, revision: opened.revision };
+		expect(await editor.call('PATCH', at, { note: 'stale', basedOn: stale })).toEqual(changed);
+		const runId = await run(editor, pid);
+		expect(await publish(editor, runId, { basedOn: stale }, pid)).toEqual(changed);
+		expect((await get()).note).toBe('three');
+		// Positive control: on the revision as it stands, both land.
+		const fresh = await editor.call('PATCH', at, { note: 'four', basedOn: { id: opened.id, revision: 4 } });
+		expect(fresh.status).toBe(200);
+		expect(fresh.body.publication.revision).toBe(5);
+		const next = await publish(editor, runId, { basedOn: { id: opened.id, revision: 5 } }, pid);
+		expect(next.status).toBe(201);
+		expect(next.body.publication.revision).toBe(1);
+	});
+
+	it('keeps the revision in the database: water_app cannot set it, and only a notice save moves it', async () => {
+		const pid = await makeProject(owner, 'Revision guard');
+		const first = await publish(owner, await run(owner, pid), {}, pid);
+		expect(first.status).toBe(201);
+		const pubId = first.body.publication.id as string;
+		const revision = async () => (await asOwner('SELECT revision FROM run_publication WHERE id = $1', [pubId]))[0].revision as number;
+		// No UPDATE on the column for water_app (grants unchanged by 389).
+		await expect(withUser(owner.id, (db) => db.query('UPDATE run_publication SET revision = 99 WHERE id = $1', [pubId]))).rejects.toThrow(/permission denied/);
+		// Positive control: the same user's notice save goes through and counts one.
+		await withUser(owner.id, (db) => db.query(`UPDATE run_publication SET next_expected_on = '2030-01-01' WHERE id = $1`, [pubId]));
+		expect(await revision()).toBe(2);
+		// Columns that aren't the notice's leave it (an account going sets updated_by null; as the schema owner here).
+		await asOwner('UPDATE run_publication SET updated_by = NULL, updated_at = now() WHERE id = $1', [pubId]);
+		expect(await revision()).toBe(2);
+		// A publish's INSERT starts at 1 whatever it says.
+		const second = await publish(owner, await run(owner, pid), { basedOn: { id: pubId, revision: 2 } }, pid);
+		expect(second.status).toBe(201);
+		const [{ project_id: p, run_id: r }] = await asOwner('SELECT project_id, run_id FROM run_publication WHERE id = $1', [second.body.publication.id]);
+		const [{ revision: inserted }] = await asOwner('INSERT INTO run_publication (project_id, run_id, revision, superseded_at) VALUES ($1, $2, 42, now()) RETURNING revision', [p, r]);
+		expect(inserted).toBe(1);
+		// Superseding leaves it alone, and a superseded publication's notice can't be written again, even unchanged.
+		expect(await revision()).toBe(2);
+		await expect(withUser(owner.id, (db) => db.query(`UPDATE run_publication SET next_expected_on = next_expected_on WHERE id = $1`, [pubId]))).rejects.toThrow(
+			/superseded publication is history/
+		);
+		expect(await revision()).toBe(2);
+		// A basis that isn't one (an id without a revision, or a revision of 0) is a 400, not a last write.
+		const at = `/projects/${pid}/publication/${second.body.publication.id}`;
+		expect((await owner.call('PATCH', at, { note: 'x', basedOn: { id: second.body.publication.id, revision: null } })).status).toBe(400);
+		expect((await owner.call('PATCH', at, { note: 'x', basedOn: { id: second.body.publication.id, revision: 0 } })).status).toBe(400);
+		expect((await owner.call('PATCH', at, { note: 'x', basedOn: { id: second.body.publication.id, updatedAt: null } })).status).toBe(400);
 	});
 
 	// Issue #861: publishRun reads a body with no restriction as "none" (api.md § Publication). No app

@@ -176,7 +176,7 @@ export const ERROR_CODES = [
  *     …/publication/:pubId whose `basedOn` is no longer the current
  *     publication as it stands (another editor published or changed it
  *     since the form was opened), or a PATCH of a superseded publication
- *     (publish/publish.ts, issue #863). The Publication panel is an English
+ *     (publish/publish.ts, issues #863 and #885: compared by `revision`). The Publication panel is an English
  *     workspace page: it reloads the publication and says why.
  *   assistant_* (issue #610, assistant/routes.ts; docs/api.md § Assistant):
  *     the assistant panel is an English workspace page. Before a stream:

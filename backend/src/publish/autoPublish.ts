@@ -60,7 +60,7 @@ interface RunWarnings {
 export async function autoPublish(db: Db, projectId: string, runId: string): Promise<AutoPublishOutcome> {
 	const { rows: cur } = await db.query<{
 		id: string;
-		updated_at: Date | null;
+		revision: number;
 		run_id: string;
 		published_at: Date;
 		restriction_level: 'none' | 'advisory' | 'restricted';
@@ -68,7 +68,7 @@ export async function autoPublish(db: Db, projectId: string, runId: string): Pro
 		notice: NoticeText;
 		next_expected_on: string | null;
 	}>(
-		`SELECT id, updated_at, run_id, published_at, restriction_level, restriction_pct, notice, next_expected_on
+		`SELECT id, revision, run_id, published_at, restriction_level, restriction_pct, notice, next_expected_on
 		 FROM run_publication WHERE project_id = $1 AND superseded_at IS NULL`,
 		[projectId]
 	);
@@ -108,7 +108,7 @@ export async function autoPublish(db: Db, projectId: string, runId: string): Pro
 				},
 				nextExpectedOn: current.next_expected_on,
 				// The restriction carried over is the one read above: a person's change since then refuses this publish (issue #863).
-				basedOn: { id: current.id, updatedAt: current.updated_at ? current.updated_at.toISOString() : null }
+				basedOn: { id: current.id, revision: current.revision }
 			},
 			{ auto: true }
 		);

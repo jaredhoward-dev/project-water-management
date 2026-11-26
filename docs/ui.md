@@ -11257,7 +11257,7 @@ read it before.
   no re-publishing): "Notice saved." The edit form and the publish dialog
   keep separate notices and errors, so opening one never overwrites the
   other's typing. Each form sends the publication it was filled in from
-  (`basedOn`, issue #863): when another editor has published or changed the
+  (`basedOn`: its id and revision, issues #863 and #885): when another editor has published or changed the
   notice since, the server refuses it (`409 publication_changed`) and the
   form reloads the publication, starts again from it and says "Another
   editor published or changed the notice since you opened this form, so

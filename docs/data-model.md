@@ -3031,6 +3031,16 @@ chose for the project's stakeholders, with the WUA's restriction notice.
   it) and refuses any change to one once made, except the endorser's
   account going clearing `endorsed_by`. The `run_publication_endorsement`
   CHECK keeps `endorsed_by` and the note empty without `endorsed_at`.
+- **The revision (389_publication_revision, issue #885):** `revision
+  integer NOT NULL ≥ 1`, what a Publish dialog's or Edit notice form's
+  `basedOn` names (api.md § Publication). The `run_publication_count_revision`
+  trigger keeps it: 1 on insert whatever the row says, one more on every
+  UPDATE of `note`, `restriction_level`, `restriction_pct`, `notice` or
+  `next_expected_on`. It's in no water_app grant (022's, 081's and 163's
+  column grants are unchanged), so only that trigger moves it; superseding,
+  endorsing and an account going leave it alone. The trigger fires before
+  `run_publication_final` (name order), so a superseded publication's notice
+  columns written again, even unchanged, are refused as history.
 - **The notice, by language (081_notice_languages.sql, issue #58).**
   `notice` is one jsonb object from a language code to the WUA's words in
   that language, `{"en": "…", "af": "…"}`; `{}` is no notice (never NULL).

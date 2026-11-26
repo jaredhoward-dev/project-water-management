@@ -50,9 +50,9 @@ describe('the notice draft', () => {
 		expect(emptyDraft().notice).toEqual({ en: '', af: '' });
 	});
 	it('names the publication a form was filled in from, or none (issue #863)', () => {
-		expect(basisOf({ id: 'p1', updatedAt: null })).toEqual({ id: 'p1', updatedAt: null });
-		expect(basisOf({ id: 'p1', updatedAt: '2024-02-01T08:00:00.123Z' })).toEqual({ id: 'p1', updatedAt: '2024-02-01T08:00:00.123Z' });
-		expect(basisOf(null)).toEqual({ id: null, updatedAt: null });
+		expect(basisOf({ id: 'p1', revision: 1 })).toEqual({ id: 'p1', revision: 1 });
+		expect(basisOf({ id: 'p1', revision: 7 })).toEqual({ id: 'p1', revision: 7 });
+		expect(basisOf(null)).toEqual({ id: null, revision: null });
 	});
 	it('round-trips a publication', () => {
 		const p = { restriction: { level: 'restricted' as const, pct: 25.5, notice: { en: 'Cut' } }, nextExpectedOn: '2024-02-01' };
