@@ -34,6 +34,8 @@
 	import { fmtStampTime } from '#lib/components/farm/format.js';
 	import { wordsHref } from '#lib/components/farm/load.js';
 	import type { QrDrawing } from './qr';
+	import { needsStepUpToAdd, setupRefusal } from './addFactor';
+	import { loginReturningTo, signOutTo } from '#lib/auth/signOut.js';
 
 	// i18n-section: account.two-step.counts
 	const CODES_LEFT = plural({ one: '{n} recovery code left.', other: '{n} recovery codes left.' });
@@ -101,11 +103,41 @@
 	let codesHeading: HTMLHeadingElement | undefined = $state();
 	let codeInput: HTMLInputElement | undefined = $state();
 
+	/**
+	 * Adding a second way from a session that gave only the password: the API
+	 * refuses it (403 mfa_step_up, issue #882), so the panel says why and
+	 * offers to sign in again with a code instead of asking for the password.
+	 */
+	let stepUp = $state<MfaMethod | null>(null);
+	let signingOut = $state(false);
+	let stepUpHeading: HTMLParagraphElement | undefined = $state();
+
+	async function showStepUp(method: MfaMethod) {
+		setup = null;
+		password = code = '';
+		error = null;
+		stepUp = method;
+		await tick();
+		stepUpHeading?.focus();
+	}
+
+	/** Sign out, then the sign-in page (password, then the code), back to this page after. */
+	async function signInAgain() {
+		signingOut = true;
+		await signOutTo(loginReturningTo(page.url.pathname + page.url.search));
+		signingOut = false;
+	}
+
 	function start(method: MfaMethod) {
 		action = null;
 		done = null;
 		password = code = '';
 		error = null;
+		stepUp = null;
+		if (needsStepUpToAdd(status, method)) {
+			void showStepUp(method);
+			return;
+		}
 		// Codes by email waiting for their code: carry on from the code step (Send again is there).
 		setup = method === 'email' && status?.emailPending ? { method, stage: 'code' } : { method, stage: 'password' };
 		sentNote = null;
@@ -113,6 +145,7 @@
 
 	function cancel() {
 		setup = null;
+		stepUp = null;
 		password = code = '';
 		error = null;
 	}
@@ -150,13 +183,20 @@
 			await tick();
 			codeInput?.focus();
 		} catch (err) {
+			// Another way went on since the page was read (another tab): sign in again with a code.
+			if (setup && setupRefusal(err) === 'step-up') {
+				const method = setup.method;
+				await load();
+				await showStepUp(method);
+				return;
+			}
 			// A send limit after a right password: the code step, with Send again counting down.
 			if (setup?.method === 'email' && err instanceof ApiError && err.code === 'mfa_email_wait') {
 				password = '';
 				resend.start(Number(err.params?.seconds) || 60);
 				setup = { method: 'email', stage: 'code' };
 			}
-			error = err instanceof ApiError && err.status === 403 ? t('Your current password is wrong.') : errorText(err);
+			error = setupRefusal(err) === 'wrong-password' ? t('Your current password is wrong.') : errorText(err);
 		} finally {
 			busy = false;
 		}
@@ -183,6 +223,13 @@
 				codesHeading?.focus();
 			}
 		} catch (err) {
+			// Started before the other way went on: joining it needs a sign-in with a code.
+			if (setup && setupRefusal(err) === 'step-up') {
+				const method = setup.method;
+				await load();
+				await showStepUp(method);
+				return;
+			}
 			error = errorText(err);
 		} finally {
 			busy = false;
@@ -199,6 +246,7 @@
 
 	function choose(a: Action) {
 		setup = null;
+		stepUp = null;
 		action = a;
 		actionCode = '';
 		actionError = null;
@@ -361,7 +409,7 @@
 					<h3>{t('Authenticator app')}</h3>
 					<span class="tag">{t('Stronger')}</span>
 					{#if on('totp')}<span class="badge badge-owner">{t('On')}</span>{:else}<span class="badge">{t('Off')}</span>{/if}
-					{#if !setup && !action}
+					{#if !setup && !action && !stepUp}
 						<div class="actions">
 							{#if on('totp')}
 								<button type="button" class="btn" onclick={() => choose('disable-totp')}>{t('Remove')}</button>
@@ -378,7 +426,7 @@
 					<h3>{t('Code by email')}</h3>
 					<span class="tag">{t('Easier')}</span>
 					{#if on('email')}<span class="badge badge-owner">{t('On')}</span>{:else}<span class="badge">{t('Off')}</span>{/if}
-					{#if !setup && !action}
+					{#if !setup && !action && !stepUp}
 						<div class="actions">
 							{#if on('email')}
 								<button type="button" class="btn" onclick={() => choose('disable-email')}>{t('Turn off')}</button>
@@ -406,7 +454,19 @@
 			</div>
 		</Fold>
 
-		{#if setup?.stage === 'password'}
+		{#if stepUp}
+			<div class="alert alert-warning" role="alert" data-add-factor-step-up={stepUp}>
+				<p tabindex="-1" bind:this={stepUpHeading}>
+					{stepUp === 'email'
+						? t('To turn on codes by email beside your authenticator app, sign in again with a code from the app. This browser signed in with your password only.')
+						: t('To set up the authenticator app beside codes by email, sign in again with a code from your email. This browser signed in with your password only.')}
+				</p>
+				<div class="actions">
+					<button type="button" class="btn btn-primary" onclick={signInAgain} disabled={signingOut}>{signingOut ? t('Signing out…') : t('Sign in again')}</button>
+					<button type="button" class="btn" onclick={cancel}>{t('Cancel')}</button>
+				</div>
+			</div>
+		{:else if setup?.stage === 'password'}
 			<form onsubmit={sendPassword} novalidate aria-label={setup.method === 'email' ? t('Turn on codes by email') : t('Set up the authenticator app')}>
 				{#if error}<div class="alert alert-error" role="alert" id="setup-error">{error}</div>{/if}
 				<div class="field">
