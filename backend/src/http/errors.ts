@@ -172,6 +172,12 @@ export const ERROR_CODES = [
  *     in that model (Runoff to dam and Upstream inflow to dam 0 %, no River
  *     to dam, no transfer in; engine damInflowRoutes): its yield is 0 at any
  *     size (yield/store.ts checkYieldNode).
+ *   publication_changed (409): POST …/publication or PATCH
+ *     …/publication/:pubId whose `basedOn` is no longer the current
+ *     publication as it stands (another editor published or changed it
+ *     since the form was opened), or a PATCH of a superseded publication
+ *     (publish/publish.ts, issue #863). The Publication panel is an English
+ *     workspace page: it reloads the publication and says why.
  *   assistant_* (issue #610, assistant/routes.ts; docs/api.md § Assistant):
  *     the assistant panel is an English workspace page. Before a stream:
  *     assistant_off (404, ASSISTANT_PROVIDER is off), assistant_rate_limited
@@ -226,6 +232,7 @@ export const MACHINE_ERROR_CODES = [
 	'yield_pattern_unit',
 	'yield_no_dam',
 	'yield_no_inflow',
+	'publication_changed',
 	'assistant_off',
 	'assistant_rate_limited',
 	'assistant_budget_spent',

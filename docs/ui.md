@@ -11249,7 +11249,13 @@ read it before.
   focus on the level) changes the current notice in place (`PATCH`,
   no re-publishing): "Notice saved." The edit form and the publish dialog
   keep separate notices and errors, so opening one never overwrites the
-  other's typing. A publish that succeeds but whose history refresh
+  other's typing. Each form sends the publication it was filled in from
+  (`basedOn`, issue #863): when another editor has published or changed the
+  notice since, the server refuses it (`409 publication_changed`) and the
+  form reloads the publication, starts again from it and says "Another
+  editor published or changed the notice since you opened this form, so
+  nothing was saved…", so a stale form never lifts or re-imposes a
+  restriction. A publish that succeeds but whose history refresh
   fails still closes as published, with "The publication history couldn't
   be refreshed: reload the page to see it." rather than an error. The focus
   goes where the page is after each act (#586 round 2,

@@ -1699,17 +1699,29 @@ export interface RunPublication {
 	} | null;
 }
 
+/**
+ * The publication a form was filled in from (issue #863): its id and
+ * updatedAt as read, id null when nothing was published. The server answers
+ * 409 publication_changed when it is no longer the current one as it stands.
+ */
+export interface PublicationBasis {
+	id: string | null;
+	updatedAt: string | null;
+}
+
 export interface PublishRequest {
 	runId: string;
 	note?: string;
 	restriction?: PublicationRestriction;
 	nextExpectedOn?: string | null;
+	basedOn?: PublicationBasis;
 }
 
 export interface PublicationPatch {
 	note?: string;
 	restriction?: PublicationRestriction;
 	nextExpectedOn?: string | null;
+	basedOn?: PublicationBasis;
 }
 
 // --- Change history (WP-2.4, docs/api.md § History) ------------------------
