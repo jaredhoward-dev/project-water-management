@@ -139,6 +139,15 @@ describe('the authority confirms, declines and removes; the owner proposes and w
 		expect((await lead.call('DELETE', `${D()}/${proposedEd.id}`)).status).toBe(204);
 	});
 
+	it('takes the person’s own id in capitals as stepping down, not as removing someone else (security.md: your own id in any case is you)', async () => {
+		expect((await admin.call('POST', D(), { userId: proposedEd.id })).status).toBe(201);
+		// Negative control: someone else's id in capitals is still someone else's (a viewer may remove nobody).
+		expect((await viewer.call('DELETE', `${D()}/${proposedEd.id.toUpperCase()}`)).status).toBe(403);
+		const res = await proposedEd.call('DELETE', `${D()}/${proposedEd.id.toUpperCase()}`);
+		expect(res.status, JSON.stringify(res.body)).toBe(204);
+		expect(await rowsAs(admin)).not.toContainEqual({ user_id: proposedEd.id });
+	});
+
 	it('records a confirmed team editor’s decision (positive control: a confirmed delegate decides)', async () => {
 		const res = await decide(teamEditor, sid);
 		expect(res.status, JSON.stringify(res.body)).toBe(200);
@@ -204,10 +213,12 @@ describe('the History', () => {
 			'authority.withdrawn', // the owner withdraws
 			'authority.proposed',
 			'authority.declined', // lead declines
+			'authority.proposed',
+			'authority.withdrawn', // proposedEd steps down, naming their own id in capitals
 			'authority.lapsed' // the team editor demoted
 		]);
 		expect(events[2]!.subject).toMatchObject({ userId: lead.id, displayName: 'AdLead', via: 'operator', reference: 'DWS letter 14/2026' });
-		expect(events[12]!.subject).toMatchObject({ userId: teamEditor.id, wasConfirmed: true });
+		expect(events[14]!.subject).toMatchObject({ userId: teamEditor.id, wasConfirmed: true });
 	});
 });
 

@@ -2199,7 +2199,11 @@ In short:
   /teams/:id/members/:userId`, `DELETE /projects/:id/members/:userId`)
   compare the id case-insensitively with the caller's, as the team's MFA
   reset does, so an uppercased own id is a leave, not a removal of someone
-  else (which needs admin or owner and step-up).
+  else (which needs admin or owner and step-up). So does stepping down as
+  the authority's delegate (`DELETE /projects/:id/authority-delegates/:userId`):
+  an uppercased own id withdraws your own proposal or delegation, where it
+  had been refused as a removal of someone else
+  (`projects/authority-delegates.db.test.ts`).
 - The backend connects as **`water_app`**: no superuser, no `BYPASSRLS`, owns
   no tables. Each request that touches project data runs in a transaction that
   sets `app.current_user_id` (transaction-local), and RLS policies on every

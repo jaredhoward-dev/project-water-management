@@ -155,7 +155,8 @@ export const authorityDelegateRoutes = new Hono<AuthEnv>()
 			if (!UUID.test(userId)) throw notFound();
 			const was = await oneDelegate(db, id, userId);
 			if (!was) throw notFound();
-			const self = userId === c.get('userId');
+			// A uuid's case doesn't change whom it names: your own id in capitals is still you (stepping down, not removing).
+			const self = userId.toLowerCase() === c.get('userId').toLowerCase();
 			const acting = await actsForAuthority(db, id);
 			if (!self && !acting && !(role === 'owner' && was.status === 'proposed')) {
 				throw new ApiError(
