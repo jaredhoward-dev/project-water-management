@@ -318,6 +318,38 @@ describe('feed routes across projects and roles', () => {
 		expect((await editor.call('POST', `/projects/${pid}/feeds/${id}/run-now`)).status).toBe(202);
 	});
 
+	it('a fetch queued before a plan pause landed ends without fetching when it runs (issue #943); after a resume it fetches', async () => {
+		const owner = await signUp('PausedFetch');
+		const pid = await project(owner);
+		const id = (await owner.call('POST', `/projects/${pid}/feeds`, gefs())).body.feed.id;
+		expect((await owner.call('POST', `/projects/${pid}/feeds/${id}/run-now`)).status).toBe(202);
+		// The pause lands while the fetch waits: a lapsed plan past its grace with a second live catchment kept
+		// (341; the tick's own pause pass writes the marker before it runs the job).
+		const other = await project(owner, 'Kept');
+		const keptFeed = (await owner.call('POST', `/projects/${other}/feeds`, gefs())).body.feed.id;
+		const [{ a: account }] = await asOwner('SELECT billing_account_id AS a FROM project WHERE id = $1', [pid]);
+		await asOwner(`INSERT INTO subscription (billing_account_id, plan_code, status, provider) VALUES ($1, 'pro', 'canceled', 'mock')`, [account]);
+		await asOwner(`UPDATE billing_account SET over_free_since = now() - interval '15 days', kept_project_id = $2 WHERE id = $1`, [account, other]);
+		vi.stubEnv('BILLING_ENFORCED', 'true');
+		expect((await tick()).done).toBe(1);
+		vi.stubEnv('BILLING_ENFORCED', '');
+		expect((await asOwner('SELECT project_id FROM project_plan_pause WHERE project_id = $1', [pid])).length).toBe(1);
+		// The job ended done (not failed or retried), and fetched nothing: no attempt on the feed, no days.
+		expect(await asOwner(`SELECT status, attempts FROM job WHERE kind = 'feed_fetch' AND payload ->> 'feedId' = $1`, [id])).toEqual([
+			{ status: 'done', attempts: 1 }
+		]);
+		expect((await series(owner, pid, 'rain_forecast_mm'))?.values.filter((v) => v !== null) ?? []).toEqual([]);
+		expect((await asOwner('SELECT last_attempt_at FROM data_feed WHERE id = $1', [id]))[0].last_attempt_at).toBeNull();
+		// Positive control: resumed (the kept catchment's feed off, so the account is back within Free), the same feed fetches.
+		expect((await owner.call('PATCH', `/projects/${other}/feeds/${keptFeed}`, { enabled: false })).status).toBe(200);
+		await asOwner('SELECT app_plan_pause_sync($1)', [account]);
+		expect(await asOwner('SELECT project_id FROM project_plan_pause WHERE project_id = $1', [pid])).toEqual([]);
+		expect((await owner.call('POST', `/projects/${pid}/feeds/${id}/run-now`)).status).toBe(202);
+		expect((await tick()).done).toBe(1);
+		expect((await series(owner, pid, 'rain_forecast_mm'))!.values).toHaveLength(16);
+		expect((await asOwner('SELECT last_attempt_at FROM data_feed WHERE id = $1', [id]))[0].last_attempt_at).not.toBeNull();
+	});
+
 	it('the per-project feed cap holds under concurrent attaches', async () => {
 		const owner = await signUp('CapOwner');
 		const pid = await project(owner);

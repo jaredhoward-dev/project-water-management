@@ -395,6 +395,18 @@ export function staleOrphans(rows: OrphanPendingRow[], now: Date): StaleOrphan[]
 		}));
 }
 
+/**
+ * A team paying for fewer editor seats than its editors in use (403, issue #926: a seat cut in the provider's
+ * portal). Ids and numbers only: no names or addresses. `since` is when it was first recorded.
+ */
+export interface OverSeatsRow {
+	accountId: string;
+	teamId: string;
+	seats: number;
+	editors: number;
+	since: string;
+}
+
 export interface Report {
 	month: string;
 	generatedAt: string;
@@ -409,6 +421,8 @@ export interface Report {
 	reverseTrial: ReverseTrialConversion;
 	/** Orphans the provider stopped retrying, whatever the month (352): the operator finishes each in the provider's dashboard. */
 	staleOrphans: StaleOrphan[];
+	/** Teams over their paid seats today, whatever the month (403), longest over first. */
+	overSeats: OverSeatsRow[];
 	notYetMeasurable: typeof NOT_YET_MEASURABLE;
 }
 
@@ -420,7 +434,8 @@ export function buildReport(
 	freeLimits: PlanLimits,
 	refusals: GateRefusalRow[] = [],
 	trials: ReverseTrialRow[] = [],
-	orphans: OrphanPendingRow[] = []
+	orphans: OrphanPendingRow[] = [],
+	overSeats: OverSeatsRow[] = []
 ): Report {
 	return {
 		month,
@@ -435,6 +450,7 @@ export function buildReport(
 		gateRefusals: gateRefusals(refusals),
 		reverseTrial: reverseTrialToPaid(trials, now),
 		staleOrphans: staleOrphans(orphans, now),
+		overSeats: [...overSeats].sort((a, b) => a.since.localeCompare(b.since) || a.accountId.localeCompare(b.accountId)),
 		notYetMeasurable: NOT_YET_MEASURABLE
 	};
 }
@@ -459,6 +475,13 @@ export function formatReport(r: Report, showEmails: boolean): string {
 	else {
 		out.push(`ACTION: ${r.staleOrphans.length} orphaned subscription(s) still pending past the provider's ${ORPHAN_RETRY_DAYS}-day retries; cancel and refund each in the provider's dashboard`);
 		for (const o of r.staleOrphans) out.push(`  ${o.provider}  ${o.eventId}  ${o.type}  received ${o.receivedAt} (${o.days} days ago)`);
+		out.push('');
+	}
+	// Teams over their paid seats (403): seats cut in the provider's portal; the seat guard refuses their new editors.
+	if (r.overSeats.length === 0) out.push('Teams over their paid editor seats: none', '');
+	else {
+		out.push(`Teams over their paid editor seats: ${r.overSeats.length} (new editors refused until they add seats or make editors viewers)`);
+		for (const o of r.overSeats) out.push(`  account ${o.accountId}  team ${o.teamId}  ${o.editors} editors on ${o.seats} seats  since ${o.since}`);
 		out.push('');
 	}
 	const a = r.activation;

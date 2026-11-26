@@ -55,7 +55,7 @@ import { cacheOrigin, claimRecheck, readCellCache } from '../../feeds/cellCacheS
 import { chirpsProduct, type FeedConfig, type FeedSource, type GridConfig, gridCells, type StationApiConfig } from '../../feeds/config.js';
 import { type CellsResult, copyWindowYears, type FetchRequest, type FetchWindow, fetchWindow, runFetch, utcToday } from '../../feeds/fetch.js';
 import { DAY_SKIP } from '../../feeds/sources/chirps.js';
-import { withUser } from '../../db/tx.js';
+import { type Db, withUser } from '../../db/tx.js';
 import { feedHttp, LiveFeedRequestRefusedError } from '../../feeds/http.js';
 import { JobError, JobRelease } from '../errors.js';
 import { fetchFromMirror } from '../../feeds/fromMirror.js';
@@ -130,6 +130,12 @@ export const feedFetchHandler = defineHandler({
 		const feed = await feedForJob(db, job.projectId, payload.feedId);
 		// Removed or switched off since it was queued: nothing to do.
 		if (!feed || !feed.enabled) return;
+		// Paused since it was queued (or retried after the pause landed): 341's pause holds every fetch, not only the
+		// scheduler's and Fetch now's (issue #943). Ends done, fetching nothing; the scheduler picks it up after a resume.
+		if (await planPaused(db, job.projectId)) {
+			logEvent('info', { event: 'feed_fetch_paused', feedId: feed.id, fetchJobId: job.id });
+			return;
+		}
 		const today = utcToday();
 		// A CHIRPS feed reading our copy reads whole years a window (fetch.ts COPY_CELL_YEARS), not CHC's 120 days.
 		const fromCopy = feed.source === 'chirps' && chirpsSource() === 'mirror';
@@ -256,6 +262,12 @@ export const feedFetchHandler = defineHandler({
 		await ingestResult(db, feed, await runFetch(request, http), window, { fetchJobId: job.id });
 	}
 });
+
+/** Whether the project's operations are paused past Free's live catchments (341 app_project_plan_paused). */
+async function planPaused(db: Db, projectId: string): Promise<boolean> {
+	const { rows } = await db.query<{ paused: boolean }>('SELECT app_project_plan_paused($1) IS NOT NULL AS paused', [projectId]);
+	return rows[0]?.paused ?? false;
+}
 
 /** A CHIRPS feed's grid cells, for its window's size; a config that names none (refused by the read, fetchFromMirror) counts as one. */
 function copyCellCount(config: unknown): number {

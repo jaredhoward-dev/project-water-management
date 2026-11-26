@@ -377,6 +377,7 @@ output never goes into an issue, a PR, a chat or an agent's transcript.
 | Metric | How it is worked out | Threshold (the issue's) |
 | --- | --- | --- |
 | Orphans past the retries (printed first) | Rows of `billing_event` still `orphan_pending` (352) more than 3 days after they were received, whatever the month: the provider, its event id, type and age, oldest first. Stripe has stopped redelivering them, so nothing will cancel or refund them but the operator ([deployment.md § Billing alarms](./deployment.md#billing-alarms)). No account or person: the account is gone | any one → finish it in Stripe's dashboard |
+| Teams over their paid seats (403) | Team accounts with `over_seats_since` set whose live Team plan pays for fewer seats than `app_team_seats_in_use` counts now (a stale marker is never listed), whatever the month: the account and team ids, editors, seats and since when, longest over first. Ids and numbers only, so redaction keeps them | any one → the team's new editors are refused; check the portal's quantity setting (§ Team seats) |
 | Activation | Verified sign-ups of the month (SAST) with a model run of their own (`model_run.trigger` `manual`: the live model, a scenario or a calibration they asked for, never a live catchment's automatic or forecast run; 402) within 7 days of signing up. Sign-ups under 7 days old are left out and counted as pending | < 30% → fix onboarding first |
 | Active Free accounts near / at each limit | Active = a run someone asked for (`manual`, as above: an account whose only runs this month are automatic is idle, 402), a server report or assistant use this month on the account's projects. Near ≥ 80% of the limit, at ≥ 100%, for reports (5), the assistant's dollars ($1), catchments (Free has no limit, so none) and live catchments (1: the share at the live-catchment limit). Catchments and live catchments are counted **today**; live is 338's count (`app_live_catchments_in_use`: an enabled feed or alert rule, automatic runs on, or a publication; [§ Live catchments](#live-catchments-free)), so an account past its limit from before enforcement counts as at it, and an idle account with a live catchment isn't in the share | > 15% at reports → 10 a month; < 3% at the monthly assistant cap → room to raise |
 | Reverse trial → paid within 30 days | The reverse trials (342) that **began in the report's SAST month**: `billing_grant_log` `grant` rows by `reverse trial`, one per account (one trial per canonical email). Paid = the account's first paid plan at or after the trial's start: a subscription from a payment provider (`stripe`, or `mock` locally) whose first payment was taken: `active`, `past_due` or `canceled` (so a plan bought and later cancelled counts; not `trialing`, and not `expired`, Stripe's `incomplete_expired`, a first payment never made), or a paid B2B invoice's grant (`billing_grant_log` `grant` by `invoice`, 335); a staff grant is not paid. Converted when it came at most 30 days after the start. A trial under 30 days old is left out and counted as pending (with how many of those already pay). A deleted account's trial goes with it (`billing_grant_log` cascades) | |
@@ -861,7 +862,9 @@ seats* control ([ui.md § Plan and usage](./ui.md#plan-and-usage)):
    included 3 while keeping every editor. Make some editors viewers first.
    Off (shadow mode) it is counted, never refused. The count is read before
    the provider call, so an editor added in that moment can still leave the
-   team one over; the seat guard then refuses the next new editor.
+   team one over: the webhook's seat write then counts it under the seat
+   guard's lock and records the team over its seats (§ Team seats, 403), and
+   the seat guard refuses the next new editor.
 5. **The provider** changes the subscription, outside any transaction. The
    route writes **no seats**: the provider's `customer.subscription.updated`
    brings them back through the webhook and `app_billing_apply`, as
@@ -995,6 +998,31 @@ invites"; Enforcement design, "Editors per catchment / Team seats").
   of every transaction (and sets nothing when off, so off costs no round
   trip). Nothing from a request reaches the setting. The committed dev and
   e2e env files leave it off.
+- **Over its seats (403, issue #926).** Stripe's customer portal can change
+  a subscription item's quantity, around this route's check. Every write of
+  a subscription's seats, status or plan (the webhook's `app_billing_apply`,
+  a staff grant, an invoice grant) fires `subscription_seats_sync`, which
+  takes the same account lock as the seat guard and counts the editors in use
+  in a fresh statement: more than the paid seats sets
+  `billing_account.over_seats_since` (kept from the first time), within them
+  clears it. The lock orders a seat cut against an editor add either way: an
+  add that commits first is counted by the cut (recorded over), a cut that
+  commits first is read by the add's guard (refused, enforced). The seat
+  guard refuses any new seat while the team is over, as before; nobody loses
+  a seat. With enforcement off (shadow mode, 404) the seat triggers still
+  reach the guard for a change that gives a new seat, and the guard records
+  the team over its seats rather than refusing. The plan page reads
+  `team.overSeats { seats, editors, since }` from `app_account_plan`, worked
+  out at each read (null within its seats), and shows a note on the Plan
+  card: how many editors over, that everyone keeps access but no one new can
+  be made an editor, and to add seats with *Change seats* or make editors
+  viewers (`plan.ts` `overSeatsNotice`; `billing-seats.spec.ts`). The
+  operator report lists the teams over their seats (§ Metrics and the abuse
+  report). The job tick clears the marker once editors are made viewers or
+  seats bought. **What the portal should allow:** configure Stripe's customer
+  portal without quantity changes on the extra-seat item (seats change
+  through *Change seats*, which refuses a cut below the editors in use); the
+  record is the backstop if it is ever allowed.
 - **Confirming an address.** `markVerified` accepts the person's pending
   invites through `app_accept_invites`, which takes each invite in its own
   subtransaction (360_accept_invites_each): one that would pass a Team's
@@ -1017,7 +1045,10 @@ invites"; Enforcement design, "Editors per catchment / Team seats").
   team, the invite left pending, only the refused one of several left
   pending and the rest accepted, any other refusal on confirming rethrown,
   a project billed to the team's account with no `team_id`, two parallel
-  grants of the last seat), `db/tx.db.test.ts` (the flag set only for
+  grants of the last seat), `billing/overSeats.db.test.ts` (a portal cut
+  replayed through the mock webhook recorded, shown and refusing a new
+  editor, cleared at the tick; the cut and an add racing in both orders; a
+  paused catchment's move), `db/tx.db.test.ts` (the flag set only for
   `BILLING_ENFORCED=true`) and `http/errors.test.ts` (402 with only the
   numbers).
 
@@ -1504,6 +1535,24 @@ Built but off: nothing is paused unless `BILLING_ENFORCED` is on.
   run and edit it (Free never limits modelling), and its published farm
   views stay up with their last publication. `app_project_plan_paused(project)`
   answers when it was paused, or null.
+- **A queued fetch (issue #943).** A `feed_fetch` job queued before the
+  pause landed, or retried after it, checks `app_project_plan_paused` when it
+  runs and ends done without fetching (logged `feed_fetch_paused`); the
+  scheduler picks the feed up again after a resume.
+- **Readings pushed by API key are accepted (decided 2026-11-26, issue
+  #943).** `/ingest` still merges a key's readings into a paused catchment:
+  they are the catchment's data, sent by the user's own logger, and refusing
+  them would lose days the logger may not resend, while Free never limits
+  data or modelling. What the pause holds is the operation they would start:
+  the automatic re-run (`app_enqueue_rerun` skips a paused catchment, so the
+  answer's `rerunQueuedFor` is null) and, through it, alerts. The next push
+  after a resume queues the re-run as usual.
+- **Moving accounts (403).** A project whose billing account changes (moved
+  into or out of a team) re-syncs both accounts in the move's transaction
+  (`project_billing_move_sync`, both locks in id order): the moved
+  catchment's pause marker and the old account's `over_free_since` follow
+  the move at once instead of at the next tick, and both accounts'
+  over-seats markers are re-counted.
 - **Resuming.** A live subscription again (the subscription trigger, at
   once), switching the extra catchments' operations off so the account is
   back within Free, or enforcement turned off: the markers go and the grace
@@ -1525,6 +1574,10 @@ Built but off: nothing is paused unless `BILLING_ENFORCED` is on.
   the kept one; members read the marker, strangers don't; the owner's
   choice moves the pause and a stranger's is refused; an upgrade resumes
   everything; a never-paid account isn't paused; only the worker sweeps.
+  `feeds/feeds.db.test.ts` (a fetch queued before the pause ends without
+  fetching, and fetches after a resume), `ingest/ingest.db.test.ts` (a key's
+  readings accepted into a paused catchment, no re-run until it resumes) and
+  `billing/overSeats.db.test.ts` (a move re-syncs both accounts).
 
 ## Plan emails
 
