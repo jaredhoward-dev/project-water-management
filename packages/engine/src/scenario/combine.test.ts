@@ -156,6 +156,29 @@ describe('combineScenarios: conflicts are refused, never merged', () => {
 		expect(scenarioConflicts(base(), [sc('a', [{ op: 'node.set', nodeId: 'B', field: 'damCapacityM3', value: 1 }]), sc('b', plantB)])).toEqual([]);
 	});
 
+	it('a demand cut on every farm and a farm another scenario adds (the cut would reach it in one order only)', () => {
+		// demand.scale without nodeIds scales every farm the model has when it applies: a farm added before it is
+		// cut, one added after is not, so the order would decide the new farm's demand.
+		const cut: ScenarioOp[] = [{ op: 'demand.scale', factor: 0.5 }];
+		const addFarm: ScenarioOp[] = [{ op: 'node.add', node: node('N', { name: 'New farm', downstreamNodeId: 'B' }) }, { op: 'cropArea.set', nodeId: 'N', cropId: 'c1', areaM2: 100_000 }];
+		const factorOfN = (x: ModelInput) => x.model.nodes.find((n) => n.id === 'N')!.demandFactor ?? null;
+		const cutFirst = applyScenario(applyScenario(base(), cut).input, addFarm).input;
+		const addFirst = applyScenario(applyScenario(base(), addFarm).input, cut).input;
+		expect(factorOfN(cutFirst)).not.toEqual(factorOfN(addFirst));
+		const [c, ...rest] = conflictOf(cut, addFarm);
+		expect(rest).toEqual([]);
+		expect(c).toMatchObject({ reason: 'same_target', target: 'demand of "New farm"', a: { scenarioId: 'a', opIndex: 0 }, b: { scenarioId: 'b', opIndex: 0 } });
+		// Either order is refused, with the same target.
+		expect(scenarioConflicts(base(), [sc('b', addFarm), sc('a', cut)]).map((x) => x.target)).toEqual(['demand of "New farm"']);
+		// The same for other water users; and a cut of farms meets no user added, a named cut no farm added.
+		const addUser: ScenarioOp[] = [{ op: 'node.add', node: node('U', { name: 'New town', kind: 'user', downstreamNodeId: 'B', areaKm2: 0 }) }];
+		expect(scenarioConflicts(base(), [sc('a', [{ op: 'demand.scale', factor: 0.5, category: 'user' }]), sc('b', addUser)]).map((x) => x.target)).toEqual(['demand of "New town"']);
+		expect(scenarioConflicts(base(), [sc('a', cut), sc('b', addUser)])).toEqual([]);
+		expect(scenarioConflicts(base(), [sc('a', [{ op: 'demand.scale', factor: 0.5, nodeIds: ['A'] }]), sc('b', addFarm)])).toEqual([]);
+		// Two scenarios each adding a farm don't meet.
+		expect(scenarioConflicts(base(), [sc('a', addFarm), sc('b', [{ op: 'node.add', node: node('M', { name: 'Other farm', downstreamNodeId: 'G' }) }])])).toEqual([]);
+	});
+
 	it("a transfer changed whose end another scenario removes", () => {
 		const cs = conflictOf([{ op: 'transfer.set', transferId: 't1', field: 'maxRateM3s', value: 0.1 }], [{ op: 'node.remove', nodeId: 'C' }]);
 		expect(cs.map((c) => [c.reason, c.target, c.a.scenarioId])).toContainEqual(['removed_in_use', 'hydrological unit "Farm C"', 'b']);

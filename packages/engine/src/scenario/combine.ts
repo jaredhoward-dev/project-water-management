@@ -139,6 +139,11 @@ function touches(model: ProjectModel, ops: readonly ScenarioOp[], index: number)
 		for (const e of entities) if (e) t.uses.push(e);
 	};
 	const nodeUse = (id: string | null | undefined) => (id ? node(id) : null);
+	// A farm or other water user a scenario adds has a demand a demand.scale without nodeIds reaches in one order
+	// (applied after the add) and not the other: `newDemand:<kind>:<id>` meets that scaling's `newDemand:<kind>:*`.
+	const addedDemand = (n: { id: string; kind: string }) => {
+		if (n.kind === 'farm' || n.kind === 'user') w(`newDemand:${n.kind}:${n.id}`);
+	};
 	switch (op.op) {
 		case 'node.set':
 			w(node(op.nodeId), op.field);
@@ -151,6 +156,7 @@ function touches(model: ProjectModel, ops: readonly ScenarioOp[], index: number)
 		case 'node.add':
 			w(node(op.node.id));
 			u(nodeUse(op.node.downstreamNodeId));
+			addedDemand(op.node);
 			break;
 		case 'node.remove':
 			t.removes.push(node(op.nodeId));
@@ -165,6 +171,7 @@ function touches(model: ProjectModel, ops: readonly ScenarioOp[], index: number)
 			w(node(op.node.id));
 			u(nodeUse(op.node.downstreamNodeId));
 			for (const up of op.upstreamNodeIds) w(node(up), 'downstreamNodeId');
+			addedDemand(op.node);
 			break;
 		case 'cropArea.set':
 			w(`cropArea:${op.nodeId}|${op.cropId}`);
@@ -250,6 +257,9 @@ function touches(model: ProjectModel, ops: readonly ScenarioOp[], index: number)
 				w(`demand:${id}`);
 				u(node(id));
 			}
+			// Without nodeIds it reaches every unit of its category the model has when it applies: one another
+			// scenario adds too, in one order only.
+			if (!op.nodeIds) w(`newDemand:${op.category === 'user' ? 'user' : 'farm'}:*`);
 			break;
 		case 'ewrRule.set':
 			w(`ewrRule:${op.table.siteNodeId ?? 'outlet'}`);
@@ -308,6 +318,11 @@ function label(model: ProjectModel, scenarios: readonly CombineScenario[], entit
 		}
 		case 'demand':
 			return `demand of "${nodeName(id)}"`;
+		case 'newDemand': {
+			// `<kind>:<id>`, or `<kind>:*` (every unit of the kind, named only when two such scalings meet).
+			const [k, nid = ''] = id.split(':');
+			return nid === '*' ? `the demand of every ${k === 'user' ? 'other water user' : 'farm'}` : `demand of "${nodeName(nid)}"`;
+		}
 		case 'settings':
 			return 'settings';
 		case 'series':
@@ -334,6 +349,8 @@ function sameEntity(a: string, b: string): boolean {
 	if (a === b) return true;
 	// climate.delta's every series (engine 1.107.0) meets any one series.
 	if ((a === 'series:*' && b.startsWith('series:')) || (b === 'series:*' && a.startsWith('series:'))) return true;
+	// A demand.scale without nodeIds (`newDemand:<kind>:*`) meets a unit of that kind another scenario adds.
+	for (const [x, y] of [[a, b], [b, a]] as const) if (x.startsWith('newDemand:') && x.endsWith(':*') && y.startsWith(x.slice(0, -1))) return true;
 	const p = 'cropArea:';
 	if (!a.startsWith(p) || !b.startsWith(p)) return false;
 	const [an, ac] = a.slice(p.length).split('|');
