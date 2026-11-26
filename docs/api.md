@@ -3342,7 +3342,8 @@ mode"; design [design/evidence-report.md](./design/evidence-report.md), layout
   failed.
 - **The cited ensemble** is the first complete unpaired ensemble on the
   baseline whose options match `settings.evidenceUncertaintyRule` (members,
-  bounds, pan shift, thresholds); the paired band is the first complete paired
+  bounds, pan shift, thresholds, and the model's default parameters varied:
+  a start that posted its own `free` doesn't match); the paired band is the first complete paired
   row on the application against it. Every other start is in
   `uncertainty.ledger` with how it departs from the declared rule.
 

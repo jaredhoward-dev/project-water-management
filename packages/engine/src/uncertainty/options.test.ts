@@ -77,7 +77,7 @@ describe('declaredRuleText', () => {
 describe('declaredRuleMismatches', () => {
 	// Only the rule's fields are read; the rest of the resolved options are the ensemble's own.
 	const resolved = (over: Partial<ResolvedEnsembleOptions> = {}) =>
-		({ members: 300, bounds: 'typical', panOffset: 0.1, thresholds: { ...RULE.thresholds }, seed: 987, records: ['flow_logger_m3s'], rainSources: ['chirps'], ...over }) as ResolvedEnsembleOptions;
+		({ model: 'gr4j', free: ['x1', 'x3', 'x4'], members: 300, bounds: 'typical', panOffset: 0.1, thresholds: { ...RULE.thresholds }, seed: 987, records: ['flow_logger_m3s'], rainSources: ['chirps'], ...over }) as ResolvedEnsembleOptions;
 
 	it('is empty when the ensemble followed the rule, whatever its seed, records and rain sources', () => {
 		expect(declaredRuleMismatches(RULE, resolved())).toEqual([]);
@@ -95,6 +95,15 @@ describe('declaredRuleMismatches', () => {
 			{ label: 'Pan coefficient shift', a: '±0.1', b: 'not varied' }
 		]);
 		expect(declaredRuleMismatches(RULE, resolved({ members: 301 }))).toEqual([{ label: 'Members', a: '300', b: '301' }]);
+	});
+
+	it('counts the parameters varied: an ensemble that varies fewer than the model’s default set narrows the band, so it departs from the rule', () => {
+		// An editor may post `free` (only X4, say); the rule fixes members, bounds, pan shift and thresholds, but a band over one
+		// parameter is narrower than the rule's own, so it must not be the cited one.
+		expect(declaredRuleMismatches(RULE, resolved({ free: ['x4'] }))).toEqual([{ label: 'Parameters varied', a: 'x1, x3, x4', b: 'x4' }]);
+		expect(declaredRuleMismatches(RULE, resolved({ free: ['x1', 'x2', 'x3', 'x4'] }))).toEqual([{ label: 'Parameters varied', a: 'x1, x3, x4', b: 'x1, x2, x3, x4' }]);
+		// Control: the default set (what declaredRuleRequest's start resolves to) follows the rule.
+		expect(declaredRuleMismatches(RULE, resolved({ free: ['x1', 'x3', 'x4'] }))).toEqual([]);
 	});
 
 	it('builds the request that starts the declared ensemble, with its own copy of the thresholds', () => {

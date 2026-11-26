@@ -36,7 +36,8 @@
 	import { fmtNum } from '#lib/format/number.js';
 	import { monthName } from '#lib/format/months.js';
 	import BandFdcChart from './BandFdcChart.svelte';
-	import { abandonedText, bandCells, coverageText, historyRows, pct, rejectedText, shownEnsemble, sig, withheldNote } from './bands';
+	import { ENGINE_VERSION } from '@water-management/engine/version';
+	import { abandonedText, bandCells, coverageText, historyRows, pct, rejectedText, reproducedText, shownEnsemble, sig, withheldNote } from './bands';
 	import { FORMER_MEMBER } from '#lib/format/maker.js';
 
 	let {
@@ -365,9 +366,8 @@
 			<button type="button" class="btn btn-sm" onclick={reproduce} disabled={busy}>Reproduce in this browser</button>
 			{#if reproduced && reproduced.id === shown.id}
 				<span class={reproduced.ok ? 'ok' : 'bad'} role="status" data-testid="reproduced">
-					{reproduced.ok
-						? `Reproduced: the same ${fmtNum(shown.members + 1)} members, verdicts, outputs and coverage.`
-						: `Does not reproduce: ${reproduced.lines.slice(0, 3).join('; ')}`}
+					<!-- Re-run on this build's engine: one stored on another engine may differ for that reason alone. -->
+					{reproducedText(reproduced, shown.members + 1, shown.engineVersion, ENGINE_VERSION)}
 				</span>
 			{/if}
 		</div>
