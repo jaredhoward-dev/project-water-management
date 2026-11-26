@@ -3694,7 +3694,10 @@ received. For a **forecast run** (WP-2.12) it is the day before
   `notice` is none (issue #58; 081_notice_languages.sql). The note is
   trimmed the same way. `nextExpectedOn` is a date
   (`YYYY-MM-DD`) or `null` (design E10). Without `restriction` a
-  publication has none.
+  publication has none, so a re-publish that leaves it out lifts the one in
+  force: the app's Publish dialog and an auto publish always send the
+  current one, and words-only edits go through `PATCH`, which keeps the
+  level unless `restriction` is sent (issue #861).
 - `PublicationMeta = { id, runId, publishedAt, publishedBy, restriction: { level }, supersededAt, endorsement? }`;
   `publishedBy` is a display name (`null` once that account is gone).
   `endorsement = { endorsedAt, endorsedBy, note } | null` (163): the
