@@ -18,6 +18,7 @@
 // would read as a formula get an apostrophe, and a comment line's commas,
 // quotes and control characters are percent-encoded. Pure: no DOM.
 import { fromEpochDay, toEpochDay, type SeriesMeta } from '@water-management/engine';
+import { defuse } from '#lib/spreadsheet/export/names.js';
 import { kindLabel } from '#lib/series/kinds.js';
 import type { Daily } from './coverage';
 import type { AreaRainLines, UnitChainLines } from './derivedRain';
@@ -35,9 +36,9 @@ export interface CsvColumn {
 	values: ArrayLike<number | string | null>;
 }
 
-/** A header or text cell: RFC 4180-quoted when needed, a leading = + - @ tab or CR behind an apostrophe (OWASP "CSV injection"). */
+/** A header or text cell: RFC 4180-quoted when needed, formula-looking text behind an apostrophe (defuse; OWASP "CSV injection"). */
 export function textCell(v: string): string {
-	const s = /^[=+\-@\t\r]/.test(v) ? `'${v}` : v;
+	const s = defuse(v);
 	return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 

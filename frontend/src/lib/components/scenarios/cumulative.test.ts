@@ -79,6 +79,11 @@ describe('the matrix cells', () => {
 });
 
 describe('assessmentCsv', () => {
+	it('guards a scenario name with whitespace before the formula sign (issue #902)', () => {
+		const report: CumulativeReport = { scenarios: [{ id: 'a', name: ' =Raise' }], rows: [row()], warnings: [] };
+		expect(assessmentCsv(report).split('\r\n')[0]).toContain(",' =Raise alone,");
+	});
+
 	it('one line per row, raw numbers, names guarded against CSV injection', () => {
 		const report: CumulativeReport = { scenarios: [{ id: 'a', name: '=Raise, dam' }, { id: 'b', name: 'More "lucerne"' }], rows: [row(), row({ metric: 'outlet_flow', site: null, isOutlet: false, unit: 'm³/day', baseline: 1000.5, interaction: null })], warnings: [] };
 		const lines = assessmentCsv(report).split('\r\n');

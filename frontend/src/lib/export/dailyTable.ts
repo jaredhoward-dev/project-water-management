@@ -4,6 +4,8 @@
 // preview shows the very file the download saves, so it parses the export
 // rather than rebuilding it from the run's series.
 
+import { undefuse } from '#lib/spreadsheet/export/names.js';
+
 export interface DailyTable {
 	/** Every leading `# …` line, without the `#`: the run's provenance line, and a legacy-runoff run's warning (audit H1). */
 	comments: string[];
@@ -53,8 +55,8 @@ export function csvCells(line: string): string[] {
 	}
 }
 
-/** Undo the export's CSV-injection guard (csv.ts textCell): a leading apostrophe before = + - @. */
-const unguard = (s: string) => (/^'[=+\-@\t\r]/.test(s) ? s.slice(1) : s);
+/** Undo the export's CSV-injection guard (csv.ts textCell, the same rule as undefuse). */
+const unguard = undefuse;
 
 /** A provenance line's pairs: `key=value` joined by `; `, values percent-encoded so neither separator occurs inside one. */
 function provenancePairs(comment: string): Record<string, string> | null {

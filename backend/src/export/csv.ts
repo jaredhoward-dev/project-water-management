@@ -133,13 +133,23 @@ export function numCell(v: number | null | undefined): string {
 }
 
 /**
+ * Where a spreadsheet may read a cell as a formula (OWASP "CSV injection"):
+ * a leading `= + - @` (or a full-width `＝ ＋ － ＠`, a formula in some
+ * locales), the same after leading whitespace (LibreOffice Calc's CSV import
+ * with "Trim spaces" on evaluates ` =1+1`; docs/security.md, issue #902), or a
+ * leading tab, CR or LF. The frontend's copy is
+ * frontend/src/lib/spreadsheet/export/names.ts `FORMULA_START`: keep them one rule.
+ */
+export const FORMULA_START = /^(?:[\t\r\n]|\s*[=+\-@\uFF1D\uFF0B\uFF0D\uFF20])/;
+
+/**
  * A text cell, RFC 4180-quoted when it contains a comma, quote or line break.
- * Text that a spreadsheet would treat as a formula (leading = + - @ tab CR) is
- * prefixed with an apostrophe (OWASP "CSV injection"): names and labels are
- * user-controlled, and the file is opened by other members of the project.
+ * Text that a spreadsheet would treat as a formula (FORMULA_START) is prefixed
+ * with an apostrophe: names and labels are user-controlled, and the file is
+ * opened by other members of the project.
  */
 export function textCell(v: string): string {
-	const s = /^[=+\-@\t\r]/.test(v) ? `'${v}` : v;
+	const s = FORMULA_START.test(v) ? `'${v}` : v;
 	return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 

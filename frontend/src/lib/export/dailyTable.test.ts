@@ -79,6 +79,7 @@ describe('parseDailyCsv', () => {
 
 	it('undoes the CSV-injection guard on a name, and refuses what is not a daily table', () => {
 		expect(parseDailyCsv("date,'=Farm [I] (m³/day)\r\n").headers).toEqual(['=Farm [I] (m³/day)']);
+		expect(parseDailyCsv("date,' =Farm,'Farm\r\n").headers).toEqual([' =Farm', "'Farm"]);
 		expect(() => parseDailyCsv('')).toThrow(/empty/);
 		expect(() => parseDailyCsv('Project,Demo\r\n')).toThrow(/not a daily table/);
 	});

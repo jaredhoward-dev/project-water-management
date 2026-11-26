@@ -153,6 +153,9 @@ describe('cells stay harmless', () => {
 		expect(textCell('Kloof, upper')).toBe('"Kloof, upper"');
 		expect(textCell('-1 gauge')).toBe("'-1 gauge");
 		for (const lead of ['+', '@', '\t', '\r']) expect(textCell(`${lead}x`).replace(/^"/, '').startsWith("'")).toBe(true);
+		// Whitespace then a formula sign, a line feed, a full-width sign (issue #902).
+		for (const lead of [' =', '  +', '\t-', '\n', '＝']) expect(textCell(`${lead}x`).replace(/^"/, '').startsWith("'")).toBe(true);
+		expect(textCell(' Kloof')).toBe(' Kloof');
 	});
 	it('a comment line stays one cell: its commas, quotes and line breaks are percent-encoded', () => {
 		expect(commentLine('a,b "c"\nd')).toBe('# a%2Cb %22c%22%0Ad');

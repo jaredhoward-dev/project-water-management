@@ -5,13 +5,16 @@
 // text in every field a CSV can carry: the project, farm, run label, run
 // notes, the notes' author, a series name and unit, and an allocation's
 // registration number, holder and reference. Each file is then parsed as
-// RFC 4180 and every text cell checked: nothing starts with = + - @ tab or
-// CR unless it is a plain number, and quoting holds (no bare quote in an
+// RFC 4180 and every text cell checked: nothing starts with = + - @ (after
+// any whitespace, or full-width), tab, CR or LF unless it is a plain number
+// (csv.ts FORMULA_START; the API trims names, so no leading-whitespace payload
+// can be seeded here: csv.test.ts covers those), and quoting holds (no bare quote in an
 // unquoted field, no unterminated field). Positive controls: the hostile
 // strings do reach the files (apostrophe-prefixed), and an ordinary name with
 // a comma and quotes round-trips unchanged.
 import { beforeAll, describe, expect, it } from 'vitest';
 import { app, monthly, node, signUp } from '../__tests__/helpers.js';
+import { FORMULA_START } from './csv.js';
 
 type User = Awaited<ReturnType<typeof signUp>>;
 const ORIGIN = 'http://localhost:7777';
@@ -33,8 +36,8 @@ const EVIL = {
 /** An ordinary name with a comma and quotes: must come back exactly (the positive control). */
 const PLAIN = 'Plain farm, "north"';
 
-/** A formula trigger at the start of a cell (OWASP CSV injection). */
-const TRIGGER = /^[=+\-@\t\r]/;
+/** A formula trigger at the start of a cell, whitespace-led and full-width ones included (OWASP CSV injection; issue #902). */
+const TRIGGER = FORMULA_START;
 /** A number exactly as the exports write one (String(n)): -12.5 is data, not a formula. */
 const isNumber = (s: string) => s !== '' && Number.isFinite(Number(s)) && String(Number(s)) === s;
 

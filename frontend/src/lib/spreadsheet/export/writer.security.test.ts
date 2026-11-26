@@ -10,6 +10,7 @@ import * as XLSX from 'xlsx/dist/xlsx.mini.min';
 import type { RunSummary } from '@water-management/engine';
 import { buildWorkbook } from './workbook';
 import { escapeCellText, XlsxWorkbook } from './writer';
+import { FORMULA_START } from './names';
 
 /** The text Excel shows for a cell's `<v>` body: entities, then a single pass of `_xHHHH_`. */
 const excelText = (xml: string) =>
@@ -20,7 +21,7 @@ const excelText = (xml: string) =>
 /** Characters XML 1.0 forbids anywhere in a document. */
 const NOT_XML = /[^\t\n\r -퟿-�\u{10000}-\u{10FFFF}]/u;
 /** A formula trigger at the start of a text cell (OWASP CSV injection). */
-const TRIGGER = /^[=+\-@\t\r]/;
+const TRIGGER = FORMULA_START;
 
 /** The zip's parts by name, as text. */
 function partsOf(bytes: Uint8Array): Map<string, string> {
