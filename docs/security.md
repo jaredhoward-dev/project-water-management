@@ -4327,6 +4327,7 @@ PDF someone else asked for kept the person as a recipient
 | Data | Tables | Retention | Account deleted | Project deleted |
 | --- | --- | --- | --- | --- |
 | Account: email, display name, password hash, session watermark, when they last downloaded their data (052), whether SES suppressed the address (057), which terms and privacy notice they accepted and when (087) | `app_user`, `email_token` | Until the account is deleted; tokens a week past expiry | Deleted | – |
+| A pending change of address (347): the new address they typed, the link's SHA-256, when it lapses and when asked; own row only under RLS; in "Download my data" (`pendingEmailChange`, never the hash) | `email_change` | 48 hours (the link's life), or until used or replaced by a newer one | Deleted (cascades from `app_user`) | – |
 | Sign-in attempts, keyed by the typed address (and a trusted device's id, 070) | `login_throttle`, `login_device_throttle` | A day without attempts | Not linked to the account | – |
 | Reset and verification emails sent, for the daily cap (and a trusted device's id, 078) | `account_mail_quota` | 24 hours | Deleted | – |
 | Elevation-model requests per account, for the hourly and running caps (184) | `dem_attempt` | 1 day | Deleted | – |
@@ -4372,6 +4373,7 @@ PDF someone else asked for kept the person as a recipient
 | Registered water users' names (WARMS) | `allocation_holder` | For the life of the project ([§ Allocations](#allocations-popia-minimisation-038_allocationssql); D3: editors, owners and the linked farmer only) | Not linked to an account | Deleted |
 | A pseudonym of each registered user's name, frozen with each run to count holders (219, #523): `md5` of a per-project salt and the name | `run_allocation_holder`, `allocation_holder_salt` (owner-only) | With the run; reset to `gone` in every run once the name leaves the project (`allocation_holder_erased`, indexed on the normalised name: undoing a 2 500-row import in a 5 000-row project takes about 70 ms locally) | Not linked to an account | Deleted |
 | Registered users' names in issued evidence: none as a field. A run's input and the evidence report carry no holder name (§ 5 names units; Appendix A.1's model rows and A.2's diff have no holder field), so a frozen pack manifest has none either. A name can reach one only as text someone typed (a unit named after its owner, notes, the applicant statement) | `evidence_pack.manifest` (frozen, hashed) | With the pack: an issued pack is never edited (its hash is verified publicly); whether issued evidence is kept against an erasure request is a legal-hold question for counsel (#92) | Not linked to an account | Kept while the project is a licence record |
+| Co-workers on an application (115): who was added to which applicant's scenario, by whom and when; read under RLS by those who read the scenario; in "Download my data" (`scenarioMemberships`) | `scenario_member` (`user_id`, `added_by`) | While the scenario and the membership stand | Deleted (with the project membership); who added cleared | Deleted |
 | An application's decision: the assessor who made it | `scenario.decided_by` | Kept (the decision on the application) | Who cleared; the outcome and note stay (052) | Deleted |
 | What followed a decision (an appeal lodged, upheld, set aside or varied): the member who recorded it (228) | `decision_event.recorded_by` | Kept with its scenario (the record of the appeal) | Who cleared; the event stays | Deleted |
 | An applicant's "Ask the assessors why" question and the assessors' answer (164): the application's name, the line as they read it, the changes it names, the rule in its real words; no account id (who asked and answered is the audit trail's), but the applicant's own typed text (`scenario_name`, `problem`, and `ops` with their node names and free text), which may be personal information | `application_question` | With the project. Kept when its draft is deleted, `scenario_id` cleared (234, issue #523 G7): the application's record for the authority's s42 written reasons, read by the editors only | The account id is never on the row, but the typed text is **not** removed: a detached question keeps `scenario_name`, `problem` and `ops` after the draft and the account are gone (the scenario's owner is set null, 138; the question no longer goes with the scenario, 234). Whether erasure should redact them is open for counsel ([followups.md](./followups.md) "Redact detached questions on account erasure", #92) | Deleted |
@@ -4411,7 +4413,10 @@ same way.
 **Data-subject requests.**
 - **Access / export: self-service.** Account → Your data → **Download my
   data** (`GET /auth/me/export`, [api.md § Auth](./api.md)) saves one JSON
-  file: the account (never the password hash), memberships, farm links with
+  file: the account (never the password hash), a pending change of address
+  (`pendingEmailChange`: the new address and when its link lapses, never the
+  link's hash, 347), memberships, the applications they were added to as a
+  co-worker (`scenarioMemberships`), farm links with
   those farms' current published figures (as the farm page shows them) and
   the registered volumes and holder names matched to them, notes written,
   sign-offs, invites to their verified address, alert and report choices,
@@ -4423,7 +4428,9 @@ same way.
   those records name (the actor who linked them, the people named in events
   they made). One export a minute per account. Every foreign key to
   `app_user` is classified as exported or left out, with why, in
-  `auth/export.ts` `USER_FK_COVERAGE` (guarded by `export.db.test.ts`; `personal-data.security.db.test.ts` checks each exported key's section holds exactly the person's rows, and every exported `app_user` column its stored value): the
+  `auth/export.ts` `USER_FK_COVERAGE`, and every column reaching a person
+  through a composite key to `project_member` or `team_member` (`farm_link`,
+  `scenario_member`) in `MEMBER_FK_COVERAGE` (both guarded by `export.db.test.ts`; `personal-data.security.db.test.ts` checks each exported key's section holds exactly the person's rows, and every exported `app_user` column its stored value): the
   project's own records that name the person only as their maker (runs,
   revisions, keys, publications…) are left out, because the act is in the
   audit events. The project exports (`export.json`, CSV, the farm CSV)

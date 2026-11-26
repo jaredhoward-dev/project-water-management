@@ -225,7 +225,7 @@ stored only as SHA-256 hashes. Links point at `SITE_URL`:
 - **`GET /auth/me/export`** ("download my data", POPIA access;
   `backend/src/auth/export.ts`, 054_subject_export.sql) returns one JSON
   document, `{ format: 'water-management.subject-export', version: 1,
-  exportedAt, account, projectMemberships, teamMemberships, farms, notes,
+  exportedAt, account, pendingEmailChange, projectMemberships, teamMemberships, scenarioMemberships, farms, notes,
   signoffs, invites, alertSubscriptions, alertDeliveries, alertFeedback, packNotices, erratumNotices, preferences,
   reportSubscriptions, auditEvents, auditEventsTruncated }`. `alertFeedback`
   is their "Was this useful?" rows on alert emails, answered or not,
@@ -240,7 +240,13 @@ stored only as SHA-256 hashes. Links point at `SITE_URL`:
   the `app_user` row without the password hash (so it includes
   `termsVersion` and `termsAcceptedAt`, the terms accepted at sign-up,
   087, and `farmNoticeVersion` and `farmNoticeAcceptedAt`, the farm view
-  notice acknowledged, 093). `farms` is one entry per farm
+  notice acknowledged, 093). `pendingEmailChange` is a change of address
+  they asked for and haven't confirmed, `{ newEmail, createdAt, expiresAt }`
+  (347; never the link's hash), or `null`. `scenarioMemberships` is the
+  applications they were added to as a co-worker, `[{ scenarioId, projectId,
+  projectName, scenarioName, addedAt, addedBy }]` (`scenario_member`; read
+  under RLS, so while their role still lets them read the scenario).
+  `farms` is one entry per farm
   linked to the person (`projectId`, `farmName`, `linkedAt`, `linkedBy`),
   with the registered volumes matched to that farm (`allocations`, holder
   name included) and the current publication's figures for it as the farm
