@@ -640,12 +640,23 @@ function applyOne(d: Draft, op: ScenarioOp, see: Visibility = SEE_ALL): string[]
 			m.cropAreas = drop(m.cropAreas, (a) => a.nodeId === n.id, 'crop area(s)', (a) => see.node(a.nodeId) && see.item(a.cropId));
 			// A rule split between destinations (engine ≥ 1.114.0) goes with any of them, as a rule goes with its one.
 			m.transfers = drop(m.transfers, (t) => t.fromNodeId === n.id || transferDestinations(t).some((x) => x.nodeId === n.id), 'transfer(s)', (t) => see.item(t.id));
-			// An off-take whose seepage rejoined below it (engine ≥ 1.42.0) returns none now: the conservative side, said in a note.
+			// An off-take whose seepage rejoined below it (engine ≥ 1.42.0) now rejoins one unit lower, below the unit the
+			// removed one drained into (issue #853): zeroing it sent that water out of the catchment, and the drop below was
+			// scored as the proposal's, even for another party's off-take the applicant can't see. Only when that unit can't
+			// take seepage (not a farm, as the outflow gauge usually is: offtakeReturnAt) does it return none, as before.
+			// Either way a hidden off-take gets no note, so the applicant learns nothing of it.
+			const below = m.nodes.find((x) => x.id === n.downstreamNodeId);
 			for (const t of m.transfers) {
 				if (t.lossReturnNodeId !== n.id) continue;
+				if (below?.kind === 'farm') {
+					t.lossReturnNodeId = below.id;
+					if (see.item(t.id)) notes.push(`a river off-take's seepage now rejoins the river below "${below.name}" (it rejoined below "${n.name}")`);
+					continue;
+				}
 				t.lossReturnNodeId = null;
 				t.lossReturnPct = 0;
-				if (see.item(t.id)) notes.push(`a river off-take's seepage no longer returns to the river (it rejoined below "${n.name}")`);
+				if (see.item(t.id))
+					notes.push(`a river off-take's seepage no longer returns to the river (it rejoined below "${n.name}", and "${below?.name ?? n.downstreamNodeId}", which it drained into, isn't a farm the seepage can rejoin below)`);
 			}
 			if (m.landCover) m.landCover = drop(m.landCover, (p) => p.nodeId === n.id, 'land-cover patch(es)', (p) => see.item(p.id));
 			if (m.boreholes) m.boreholes = drop(m.boreholes, (b) => b.nodeId === n.id, 'borehole(s)', (b) => see.item(b.id));
@@ -1342,7 +1353,8 @@ export function classifyOp(op: ScenarioOp, ownedNodeIds: Iterable<string>, input
 			// It drops every rule from or to it: each must reach only the applicant's units, as transfer.remove asks, else
 			// removing a node would take another party's rule as the proposal. Only rules from or to it: the owner of a node
 			// sees each of those (applicant.ts); an off-take whose seepage alone rejoins below it may be hidden from them,
-			// and classing by it would tell an applicant it exists (the removal's note leaves it out for the same reason).
+			// and classing by it would tell an applicant it exists (the removal's note leaves it out for the same reason). Its
+			// seepage now rejoins one unit lower (issue #853), so it stays in the river rather than going as the proposal's loss.
 			const touched = (input?.model.transfers ?? []).filter((t) => t.fromNodeId === op.nodeId || transferDestinations(t).some((x) => x.nodeId === op.nodeId));
 			return ok(mine(op.nodeId) && !!n && !sharesRunoff(n) && !ewrSite && touched.every(allEndsMine));
 		}
