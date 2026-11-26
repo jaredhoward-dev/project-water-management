@@ -108,6 +108,52 @@ describe('billing_metrics_people', () => {
 	});
 });
 
+// 402: a run the app made by itself (model_run.trigger 'auto' or 'forecast', a live catchment's re-run) is not the
+// person's activity. Before 402 an idle account with automatic runs on counted as active, and an automatic run
+// within 7 days of signing up activated its person. June 2001, a month no other test writes to.
+describe('automatic runs are not activity (402)', () => {
+	const NOW = new Date('2026-11-23T00:00:00Z');
+	let idle: User;
+	let idleProject: string;
+	let idleAccount: string;
+	const run = (trigger: string, at: string) =>
+		asOwner(
+			`INSERT INTO model_run (project_id, created_by, engine_version, start_date, end_date, inputs, created_at, trigger)
+			 VALUES ($1, $2, '1.0.0', '2000-10-01', '2001-09-30', '{}', $3, $4)`,
+			[idleProject, idle.id, at, trigger]
+		);
+
+	beforeAll(async () => {
+		idle = await signUp('MetricsIdle');
+		idleProject = (await idle.call('POST', '/projects', { name: 'Metrics idle synthetic' })).body.project.id;
+		idleAccount = ((await asOwner('SELECT billing_account_id AS id FROM project WHERE id = $1', [idleProject])) as { id: string }[])[0]!.id;
+		await asOwner(`UPDATE app_user SET created_at = '2001-06-02T08:00:00Z' WHERE id = $1`, [idle.id]);
+		await run('auto', '2001-06-03T04:00:00Z');
+		await run('forecast', '2001-06-04T04:00:00Z');
+	});
+
+	it('counts neither in the month’s runs nor as the first run, so the account is not active and its person not activated', async () => {
+		const [acct] = (await asOwner('SELECT runs FROM billing_metrics_accounts($1::date) WHERE account_id = $2', ['2001-06-01', idleAccount])) as { runs: string }[];
+		expect(acct!.runs).toBe('0');
+		const [person] = (await asOwner('SELECT first_run_at FROM billing_metrics_people($1::date) WHERE user_id = $2', ['2001-06-01', idle.id])) as {
+			first_run_at: Date | null;
+		}[];
+		expect(person!.first_run_at).toBeNull();
+		const r = await gatherReport(process.env.TEST_MIGRATION_DATABASE_URL!, '2001-06', NOW);
+		expect(r.freeLimits.active).toBe(0);
+		expect(r.activation).toMatchObject({ cohort: 1, activated: 0 });
+	});
+
+	it('counts the person’s own run (positive control)', async () => {
+		await run('manual', '2001-06-05T04:00:00Z');
+		const [acct] = (await asOwner('SELECT runs FROM billing_metrics_accounts($1::date) WHERE account_id = $2', ['2001-06-01', idleAccount])) as { runs: string }[];
+		expect(acct!.runs).toBe('1');
+		const r = await gatherReport(process.env.TEST_MIGRATION_DATABASE_URL!, '2001-06', NOW);
+		expect(r.freeLimits.active).toBe(1);
+		expect(r.activation).toMatchObject({ cohort: 1, activated: 1 });
+	});
+});
+
 describe('the reverse trial and the live catchments (342, 338)', () => {
 	const NOW = new Date('2026-11-23T00:00:00Z');
 	const report = (month: string) => gatherReport(process.env.TEST_MIGRATION_DATABASE_URL!, month, NOW);
