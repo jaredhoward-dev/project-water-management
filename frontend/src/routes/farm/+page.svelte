@@ -15,7 +15,7 @@
 	import FarmNoticeGate from '#lib/components/farm/FarmNoticeGate.svelte';
 	import FarmSkeleton from '#lib/components/farm/FarmSkeleton.svelte';
 	import FarmStatus from '#lib/components/farm/FarmStatus.svelte';
-	import { farmSummaryLine, farmsPrivacy, levelWord, stateText } from '#lib/components/farm/cards.js';
+	import { farmSummaryLine, farmsPrivacy, levelWord, savedStrip, stateText } from '#lib/components/farm/cards.js';
 	import { t } from '#lib/i18n/locale.svelte.js';
 	import { ApiError } from '#lib/api/client.js';
 	import { errorText } from '#lib/i18n/apiError.js';
@@ -34,6 +34,8 @@
 		viewFailed: boolean;
 		/** The figures are withheld from this viewer (403 farm_preview_withheld): the card says why, never the saved copy (#875). */
 		withheld: boolean;
+		/** The figures are this phone's saved copy, fetched then (ms), since the live ones failed: the card says so, never as current. */
+		savedAt: number | null;
 	}
 
 	let rows = $state<Row[] | null>(null);
@@ -70,7 +72,8 @@
 						publication: ix.publication,
 						view: null,
 						viewFailed: false,
-						withheld: false
+						withheld: false,
+						savedAt: null
 					});
 				}
 			});
@@ -92,16 +95,18 @@
 					if (!row.publication) return;
 					let view: FarmView | null;
 					let withheld = false;
+					let savedAt: number | null = null;
 					try {
 						view = await api.farm.view(row.projectId, row.nodeId);
 					} catch (e) {
-						const next = cardOnFailure(e, () => (user ? (readSaved(user, row.projectId, row.nodeId)?.view ?? null) : null));
+						const next = cardOnFailure(e, () => (user ? readSaved(user, row.projectId, row.nodeId) : null));
 						if (next.drop) {
 							clearSaved(row.projectId, row.nodeId);
 							if (gen === generation && rows) rows = rows.filter((r) => r.projectId !== row.projectId || r.nodeId !== row.nodeId);
 							return;
 						}
-						view = next.view;
+						view = next.view?.view ?? null;
+						savedAt = next.view?.savedAt ?? null;
 						withheld = next.withheld;
 					}
 					// A reload since (Try again, a new list) owns the cards now.
@@ -110,6 +115,7 @@
 					if (!live) return;
 					live.view = view;
 					live.withheld = withheld;
+					live.savedAt = savedAt;
 					live.viewFailed = view == null && !withheld;
 				})
 			);
@@ -157,6 +163,8 @@
 												: stateText('updating')
 									: t('Not published yet')}</span
 							>
+							<!-- The live figures failed and these are the phone's saved copy: said so, with when it was saved, as the farm page's strip does. -->
+							{#if r.view && r.savedAt != null}<span class="saved" data-testid="farm-card-saved">{savedStrip(r.savedAt, 'failed')}</span>{/if}
 						</a>
 					</li>
 				{/each}
@@ -200,6 +208,10 @@
 	}
 	.pending {
 		color: var(--text-2);
+	}
+	.saved {
+		font-size: 14px;
+		color: var(--warning);
 	}
 	.level {
 		padding: 2px 10px;
