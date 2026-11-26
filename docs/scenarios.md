@@ -1951,7 +1951,9 @@ scenario is `'team'`, and behaves exactly as above).
   one. An owner who has since become a viewer or above (who reads the member
   list anyway) shares with any contributor-or-above member, by id or email.
   Moving someone out of a party (or changing a role) ends the shares the
-  rule no longer allows (`project_member_prune_shares`); the rule lives in
+  rule no longer allows (`project_member_prune_shares`), and so does a
+  member joining or leaving (393, issue #901): an applicant who leaves stops
+  sharing their applications, and comes back sharing with nobody; the rule lives in
   `app_share_allowed`, which the insert trigger checks too.
 - **Runs.** The owner and the people it is shared with run it, and so may an
   assessor. A contributor's run answers with the run's metadata only (its

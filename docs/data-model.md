@@ -2895,8 +2895,16 @@ projection's read and narrows their series further:
   `app_share_candidates(project)` lists, for the current user, whom they may
   share with (id and display name, never an email): the only way an
   applicant names someone, so no answer says who else is a member.
-  `project_member_prune_shares` (after a change of party or role) deletes
-  the shares the rule no longer allows.
+  `project_member_prune_shares` deletes the shares the rule no longer
+  allows, of the member's applications or to them: after a change of party
+  or role (049), and after a member joins or leaves (393_prune_shares_on_join,
+  issue #901). Shares *to* a member who leaves go with their row anyway (the
+  foreign key cascades); the leave prune ends the shares *of their own
+  applications*, since the rule refuses every share of an owner who is no
+  longer a member, so an applicant removed and later re-invited comes back
+  sharing with nobody until they share again within the party the owner
+  gives them. The join prune catches any share left from before 393 (which
+  also deleted every existing share the rule refused).
 - **`project_member.specialist`** (167_signers, boolean, default false,
   needs a party: `project_member_specialist_party`): the applying party's
   appointed specialist, who signs the draft evidence packs of the party's
