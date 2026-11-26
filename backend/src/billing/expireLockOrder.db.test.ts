@@ -83,3 +83,47 @@ describe('the expiry ticks take the billing lock before the subscription row', (
 		});
 	}
 });
+
+// The staff revoke (app_staff_revoke_grant, 330) had the same order until 401: it locked the grant's row FOR UPDATE
+// and met the billing lock only in 341's sync on its UPDATE, so against a paid invoice's webhook (which holds the
+// billing lock and locks the live grant's row FOR UPDATE, 344) the two deadlocked. It runs as the schema owner.
+describe('the staff revoke takes the billing lock before the grant row (401)', () => {
+	it('waits on the advisory lock holding no row lock, then revokes the grant', async () => {
+		const u = await signUp('LockRevoke');
+		const account = (await asOwner(`SELECT billing_account_ensure('user', $1) AS a`, [u.id]))[0]!.a as string;
+		const sub = (
+			await asOwner(
+				`INSERT INTO subscription (billing_account_id, plan_code, status, provider, period_start, period_end, cancel_at_period_end)
+				 VALUES ($1, 'pro', 'active', 'manual', now() - interval '2 days', now() + interval '20 days', true) RETURNING id`,
+				[account]
+			)
+		)[0]!.id as string;
+		const webhook = await connect(process.env.TEST_MIGRATION_DATABASE_URL);
+		const operator = await connect(process.env.TEST_MIGRATION_DATABASE_URL);
+		const other = await connect(process.env.TEST_MIGRATION_DATABASE_URL);
+		try {
+			await webhook.query('BEGIN');
+			await webhook.query(`SELECT pg_advisory_xact_lock(hashtext('billing:' || $1::text))`, [account]);
+			const pid = await pidOf(operator);
+			await operator.query('BEGIN');
+			const revoked = operator.query<{ id: string }>(`SELECT app_staff_revoke_grant($1, 'lock order', 'test') AS id`, [account]).then(
+				(r) => r.rows[0]!.id,
+				(e: { code?: string }) => `failed ${String(e.code)}`
+			);
+			expect(await waitingOn(pid)).toBe('advisory');
+			await other.query('BEGIN');
+			await expect(other.query('SELECT 1 FROM subscription WHERE id = $1 FOR UPDATE NOWAIT', [sub])).resolves.toMatchObject({ rowCount: 1 });
+			await other.query('ROLLBACK');
+			await webhook.query('COMMIT');
+			expect(await revoked).toBe(sub);
+			await operator.query('COMMIT');
+		} finally {
+			for (const x of [webhook, operator, other]) await x.query('ROLLBACK').catch(() => {});
+			await Promise.all([webhook.end(), operator.end(), other.end()]);
+		}
+		expect(await asOwner('SELECT status FROM subscription WHERE id = $1', [sub])).toEqual([{ status: 'canceled' }]);
+		expect(await asOwner(`SELECT action, reason, granted_by FROM billing_grant_log WHERE subscription_id = $1`, [sub])).toEqual([
+			{ action: 'revoke', reason: 'lock order', granted_by: 'test' }
+		]);
+	});
+});

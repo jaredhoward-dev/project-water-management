@@ -1101,7 +1101,13 @@ Stripe trials are `stripe`). Only a verified address qualifies.
 canonical address and when, never the address and no link to the account,
 so it outlives the account's deletion: deleting the account and signing up
 again gets no second trial (`security.md` § Personal information says what
-the record is). "Download my data" shows the person their current
+the record is). The claim follows the person to a new address (401): when
+an address changes and the old one's canonical form is claimed, the new
+one's is claimed too (a trigger on `app_user.email`), so changing the
+address, deleting the account and signing up again with the new address
+gets no second trial either. Before 401 it did, since the trial had only
+ever claimed the address it started on. An account whose old address was
+never claimed (no trial yet) claims nothing by moving. "Download my data" shows the person their current
 address's claim (`reverseTrialClaim`, 396).
 
 **At the end.** The worker's tick moves each trial past its `trial_end` to
@@ -1197,7 +1203,8 @@ Pro already), and its day meter counts the trial's day and its whole $2
 
 **Tests.** `billing/reverseTrial.db.test.ts` (off grants and claims nothing;
 on, a first verification starts 14 days of Pro, logged and on the plan page;
-a Gmail canonical duplicate and the same address after deletion get none; an
+a Gmail canonical duplicate and the same address after deletion get none,
+nor a new address the account moved to after its trial (401); an
 unverified caller gets none and is granted once verified; a live plan keeps
 it; the tick ends it to Free with the project still there; the claim table
 closed to `water_app`; the trial caps refuse only enforced, wait to 00:00 SAST
@@ -1776,7 +1783,11 @@ defaults to the operator's login.
   `billing/expireLockOrder.db.test.ts`).
 - **Revoke.** `app_staff_revoke_grant(account, reason, by)` cancels the live
   grant now (`period_end` now) and logs a `revoke` row; Free again, nothing
-  deleted. It never touches a Stripe or mock subscription.
+  deleted. It never touches a Stripe or mock subscription. Since 401 it takes
+  the account's billing lock before the grant's row, as the expiry ticks do
+  (387); before, it locked the row first and could deadlock against a paid
+  invoice's webhook, which holds that lock and locks the live grant's row
+  (`billing/expireLockOrder.db.test.ts`).
 - **The log.** `billing_grant_log` is append-only (`water_app` holds SELECT
   only; only these functions insert). The account's person and its team's
   admins read their own rows under RLS (`app_billing_account_readable`), and
