@@ -1003,7 +1003,7 @@
 					<a
 						id="tab-{id}"
 						href={tabHref(id)}
-						data-sveltekit-noscroll
+						data-sveltekit-reset="false"
 						aria-current={tab === id ? 'page' : undefined}
 						onkeydown={(e) => tabKeydown(e, id)}
 						onclick={followTab}

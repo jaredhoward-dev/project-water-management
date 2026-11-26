@@ -12,7 +12,7 @@
 	<div class="alert alert-warning" role="status">
 		<strong>Fix before saving:</strong>
 		<ul>
-			{#each mine as issue, i (i)}<li>{#if links && issue.itemId}<a href={issueHref(issue)} data-sveltekit-noscroll>{issue.message}</a>{:else}{issue.message}{/if}</li>{/each}
+			{#each mine as issue, i (i)}<li>{#if links && issue.itemId}<a href={issueHref(issue)} data-sveltekit-reset="false">{issue.message}</a>{:else}{issue.message}{/if}</li>{/each}
 		</ul>
 	</div>
 {/if}

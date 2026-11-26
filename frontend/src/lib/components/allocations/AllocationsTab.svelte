@@ -486,8 +486,8 @@
 	{/if}
 	{#if data?.allocations.length}<a class="btn" href={api.allocations.exportUrl(projectId)} download>Download CSV</a>{/if}
 	{#if canEdit}
-		<a class="btn" href={withParam(url, 'import', '1')} data-sveltekit-noscroll data-sveltekit-keepfocus>Import</a>
-		<a class="btn" href={withParam(url, 'volume', 'new')} data-sveltekit-noscroll data-sveltekit-keepfocus>+ Add volume</a>
+		<a class="btn" href={withParam(url, 'import', '1')} data-sveltekit-reset="false">Import</a>
+		<a class="btn" href={withParam(url, 'volume', 'new')} data-sveltekit-reset="false">+ Add volume</a>
 	{/if}
 {/snippet}
 

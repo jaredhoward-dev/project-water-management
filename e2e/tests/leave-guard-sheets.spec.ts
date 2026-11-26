@@ -2,12 +2,14 @@
 // closing the node sheet, the grid modal or the farm drawer with a field holding text it can't take
 // asks first, and Stay keeps it open with the URL still naming it; a navigation the guard stopped is
 // made again with its own options, so a replacing one (‹ › in the sheet, a close) still replaces and
-// Back doesn't reopen what was closed; a `node=` naming no node leaves the URL.
+// Back doesn't reopen what was closed; a `node=` naming no node leaves the URL; a link marked
+// `data-sveltekit-reset="false"` (SvelteKit 3's name for the old noscroll/keepfocus) keeps the scroll and focus.
 // Synthetic data only.
 import type { Page } from '@playwright/test';
 import { createProject, putModel, sampleModel, seedRunnableProject } from '../support/api.ts';
 import { answerConfirm } from '../support/confirm.ts';
 import { expect, test } from '../support/fixtures.ts';
+import { historyDetail, historyEntries, openHistory, seedLongHistory } from '../support/history.ts';
 import { openNodeForm, openNodeTable } from '../support/network.ts';
 import { urlSettled } from '../support/urlSettled.ts';
 
@@ -172,4 +174,27 @@ test('removing a node from its sheet asks the leave guard too: Stay keeps the no
 	expect(param(page, 'edit')).toBeNull();
 	expect(param(page, 'node')).toBeNull();
 	await expect(page.getByRole('list', { name: 'All hydrological units' }).getByRole('button', { name: /^Edit Upper farm/ })).toHaveCount(0);
+});
+
+test('a link with data-sveltekit-reset="false" keeps the scroll and the focus (History’s Older)', async ({ page, owner }) => {
+	void owner;
+	test.setTimeout(90_000);
+	// Narrower than the card-fills-the-window layout (1100 × 620), so the page itself scrolls.
+	await page.setViewportSize({ width: 1024, height: 600 });
+	const p = await seedLongHistory(page.request, 'Reset false', 12);
+	await openHistory(page, p.id);
+	await historyEntries(page).nth(2).getByRole('link').click();
+	await expect(page).toHaveURL(/entry=revision\d+/);
+	const older = historyDetail(page).getByRole('link', { name: 'Older', exact: true });
+	await older.scrollIntoViewIfNeeded();
+	// The precondition: the page is scrolled, so a reset would move it.
+	await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+	const before = await page.evaluate(() => window.scrollY);
+	const was = new URL(page.url()).searchParams.get('entry');
+	await older.click();
+	await expect.poll(() => new URL(page.url()).searchParams.get('entry')).not.toBe(was);
+	await expect(historyEntries(page).nth(3).getByRole('link')).toHaveAttribute('aria-current', 'true');
+	// Kept: SvelteKit's reset would put the scroll at the top and the focus on <body>.
+	expect(await page.evaluate(() => window.scrollY)).toBe(before);
+	await expect(older).toBeFocused();
 });

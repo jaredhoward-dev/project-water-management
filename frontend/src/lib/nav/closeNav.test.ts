@@ -42,12 +42,13 @@ function deferred() {
 }
 
 /** A click on a stand-in link, as openAfterClose's handler receives it. */
-function linkClick(href: string, extra: Partial<MouseEvent> = {}, link: { target?: string; download?: boolean; noscroll?: boolean } = {}) {
+function linkClick(href: string, extra: Partial<MouseEvent> = {}, link: { target?: string; download?: boolean; keep?: boolean; replace?: boolean } = {}) {
 	const a = {
 		href: new URL(href, ORIGIN).href,
 		target: link.target ?? '',
 		hasAttribute: (n: string) => n === 'download' && !!link.download,
-		closest: (sel: string) => (sel === '[data-sveltekit-noscroll]' && link.noscroll ? a : null)
+		getAttribute: (n: string) => (n === 'data-sveltekit-reset' && link.keep ? 'false' : n === 'data-sveltekit-replacestate' && link.replace ? '' : null),
+		parentElement: null
 	};
 	const e = { currentTarget: a, defaultPrevented: false, button: 0, metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, preventDefault: vi.fn(), ...extra };
 	return e as unknown as MouseEvent & { currentTarget: HTMLAnchorElement; preventDefault: ReturnType<typeof vi.fn> };
@@ -185,7 +186,7 @@ describe('openAfterClose', () => {
 		const own = vi.fn();
 		const d = deferred();
 		void trackClose(d.promise);
-		const e = linkClick('/projects/p1?grid=nodes', {}, { noscroll: true });
+		const e = linkClick('/projects/p1?grid=nodes', {}, { keep: true });
 		openAfterClose(own)(e);
 		expect(own).toHaveBeenCalledOnce();
 		expect(e.preventDefault).toHaveBeenCalledOnce();
@@ -225,5 +226,23 @@ describe('openAfterClose', () => {
 		openAfterClose()(e);
 		expect(e.preventDefault).not.toHaveBeenCalled();
 		expect(h.goto).not.toHaveBeenCalled();
+	});
+});
+
+describe('openAfterClose follows the link as SvelteKit 3 does (issue #931)', () => {
+	it('a link with data-sveltekit-replacestate goes replacing; one with neither attribute resets', async () => {
+		const d = deferred();
+		void trackClose(d.promise);
+		openAfterClose()(linkClick('/projects/p1?grid=nodes', {}, { replace: true, keep: true }));
+		d.resolve();
+		await flush();
+		expect(h.goto).toHaveBeenCalledExactlyOnceWith(`${ORIGIN}/projects/p1?grid=nodes`, { reset: false, replace: true });
+		h.goto.mockClear();
+		const d2 = deferred();
+		void trackClose(d2.promise);
+		openAfterClose()(linkClick('/projects/p1?grid=systems'));
+		d2.resolve();
+		await flush();
+		expect(h.goto).toHaveBeenCalledExactlyOnceWith(`${ORIGIN}/projects/p1?grid=systems`, { reset: true });
 	});
 });

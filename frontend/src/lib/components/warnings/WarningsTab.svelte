@@ -583,7 +583,7 @@
 {/snippet}
 
 {#snippet chip(href: string, label: string, n: number | null, current: boolean)}
-	<a class="chip" {href} aria-current={current ? 'true' : undefined} data-sveltekit-noscroll data-sveltekit-keepfocus
+	<a class="chip" {href} aria-current={current ? 'true' : undefined} data-sveltekit-reset="false"
 		>{label}{#if n !== null}{' '}<span class="n">{n}</span>{/if}</a
 	>
 {/snippet}
@@ -754,7 +754,7 @@
 					</div>
 					{#if !checksShown.length}
 						<p class="empty" data-testid="warnings-none">
-							{filters.status === 'open' ? 'Nothing open' : 'Nothing'} matches these filters. <a href={everyHref} data-sveltekit-noscroll>Show every period</a>
+							{filters.status === 'open' ? 'Nothing open' : 'Nothing'} matches these filters. <a href={everyHref} data-sveltekit-reset="false">Show every period</a>
 						</p>
 					{:else}
 						<div class="table-wrap">

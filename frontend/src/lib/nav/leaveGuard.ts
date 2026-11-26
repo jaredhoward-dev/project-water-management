@@ -35,9 +35,9 @@ export interface LinkOptionSource {
 /**
  * The goto options a click on a link has SvelteKit follow it with, read as SvelteKit 3 reads
  * them: the nearest `data-sveltekit-replacestate` and `data-sveltekit-reset` on the link or
- * above it ('' or 'true' on, 'false' off). SvelteKit 3 ignores `data-sveltekit-noscroll` and
- * `-keepfocus` (it only warns of them), so they are not read here either: the repeat goes as
- * the click went.
+ * above it ('' or 'true' on, 'false' off). `data-sveltekit-reset="false"` is SvelteKit 3's
+ * replacement for the old `noscroll` and `keepfocus` link options, which it ignores (only warning
+ * of them); leaveGuard.test.ts fails on either old name in src.
  */
 export function linkOptions(el: LinkOptionSource | null): GotoOptions {
 	let replace: string | null = null;

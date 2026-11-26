@@ -177,7 +177,8 @@ describe('the leave guard', () => {
 			// The nearest wins: the link's own 'false' over its parent's on.
 			expect(linkOptions(link('/x', { 'data-sveltekit-replacestate': 'false' }, { 'data-sveltekit-replacestate': '' }))).toEqual({});
 			// SvelteKit 3 ignores the old noscroll and keepfocus, so the repeat does too.
-			expect(linkOptions(link('/x', { 'data-sveltekit-noscroll': '', 'data-sveltekit-keepfocus': '' }))).toEqual({});
+			expect(linkOptions(link('/x', { ['data-sveltekit-' + 'noscroll']: '' }))).toEqual({});
+			expect(linkOptions(link('/x', {}, { 'data-sveltekit-reset': '' }))).toEqual({});
 		});
 
 		it('a replacing link, stopped and then agreed to, is repeated replacing', async () => {
@@ -228,5 +229,31 @@ describe('no raw goto outside the guard (issue #931)', () => {
 		expect(files).toContain('lib/nav/leaveGuard.ts');
 		const raw = files.filter((f) => !ALLOWED.has(f) && RAW.test(readFileSync(join(SRC, f), 'utf8')));
 		expect(raw).toEqual([]);
+	});
+});
+
+// SvelteKit 3 replaced the noscroll and keepfocus link options with data-sveltekit-reset="false"
+// and ignores the old names (a dev warning only), so a link carrying one resets the scroll and
+// focus it meant to keep (issue #931).
+describe('no SvelteKit 2 link options left in src', () => {
+	const SRC = join(__dirname, '..', '..');
+	const OLD = new RegExp(`data-sveltekit-(?:${['noscroll', 'keepfocus'].join('|')})\\b`);
+
+	function* sources(dir: string): Generator<string> {
+		for (const e of readdirSync(dir, { withFileTypes: true })) {
+			const p = join(dir, e.name);
+			if (e.isDirectory()) yield* sources(p);
+			else if (/\.(svelte|ts|js|html)$/.test(e.name)) yield p;
+		}
+	}
+
+	it('the pattern catches an old name (positive control)', () => {
+		expect(OLD.test('<a href="?x" data-sveltekit-' + 'noscroll>')).toBe(true);
+		expect(OLD.test('<a href="?x" data-sveltekit-reset="false">')).toBe(false);
+	});
+
+	it('no source file uses the old noscroll or keepfocus link option', () => {
+		const old = [...sources(SRC)].filter((p) => OLD.test(readFileSync(p, 'utf8'))).map((p) => relative(SRC, p));
+		expect(old).toEqual([]);
 	});
 });

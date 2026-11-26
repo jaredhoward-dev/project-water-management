@@ -492,8 +492,7 @@
 													class="row"
 													href={entryHref(e.key)}
 													aria-current={picked?.key === e.key ? 'true' : undefined}
-													data-sveltekit-noscroll
-													data-sveltekit-keepfocus
+													data-sveltekit-reset="false"
 												>
 													<span class="row-meta"><time datetime={e.createdAt}>{localTime(e.createdAt, timeZone())}</time>{' · '}<span class="who">{e.actor ?? 'A deleted account'}</span></span>
 													<span class="row-title">{' '}{s.title}</span>
@@ -526,8 +525,8 @@
 									</p>
 								</div>
 								<p class="steps">
-									{#if newer}<a class="btn btn-sm" href={entryHref(newer.key)} data-sveltekit-noscroll data-sveltekit-keepfocus>Newer</a>{/if}
-									{#if older}<a class="btn btn-sm" href={entryHref(older.key)} data-sveltekit-noscroll data-sveltekit-keepfocus>Older</a>{/if}
+									{#if newer}<a class="btn btn-sm" href={entryHref(newer.key)} data-sveltekit-reset="false">Newer</a>{/if}
+									{#if older}<a class="btn btn-sm" href={entryHref(older.key)} data-sveltekit-reset="false">Older</a>{/if}
 								</p>
 							</div>
 							<div class="what">{@render entryBody(picked, false)}</div>

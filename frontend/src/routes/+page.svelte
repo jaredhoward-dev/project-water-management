@@ -431,8 +431,7 @@
 							<a
 								href={hrefWith({ owner: o.value })}
 								aria-current={owner === o.value ? 'true' : undefined}
-								data-sveltekit-noscroll
-								data-sveltekit-keepfocus
+								data-sveltekit-reset="false"
 							>
 								<span class="label">{o.label}</span>
 								<span class="count">{o.count}</span>

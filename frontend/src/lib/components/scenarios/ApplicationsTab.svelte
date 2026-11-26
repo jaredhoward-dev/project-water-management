@@ -126,9 +126,9 @@
 {#snippet headerContext()}<span>{applicationsContext(items ?? [], now)}</span>{/snippet}
 {#snippet headerActions()}
 	{#if assessView}
-		<a class="btn" href={listHref} data-sveltekit-noscroll>Back to the list</a>
+		<a class="btn" href={listHref} data-sveltekit-reset="false">Back to the list</a>
 	{:else if items?.length}
-		<a class="btn" href={assessHref} data-sveltekit-noscroll>Assess together</a>
+		<a class="btn" href={assessHref} data-sveltekit-reset="false">Assess together</a>
 	{/if}
 	{#if next}<a class="btn" href={scenarioHref(next.id)} title="Open “{next.name}”, waiting longest">Decide the longest waiting</a>{/if}
 {/snippet}
@@ -158,8 +158,7 @@
 								class="chip"
 								href={filterHref(f)}
 								aria-current={filter === f ? 'true' : undefined}
-								data-sveltekit-noscroll
-								data-sveltekit-keepfocus
+								data-sveltekit-reset="false"
 							>
 								{FILTER_LABEL[f]} <span class="n">{counts[f]}</span>
 							</a>
@@ -187,7 +186,7 @@
 					</p>
 				</div>
 			{:else if !shown.length}
-				<p class="empty" data-testid="applications-none">{EMPTY_FILTER[filter]} <a href={filterHref('all')} data-sveltekit-noscroll>Show all</a></p>
+				<p class="empty" data-testid="applications-none">{EMPTY_FILTER[filter]} <a href={filterHref('all')} data-sveltekit-reset="false">Show all</a></p>
 			{:else}
 				<div class="table-wrap">
 					<table class="data apps">

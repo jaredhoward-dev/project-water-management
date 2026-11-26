@@ -117,7 +117,7 @@
 		{#if open}
 			<button type="button" class="btn btn-sm" aria-expanded="true" aria-controls="ewr-map-body" onclick={hide}>Hide the map</button>
 		{:else}
-			<a class="btn btn-sm" href={withParam(url, EWR_MAP_PARAM, '1')} data-sveltekit-noscroll data-sveltekit-keepfocus aria-expanded="false" aria-controls="ewr-map-body">Show the map</a>
+			<a class="btn btn-sm" href={withParam(url, EWR_MAP_PARAM, '1')} data-sveltekit-reset="false" aria-expanded="false" aria-controls="ewr-map-body">Show the map</a>
 		{/if}
 	</div>
 	<p class="small muted lead">
