@@ -177,6 +177,15 @@
 	const projectC = $derived(projectFor('c'));
 	// What-if 2's card shows once it is in the URL, or while its run is being picked.
 	const showC = $derived(!!refC || picked.c !== null);
+	// The URL owns the runs: any change to it (Back, Forward, a link, this view's own choice) drops a pick still
+	// waiting for a run (a project with no runs, or whose runs failed to load), else after Back a card went on
+	// naming that project over the pair the comparison below shows.
+	$effect(() => {
+		void [aParam, bParam, cParam];
+		untrack(() => {
+			if (picked.a !== null || picked.b !== null || picked.c !== null) picked = { a: null, b: null, c: null };
+		});
+	});
 
 	$effect(() => {
 		for (const p of [projectA, projectB, showC ? projectC : null]) if (p) untrack(() => ensureRuns(p));
