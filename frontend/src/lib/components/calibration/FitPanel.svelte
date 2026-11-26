@@ -56,7 +56,7 @@
 		SEED_MAX,
 		seedError,
 		stageText,
-		totalRuns,
+		planRuns,
 		validationRecordOptions
 	} from '#lib/calibration/fit.js';
 	import { FLOW_KIND_LABEL } from '#lib/components/calibration/metrics.js';
@@ -144,7 +144,6 @@
 	const penalty = $derived(marPenaltyOn(settings()));
 	// The fit without the regional prior, when asked (engine 1.120.0): one more optimisation per start, so the report says what the prior cost.
 	const priorCostOn = $derived(session.priorUse !== 'off' && session.priorCost);
-	const runs = $derived(totalRuns(session.budget ?? 0, session.validate, penalty, startsOk ? session.starts! : 1, priorCostOn));
 	// The regional prior (issue #622): a penalty, the search box or both; its weight only matters with the penalty.
 	const priorProblem = $derived(priorWeightError(session.priorUse, session.priorWeight));
 	const priorBox = $derived(session.priorUse === 'bounds' || session.priorUse === 'both');
@@ -180,6 +179,8 @@
 	// before any worker starts.
 	const planned = $derived(nodes.length ? fitPlanOf(settings(), nodes) : null);
 	// A ticked outlet with no record yet (a new project is created with the outlet ticked): its step can't be scored.
+	// The engine's plan per location (issue #865): the unpenalised fit at the headline's step only.
+	const runs = $derived(planRuns(planned?.plan, session.budget ?? 0, session.validate, penalty, startsOk ? session.starts! : 1, priorCostOn));
 	const outletMissing = $derived(!!planned?.plan?.some((st) => st.zoneNodeId === null) && !outletHasRecord);
 	const planError = $derived(
 		planned?.error ?? (outletMissing ? 'The outlet has no flow record yet, so its step can’t be fitted: add one on Data, or untick Calibrate here at the outlet.' : null)
@@ -423,7 +424,7 @@
 			{/if}
 			<span class="muted small" id="{uid}-runs" data-testid="fit-runs"
 				>{planned?.plan && planned.plan.length > 1
-					? `${fmtNum(runs)} runs a location, ${fmtNum(runs * planned.plan.length)} in all over ${planned.plan.length} locations.`
+					? `${fmtNum(runs)} runs in all over ${planned.plan.length} locations.`
 					: `${fmtNum(runs)} runs in all.`}</span
 			>
 		</div>

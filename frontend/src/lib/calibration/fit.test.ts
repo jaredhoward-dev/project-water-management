@@ -26,6 +26,7 @@ import {
 	STAGE_LABEL,
 	stageText,
 	totalRuns,
+	planRuns,
 	validationRecordOptions,
 	waterYearsText
 } from './fit';
@@ -148,12 +149,23 @@ describe('progress', () => {
 	});
 
 	it('gives no share to a dry → wet test the engine skips (fewer than 4 water years): the split-sample test ends the bar', () => {
+		// The estimate reads the engine's plan too (issue #865): no dry → wet fit, one budget fewer.
+		expect(totalRuns(1500, true, false, 1, false, false)).toBe(3000);
+		expect(totalRuns(1500, true, true, 1, false, false)).toBe(4500);
+		expect(totalRuns(1500, false, false, 1, false, false)).toBe(1500);
 		expect(progressFraction(ev('full', 100, 1, 2))).toBe(0.5);
 		expect(progressFraction(ev('split', 50, 2, 2))).toBe(0.75);
 		expect(progressFraction(ev('split', 100, 2, 2))).toBe(1);
 	});
 
 	it('gives no share to an unpenalised fit where no penalty applies (a non-headline location)', () => {
+		// The estimate plans the unpenalised fit at the headline's step only (issue #865).
+		expect(planRuns([{ headline: false }, { headline: true }], 1500, true, true, 1, false)).toBe(1500 * 3 + 1500 * 4);
+		expect(planRuns([{ headline: false }], 1500, true, true, 1, false)).toBe(1500 * 3);
+		// Penalty off: no step plans it. No plan yet (no network): one step, at the headline.
+		expect(planRuns([{ headline: false }, { headline: true }], 1500, true, false, 1, false)).toBe(1500 * 6);
+		expect(planRuns(null, 1500, true, true, 1, false)).toBe(1500 * 4);
+		expect(planRuns([], 1500, true, false, 2, true, false)).toBe(1500 * 5);
 		// Penalty on at the headline: full, split, dsst, unpenalised; at another location: full, split, dsst only.
 		expect(progressFraction(ev('dsst', 100, 3, 3))).toBe(1);
 		// Both skipped: full and split are the whole fit.

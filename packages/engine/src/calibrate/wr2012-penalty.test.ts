@@ -5,7 +5,7 @@ import { daysPerMonth, toEpochDay } from '../calendar';
 import type { ModelInput, NetworkNode } from '../project';
 import { Rng } from '../random';
 import { runModel } from '../run';
-import { calibrate, prepareCalibration, prepareCalibrationFits, type FitOutcome } from './calibrate';
+import { calibrate, calibrationPlan, prepareCalibration, prepareCalibrationFits, type FitOutcome } from './calibrate';
 import { defaultWr2012Settings, type Wr2012Settings } from '../reference/wr2012Settings';
 
 const apan = [150, 180, 200, 210, 180, 150, 100, 60, 40, 40, 60, 100];
@@ -123,6 +123,10 @@ describe('WR2012 MAR penalty in calibration', () => {
 		const off: string[] = [];
 		calibrate(input, { ...opts, budget: 20, onProgress: (pr) => void off.push(`${pr.stage} ${pr.optimisation}/${pr.optimisations}`) });
 		expect(new Set(off)).toEqual(new Set(['full 1/1']));
+		// The plan before the fit says the same (issue #865).
+		const on = withReference(input, mar, 1.4, { enabled: true, weight: 1, marLowMm3: null, marHighMm3: null });
+		expect(calibrationPlan(on, opts).map((p) => p.stage)).toEqual(['full', 'unpenalised']);
+		expect(calibrationPlan(input, opts).map((p) => p.stage)).toEqual(['full']);
 	});
 
 	it('is deterministic for a seed', () => {
