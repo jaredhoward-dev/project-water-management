@@ -5111,6 +5111,17 @@ LOCKED`), deletes each PDF from storage and settles it
 attempt); both functions refuse anything but the worker's context
 (`reports/erasure.ts`, `reports/erasure.db.test.ts`; issue #903).
 
+`app_report_pdf_orphaned(p_project, p_report)` (398_report_pdf_orphan.sql,
+issue #911, SECURITY DEFINER, granted to `water_app`): whoever just stored a
+report's PDF asks it, the inline render in its job's transaction and the
+worker when the renderer Lambda's answer arrives (`acceptRenderResult`, from
+the answer's `projectId`). When no report row of that id exists anywhere
+(deleted while it rendered, perhaps after its erasure already ran) it queues
+the ids here and answers true; the tick removes the object. When the row
+exists it does nothing: its PDF is live, or a later deletion queues it
+through the trigger. Definer so that RLS can't make a row the caller can't
+see (a deleted requester's) read as gone.
+
 ### Reference loads (192_feature_names_reference_load.sql, 248_reference_load_provenance.sql)
 
 `reference_load (kind, dataset, source_key, source_sha256, loaded_at)`,

@@ -127,8 +127,12 @@ async function fireSchedule(s: ScheduleRow, fire: Date): Promise<'queued' | 'ski
 	return 'queued';
 }
 
-/** What became of a render-results message. */
-export type RenderAcceptance = 'queued' | 'unknown_report' | 'refused';
+/**
+ * What became of a render-results message. `orphan_queued`: the report was
+ * deleted while it rendered, so the PDF the renderer stored is queued for
+ * removal (398).
+ */
+export type RenderAcceptance = 'queued' | 'unknown_report' | 'orphan_queued' | 'refused';
 
 export async function acceptRenderResult(msg: RenderResultMessage): Promise<RenderAcceptance> {
 	const { rows } = await withoutUser((db) =>
@@ -138,7 +142,19 @@ export async function acceptRenderResult(msg: RenderResultMessage): Promise<Rend
 	);
 	const target = rows[0];
 	// Purged, already answered, or not a report that is waiting.
-	if (!target) return 'unknown_report';
+	if (!target) {
+		// A PDF stored for a report deleted since (its account or project, 395): the renderer stored it before
+		// answering, perhaps after the deletion's own erasure ran, so queue it for the tick to remove (398,
+		// issue #911). A report that still exists (answered already: a redelivery) keeps its PDF.
+		if (msg.result.ok && msg.projectId) {
+			const projectId = msg.projectId;
+			const { rows: o } = await withoutUser((db) =>
+				db.query<{ orphaned: boolean }>('SELECT app_report_pdf_orphaned($1, $2) AS orphaned', [projectId, msg.reportId])
+			);
+			if (o[0]?.orphaned) return 'orphan_queued';
+		}
+		return 'unknown_report';
+	}
 	try {
 		await withUser(target.requestedBy, (db) =>
 			enqueueJob(db, {

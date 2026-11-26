@@ -3234,6 +3234,14 @@ sequenceDiagram
   those PDFs from storage (`reports/erasure.ts`; MinIO or the bucket, the
   worker's role holding `s3:DeleteObject` on `reports/*` only), dropping
   each entry once its object is gone and retrying the rest next tick.
+  A render still in flight when its row goes stores its PDF after that
+  removal, so whoever stored it asks `app_report_pdf_orphaned` (398, issue
+  #911) right after: the inline render in its job, and for the renderer
+  Lambda (no database) the worker on its answer, which names the project.
+  No report of that id left: the ids are queued again and the next tick
+  removes the late PDF. Locally `pnpm dev:s3:up` gives the `water-reports`
+  bucket production's 7-day expiry rule too (`expire-reports` on
+  `reports/`, `backend/scripts/s3-lifecycle.ts`).
 
 Where the render runs (`REPORT_RENDERER`, `jobs/transport.ts`):
 

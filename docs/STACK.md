@@ -190,7 +190,7 @@ pnpm dev:mail:up            # Mailpit: local inbox for all app email (UI :8026)
 pnpm dev:mail:down | dev:mail:status | dev:mail:logs | dev:mail:open
 pnpm dev:mail:bounce <email> [--complaint | --transient]   # stand in for an SES bounce: pauses that account's alert emails (run-locally.md § Alerts)
 pnpm dev:billing:replay <fixture> [--account <id>] [--new-id]   # sign a synthetic Stripe-shaped event (backend/fixtures/billing/) with the dev key and post it to the local mock webhook (run-locally.md § Billing webhooks)
-pnpm dev:s3:up              # MinIO: report PDFs (API :9002, console :9003, minioadmin / minioadmin)
+pnpm dev:s3:up              # MinIO: report PDFs (API :9002, console :9003, minioadmin / minioadmin); gives water-reports production's 7-day expiry (idempotent)
 pnpm dev:s3:down | dev:s3:status | dev:s3:logs
 pnpm dev:tiles:up           # optional basemap for the Map tab, one step, re-runnable: MinIO, tiles + fonts (cached, else fetched), a cached relief DEM, the frontend's URLs; restart pnpm dev
 pnpm dev:tiles:fetch        # re-download the SA extract (pmtiles CLI) into MinIO; dev:tiles:terrain (the Relief layer's DEM) | dev:tiles:water (Trace a dam's GSW occurrence; GDAL or docker) | dev:tiles:status | dev:tiles:env (maps.md)
