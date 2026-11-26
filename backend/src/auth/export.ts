@@ -332,6 +332,7 @@ export async function buildSubjectExport(userId: string, now = new Date()) {
 			[userId]
 		);
 		const { rows: alertDeliveries } = await db.query(
+			// mode: their choice when it was queued; via: how it went out (the choice at send time wins, 370, issue #890).
 			`SELECT d.project_id AS "projectId", e.kind, d.mode, d.status, d.via, d.created_at AS "createdAt", d.sent_at AS "sentAt"
 			 FROM alert_delivery d LEFT JOIN alert_event e ON e.id = d.event_id
 			 WHERE d.user_id = $1 ORDER BY d.created_at DESC`,

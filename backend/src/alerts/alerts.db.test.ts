@@ -624,6 +624,8 @@ describe('the digest’s size limit', () => {
 		// Busy: 230 lines in Alerts, the newest. Quiet: 5 lines, older than every busy one.
 		const u = await queueDigest(230);
 		expect((await owner.call('POST', `/projects/${quietId}/members`, { email: u.email, role: 'editor' })).status).toBe(201);
+		// Daily there too, or the mode at send time (370) would send the quiet lines on their own.
+		await chooseDaily(u, quietId, 'dam_below');
 		const [rule] = await asOwner(`INSERT INTO alert_rule (project_id, kind, node_id, threshold) VALUES ($1, 'dam_below', $2, 0.5) RETURNING id`, [quietId, quietFarm]);
 		await asOwner(
 			`WITH e AS (
@@ -659,6 +661,96 @@ describe('the digest’s size limit', () => {
 		await asOwner('DELETE FROM alert_delivery WHERE user_id = $1', [u.id]);
 		await reset(quietId);
 		await reset();
+	});
+});
+
+describe('what the digest limit leaves out (386)', () => {
+	/** A new person owning `sizes.length` catchments, each with `sizes[i]` data_stale digest lines (catchment i's queued after i−1's), as the schema owner. */
+	async function catchments(sizes: number[]) {
+		const u = await signUp('Aleft');
+		const ids: string[] = [];
+		for (const [i, n] of sizes.entries()) {
+			const pid = (await u.call('POST', '/projects', { name: `Left ${i}` })).body.project.id as string;
+			ids.push(pid);
+			const [rule] = await asOwner(`INSERT INTO alert_rule (project_id, kind, threshold) VALUES ($1, 'data_stale', 3) RETURNING id`, [pid]);
+			await asOwner(
+				`WITH e AS (
+					INSERT INTO alert_event (rule_id, project_id, state, value, detail)
+					SELECT $1, $2, 'cleared', 4, jsonb_build_object('i', i) FROM generate_series(1, $4::int) i
+					RETURNING id, (detail->>'i')::int AS i
+				)
+				INSERT INTO alert_delivery (event_id, user_id, project_id, mode, status, created_at)
+				SELECT e.id, $3, $2, 'daily_digest', 'digest', now() - make_interval(hours => 100 - 10 * $5::int - e.i) FROM e`,
+				[rule.id, pid, u.id, n, i]
+			);
+		}
+		return { u, ids };
+	}
+	const tomorrow = () => new Date(Date.now() + 24 * 3600_000);
+	/** One digest claim with a limit of `lines` a person; this person's rows only. */
+	const mine = async (u: { id: string }, lines: number) => {
+		const rows = await withoutUser((db) =>
+			db.query<{ user_id: string; project_id: string; left_out: number; catchments_left_out: number }>(
+				`SELECT user_id, project_id, left_out, catchments_left_out FROM app_alert_claim_digest($1, 500, $2, interval '5 minutes')`,
+				[tomorrow(), lines]
+			)
+		);
+		return rows.rows.filter((r) => r.user_id === u.id);
+	};
+	const byProject = (u: { id: string }) =>
+		asOwner(`SELECT project_id, status, reason, count(*)::int AS n FROM alert_delivery WHERE user_id = $1 GROUP BY 1, 2, 3 ORDER BY 1, 2, 3`, [u.id]);
+	const cleanUp = async (u: { id: string }, ids: string[]) => {
+		await asOwner('DELETE FROM alert_delivery WHERE user_id = $1', [u.id]);
+		for (const pid of ids) await reset(pid);
+	};
+
+	it('past the limit in catchments, says on every claimed line how many catchments kept no line (#883)', async () => {
+		// Three catchments, a limit of 2: each one's newest is turn 1, so the oldest catchment (0) keeps none.
+		const { u, ids } = await catchments([3, 2, 2]);
+		const got = await mine(u, 2);
+		expect(got.map((r) => r.project_id).sort()).toEqual([ids[1], ids[2]].sort());
+		// Every line of the person carries the whole catchment left out; each its own catchment's lines.
+		expect(got.map((r) => r.catchments_left_out)).toEqual([1, 1]);
+		expect(Object.fromEntries(got.map((r) => [r.project_id, r.left_out]))).toEqual({ [ids[1]!]: 1, [ids[2]!]: 1 });
+		const rows = await byProject(u);
+		expect(rows.filter((r) => r.project_id === ids[0])).toEqual([{ project_id: ids[0], status: 'skipped', reason: 'over the digest limit', n: 3 }]);
+		await cleanUp(u, ids);
+	});
+
+	it('counts neither in the limit nor in left out the lines the reader turned off or whose rule is off: skipped with the sender’s reason (#883)', async () => {
+		const { u, ids } = await catchments([3, 2, 2, 2]);
+		// Catchment 2: the person turned the alert off. Catchment 3: an editor switched the rule off.
+		expect((await u.call('PUT', `/me/alerts/${ids[2]}`, { items: [{ kind: 'data_stale', mode: 'off' }] })).status).toBe(200);
+		await asOwner(`UPDATE alert_rule SET enabled = false WHERE project_id = $1`, [ids[3]]);
+		const got = await mine(u, 2);
+		// Only catchments 0 and 1 compete for the 2 places now: each keeps one, no catchment is left out whole.
+		expect(got.map((r) => r.project_id).sort()).toEqual([ids[0], ids[1]].sort());
+		expect(got.map((r) => r.catchments_left_out)).toEqual([0, 0]);
+		expect(Object.fromEntries(got.map((r) => [r.project_id, r.left_out]))).toEqual({ [ids[0]!]: 2, [ids[1]!]: 1 });
+		const rows = await byProject(u);
+		expect(rows.filter((r) => r.project_id === ids[2])).toEqual([{ project_id: ids[2], status: 'skipped', reason: 'turned this alert off', n: 2 }]);
+		expect(rows.filter((r) => r.project_id === ids[3])).toEqual([{ project_id: ids[3], status: 'skipped', reason: RULE_OFF, n: 2 }]);
+		await cleanUp(u, ids);
+	});
+
+	it('skips the lines of a person no longer in the catchment as no longer getting the alert (positive control: a member’s are claimed)', async () => {
+		const { u, ids } = await catchments([2]);
+		const v = await signUp('Aleftv');
+		// v was an editor when the line was queued, and has since left.
+		const [e] = await asOwner(`SELECT event_id FROM alert_delivery WHERE user_id = $1 LIMIT 1`, [u.id]);
+		await asOwner(`INSERT INTO alert_delivery (event_id, user_id, project_id, mode, status, created_at) VALUES ($1, $2, $3, 'daily_digest', 'digest', now() - interval '2 hours')`, [
+			e.event_id,
+			v.id,
+			ids[0]
+		]);
+		const all = await withoutUser((db) =>
+			db.query<{ user_id: string }>(`SELECT user_id FROM app_alert_claim_digest($1, 500, 200, interval '5 minutes')`, [tomorrow()])
+		);
+		expect(all.rows.filter((r) => r.user_id === u.id)).toHaveLength(2);
+		expect(all.rows.filter((r) => r.user_id === v.id)).toHaveLength(0);
+		expect(await asOwner(`SELECT status, reason FROM alert_delivery WHERE user_id = $1`, [v.id])).toEqual([{ status: 'skipped', reason: 'no longer gets this alert' }]);
+		await asOwner('DELETE FROM alert_delivery WHERE user_id = $1', [v.id]);
+		await cleanUp(u, ids);
 	});
 });
 
