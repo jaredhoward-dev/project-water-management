@@ -127,7 +127,7 @@ test('the standalone page opens ?project= on its default pair, takes a second wh
 	// No published run: the latest against the one before (picker.ts defaultPair).
 	await expect(runSelect(page, 'Baseline')).toHaveValue(p.whatIf1);
 	await expect(runSelect(page, 'What-if 1')).toHaveValue(p.whatIf2);
-	await expect(page.getByRole('link', { name: 'Back to runs' })).toHaveAttribute('href', `/projects/${p.id}?tab=runs`);
+	await expect(page.getByRole('link', { name: 'Back to runs' })).toHaveAttribute('href', `/projects/${p.id}?tab=runs&run=${p.whatIf2}`);
 
 	await page.getByRole('button', { name: '+ Add a second what-if' }).click();
 	await expect(page).toHaveURL(new RegExp(`/compare\\?a=${p.id}%3A${p.whatIf1}&b=${p.id}%3A${p.whatIf2}&c=${p.id}%3A${p.baseline}$`));

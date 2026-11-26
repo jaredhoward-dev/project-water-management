@@ -49,7 +49,7 @@
 	import RunPicker from '#lib/components/compare/RunPicker.svelte';
 	import SectionNav from '#lib/components/common/SectionNav.svelte';
 	import { COMPARE_HEADINGS as HEADING, compareNavGroups } from '#lib/components/compare/sections.js';
-	import { defaultPair, defaultRunFor, defaultWhatIf, formatRef, parseRef, projectZoneOf, publishedBaseline, type RunRef } from '#lib/components/compare/picker.js';
+	import { defaultPair, defaultRunFor, defaultWhatIf, formatRef, parseRef, projectZoneOf, publishedBaseline, staleComparisonNote, waitingSides, type RunRef } from '#lib/components/compare/picker.js';
 	import { compareEvidenceNote } from '#lib/components/runs/evidence.js';
 	import { fillHeader } from '#lib/components/workspace/headerSlot.svelte.js';
 	import { runYears } from '#lib/components/runs/runList.js';
@@ -186,6 +186,17 @@
 			if (picked.a !== null || picked.b !== null || picked.c !== null) picked = { a: null, b: null, c: null };
 		});
 	});
+
+	// A card picked onto a project with no run to choose (issue #924): the URL keeps its previous run, so the
+	// comparison below is marked as of the runs before rather than cleared. Clearing would leave the screen out of
+	// step with its own URL (a reload or a shared link brings the pair back) and lose the pair for a pick that may be a
+	// slip; Back or another project gets out of it.
+	const waiting = $derived(waitingSides(picked, runs, runsError, showC ? (['a', 'b', 'c'] as const) : (['a', 'b'] as const)));
+	const staleNote = $derived(
+		staleComparisonNote(
+			waiting.map((s) => ({ card: NAME[s], project: projects.find((p) => p.id === picked[s])?.name ?? 'the project picked', failed: !!runsError[picked[s]!] }))
+		)
+	);
 
 	$effect(() => {
 		for (const p of [projectA, projectB, showC ? projectC : null]) if (p) untrack(() => ensureRuns(p));
@@ -505,7 +516,8 @@
 {#snippet card(side: Side)}
 	{@const pid = side === 'a' ? projectA : side === 'b' ? projectB : projectC}
 	{@const ref = refOf(side)}
-	{@const meta = runMeta(side)}
+	{@const stale = waiting.includes(side)}
+	{@const meta = stale ? null : runMeta(side)}
 	<RunPicker
 		id={side}
 		legend={NAME[side]}
@@ -523,8 +535,10 @@
 			{#if side === 'c'}<button type="button" class="btn btn-ghost btn-sm" onclick={removeWhatIf}>Remove<span class="visually-hidden"> what-if 2</span></button>{/if}
 		{/snippet}
 		{#snippet summary()}
-			<p class="run-name">{meta ? meta.label || 'Untitled run' : ref ? '…' : 'No run chosen'}</p>
-			{#if side === 'a'}
+			<p class="run-name">{meta ? meta.label || 'Untitled run' : ref && !stale ? '…' : 'No run chosen'}</p>
+			{#if stale}
+				<!-- The project picked has no run: the comparison below says it is of the runs before (staleNote). -->
+			{:else if side === 'a'}
 				<p class="run-line muted">{baseLine}</p>
 			{:else}
 				{@const d = cmp[side].data}
@@ -591,6 +605,9 @@
 			</div>
 		{/if}
 	{:else}
+		{#if staleNote}
+			<div class="alert alert-warning" role="status" data-testid="compare-stale">{staleNote}</div>
+		{/if}
 		<!-- Every panel's id and heading come from compare/sections.ts, which the menu reads too. -->
 		<SectionNav groups={navGroups} label="Comparison sections" railFrom={COMPARE_RAIL_FROM_REM}>
 		<!-- The comparison's own widths are read from cmp-body, the column beside the side index (a window

@@ -18,7 +18,9 @@ runs list). Its runs live in the workspace URL
 be a run of another project. A two-run link (no `c`) opens exactly as it
 always did.
 The same view is the standalone page `/compare?project=<id>`, which links
-**Back to runs**; its URL keeps working for bookmarks and cross-project links,
+**Back to runs**: the baseline's project's Runs tab on the run being looked at
+there, what-if 1 when it is that project's, else the baseline
+(`runsTabSearch`, issue #924); its URL keeps working for bookmarks and cross-project links,
 and an applicant (no workspace tabs) gets it from their application. Either
 way the view starts on that
 project's **latest run (what-if 1)** against its **published run
@@ -53,7 +55,14 @@ newest run that isn't already the other side. The URL holds the choice
 bookmarked or shared with anyone who can see both projects. A project
 picked for a card that has no run to choose (or whose runs failed to load)
 waits in that card only until the URL changes: Back, Forward or a link drops
-it, so a card always names the pair the comparison below shows.
+it, so a card always names the pair the comparison below shows. While it
+waits, the card says **No run chosen** and a note above the comparison names
+the card, its project and why it has no run, and says the comparison is still
+of the runs chosen before (`waitingSides`, `staleComparisonNote`, issue #924).
+The comparison is marked stale rather than cleared: the URL still holds the
+previous pair, so clearing would leave the screen out of step with its own
+address (a reload or a shared link brings the pair back), and a slip of the
+project picker would throw the comparison away.
 
 If a project has fewer than two runs, the page explains what to do: run the
 model, change something, and run it again, or pick a run from another project
