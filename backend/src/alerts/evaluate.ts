@@ -56,7 +56,6 @@ import { lastValueDaySql } from '../series/lastDay.js';
 import type { RecentShortfall } from '../publish/recent.js';
 import { recordedRainUntil } from '../runs/autoRun.js';
 import { SERIES_STALE_ALERT_DAYS, SERIES_USUAL_DELAY_DAYS, step, type AlertKind } from './rules.js';
-import { JOB_CANCELLED, SUPERSEDED_NOTE } from '../jobs/errors.js';
 
 /** ALERTS_ENABLED=false is the kill switch (docs/deployment.md § Runbooks): events still open and clear, nothing is sent. */
 export const alertsEnabled = () => process.env.ALERTS_ENABLED !== 'false';
@@ -360,12 +359,12 @@ export async function evaluateAlerts(db: Db, projectId: string, { now = new Date
 				};
 			}
 			case 'job_dead': {
-				// Dead letters only: a cancelled job is what someone asked for, and a superseded one's work is done by the newer
-				// job with its key (jobs/errors.ts JOB_CANCELLED, SUPERSEDED_NOTE).
+				// Dead letters only (394 job.dead_reason = 'failed'): a cancelled job is what someone asked for, and a superseded
+				// one's work is done by the newer job with its key. Jobs dead before 394 got their reason from their text there.
 				const { rows } = await db.query<{ n: number }>(
-					`SELECT count(*)::int AS n FROM job WHERE project_id = $1 AND status = 'dead' AND finished_at > now() - interval '24 hours'
-					   AND last_error IS DISTINCT FROM $2 AND right(COALESCE(last_error, ''), length($3)) <> $3`,
-					[projectId, JOB_CANCELLED, SUPERSEDED_NOTE]
+					`SELECT count(*)::int AS n FROM job WHERE project_id = $1 AND status = 'dead' AND dead_reason = 'failed'
+					   AND finished_at > now() - interval '24 hours'`,
+					[projectId]
 				);
 				return { value: rows[0]?.n ?? 0, detail: { count: rows[0]?.n ?? 0 }, runId: null };
 			}

@@ -11,16 +11,17 @@ import { safeError, stackFrames } from '../logging/safeError.js';
 export const JOB_ERROR_MAX = 500;
 
 /**
- * Ends the stored error of a job a newer one with its dedupe key replaced (runner.ts): dead, but not a dead letter,
- * so no alarm and not counted by the job_dead alert (alerts/evaluate.ts).
- */
-/**
  * The stored error of a job someone cancelled (app_cancel_job_outcome kills a waiting one with it; a running one's
- * handler throws it once progress answers false): dead, but not a dead letter, so no alarm and not counted by the
- * job_dead alert (alerts/evaluate.ts).
+ * handler throws it once progress answers false, and the runner records the death as `cancelled`): dead, but not a
+ * dead letter (394 job.dead_reason), so no alarm and not counted by the job_dead alert (alerts/evaluate.ts).
  */
 export const JOB_CANCELLED = 'cancelled';
 
+/**
+ * Ends the stored error of a job a newer one with its dedupe key replaced (runner.ts), dead as `superseded`
+ * (394 job.dead_reason): not a dead letter, so no alarm and not counted by the job_dead alert. 394's
+ * app_finish_job infers the reason from it for a backend from before that migration.
+ */
 export const SUPERSEDED_NOTE = ' (a newer job with the same key is queued)';
 
 /**

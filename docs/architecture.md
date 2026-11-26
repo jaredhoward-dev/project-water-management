@@ -901,7 +901,13 @@ alerts plug in as a further kind.
   was lost, and the handler then stops: dead, `cancelled`, its work rolled
   back. A cancel is not a dead letter: logged as `job_cancelled`, not
   `job_dead`, so no alarm, and the job_dead alert counts neither a
-  cancelled job nor a superseded one (below; `alerts/evaluate.ts`). `future_yield` and `climate_factors` report after each model read
+  cancelled job nor a superseded one (below; `alerts/evaluate.ts`). Which of
+  the three a death is lives in `job.dead_reason` (`cancelled`, `superseded`,
+  `failed`; 394, issue #904), set by the SQL that kills the job, and the
+  runner's logs and the alert read it, not the error text. A cancelled running
+  job that hands itself back (`JobRelease`), fails in a way worth retrying,
+  or loses its worker is dead as cancelled too, never queued again to redo
+  work until its next progress report. `future_yield` and `climate_factors` report after each model read
   from the copy, and `future_yield` after each case it runs
   (`runFutureYieldAsync`), so a cancel lands before the next.
 - **`yield`** (WP-3.6, `jobs/handlers/yield.ts`, [api.md § Yield](./api.md#yield)):
