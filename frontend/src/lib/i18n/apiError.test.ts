@@ -51,6 +51,7 @@ describe('errorText', () => {
 		account_plan_not_cancelled: 'Your paid plan couldn’t be cancelled with the payment provider, so your account wasn’t deleted. Try again in a few minutes.',
 		note_comment_closed: 'This application isn’t open for comment right now.',
 		note_audience_denied: 'You can’t post a comment here.',
+		farm_preview_withheld: 'This hydrological unit’s published figures are worked out from a registered water volume, which this project shows only to its editors and owners. Ask one of them to let you see registered volumes.',
 		mfa_code_wrong: 'That code isn’t right. Enter the newest code from your authenticator app or your email, or one of your recovery codes.',
 		mfa_locked: 'Too many wrong codes. Try again in 1 minute.',
 		mfa_challenge_expired: 'Your sign-in timed out. Enter your email and password again.',

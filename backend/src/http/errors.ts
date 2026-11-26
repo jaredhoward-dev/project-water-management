@@ -72,6 +72,8 @@ export const ERROR_CODES = [
 	'note_delete_denied',
 	'note_comment_closed',
 	'note_audience_denied',
+	// A WUA viewer kept from registered volumes previewing a farm while a cap or full-allocation run is published (farms/view.ts, #523 I).
+	'farm_preview_withheld',
 	'unsubscribe_link_gone',
 	'feedback_link_gone',
 	'export_throttled',

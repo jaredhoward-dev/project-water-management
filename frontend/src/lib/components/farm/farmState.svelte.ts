@@ -7,6 +7,9 @@
 //   without one; a server failure the same, with Try again;
 // - 403/404 (the farm or the project is no longer this user's): the removed
 //   state, and the saved copy goes;
+// - a 403 coded farm_preview_withheld (a WUA viewer kept from registered
+//   volumes, previewing while a cap or full-allocation run is published):
+//   the withheld state, saying why; the farm is still there, so nothing saved goes;
 // - a ?node= the index doesn't list while it lists others (a link to a unit
 //   that isn't, or is no longer, theirs, in a catchment they still see): the
 //   not-yours state, with their own units here; a saved copy of it goes;
@@ -28,6 +31,7 @@ export type FarmPhase =
 	| { kind: 'no-publication' }
 	| { kind: 'removed' }
 	| { kind: 'not-yours' }
+	| { kind: 'withheld' }
 	| { kind: 'error'; offline: boolean; attempts: number };
 
 /** How long a fetched view is reused between the farm pages without asking again. */
@@ -212,6 +216,12 @@ export class FarmState {
 		const why = classify(e);
 		if (why === 'removed') return this.#removed(projectId, nodeId);
 		this.updating = false;
+		if (why === 'withheld') {
+			// Not "no longer yours": the farm is there, its figures aren't for this viewer while this run is published.
+			this.view = null;
+			this.phase = { kind: 'withheld' };
+			return;
+		}
 		if (this.view && this.view.project.id === projectId) {
 			// Keep the saved copy on screen, under the strip.
 			this.fromSaved = true;

@@ -52,7 +52,7 @@ describe('the farm view of a published cap or full-allocation run (#523 I)', () 
 	it('is refused to a viewer kept from the volumes previewing a farm, with the reason, on every farm route', async () => {
 		for (const path of ['', '/export.csv', '/map']) {
 			const r = await ctx.viewer.call('GET', `${at}/farm/${ctx.otherFarmId}${path}`);
-			expect([path, r.status, r.body?.code]).toEqual([path, 403, 'allocation_series_withheld']);
+			expect([path, r.status, r.body?.code]).toEqual([path, 403, 'farm_preview_withheld']);
 		}
 	});
 

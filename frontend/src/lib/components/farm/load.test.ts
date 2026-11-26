@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '#lib/api/client.js';
-import { classify, farmHref, farmReturn, pickNode, wordsHref, worstFirst } from './load';
+import { cardOnFailure, classify, farmHref, farmReturn, pickNode, wordsHref, worstFirst } from './load';
 
 describe('what a failed request means', () => {
 	it('403 and 404 mean access removed; 0 means no signal; the rest a failure', () => {
 		expect(classify(new ApiError(403, 'x'))).toBe('removed');
 		expect(classify(new ApiError(404, 'x'))).toBe('removed');
+		// A WUA viewer's preview withheld while a cap or full-allocation run is published: its own state, by its code (#523 I).
+		expect(classify(new ApiError(403, 'x', undefined, 'farm_preview_withheld'))).toBe('withheld');
+		expect(classify(new ApiError(404, 'x', undefined, 'farm_preview_withheld'))).toBe('removed');
+		expect(classify(new ApiError(403, 'x', undefined, 'note_audience_denied'))).toBe('removed');
 		expect(classify(new ApiError(0, 'x'))).toBe('offline');
 		expect(classify(new ApiError(500, 'x'))).toBe('failed');
 		expect(classify(new ApiError(401, 'x'))).toBe('failed');
@@ -79,5 +83,21 @@ describe('the farms list puts the worst notice first', () => {
 		const rows = [row('a', null), row('b', 'restricted')];
 		worstFirst(rows);
 		expect(rows.map((r) => r.id)).toEqual(['a', 'b']);
+	});
+});
+
+describe('cardOnFailure (/farm: a card whose figures fail)', () => {
+	const saved = { farm: 'saved copy' };
+	it('drops a farm unlinked since the list loaded (403/404) without reading its saved copy', () => {
+		for (const status of [403, 404]) {
+			let read = false;
+			expect(cardOnFailure(new ApiError(status, 'x'), () => ((read = true), saved))).toEqual({ drop: true });
+			expect(read).toBe(false);
+		}
+	});
+	it('falls back to the saved copy on no signal or a server failure, else nothing', () => {
+		expect(cardOnFailure(new ApiError(0, 'x'), () => saved)).toEqual({ drop: false, view: saved });
+		expect(cardOnFailure(new ApiError(500, 'x'), () => saved)).toEqual({ drop: false, view: saved });
+		expect(cardOnFailure(new ApiError(500, 'x'), () => null)).toEqual({ drop: false, view: null });
 	});
 });

@@ -62,6 +62,8 @@
 		<FarmStatus kind="error" offline={farm.phase.offline} attempts={farm.phase.attempts} wuaName={farm.wuaName} {retry} />
 	{:else if farm.phase.kind === 'removed'}
 		<FarmStatus kind="removed" farmName={farm.farmName} wuaName={farm.wuaName} />
+	{:else if farm.phase.kind === 'withheld'}
+		<FarmStatus kind="withheld" farmName={farm.farmName} />
 	{:else if farm.phase.kind === 'not-yours'}
 		<FarmStatus kind="not-yours" wuaName={farm.wuaName} {projectId} farms={farm.index?.farms ?? []} />
 	{:else if farm.phase.kind === 'no-publication'}

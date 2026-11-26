@@ -9,6 +9,8 @@
 	import { contactText, stateText, stillFailing } from './cards';
 	import { farmHref } from './load';
 	import { followRetry } from '#lib/components/common/loadState.js';
+	import { errorText } from '#lib/i18n/apiError.js';
+	import { ApiError } from '#lib/api/client.js';
 
 	let {
 		kind,
@@ -22,7 +24,7 @@
 		projectId = null,
 		farms = []
 	}: {
-		kind: 'no-publication' | 'removed' | 'not-yours' | 'error';
+		kind: 'no-publication' | 'removed' | 'not-yours' | 'withheld' | 'error';
 		farmName?: string | null;
 		projectName?: string | null;
 		/** The WUA the contact lines name (project.wuaName); null says "your WUA". */
@@ -58,6 +60,10 @@
 	<h1>{farmName ?? t('Your hydrological unit')}</h1>
 	<p role="alert">{contactText('removed', wuaName)}</p>
 	<a class="link" href={resolve('farm')}>{t('Your hydrological units')}</a>
+{:else if kind === 'withheld'}
+	<!-- A WUA viewer's preview while a cap or full-allocation run is published (#523 I): why, worded from the API's code. -->
+	<h1>{farmName ?? t('Your hydrological unit')}</h1>
+	<p role="alert">{errorText(new ApiError(403, '', undefined, 'farm_preview_withheld'))}</p>
 {:else if kind === 'not-yours'}
 	<!-- A link to a unit that isn't theirs, in a catchment they still see: say so without "no longer", and offer their own units here. -->
 	<h1>{t('Your hydrological unit')}</h1>

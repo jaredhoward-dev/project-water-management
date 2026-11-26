@@ -4,18 +4,36 @@
 import type { FarmIndex } from '@water-management/engine';
 
 /** Why a request failed, as the page words it. */
-export type Failure = 'removed' | 'offline' | 'failed';
+export type Failure = 'removed' | 'withheld' | 'offline' | 'failed';
 
 /**
- * 403 or 404: the farm (or the project) is no longer this user's, so the page
- * says so and the saved copy goes. Status 0: no signal. Anything else: the
- * server had a problem; the page offers Try again. Never the raw error text.
+ * 403 coded `farm_preview_withheld`: a WUA viewer kept from registered volumes
+ * previewing a farm while a cap or full-allocation run is published (#523 I);
+ * the farm is still in the catchment, so the page says why and keeps the
+ * saved copies. Any other 403 or 404: the farm (or the project) is no longer
+ * this user's, so the page says so and the saved copy goes. Status 0: no
+ * signal. Anything else: the server had a problem; the page offers Try
+ * again. Never the raw error text.
  */
 export function classify(e: unknown): Failure {
 	const status = e && typeof e === 'object' && 'status' in e ? (e as { status: unknown }).status : null;
+	const code = e && typeof e === 'object' && 'code' in e ? (e as { code: unknown }).code : null;
+	if (status === 403 && code === 'farm_preview_withheld') return 'withheld';
 	if (status === 403 || status === 404) return 'removed';
 	if (status === 0) return 'offline';
 	return 'failed';
+}
+
+/**
+ * A card's figures on /farm when asking for them failed: a farm unlinked (or
+ * a project lost) between loading the list and its figures (403/404) is
+ * dropped from the list, as the list's own 403/404 leaves a project out, and
+ * its saved copy goes; any other failure falls back to the phone's saved copy
+ * (`saved`, read only then), else nothing.
+ */
+export function cardOnFailure<V>(e: unknown, saved: () => V | null): { drop: true } | { drop: false; view: V | null } {
+	if (classify(e) === 'removed') return { drop: true };
+	return { drop: false, view: saved() };
 }
 
 /**
