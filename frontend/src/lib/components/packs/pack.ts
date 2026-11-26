@@ -205,7 +205,15 @@ export const issuedOf = (packs: readonly Pack[], scenarioId: string | null) => p
 export const packHref = (base: string, projectId: string, packId: string) => `${base}/projects/${encodeURIComponent(projectId)}/packs/${encodeURIComponent(packId)}`;
 
 /** A draft's checklist before issue, from the API's `issue` (an editor's read of a draft), in the order to do them. */
-export function issueChecklist(c: PackIssueChecks): { id: keyof PackIssueChecks | 'registrationChecked'; ok: boolean; done: string; todo: string }[] {
+/**
+ * Where a failing check's way out is, for the pack page to link (null: on this
+ * page, or nothing to do here): `report`, the run's evidence report, where a
+ * pack is drafted again; `registration`, the Project page's Registration
+ * checks panel, where the check is recorded.
+ */
+export type IssueCheckFix = 'report' | 'registration' | null;
+
+export function issueChecklist(c: PackIssueChecks): { id: keyof PackIssueChecks | 'registrationChecked'; ok: boolean; done: string; todo: string; fix: IssueCheckFix }[] {
 	const unchecked = c.registrationUnchecked ?? [];
 	// The registration check (167_signers): listed only while the project requires it.
 	const registration = c.registrationCheckRequired
@@ -214,7 +222,8 @@ export function issueChecklist(c: PackIssueChecks): { id: keyof PackIssueChecks 
 					id: 'registrationChecked' as const,
 					ok: unchecked.length === 0,
 					done: 'Each specialist signer’s registration has a current check against the professional register.',
-					todo: `The registration of ${unchecked.join(', ')} hasn’t been checked against the professional register: an owner records the check on the Project tab (Registration checks).`
+					todo: `The registration of ${unchecked.join(', ')} hasn’t been checked against the professional register: an owner records the check on the Project tab (Registration checks).`,
+					fix: 'registration' as const
 				}
 			]
 		: [];
@@ -223,25 +232,29 @@ export function issueChecklist(c: PackIssueChecks): { id: keyof PackIssueChecks 
 			id: 'issuable',
 			ok: c.issuable,
 			done: 'The frozen report may be issued: no check that stops issue fails.',
-			todo: 'The frozen report can’t be issued: a check that stops issue failed when it was drafted. Withdraw it and draft again once the report passes.'
+			todo: 'The frozen report can’t be issued: a check that stops issue failed when it was drafted. Withdraw it and draft again once the report passes.',
+			fix: 'report'
 		},
 		{
 			id: 'runsVerified',
 			ok: c.runsVerified,
 			done: 'Both runs still carry the server’s stamp.',
-			todo: 'A run it cites no longer matches the server’s stamp, so it can’t be signed or issued.'
+			todo: 'A run it cites no longer matches the server’s stamp, so it can’t be signed or issued.',
+			fix: null
 		},
 		{
 			id: 'errataRecorded',
 			ok: c.errataRecorded,
 			done: 'Its manifest records every known erratum of its runs’ engines.',
-			todo: 'An erratum found since this draft was made applies to its runs, and the manifest doesn’t record it, so it can’t be issued. Draft the pack again to record it.'
+			todo: 'An erratum found since this draft was made applies to its runs, and the manifest doesn’t record it, so it can’t be issued. Draft the pack again to record it.',
+			fix: 'report'
 		},
 		{
 			id: 'signed',
 			ok: c.signed,
 			done: 'Signed off under the current pack statement.',
-			todo: 'Not signed under the current pack statement: a registered professional signs it in Appendix B.2 (again, if the statement changed since).'
+			todo: 'Not signed under the current pack statement: a registered professional signs it in Appendix B.2 (again, if the statement changed since).',
+			fix: null
 		},
 		...registration
 	];
