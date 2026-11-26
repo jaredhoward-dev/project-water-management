@@ -451,6 +451,15 @@ The mock signs the same way with the dev key, so the same check serves both.
 checkout. Every payload carries the event's `created` time as `eventCreated`
 (ISO), which orders the events (§ Event order below).
 
+An event whose object has no `billing_account_id` at all (on the
+subscription, the session, or the invoice and its subscription) is about
+something this app never made: an invoice sent from the dashboard ([§ Staff
+grants](#staff-grants)), a payment link's session, a subscription made by
+hand. It is answered `200 ignored` and never written, like a type we don't act
+on: a `400` would have Stripe redeliver it for 3 days, and no retry could
+change it. A `billing_account_id` that isn't a UUID, or a missing
+`plan_code`, period or status, is still `invalid`.
+
 | Stripe type | Normalised type | Effect in 326 |
 | --- | --- | --- |
 | `customer.subscription.created`, `.updated` | `subscription.updated` | the account's subscription upserted by (provider, `externalRef`) |
@@ -583,6 +592,13 @@ applied to it (`subscription.last_event_at`):
   unchanged. A malformed one (not ISO 8601 with an offset) is `invalid`.
 - A delete is never stale: it is the provider's last word, and a late live
   update after it is already a `conflict`.
+- A delete that arrives before anything else about its subscription (a
+  subscription cancelled within seconds, or its `created` retried after a
+  failure) has no row to cancel, so it is `recorded`. 399 keeps the
+  subscription id on the event row (`billing_event.external_ref`), and a
+  later live `created` or update for that id is a `conflict` that writes
+  nothing, so the account never gets a plan nothing would ever end. An ended
+  status for it still applies.
 
 ### Retention
 
@@ -610,7 +626,7 @@ The fixtures are `checkout-completed`, `subscription-created` (trialing),
 - `billing/provider/signature.test.ts`: good, tampered, stale and future
   signatures, the wrong secret, several `v1` values, malformed headers.
 - `billing/provider/stripe.test.ts`: each type, the status map, both API eras,
-  and the refusals.
+  the refusals, and an object with no `billing_account_id` ignored.
 - `billing/provider.test.ts`: the provider choice.
 - `billing/webhook.test.ts`: the route with the database mocked.
 - `config/production.security.test.ts`: production refuses the mock.
@@ -623,8 +639,9 @@ The fixtures are `checkout-completed`, `subscription-created` (trialing),
   and an event redelivered after its account went is a plain `duplicate`.
 - `billing/apply.db.test.ts`: `app_billing_apply` itself (326, 327) as
   `water_app` with no user: once only, the status moves, conflicts, unknown
-  accounts and invalid payloads, stale updates by `eventCreated`, and the
-  tick's purge of `billing_event`.
+  accounts and invalid payloads, stale updates by `eventCreated`, a delete
+  that arrives before the subscription (399), and the tick's purge of
+  `billing_event`.
 - `mail/templates.renewal.test.ts`: the renewal email's words in English
   and Afrikaans (plan, the period end in South African time under the
   skewed `TZ`, the rand amount, the plan page link), and wholly English when

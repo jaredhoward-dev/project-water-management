@@ -118,6 +118,27 @@ describe('app_billing_apply', () => {
 		).toBe('free');
 	});
 
+	it('a delete that arrives before the subscription’s first event keeps it from ever going live (399)', async () => {
+		// Stripe sent created (t=0), then deleted (t=10); the delete lands first, for a ref never seen.
+		const ref = `sub_${randomUUID()}`;
+		const at = (s: number) => new Date(Date.UTC(2026, 10, 21, 12, 0, s)).toISOString();
+		const del = `evt_${randomUUID()}`;
+		expect(await apply('subscription.deleted', { accountId: account, externalRef: ref, eventCreated: at(10) }, del)).toBe('recorded');
+		// The late created (and a later-timed update, a replay of old state under a fresh id): never a live row.
+		expect(await apply('subscription.created', payload(account, ref, { eventCreated: at(0) }))).toBe('conflict');
+		expect(await apply('subscription.updated', payload(account, ref, { status: 'past_due', eventCreated: at(20) }))).toBe('conflict');
+		expect((await subs(account)).filter((s) => s.external_ref === ref)).toEqual([]);
+		expect(
+			await withUser(person.id, async (db) => (await db.query('SELECT app_account_plan($1) -> $2 ->> $3 AS v', [account, 'plan', 'code'])).rows[0]!.v)
+		).toBe('free');
+		// An ended status for that ref still records it (nothing live), and another ref is untouched by the delete.
+		expect(await apply('subscription.updated', payload(account, ref, { status: 'canceled', eventCreated: at(30) }))).toBe('applied');
+		expect((await subs(account)).filter((s) => s.external_ref === ref)).toEqual([expect.objectContaining({ status: 'canceled' })]);
+		const fresh = `sub_${randomUUID()}`;
+		expect(await apply('subscription.created', payload(account, fresh, { eventCreated: at(0) }))).toBe('applied');
+		await apply('subscription.deleted', { accountId: account, externalRef: fresh });
+	});
+
 	it('refuses a second live subscription under another external_ref, and a ref moving accounts, changing nothing', async () => {
 		const live = `sub_${randomUUID()}`;
 		expect(await apply('subscription.updated', payload(account, live))).toBe('applied');
