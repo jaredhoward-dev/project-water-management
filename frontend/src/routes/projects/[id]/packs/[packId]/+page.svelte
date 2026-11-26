@@ -138,8 +138,10 @@
 	const pack = $derived(detail?.pack ?? null);
 	/** Where the server-rendered PDF is (119_pack_render): ready, rendering, failed or none. */
 	const pdf = $derived(detail?.pdf ?? null);
+	/** The zone the report and its stamp and the reproduction line date in (issues #864, #878): the project's, or in a render session the browser's. */
+	const timeZone = $derived(packTimeZone(project, !!session.user?.renderSession));
 	/** What the server's re-run from the stored bundle found (154_pack_reproduce); null when there is nothing to say. */
-	const reproduction = $derived(detail?.reproduction ? { state: detail.reproduction, note: reproductionNote(detail.reproduction) } : null);
+	const reproduction = $derived(detail?.reproduction ? { state: detail.reproduction, note: reproductionNote(detail.reproduction, timeZone) } : null);
 
 	let renderingAgain = $state(false);
 	let renderError = $state<string | null>(null);
@@ -209,8 +211,6 @@
 	/** Send the issued pack to the members acting for the responsible authority (licensing build item 13). */
 	let sendOpen = $state(false);
 	const ready = $derived(status === 'loaded');
-	/** The zone the report and its stamp date in (issue #864): the project's, or in a render session the browser's. */
-	const timeZone = $derived(packTimeZone(project, !!session.user?.renderSession));
 	const stamp = $derived(pack ? packStamp(pack, timeZone) : '');
 	const verify = $derived(pack ? packVerifyRef(pack, page.url.origin, basePath()) : null);
 	// The frozen project name, as the manifest recorded it.

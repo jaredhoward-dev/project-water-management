@@ -14379,6 +14379,14 @@ exists, says so with a link to Runs & results. The Overview's published
 baseline card links to the published run's report (**Report**, beside
 **Open in Runs**).
 
+- **Dates** (issue #878): every moment on the page (when the run was made,
+  its publications and the one before, the notes' last change, the
+  sign-offs, the impact baseline's run, when the report was prepared, and a
+  label-less run's "Run of …" name) is on the project's clock
+  (`report/sections.ts` `reportStamp`, from `reportTimeZone`: the project's
+  time zone, Africa/Johannesburg when none), never the viewer's, as the
+  evidence report and the server PDF date theirs.
+
 - **Impact report** (`&against=<projectId>:<runId>`, Compare runs' **Export
   impact report**, issue #17 A4): the same report with the cover's eyebrow
   reading *Impact report* and a first section, **Impact against the
@@ -15025,7 +15033,8 @@ their own application's in [their own view](#the-applicants-pack-view).
   [evidence-pack.md § Reproduction](./evidence-pack.md#reproduction);
   `packs/pack.ts` `reproductionNote`, `data-testid="pack-reproduction"`
   with `data-state` the status): *Reproduced on the server* with the engine
-  and date (an info box), *Not reproduced* with each failed check listed (an
+  and date (the project's calendar day, `packTimeZone`, as the stamp; issue
+  #878) (an info box), *Not reproduced* with each failed check listed (an
   error), *Not re-run on the runs' own engine* when only the re-runs differ
   on another engine (a warning), a quiet *re-running* line with **Check
   again** while its job runs, or that it couldn't be done and why. An editor
