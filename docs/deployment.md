@@ -4058,7 +4058,11 @@ workflow's log prints the file it loaded and the one it replaced (key,
 SHA-256 and when it was loaded): that replaced file is the one to restore
 to undo the load. A local `pnpm import:*` of the same label names no
 bucket file, so it deletes the record rather than leave it describing data
-that is gone. The table is owner-only (the app reads only versions and
+that is gone. Quaternaries and waterbodies are one row per code (or uid)
+whatever dataset loaded it, so a load under a new label moves the codes it
+names out of the older dataset; one that it leaves with no row loses its
+record in the same transaction (`forgetEmptiedOrigins`), and the new
+load's log names no replaced file, since its label had none. The table is owner-only (the app reads only versions and
 dates, through `app_reference_provenance()`); to read it outside a load,
 run the `reference-provenance` check ([§ Read-only production
 checks](#read-only-production-checks)), or locally `SELECT * FROM

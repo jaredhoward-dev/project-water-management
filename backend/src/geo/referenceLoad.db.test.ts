@@ -76,7 +76,9 @@ const LY = LYNCH_MAP.dataset;
 // The one A-pan label production allows (REFERENCE_KINDS.evaporation.kindDatasets.apan): only this file writes it in water_test.
 const AP = ATLAS_APAN.dataset;
 const WB = 'Test-Waterbodies';
+const WB2 = 'Test-Waterbodies-2';
 const QT = 'Test-Quaternaries';
+const QT2 = 'Test-Quaternaries-2';
 const QE = 'Test-Quaternary-Evaporation';
 const sha = (b: Uint8Array) => createHash('sha256').update(b).digest('hex');
 const object = (bytes: Uint8Array): ReadObject => async () => ({ contentLength: bytes.byteLength, bytes: async () => bytes });
@@ -108,10 +110,10 @@ afterAll(async () => {
 	await client.query('DELETE FROM evaporation_dataset WHERE dataset = ANY($1::text[])', [[EV, AP]]);
 	await client.query('DELETE FROM gazetteer_reference WHERE dataset = ANY($1::text[])', [[GZ, GZN]]);
 	await client.query('DELETE FROM rain_map_dataset WHERE dataset = ANY($1::text[])', [[MG, LY]]);
-	await client.query('DELETE FROM waterbody_reference WHERE dataset = $1', [WB]);
-	await client.query('DELETE FROM quaternary_reference WHERE dataset = $1', [QT]);
+	await client.query('DELETE FROM waterbody_reference WHERE dataset = ANY($1::text[])', [[WB, WB2]]);
+	await client.query('DELETE FROM quaternary_reference WHERE dataset = ANY($1::text[])', [[QT, QT2]]);
 	await client.query('DELETE FROM quaternary_evaporation WHERE dataset = $1', [QE]);
-	await client.query('DELETE FROM reference_load WHERE dataset = ANY($1::text[])', [[LC, `${LC}-other`, RV, EV, GZ, GZN, MG, LY, AP, WB, QT, QE]]);
+	await client.query('DELETE FROM reference_load WHERE dataset = ANY($1::text[])', [[LC, `${LC}-other`, RV, EV, GZ, GZN, MG, LY, AP, WB, WB2, QT, QT2, QE]]);
 	await client.end();
 	rmSync(dir, { recursive: true, force: true });
 });
@@ -459,6 +461,18 @@ describe('quaternaries, from the file `import:quaternaries --out` writes (the op
 		await replaceQuaternaries(client, QT, []);
 		expect(await recorded('quaternaries', QT)).toBeUndefined();
 	});
+
+	it('a load under a new label that takes every code of an older dataset forgets the older one’s record', async () => {
+		// quaternary_reference is keyed by code, so loading the same outlines as QT2 moves every row out of QT:
+		// QT's record would otherwise name a file for a dataset that has no row left.
+		const bytes = file('');
+		await load({ kind: 'quaternaries', key: 'reference/quaternaries/test.geojson.gz', dataset: QT }, bytes);
+		expect(await recorded('quaternaries', QT)).toBeDefined();
+		await load({ kind: 'quaternaries', key: 'reference/quaternaries/test-new.geojson.gz', dataset: QT2 }, bytes);
+		expect(await rows()).toEqual([]);
+		expect(await recorded('quaternaries', QT)).toBeUndefined();
+		expect(await recorded('quaternaries', QT2)).toEqual({ key: 'reference/quaternaries/test-new.geojson.gz', sha256: sha(bytes) });
+	});
 });
 
 describe('quaternary-evaporation, from the CSV wrsm_evaporation.py writes (the operator’s decision, 2026-11-03)', () => {
@@ -505,6 +519,16 @@ describe('DE Africa Waterbodies polygons (261, issue #604 R5)', () => {
 		expect(err).toBeInstanceOf(LoadError);
 		expect((err as LoadError).code).toBe('empty');
 		expect(await asOwner('SELECT count(*)::int AS n FROM waterbody_reference WHERE dataset = $1', [WB])).toEqual(before);
+	});
+
+	it('a load under a new label that takes every uid of an older dataset forgets the older one’s record', async () => {
+		// waterbody_reference is keyed by uid, so the same clip loaded as WB2 moves every row out of WB.
+		const bytes = gzipSync(readFileSync(SYNTHETIC_WATERBODIES_FILE));
+		expect(await recorded('waterbodies', WB)).toBeDefined();
+		await load({ kind: 'waterbodies', key: 'reference/waterbodies/d1-new.geojson.gz', dataset: WB2 }, bytes);
+		expect(await asOwner('SELECT count(*)::int AS n FROM waterbody_reference WHERE dataset = $1', [WB])).toEqual([{ n: 0 }]);
+		expect(await recorded('waterbodies', WB)).toBeUndefined();
+		expect(await recorded('waterbodies', WB2)).toEqual({ key: 'reference/waterbodies/d1-new.geojson.gz', sha256: sha(bytes) });
 	});
 });
 

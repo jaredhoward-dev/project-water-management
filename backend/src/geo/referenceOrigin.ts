@@ -7,7 +7,9 @@
 // loadRivers.ts, loadGazetteer.ts, rainMap.ts) write that in the same
 // transaction as the data, and any other replace of the dataset (a local
 // `pnpm import:*`, which names no bucket file) deletes it, so the record
-// never outlives the data it describes.
+// never outlives the data it describes. Quaternaries and waterbodies are keyed
+// by code across datasets, so a replace also forgets any other dataset of its
+// kind it left with no row (forgetEmptiedOrigins).
 //
 // Tile archives (248). The tiles bucket serves four archives (TILE_ARCHIVES);
 // backend/scripts/tiles-upload.ts hashes each one it uploads, keeps the
@@ -45,6 +47,26 @@ export async function recordReferenceOrigin(client: pg.ClientBase, kind: Referen
 	if (origin) {
 		await client.query('INSERT INTO reference_load (kind, dataset, source_key, source_sha256) VALUES ($1, $2, $3, $4)', [kind, dataset, origin.key, origin.sha256]);
 	}
+}
+
+/**
+ * Tables keyed by a code across datasets (one row per quaternary or
+ * waterbody, whatever dataset last loaded it): a load under a new label moves
+ * the codes it names out of any older dataset (ON CONFLICT … SET dataset).
+ */
+const CODE_KEYED_TABLES = { quaternaries: 'quaternary_reference', waterbodies: 'waterbody_reference' } as const;
+
+/**
+ * Inside a replace's transaction, after its rows are written: forget the
+ * record of every other dataset of `kind` that the replace left with no row,
+ * so a record never names a file for a dataset that is gone.
+ */
+export async function forgetEmptiedOrigins(client: pg.ClientBase, kind: keyof typeof CODE_KEYED_TABLES, dataset: string): Promise<void> {
+	await client.query(
+		`DELETE FROM reference_load r WHERE r.kind = $1 AND r.dataset <> $2
+		 AND NOT EXISTS (SELECT 1 FROM ${CODE_KEYED_TABLES[kind]} t WHERE t.dataset = r.dataset)`,
+		[kind, dataset]
+	);
 }
 
 /** The file `dataset` was last loaded from, or null (never loaded from a file, or replaced since by a local import). */
