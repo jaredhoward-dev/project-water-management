@@ -1405,8 +1405,11 @@ account with that address is already a member (change a farmer's farms with
   (`unknown language “fr” (use en, af, or the language’s name)`). Rows are then grouped by address: a farmer already
   here gains the farms (`'added'`; the rows never take one away), anyone
   else, account or not, is invited with the farms of all their rows (added
-  to any the invite already names; `'invited'`, issue #136), and a member
-  with another role is an `error`, as is an
+  to any the invite already names; `'invited'`, issue #136; a pending
+  applicant invite stays an applicant's), and a member with another role is
+  an `error` (`already a member of this project (viewer)`), as is a pending
+  invite of another role (`already invited to this project (editor)`: a row
+  never turns it into a farmer's), and an
   address given more than 50 farms in one request (the single-add cap). One email
   per address at most, after commit, with the usual re-send cooldown; the
   first row's language wins. `row` is the index into `rows`.

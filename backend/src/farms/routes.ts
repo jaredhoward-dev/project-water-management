@@ -10,6 +10,9 @@
 // the address is verified (app_accept_invites). POST /farmers/bulk does the
 // same for up to 200 CSV rows at once, matching farms by name; a row for
 // someone already a farmer here adds the farm to their links straight away.
+// A row for a pending applicant invite adds the farm to it as an applicant's;
+// one for a pending invite of another role (an editor's) is refused, never
+// turned into a farmer's.
 //
 // POST /farmers also invites a licence applicant (`role:
 // 'contributor'`, WP-3.3) with the farms they hold (097_contributor_invite_farms):
@@ -173,8 +176,8 @@ async function inviteFarmer(
 	if (!replace) {
 		const { rows } = await db.query<{ node_id: string }>(
 			`SELECT n.node_id FROM invite_node n JOIN invite i ON i.id = n.invite_id
-			 WHERE i.project_id = $1 AND i.email = $2 AND i.project_role = 'farmer'`,
-			[projectId, email]
+			 WHERE i.project_id = $1 AND i.email = $2 AND i.project_role = $3::project_role`,
+			[projectId, email, role]
 		);
 		farms = [...new Set([...rows.map((r) => r.node_id), ...nodeIds])];
 	}
@@ -296,6 +299,14 @@ export const farmerRoutes = new Hono<AuthEnv>()
 				[id, users.map((u) => u.id)]
 			);
 			const roleOf = new Map(members.map((m) => [m.user_id, m.role]));
+			// Pending invites (the owner reads them all): a row adds its farm to a farmer's or an applicant's, as their
+			// own role, and never turns an invite of another role into a farmer's (it would drop an applicant's farms, or
+			// quietly change an editor's role).
+			const { rows: pending } = await db.query<{ email: string; role: string }>(
+				'SELECT lower(email) AS email, project_role::text AS role FROM invite WHERE project_id = $1 AND lower(email) = ANY($2::text[])',
+				[id, emails]
+			);
+			const invitedAs = new Map(pending.map((p) => [p.email, p.role]));
 
 			if (body.dryRun) await db.query('SAVEPOINT bulk_preview');
 			const mails: NonNullable<PendingMail>[] = [];
@@ -323,8 +334,13 @@ export const farmerRoutes = new Hono<AuthEnv>()
 					await recordLinkChanges(db, id, before, (await farmLinks(db, id)).filter((l) => l.userId === user!.id), 'farmers_set');
 					mark('added');
 				} else {
-					// Anyone else is invited, account or not (issue #136): 'invited' either way.
-					const { mail } = await inviteFarmer(db, id, email, nodeIds, rows[0]!.locale, user, false);
+					const invited = invitedAs.get(email);
+					if (invited && invited !== 'farmer' && invited !== 'contributor') {
+						mark('error', `already invited to this project (${invited})`);
+						continue;
+					}
+					// Anyone else is invited, account or not (issue #136): 'invited' either way. A pending applicant invite stays one.
+					const { mail } = await inviteFarmer(db, id, email, nodeIds, rows[0]!.locale, user, false, invited === 'contributor' ? 'contributor' : 'farmer');
 					if (mail) mails.push(mail);
 					mark('invited');
 				}
