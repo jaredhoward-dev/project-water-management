@@ -105,6 +105,25 @@ test('picking a series charts it through the URL: Back returns to the one before
 	await expect(page.getByTestId('gone-series')).toHaveCount(0);
 });
 
+test('a dead series link’s note goes once an upload through Add data charts the new series', async ({ page, owner }) => {
+	void owner;
+	const project = await createProject(page.request, 'Data gone series upload');
+	await putSeries(page.request, project.id, { kind: 'rain_catchment_mm', name: 'Gauge R1', unit: 'mm', startDate: '2021-10-01', values: [1, 2, 3] });
+	await openData(page, project.id, '&series=00000000-0000-4000-8000-000000000000');
+	await expect(page.getByTestId('gone-series')).toHaveText('The series that link named is no longer stored: showing Gauge R1 instead.');
+	// The upload is charted through the URL (the page's onUploaded), not through a row's View: the note must not
+	// go on to say "showing <the upload> instead", as if the link had named a series and the upload stood in for it.
+	await page.getByRole('button', { name: 'Add data', exact: true }).click();
+	const dialog = page.getByRole('dialog', { name: 'Add data' });
+	await dialog.getByLabel('Kind').selectOption({ label: 'Flow — observed gauge' });
+	await dialog.getByLabel('CSV file').setInputFiles(fixture('observed-flow-daily.csv'));
+	await dialog.getByRole('button', { name: 'Upload' }).click();
+	await expect(dialog).toBeHidden();
+	await expect(page).toHaveURL(/[?&]series=/);
+	await expect(seriesRow(page, 'Flow — observed gauge').getByRole('button', { name: 'View', exact: true })).toHaveAttribute('aria-pressed', 'true');
+	await expect(page.getByTestId('gone-series')).toHaveCount(0);
+});
+
 /**
  * Elements on the Data tab that scroll vertically inside themselves (the page is the one scroll; issue #17,
  * 2026-09-29): the series and chart, and the panels below them (data feeds, gauge vs logger, double mass, checks, reference).

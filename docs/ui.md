@@ -6807,7 +6807,9 @@ with the table the data needs).
   deleted since) is dropped from the address (`goto` with `replace`) and a
   one-line note says "The series that link named is no longer stored:
   showing <name> instead", rather than charting another series without a
-  word (issue #586). Deleting the charted series drops the parameter
+  word (issue #586); the note goes as soon as the URL names a stored
+  series by any route (a row's **View**, an upload charting itself, Back or
+  Forward). Deleting the charted series drops the parameter
   (`goto` with `replace`); an upload through **Add data** on this tab charts the
   uploaded series (`series=<id>`, with `replace`, the page's `onUploaded`).
   A `view=<start>~<end>` beside `series=` (a flagged period's **View** on
