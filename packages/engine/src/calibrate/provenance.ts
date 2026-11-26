@@ -139,9 +139,38 @@ const keptForFit = (kept: readonly string[] | null | undefined, seriesId: string
 	].sort();
 };
 
-/** settings.flowMissing without its empty lists, {} for none: two that leave out the same days compare equal. */
-const nonEmpty = (fm: Record<string, CalibrationExclusion[]> | null | undefined): Record<string, CalibrationExclusion[]> =>
-	Object.fromEntries(Object.entries(fm ?? {}).filter(([, l]) => Array.isArray(l) && l.length > 0).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+/**
+ * The days a list of exclusions (or missing periods) leaves out, as merged
+ * inclusive epoch-day ranges, sorted: what scoring reads of the list. Two
+ * lists that leave out the same days are equal however they are written: a
+ * reworded reason, another order, a water year as its dates, or one period
+ * split in two.
+ */
+function excludedDaysKey(list: readonly CalibrationExclusion[] | null | undefined): [number, number][] {
+	const ranges = exclusionRanges(list)
+		.map((r) => [toEpochDay(r.start), toEpochDay(r.end)] as [number, number])
+		.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+	const out: [number, number][] = [];
+	for (const [a, b] of ranges) {
+		const last = out[out.length - 1];
+		if (last && a <= last[1] + 1) last[1] = Math.max(last[1], b);
+		else out.push([a, b]);
+	}
+	return out;
+}
+
+/** The two lists leave out the same days (excludedDaysKey). */
+const sameExcludedDays = (a: readonly CalibrationExclusion[] | null | undefined, b: readonly CalibrationExclusion[] | null | undefined) =>
+	sameJson(excludedDaysKey(a), excludedDaysKey(b));
+
+/** settings.flowMissing as the days each record leaves out, without the records that leave none out: two that leave out the same days compare equal. */
+const nonEmpty = (fm: Record<string, CalibrationExclusion[]> | null | undefined): Record<string, [number, number][]> =>
+	Object.fromEntries(
+		Object.entries(fm ?? {})
+			.filter(([, l]) => Array.isArray(l) && l.length > 0)
+			.map(([k, l]) => [k, excludedDaysKey(l)] as const)
+			.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+	);
 
 /** Day flags (1 = excluded) for a run of `days` days from `startDate`. */
 export function excludedDayMask(ranges: readonly { start: string; end: string }[], startDate: string, days: number): Uint8Array {
@@ -563,15 +592,15 @@ export interface FitContext {
 function withRuleYears(settings: Partial<ProjectSettings>, record: FitRecord): boolean {
 	const rule = record.auto?.ruleExclusions ?? [];
 	if (!rule.length) return false;
-	const key = (xs: readonly CalibrationExclusion[]) => JSON.stringify(exclusionRanges(xs).map((r) => [r.start, r.end]).sort());
-	return key(settings.calibrationExclusions ?? []) === key([...(record.exclusions ?? []), ...rule]);
+	return sameExcludedDays(settings.calibrationExclusions, [...(record.exclusions ?? []), ...rule]);
 }
 
 /** Whether any water year an automated fit's rule left out is still scored under these exclusions. */
 function ruleYearsScored(exclusions: readonly CalibrationExclusion[], ruleYears: readonly CalibrationExclusion[]): boolean {
 	if (!ruleYears.length) return false;
-	const kept = exclusionRanges(exclusions);
-	return exclusionRanges(ruleYears).some((r) => !kept.some((k) => k.start <= r.start && k.end >= r.end));
+	// Merged, so a year the settings leave out in two pieces is left out.
+	const kept = excludedDaysKey(exclusions);
+	return excludedDaysKey(ruleYears).some(([a, b]) => !kept.some(([ka, kb]) => ka <= a && kb >= b));
 }
 
 /** The fit record for a report, as Apply stores it. */
@@ -1198,7 +1227,7 @@ export function fitRecordStatus(settings: Partial<ProjectSettings>, record: FitR
 		windowChanged: (settings.calibrationStart ?? null) !== record.calibrationStart || (settings.calibrationEnd ?? null) !== record.calibrationEnd,
 		// Settings that exclude the fit's exclusions and the years its rule left out (§2.10j) are the fit's own days too.
 		// A record's own missing periods (engine ≥ 1.102.0) are the fit's days too: absent on either side is none.
-		exclusionsChanged: (!sameJson(settings.calibrationExclusions ?? [], record.exclusions ?? []) && !withRuleYears(settings, record)) || !sameJson(nonEmpty(settings.flowMissing), nonEmpty(record.flowMissing)),
+		exclusionsChanged: (!sameExcludedDays(settings.calibrationExclusions, record.exclusions) && !withRuleYears(settings, record)) || !sameJson(nonEmpty(settings.flowMissing), nonEmpty(record.flowMissing)),
 		...(!withRuleYears(settings, record) && ruleYearsScored(settings.calibrationExclusions ?? [], record.auto?.ruleExclusions ?? []) ? { ruleYearsScored: true } : {}),
 		// Compared resolved on both sides, so a stored field left at its default is no change.
 		// A fit at a gauge (engine ≥ 1.41.0) read no gauged range, so a change of the outlet records' ratings is none to it.
