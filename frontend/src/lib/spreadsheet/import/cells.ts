@@ -50,6 +50,39 @@ export function pyStrip(s: string): string {
 }
 
 /**
+ * int() of a run of Python's \\d: any Unicode decimal digit (Nd). Nd digits
+ * come in runs of ten from 0 to 9, so a digit's value is its distance from
+ * the start of its run, mod 10.
+ */
+export function pyDigitsValue(run: string): number {
+	let n = 0;
+	for (const ch of run) {
+		const cp = ch.codePointAt(0)!;
+		let d = cp - 48;
+		if (d < 0 || d > 9) {
+			let start = cp;
+			while (ND.test(String.fromCodePoint(start - 1))) start--;
+			d = (cp - start) % 10;
+		}
+		n = n * 10 + d;
+	}
+	return n;
+}
+
+const ND = /^\p{Nd}$/u;
+
+const PY_INT = /^[+-]?\p{Nd}+(?:_\p{Nd}+)*$/u;
+
+/** Python int() of a string: its whitespace stripped, a sign, Unicode decimal digits with single underscores between; null where int() raises. */
+export function pyInt(s: string): number | null {
+	const t = pyStrip(s);
+	if (!PY_INT.test(t)) return null;
+	const n = pyDigitsValue(t.replace(/^[+-]/, '').replaceAll('_', ''));
+	return t.startsWith('-') ? -n : n;
+}
+
+
+/**
  * Whether openpyxl would have returned this number as an int: it does when the
  * cell's XML text has no '.' and no exponent, which Excel writes for every
  * integral value below 1e15 (it switches to 'E' notation above that).

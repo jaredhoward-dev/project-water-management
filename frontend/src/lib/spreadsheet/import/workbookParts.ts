@@ -1,8 +1,11 @@
 // The two small parts the reader needs before any sheet: workbook.xml (the
 // sheets, the defined names and the date system) and styles.xml (enough of
 // it to give each cell style its number format, which is how a date cell is
-// told from a number). Both are read the way SheetJS read them, so a sheet
-// or named range resolves exactly as before.
+// told from a number). workbook.xml is read the way SheetJS read it, so a
+// sheet or named range resolves exactly as before; styles.xml the way
+// openpyxl 3.1.5 reads it, since the Python importer decides date vs number
+// (issue #895).
+import { pyInt } from './cells';
 import { decodeXml } from './ooxml';
 import type { DefinedName } from './source';
 import { UnreadableWorkbookError } from './errors';
@@ -126,33 +129,34 @@ const BUILTIN_FORMATS: [number, string][] = [
 	[49, '@']
 ];
 
-/** Formats SheetJS rewrites on load (a Google Sheets quirk). */
-const BAD_FORMATS: Record<string, string> = { 'd.m': 'd\\.m' };
-
-const MAX_FMT_ID = 0x188;
-const CANONICAL_INDEX = /^(?:0|[1-9]\d*)$/;
-
-/** Cell style → number format, as SheetJS resolved it (cellNF). */
+/**
+ * Cell style → number format, as openpyxl 3.1.5 resolves it (issue #895):
+ * a cell's s attribute is read with Python's int() (no s is style 0) and
+ * names a cellXfs <xf>; the xf's numFmtId (0 when absent) is looked up in the
+ * workbook's own formats first, any id (0 included, past 0x188 as written),
+ * then in BUILTIN_FORMATS. A style index out of range, or an id in neither
+ * table, has no format: a number. Where styles.xml repeats <numFmts> or
+ * <cellXfs>, the last block counts, as in openpyxl. openpyxl refuses an s, a
+ * numFmtId or a numFmt id that int() can't read; so does this.
+ */
 export class Styles {
 	private readonly cache = new Map<string, number>();
-	/** Distinct format strings (undefined = SheetJS had none), indexed by zIndex(). */
+	/** Distinct format strings (undefined = no format), indexed by zIndex(). */
 	readonly formats: (string | undefined)[] = [];
 	private readonly formatIndex = new Map<string | undefined, number>();
 
 	constructor(
 		private readonly table: Map<number, string>,
-		/** Each cellXfs <xf>'s numFmtId after SheetJS's processing (a number, NaN, '' or undefined); null without a <cellXfs>. */
-		private readonly xfs: (number | string | undefined)[] | null
+		/** Each cellXfs <xf>'s numFmtId; empty without a <cellXfs>. */
+		private readonly xfs: number[]
 	) {}
 
 	/** The number format of a cell whose s attribute is `s` (raw), or undefined. */
 	format(s: string | undefined): string | undefined {
-		let id: number | string = 0;
-		if (s !== undefined && this.xfs && CANONICAL_INDEX.test(s)) {
-			const i = Number(s);
-			if (i < this.xfs.length) id = this.xfs[i] ?? 0;
-		}
-		return typeof id === 'number' ? this.table.get(id) : undefined;
+		const i = s === undefined ? 0 : pyInt(s);
+		if (i === null) throw new UnreadableWorkbookError(`a cell style index in it is not a number (${s!.slice(0, 20)})`, 'corrupt');
+		if (i < 0 || i >= this.xfs.length) return undefined;
+		return this.table.get(this.xfs[i]!);
 	}
 
 	/** format(s) as an index into `formats`, cached per distinct s. */
@@ -173,40 +177,35 @@ export class Styles {
 	}
 }
 
-/** No styles part: every cell is General, as in SheetJS. */
+/** No styles part: no cell has a format. */
 export function defaultStyles(): Styles {
-	return new Styles(new Map(BUILTIN_FORMATS), null);
+	return new Styles(new Map(BUILTIN_FORMATS), []);
+}
+
+function formatId(raw: string, what: string): number {
+	const id = pyInt(raw);
+	if (id === null) throw new UnreadableWorkbookError(`a ${what} in it is not a number (${raw.slice(0, 20)})`, 'corrupt');
+	return id;
 }
 
 /**
- * Read xl/styles.xml: the first <numFmts> block's custom formats and the
- * first <cellXfs> block's <xf numFmtId>, with SheetJS's handling of ids past
- * 0x188 (moved into the free slots below it) and its Google Sheets fix.
+ * Read xl/styles.xml as openpyxl does for dates: the last <numFmts> block's
+ * formats by id and the last <cellXfs> block's <xf numFmtId>.
  */
 export function readStyles(bytes: Uint8Array, part: string): Styles {
-	const numFmts: { id: string | undefined; code: string | undefined }[] = [];
-	const xfIds: (string | undefined)[] = [];
-	let hasNumFmts = false;
-	let hasXfs = false;
-	let seenNumFmts = false;
-	let seenXfs = false;
+	let numFmts: { id: string | undefined; code: string | undefined }[] = [];
+	let xfIds: (string | undefined)[] = [];
 	let inNumFmts = -1;
 	let inXfs = -1;
 	let depth = 0;
 	scanXml(bytes, part, {
 		open(local, tag, selfClosing) {
-			if (local === 'numFmts' && !seenNumFmts) {
-				seenNumFmts = true;
-				if (!selfClosing) {
-					hasNumFmts = true;
-					inNumFmts = depth;
-				}
-			} else if (local === 'cellXfs' && !seenXfs) {
-				seenXfs = true;
-				if (!selfClosing) {
-					hasXfs = true;
-					inXfs = depth;
-				}
+			if (local === 'numFmts') {
+				numFmts = [];
+				if (!selfClosing) inNumFmts = depth;
+			} else if (local === 'cellXfs') {
+				xfIds = [];
+				if (!selfClosing) inXfs = depth;
 			} else if (local === 'numFmt' && inNumFmts >= 0) numFmts.push({ id: tag.attr('numFmtId'), code: tag.attr('formatCode') });
 			else if (local === 'xf' && inXfs >= 0) xfIds.push(tag.attr('numFmtId'));
 			depth++;
@@ -221,37 +220,11 @@ export function readStyles(bytes: Uint8Array, part: string): Styles {
 	});
 
 	const table = new Map(BUILTIN_FORMATS);
-	let numberFmt: Map<number, string> | null = null;
-	if (hasNumFmts) {
-		numberFmt = new Map(table);
-		for (const f of numFmts) {
-			if (f.code === undefined) throw new UnreadableWorkbookError('a number format in it has no format code', 'corrupt');
-			const code = unescapeXml(utf8read(f.code));
-			let j = parseInt(f.id ?? '', 10);
-			numberFmt.set(j, code);
-			if (j > 0) {
-				if (j > MAX_FMT_ID) {
-					for (j = MAX_FMT_ID; j > 0x3c; --j) if (numberFmt.get(j) == null) break;
-					numberFmt.set(j, code);
-				}
-				table.set(j, Object.hasOwn(BAD_FORMATS, code) ? BAD_FORMATS[code]! : code);
-			}
-		}
+	for (const f of numFmts) {
+		if (f.code === undefined) throw new UnreadableWorkbookError('a number format in it has no format code', 'corrupt');
+		if (f.id === undefined) throw new UnreadableWorkbookError('a number format in it has no id', 'corrupt');
+		table.set(formatId(unescapeXml(utf8read(f.id)), 'number format id'), unescapeXml(utf8read(f.code)));
 	}
-	let xfs: (number | string | undefined)[] | null = null;
-	if (hasXfs) {
-		xfs = xfIds.map((raw) => {
-			let id: number | string | undefined = raw ? parseInt(raw, 10) : raw;
-			if (numberFmt && typeof id === 'number' && id > MAX_FMT_ID) {
-				for (let i = MAX_FMT_ID; i > 0x3c; --i) {
-					if (numberFmt.get(id) == numberFmt.get(i)) {
-						id = i;
-						break;
-					}
-				}
-			}
-			return id;
-		});
-	}
+	const xfs = xfIds.map((raw) => (raw === undefined ? 0 : formatId(unescapeXml(utf8read(raw)), 'cell style numFmtId')));
 	return new Styles(table, xfs);
 }
