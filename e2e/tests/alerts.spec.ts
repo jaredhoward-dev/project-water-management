@@ -109,8 +109,15 @@ test('a farmer chooses how often they get their dam alerts, and the choice is ke
 
 	// What alert emails are, on the farmer words page.
 	await p.getByRole('link', { name: 'What are alert emails?' }).click();
-	await expect(p).toHaveURL(/\/farm\/words#farm-alerts$/);
+	await expect(p).toHaveURL(/\/farm\/words\?from=%2Faccount%2Falerts#farm-alerts$/);
 	await expect(p.locator('#farm-alerts')).toContainText('only a notice from your WUA or from DWS is one');
+	// The words page's back link leads back to these settings, named for them, not to the list of units.
+	await p.setViewportSize({ width: 360, height: 740 });
+	const back = p.locator('.farm-header').getByRole('link', { name: 'Alert emails' });
+	await expect(back).toHaveAttribute('href', '/account/alerts');
+	await back.click();
+	await expect(p).toHaveURL(/\/account\/alerts$/);
+	await expect(p.getByRole('link', { name: 'What are alert emails?' })).toBeVisible();
 });
 
 // A farmer-only user has no workspace: their account pages sit in the farmer
@@ -130,7 +137,7 @@ test('a farmer-only user’s account pages sit in the farm frame, in their langu
 	await p.goto('/account/invitations');
 	await expect(p.locator('main[data-ready="true"]')).toBeVisible();
 	await p.getByRole('link', { name: 'What does accepting mean?' }).click();
-	await expect(p).toHaveURL(/\/farm\/words#farm-invitation$/);
+	await expect(p).toHaveURL(/\/farm\/words\?from=%2Faccount%2Finvitations#farm-invitation$/);
 	await expect(p.locator('#farm-invitation')).toContainText('Other farmers in the catchment never see your name');
 	await acceptInvites(farmer.user.email, project.id);
 
@@ -178,11 +185,13 @@ test('a farmer-only user’s account pages sit in the farm frame, in their langu
 
 	// How two-step sign-in works: the farmer words, in the farm frame, not the workspace's guide.
 	const howTwoStep = p.getByRole('region', { name: 'Two-step sign-in' }).getByRole('link', { name: 'How two-step sign-in works' });
-	await expect(howTwoStep).toHaveAttribute('href', '/farm/words#farm-two-step');
+	await expect(howTwoStep).toHaveAttribute('href', '/farm/words?from=%2Faccount#farm-two-step');
 	await howTwoStep.click();
-	await expect(p).toHaveURL(/\/farm\/words#farm-two-step$/);
+	await expect(p).toHaveURL(/\/farm\/words\?from=%2Faccount#farm-two-step$/);
 	await expect(p.locator('#farm-two-step')).toContainText('nothing else about your account changes');
-	await p.goto('/account');
+	// Its back link returns to the account page, named for it.
+	await p.locator('.farm-header').getByRole('link', { name: 'Account' }).click();
+	await expect(p.getByRole('heading', { level: 1, name: 'Account' })).toBeVisible();
 
 	// A member of a catchment as well: the workspace frame, and the workspace's guide.
 	const other = await createProject(page.request, 'Frame viewer catchment');
@@ -265,7 +274,7 @@ test('thirty farms’ dam alerts read as two columns of rows in one wide card', 
 	await p.goto('/account/invitations');
 	await expect(p.locator('main[data-ready="true"]')).toBeVisible();
 	await p.getByRole('link', { name: 'What does accepting mean?' }).click();
-	await expect(p).toHaveURL(/\/farm\/words#farm-invitation$/);
+	await expect(p).toHaveURL(/\/farm\/words\?from=%2Faccount%2Finvitations#farm-invitation$/);
 	await expect(p.locator('#farm-invitation')).toContainText('Other farmers in the catchment never see your name');
 	await acceptInvites(farmer.user.email, project.id);
 

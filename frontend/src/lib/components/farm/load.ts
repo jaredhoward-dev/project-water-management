@@ -64,19 +64,34 @@ export function farmHref(base: string, projectId: string, nodeId: string | null,
 /**
  * A farm page's own address (path and ?node=, without the app's base) that
  * /farm/words may send its back link to: one farm page, its Why?, dam or
- * who-decides page, nothing else. Anything else (another site, another app
+ * who-decides page, or one of the three account pages that link to a farmer
+ * word (/account, /account/alerts, /account/invitations, exactly), nothing else. Anything else (another site, another app
  * page, a path with dots or slashes doubled) is null, so `?from=` can never
  * be an open redirect.
  */
 const FARM_RETURN = /^\/farm\/(?!words(?:[/?]|$))[\w-]+(?:\/(?:why|dam|who-decides))?(?:\?node=[\w-]+)?$/;
+const ACCOUNT_RETURN = /^\/account(?:\/(?:alerts|invitations))?$/;
 export function farmReturn(raw: string | null | undefined): string | null {
-	return raw && FARM_RETURN.test(raw) ? raw : null;
+	return raw && (FARM_RETURN.test(raw) || ACCOUNT_RETURN.test(raw)) ? raw : null;
 }
 
 /**
- * "/farm/words" (with `#anchor`), carrying the farm page it is opened from as
- * `?from=`, so its back link returns there rather than to the list of farms.
- * `here` is the current URL; a page that isn't a farm page adds nothing, and
+ * Which page a `farmReturn` address is: the farm's own page, its dam, Why?
+ * or who-decides page, or an account page. The words page names its back link by it,
+ * so "back" never says "My hydrological unit" and lands on the dam page.
+ */
+export type FarmReturnPage = 'farm' | 'dam' | 'why' | 'who-decides' | 'account' | 'alerts' | 'invitations';
+export function farmReturnPage(from: string | null): FarmReturnPage | null {
+	if (!from || !farmReturn(from)) return null;
+	if (ACCOUNT_RETURN.test(from)) return from === '/account/alerts' ? 'alerts' : from === '/account/invitations' ? 'invitations' : 'account';
+	const sub = from.split('?')[0]!.split('/')[3];
+	return sub === 'dam' || sub === 'why' || sub === 'who-decides' ? sub : 'farm';
+}
+
+/**
+ * "/farm/words" (with `#anchor`), carrying the farm or account page it is
+ * opened from as `?from=`, so its back link returns there rather than to the
+ * list of farms. `here` is the current URL; any other page adds nothing, and
  * the words page passes on its own `from`.
  */
 export function wordsHref(base: string, here: Pick<URL, 'pathname' | 'search'>, anchor = ''): string {
