@@ -1600,7 +1600,7 @@ describe('later ops (engine ≥ 1.35.0): moving and inserting nodes', () => {
 		expect(river.input.model.transfers[0]!.source ?? 'dam').toBe('dam');
 	});
 
-	it('sets where an off-take’s canal seepage rejoins (engine 1.42.0): below the source or a farm below it, and a removed unit returns none', () => {
+	it('sets where an off-take’s canal seepage rejoins (engine 1.42.0): below the source or a farm below it, and a removed unit draining into the outflow gauge returns none', () => {
 		const b = base();
 		b.model.transfers = [{ id: 'r1', fromNodeId: 'C', toNodeId: 'B', months: [1], maxRateM3s: 0.01, dailyCapM3: null, minStoragePct: 0, enabled: true, priority: 0, source: 'river', lossPct: 0.2 }];
 		const ok = applyScenario(b, [
@@ -1616,7 +1616,63 @@ describe('later ops (engine ≥ 1.35.0): moving and inserting nodes', () => {
 		const gone = applyScenario(ok.input, [{ op: 'node.remove', nodeId: 'A' }]);
 		expect(gone.problems).toEqual([]);
 		expect(gone.input.model.transfers[0]).toMatchObject({ lossReturnPct: 0, lossReturnNodeId: null });
-		expect(gone.applied[0]!.notes.join()).toMatch(/seepage no longer returns to the river \(it rejoined below "Farm A"\)/);
+		// A drained into the outflow gauge, which no seepage can rejoin below (offtakeReturnAt asks for a farm): none returns, as before issue #853.
+		expect(gone.applied[0]!.notes.join()).toMatch(/seepage no longer returns to the river \(it rejoined below "Farm A", and "Outlet gauge", which it drained into, isn't a farm/);
+		expect(checkAll(gone.input)).toBeNull();
+	});
+
+	// Issue #853: removing a unit an off-take's seepage rejoins below re-points that seepage one unit lower, so the
+	// water stays in the river; zeroing it sent it out of the catchment and scored the drop below as the proposal's.
+	/** C → A → D → G and B → G; r1, another party's off-take at C for B, returns all its canal losses below A. */
+	const seepageBelowA = (withR1 = true): ModelInput => {
+		const b = base();
+		b.model.nodes.push(node('D', { downstreamNodeId: 'G', sortOrder: 4 }));
+		nodeOf(b, 'A')!.downstreamNodeId = 'D';
+		if (withR1)
+			b.model.transfers.push({ id: 'r1', fromNodeId: 'C', toNodeId: 'B', months: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], maxRateM3s: 0.01, dailyCapM3: null, minStoragePct: 0, enabled: true, priority: 0, source: 'river', sizing: 'capacity', lossPct: 0.2, lossReturnPct: 1, lossReturnNodeId: 'A' });
+		return b;
+	};
+	const total = (out: { series: RunSeries[] }, nodeId: string, key: string) =>
+		(out.series.find((x) => x.nodeId === nodeId && x.key === key)?.values ?? []).reduce((a, v) => a + v, 0);
+
+	it('node.remove of the unit an off-take’s seepage rejoins below re-points it one unit lower, and the water stays in the river (issue #853)', () => {
+		const b = seepageBelowA();
+		expect(applyScenario(b, []).problems).toEqual([]);
+		const gone = applyScenario(b, [{ op: 'node.remove', nodeId: 'A' }]);
+		expect(gone.problems).toEqual([]);
+		expect(gone.input.model.transfers.find((t) => t.id === 'r1')).toMatchObject({ lossReturnNodeId: 'D', lossReturnPct: 1, lossPct: 0.2 });
+		expect(gone.applied[0]!.notes.join()).toMatch(/seepage now rejoins the river below "Farm D" \(it rejoined below "Farm A"\)/);
+		// The invariants, the water account's balance among them, hold on the scenario's input.
+		expect(checkAll(gone.input)).toBeNull();
+		const out = runModel(gone.input);
+		expect(out.summary.warnings.join(' ')).not.toMatch(/seepage|r1/);
+		const returned = total(out, 'D', 'offtake_loss_return');
+		expect(returned).toBeGreaterThan(0);
+		// Against today's zeroing: the same water reaches the outlet, rather than leaving the catchment as a loss.
+		const zeroed = cloneData(gone.input);
+		Object.assign(zeroed.model.transfers.find((t) => t.id === 'r1')!, { lossReturnNodeId: null, lossReturnPct: 0 });
+		const lost = runModel(zeroed);
+		expect(total(out, 'G', 'outflow') - total(lost, 'G', 'outflow')).toBeCloseTo(returned, 3);
+		expect(total(lost, 'D', 'offtake_loss_return')).toBe(0);
+	});
+
+	it('node.remove re-points a hidden off-take’s seepage without the applicant’s view revealing it exists (issue #853)', () => {
+		// The applicant owns A and D; C and B, r1 and t1 (C → A) are another party's, hidden.
+		const mask = (transfers: string[]): ScenarioMask => ({ nodes: { B: 'Farm 1', C: 'Farm 2' }, transfers });
+		const remove: ScenarioOp[] = [{ op: 'node.remove', nodeId: 'A' }];
+		const hidden = applyScenario(seepageBelowA(), remove, { mask: mask(['t1', 'r1']) });
+		const without = applyScenario(seepageBelowA(false), remove, { mask: mask(['t1']) });
+		expect(hidden.problems).toEqual([]);
+		// The seepage still rejoins one unit lower in the input the run reads.
+		expect(hidden.input.model.transfers.find((t) => t.id === 'r1')).toMatchObject({ lossReturnNodeId: 'D', lossReturnPct: 1 });
+		// What the applicant reads is the same as with no such off-take at all: notes, problems, and the op's class.
+		expect(hidden.applied.map((a) => a.notes)).toEqual(without.applied.map((a) => a.notes));
+		expect(hidden.problems).toEqual(without.problems);
+		expect(hidden.assessorProblems ?? []).toEqual(without.assessorProblems ?? []);
+		expect(hidden.applied[0]!.notes.join()).not.toMatch(/seepage|off-take/);
+		expect(classifyOp(remove[0]!, ['A', 'D'], seepageBelowA())).toBe(classifyOp(remove[0]!, ['A', 'D'], seepageBelowA(false)));
+		// Positive control: unmasked, the caller sees the off-take and is told where its seepage went.
+		expect(applyScenario(seepageBelowA(), remove).applied[0]!.notes.join()).toMatch(/seepage now rejoins the river below "Farm D"/);
 	});
 
 	it('sizes an off-take by a diversion curve (engine 1.113.0): the curve first, the sizing last; the sizing before the curve is skipped', () => {

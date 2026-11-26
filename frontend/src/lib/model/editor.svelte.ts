@@ -188,9 +188,16 @@ export class ModelEditor {
 		m.cropAreas = m.cropAreas.filter((a) => a.nodeId !== id);
 		// A rule split between destinations (engine ≥ 1.114.0) goes with any of them, as a scenario's node.remove does.
 		m.transfers = m.transfers.filter((t) => t.fromNodeId !== id && !transferDestinations(t).some((d) => d.nodeId === id));
-		// An off-take whose seepage rejoined below it returns none now, as a scenario's node.remove leaves it (engine ≥ 1.42.0).
+		// An off-take whose seepage rejoined below it (engine ≥ 1.42.0) rejoins one unit lower, below the unit the removed
+		// one drained into, as a scenario's node.remove re-points it (issue #853); it returns none only when that unit
+		// isn't a farm (the outflow gauge, usually), which no seepage can rejoin below.
+		const below = m.nodes.find((n) => n.id === removed?.downstreamNodeId);
 		for (const t of m.transfers) {
 			if (t.lossReturnNodeId !== id) continue;
+			if (below?.kind === 'farm') {
+				t.lossReturnNodeId = below.id;
+				continue;
+			}
 			t.lossReturnNodeId = null;
 			t.lossReturnPct = 0;
 		}
