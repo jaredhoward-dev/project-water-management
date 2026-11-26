@@ -19,11 +19,13 @@ export type FromWorker =
 export function parseStartMessage(data: unknown): ToWorker | null {
 	if (!isObj(data) || data.type !== 'start' || !onlyKeys(data, ['type', 'request'])) return null;
 	const r = data.request;
-	if (!isObj(r) || !onlyKeys(r, ['apiBase', 'projectId', 'runId', 'auditNodeId'])) return null;
+	if (!isObj(r) || !onlyKeys(r, ['apiBase', 'projectId', 'runId', 'auditNodeId', 'timeZone'])) return null;
 	if (typeof r.apiBase !== 'string' || !isId(r.projectId) || !isId(r.runId)) return null;
 	if (r.auditNodeId !== undefined && !isId(r.auditNodeId)) return null;
+	if (r.timeZone !== undefined && !isId(r.timeZone)) return null;
 	const request: WorkbookRequest = { apiBase: r.apiBase, projectId: r.projectId, runId: r.runId };
 	if (r.auditNodeId !== undefined) request.auditNodeId = r.auditNodeId;
+	if (r.timeZone !== undefined) request.timeZone = r.timeZone;
 	return { type: 'start', request };
 }
 

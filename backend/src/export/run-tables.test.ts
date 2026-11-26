@@ -2023,6 +2023,15 @@ describe('gapRainLines (engine ≥ 1.101.0, issue #604 R4-E)', () => {
 		]
 	} as unknown as NonNullable<RunSummary['gapRain']>;
 
+	it("dates the summary CSV's credits by the run's day in the project's zone, not UTC's (issue #860)", () => {
+		// 23:30 UTC on 26 October: the 27th in Johannesburg (the default), still the 26th in St John's.
+		const at = (timeZone?: string) =>
+			[...summaryCsvLines({ ...meta, createdAt: '2026-10-26T23:30:00.000Z', ...(timeZone ? { timeZone } : {}) }, { ...summary, gapRain })].find((l) => l.includes('IMERG Late Precipitation'))!;
+		expect(at()).toContain('accessed 2026-10-27,');
+		expect(at('Africa/Johannesburg')).toContain('accessed 2026-10-27,');
+		expect(at('America/St_Johns')).toContain('accessed 2026-10-26,');
+	});
+
 	it('lists the choice, each product, the days each filled with IMERG’s version, and the credits word for word', () => {
 		const credits = runRainCredits({ summary: { gapRain } }, '2026-10-27');
 		const rows = [...gapRainLines(gapRain, credits)].map((l) => splitCsv(l, ',')[0]!.cells);

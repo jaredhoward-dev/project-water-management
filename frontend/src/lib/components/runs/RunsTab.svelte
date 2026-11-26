@@ -563,7 +563,8 @@
 					projectId,
 					detail.run.id,
 					editor.model.nodes.map((n) => ({ id: n.id, name: n.name, kind: n.kind })),
-					detail.run.summary.farms.length > 0 ? { onPreview: previewFarmTable } : null
+					detail.run.summary.farms.length > 0 ? { onPreview: previewFarmTable } : null,
+					project.timeZone
 				)
 			: []
 	);

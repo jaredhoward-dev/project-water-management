@@ -455,7 +455,7 @@
 							coverageRows(series, run)
 						)}
 						<!-- The credits the run's data owe (issue #604 R4-E, R5-E): ERA5-Land, IMERG Late, the ECMWF forecast, AgERA5 and NASA POWER's reference ET, word for word. -->
-						{@const credits = reportRainCredits(run)}
+						{@const credits = reportRainCredits(run, project.timeZone)}
 						{#if credits.length}
 							<h3>Data credits</h3>
 							<ul class="credits" data-testid="report-rain-credits">

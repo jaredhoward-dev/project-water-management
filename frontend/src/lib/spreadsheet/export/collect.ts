@@ -4,6 +4,7 @@
 // docs/api.md § Bulk run series), reporting progress per node. `fetchFn` is
 // injected so collect.test.ts runs without a server.
 import { runRainCredits, type RunSummary } from '@water-management/engine';
+import { projectDay } from '#lib/components/project/project.js';
 import { DownloadError } from '#lib/export/download.js';
 import { exportUrls, filenameFromDisposition, type WorkbookRequest } from '#lib/export/urls.js';
 import type { DailyTable, WorkbookInput } from './workbook';
@@ -126,8 +127,8 @@ export async function collectWorkbookInput(
 		input: {
 			summaryCsv,
 			summary: run.summary,
-			// The data sources' credits on the first sheet (issue #604 R4-E, R5-E), read on the run's day.
-			credits: runRainCredits(run, (run.createdAt ?? new Date().toISOString()).slice(0, 10)),
+			// The data sources' credits on the first sheet (issue #604 R4-E, R5-E), read on the run's day in the project's zone (#860).
+			credits: runRainCredits(run, projectDay(run.createdAt ?? new Date().toISOString(), req.timeZone)),
 			settings: run.settings,
 			model: run.model,
 			catchment: flagged(catchment),

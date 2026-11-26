@@ -242,6 +242,7 @@
 					{nodes}
 					{series}
 					{projectSettings}
+					timeZone={project.timeZone}
 					{hasRecord}
 					{changed}
 					landing={(land) => (landResults = land)}
