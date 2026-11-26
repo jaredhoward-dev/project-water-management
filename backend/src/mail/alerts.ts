@@ -319,7 +319,7 @@ export function digestMail(
 	cap: number,
 	more = 0,
 	feedback?: Feedback,
-	leftOut?: { n: number; limit: number }
+	leftOut?: { n: number; catchments?: number; limit: number }
 ): Mail {
 	const { tr, lang } = translator(to.locale);
 	const paragraphs: Para[] = [tr.t('mail.alert.digest.intro')];
@@ -333,6 +333,8 @@ export function digestMail(
 	if (more > 0) paragraphs.push(tr.tn('mail.alert.digest.more', more, { more }));
 	// Lines of this catchment the per-person limit dropped (app_alert_claim_digest, 371): said, never silently lost.
 	if (leftOut && leftOut.n > 0) paragraphs.push(tr.tn('mail.alert.digest.leftOut', leftOut.n, { n: leftOut.n, limit: leftOut.limit }));
+	// Whole catchments of the person's that kept no line (386, issue #883): said in each of their digests.
+	if (leftOut?.catchments) paragraphs.push(tr.tn('mail.alert.digest.catchmentsLeftOut', leftOut.catchments, { n: leftOut.catchments, limit: leftOut.limit }));
 	paragraphs.push(...liabilityLines(items.map((f) => f.kind), to.farmer, tr));
 	const mail = render(
 		'alert_digest',

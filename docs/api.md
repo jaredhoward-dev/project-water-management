@@ -230,7 +230,11 @@ stored only as SHA-256 hashes. Links point at `SITE_URL`:
   reportSubscriptions, auditEvents, auditEventsTruncated }`. `alertFeedback`
   is their "Was this useful?" rows on alert emails, answered or not,
   `[{ projectId, kind, sentAt, useful, comment, answeredAt }]` (151; never
-  the token's hash or nonce). `preferences`
+  the token's hash or nonce). `alertDeliveries` is the alert emails and
+  digest lines queued for them, `[{ projectId, kind, mode, status, via,
+  createdAt, sentAt }]`: `mode` is the choice they had when the alert was
+  queued, `via` how it went out (its own email or a digest line), which can
+  differ since the choice at send time wins (370; data-model.md § Alerts). `preferences`
   is the person's saved display preferences, `[{ preferences, updatedAt }]`,
   or `[]` if they never saved any. `packNotices` is the evidence pack emails
   sent to them (each kept 30 days after it was sent, skipped or failed), `[{ projectId, packId, event, status,
@@ -1807,8 +1811,13 @@ the worker mails each recipient ([§ below](#how-alert-mail-is-sent)).
   while a person has no more than 200 of them. A catchment that lost lines
   to the limit says how many in its own digest ("35 older alerts for this
   catchment were left out of this summary, because one day's summaries list
-  at most 200 alerts across all your catchments"), after "…and N more"; that
-  count is of the lines dropped, not rechecked against the reader's access. A person's digest lines go to one worker
+  at most 200 alerts across all your catchments"), after "…and N more".
+  Past 200 catchments with lines due, whole catchments keep none: every
+  digest the person gets that morning then says how many ("Alerts for 12
+  other catchments of yours were left out of today's summaries…"; 386, issue
+  #883). Neither count includes alerts the reader no longer gets, turned
+  off, or whose rule an editor switched off: those lines are skipped first,
+  as the sender would skip them, and take no place in the 200. A person's digest lines go to one worker
   (a per-person advisory lock, 357), so two workers at once never split
   them over two emails.
 - **The mode at send time wins** (issue #868, 370): a delivery goes by the
@@ -1817,7 +1826,8 @@ the worker mails each recipient ([§ below](#how-alert-mail-is-sent)).
   chosen once a day, goes in the next digest instead; a digest line from
   someone who has since chosen right away goes out at the next tick, on its
   own (under the daily cap as ever). A line the cap put in the digest stays
-  there.
+  there. A switch made while that tick is sending (between the claim and
+  the email being built) takes effect from the next alert, not that one.
 - The mail is built **as its recipient**, under RLS, when it is sent: their
   access and choice are checked again then (a member removed since the
   event, or who turned the alert off, gets nothing; nor does anyone once an
