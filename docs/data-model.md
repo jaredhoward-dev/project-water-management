@@ -4044,11 +4044,13 @@ never to a farmer, contributor or viewer.
   `water_app` (a call as `water_app` is `42501`), pinned `search_path`:
   - `billing_metrics_accounts(month) → TABLE`: per billing account, its
     plan today, when its person or team started, its catchments today, and
-    the month's runs (`model_run.created_at` in the SAST month), reports
+    the month's runs (`model_run.created_at` in the SAST month; `trigger`
+    `manual` only since 402, so a live catchment's automatic runs aren't
+    activity), reports
     (`usage_counter`) and assistant cost, unpriced turns and latest spend
     (`assistant_usage`, its UTC month).
   - `billing_metrics_people(month) → TABLE`: per person, the address,
-    sign-up, verified or not, first run, and whether the sign-up's SAST
+    sign-up, verified or not, first run (a `manual` one, 402), and whether the sign-up's SAST
     month is `month` and its SAST day.
   The month's edges are Africa/Johannesburg's whatever the session's time
   zone (`src/billing/metrics.db.test.ts`).
