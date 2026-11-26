@@ -177,7 +177,7 @@ describe('readWorkbook', () => {
 	it('never parses a sheet it does not read, however broken', async () => {
 		const file = workbookPackage({ sheets: [['S', worksheet('<row r="1"><c r="A1"><v>1</v></c></row>')], ['Element', '<not xml at all']] });
 		const wb = await readWorkbook(file);
-		expect(wb.sheet('S')?.cell(1, 1)).toEqual({ t: 'n', v: 1, z: 'General' });
+		expect(wb.sheet('S')?.cell(1, 1)).toEqual({ t: 'n', v: 1, z: undefined });
 		expect(wb.sheet('Element')).toBeUndefined();
 	});
 

@@ -11,12 +11,13 @@
 // differently. The strings here avoid those; ./stringDecoding.test.ts pins
 // each one to openpyxl's committed output and lists exactly which cells differ
 // from SheetJS.
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { XlDateTime, XlDuration } from './cells';
 import { readWorkbookWithSheetJS, readerDifference } from './sheetjsReference';
 import { MAIN_NS, workbookPackage, worksheet } from './testPackage';
 import { syntheticB023 } from './testWorkbook';
+import { UnreadableWorkbookError } from './errors';
 import { B023Workbook, readWorkbook } from './workbook';
 
 const FIXTURE = new URL('../../../../../scripts/wbt-import/fixtures/synthetic_b023.xlsx', import.meta.url);
@@ -65,9 +66,7 @@ const EDGE = worksheet(
 			c('E2', ' s="4"', '<v>3.14159</v>'),
 			c('F2', ' s="5"', '<v>40180</v>'),
 			c('G2', ' s="6"', '<v>7</v>'),
-			c('H2', ' s="01"', '<v>40179</v>'),
-			c('I2', ' s="99"', '<v>40179</v>'),
-			c('J2', ' s=" 1"', '<v>40179</v>')
+			c('I2', ' s="99"', '<v>40179</v>')
 		].join('')}</row>`,
 		`<row r="3">${['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '13'].map((v, i) => c(`${'ABCDEFGHIJKL'[i]}3`, ' t="s"', `<v>${v}</v>`)).join('')}</row>`,
 		`<row r="4">${[
@@ -158,7 +157,7 @@ describe('streaming reader parity with SheetJS', () => {
 		expect(streamed.cell('Edge', 12, 3)).toBe('');
 		expect(streamed.cell('Edge', 3, 2)).toEqual(new XlDateTime('2010-01-01', 43_200_000));
 		expect(streamed.cell('Edge', 4, 2)).toEqual(new XlDuration(1.25));
-		expect(streamed.cell('Edge', 5, 2)).toBe(3.14159); // numFmtId 500, moved below 0x188: not a date
+		expect(streamed.cell('Edge', 5, 2)).toBe(3.14159); // numFmtId 500, '0.000': not a date
 		expect(streamed.cell('Edge', 10, 6)).toBe('#UNKNOWN!');
 		expect(Number.isNaN(streamed.cell('Edge', 3, 7))).toBe(true);
 		expect(streamed.cell('Edge', 6, 7)).toBeNull();
@@ -217,4 +216,108 @@ describe('built-in number formats decided as openpyxl does (issue #895)', () => 
 		const sheetjsDates = FORMAT_IDS.filter((id) => typeof reference.cell('Formats', 1, id + 1) !== 'number');
 		expect(sheetjsDates).toEqual([...OPENPYXL_DATE_IDS, ...SHEETJS_ONLY_DATE_IDS].sort((a, b) => a - b));
 	});
+});
+
+// How a cell's style finds its number format, as openpyxl 3.1.5 reads it
+// (issue #895), where SheetJS read some of these differently. Each case is a
+// styles.xml body and the s attributes of a column of serials; `openpyxl` is
+// what openpyxl.load_workbook(read_only=True, data_only=True) gave for each
+// cell (d: a date or time, n: a number) or 'refused' when it raised, and
+// `sheetjs` what SheetJS gave where it differs. DUMP_895_DIR=<dir> writes
+// each case's workbook as <name>.xlsx, to re-check with openpyxl when the
+// pin moves.
+type Kind = 'd' | 'n';
+const STYLE_CASES: { name: string; styles: string; s: (string | null)[]; openpyxl: Kind[] | 'refused'; sheetjs?: Kind[] }[] = [
+	{
+		name: 'custom-id-0',
+		styles: '<numFmts><numFmt numFmtId="0" formatCode="yyyy-mm-dd"/></numFmts><cellXfs><xf numFmtId="0"/></cellXfs>',
+		s: [null, '0'],
+		openpyxl: ['d', 'd'],
+		sheetjs: ['n', 'n']
+	},
+	{
+		// openpyxl looks ids past 0x188 up as written; SheetJS moved 500 into the slot below
+		// 0x188 that the later 392 then overwrote.
+		name: 'past-0x188',
+		styles: '<numFmts><numFmt numFmtId="500" formatCode="yyyy"/><numFmt numFmtId="392" formatCode="0.00"/></numFmts><cellXfs><xf numFmtId="0"/><xf numFmtId="500"/><xf numFmtId="392"/><xf numFmtId="600"/></cellXfs>',
+		s: ['1', '2', '3'],
+		openpyxl: ['d', 'n', 'n'],
+		sheetjs: ['n', 'n', 'n']
+	},
+	{
+		name: 'past-0x188-alone',
+		styles: '<numFmts><numFmt numFmtId="500" formatCode="yyyy"/><numFmt numFmtId="501" formatCode="0.0"/><numFmt numFmtId="502" formatCode="hh:mm"/></numFmts><cellXfs><xf numFmtId="500"/><xf numFmtId="501"/><xf numFmtId="502"/></cellXfs>',
+		s: ['0', '1', '2'],
+		openpyxl: ['d', 'n', 'd']
+	},
+	{
+		name: 'no-s-is-style-0',
+		styles: '<cellXfs><xf numFmtId="14"/><xf numFmtId="0"/></cellXfs>',
+		s: [null, '1', '0'],
+		openpyxl: ['d', 'n', 'd'],
+		sheetjs: ['n', 'n', 'd']
+	},
+	{
+		name: 's-read-by-int',
+		styles: '<cellXfs><xf numFmtId="0"/><xf numFmtId="14"/></cellXfs>',
+		s: ['01', ' 1', '+1', '1_0', '9', '-1'],
+		openpyxl: ['d', 'd', 'd', 'n', 'n', 'n'],
+		sheetjs: ['n', 'n', 'n', 'n', 'n', 'n']
+	},
+	{
+		name: 'numfmtid-absent-or-spaced',
+		styles: '<cellXfs><xf/><xf numFmtId=" 14"/></cellXfs>',
+		s: ['0', '1'],
+		openpyxl: ['n', 'd']
+	},
+	{
+		name: 'last-block-counts',
+		styles: '<numFmts><numFmt numFmtId="164" formatCode="yyyy"/></numFmts><numFmts><numFmt numFmtId="165" formatCode="yyyy"/></numFmts><cellXfs><xf numFmtId="164"/><xf numFmtId="165"/></cellXfs><cellXfs><xf numFmtId="0"/><xf numFmtId="164"/><xf numFmtId="165"/></cellXfs>',
+		s: ['0', '1', '2'],
+		openpyxl: ['n', 'n', 'd'],
+		sheetjs: ['d', 'n', 'n']
+	},
+	{
+		name: 'duplicate-id-last-wins',
+		styles: '<numFmts><numFmt numFmtId="164" formatCode="yyyy"/><numFmt numFmtId="164" formatCode="0.0"/></numFmts><cellXfs><xf numFmtId="164"/></cellXfs>',
+		s: ['0'],
+		openpyxl: ['n']
+	},
+	{
+		name: 'custom-over-builtin',
+		styles: '<numFmts><numFmt numFmtId="14" formatCode="0.0"/><numFmt numFmtId="1" formatCode="yyyy"/></numFmts><cellXfs><xf numFmtId="14"/><xf numFmtId="1"/></cellXfs>',
+		s: ['0', '1'],
+		openpyxl: ['n', 'd']
+	},
+	{ name: 'no-cellxfs', styles: '<numFmts><numFmt numFmtId="164" formatCode="yyyy"/></numFmts>', s: [null, '0'], openpyxl: ['n', 'n'] },
+	{ name: 'bad-s', styles: '<cellXfs><xf numFmtId="0"/></cellXfs>', s: ['x'], openpyxl: 'refused' },
+	{ name: 'bad-xf-numfmtid', styles: '<cellXfs><xf numFmtId=""/></cellXfs>', s: ['0'], openpyxl: 'refused' },
+	{ name: 'numfmt-without-id', styles: '<numFmts><numFmt formatCode="yyyy"/></numFmts><cellXfs><xf numFmtId="0"/></cellXfs>', s: ['0'], openpyxl: 'refused' },
+	{ name: 'numfmt-bad-id', styles: '<numFmts><numFmt numFmtId="x" formatCode="yyyy"/></numFmts><cellXfs><xf numFmtId="0"/></cellXfs>', s: ['0'], openpyxl: 'refused' }
+];
+
+function stylePackage(c: (typeof STYLE_CASES)[number]) {
+	const rows = c.s.map((s, i) => `<row r="${i + 1}"><c r="A${i + 1}"${s === null ? '' : ` s="${s}"`}><v>40179.25</v></c></row>`).join('');
+	return workbookPackage({ sheets: [['Formats', worksheet(rows)]], styles: `<?xml version="1.0"?><styleSheet xmlns="${MAIN_NS}">${c.styles}</styleSheet>` });
+}
+
+const kinds = (book: B023Workbook, n: number): Kind[] => Array.from({ length: n }, (_, i) => (typeof book.cell('Formats', 1, i + 1) === 'number' ? 'n' : 'd'));
+
+describe('cell styles resolved as openpyxl resolves them (issue #895)', () => {
+	for (const c of STYLE_CASES) {
+		it(c.name, async () => {
+			const bytes = stylePackage(c);
+			if (process.env.DUMP_895_DIR) {
+				mkdirSync(process.env.DUMP_895_DIR, { recursive: true });
+				writeFileSync(`${process.env.DUMP_895_DIR}/${c.name}.xlsx`, bytes);
+			}
+			if (c.openpyxl === 'refused') {
+				await expect(readWorkbook(bytes)).rejects.toThrow(UnreadableWorkbookError);
+				return;
+			}
+			expect(kinds(new B023Workbook(await readWorkbook(bytes)), c.s.length)).toEqual(c.openpyxl);
+			const reference = new B023Workbook((await readWorkbookWithSheetJS(bytes)).source);
+			expect(kinds(reference, c.s.length)).toEqual(c.sheetjs ?? c.openpyxl);
+		});
+	}
 });

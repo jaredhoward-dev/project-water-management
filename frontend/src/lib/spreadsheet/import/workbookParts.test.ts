@@ -53,24 +53,32 @@ describe('readWorkbookXml', () => {
 describe('readStyles', () => {
 	const styles = (body: string) => readStyles(enc.encode(`<styleSheet xmlns="${MAIN_NS}">${body}</styleSheet>`), 'xl/styles.xml');
 
-	it("gives each cell style its number format, built-in or the workbook's own", () => {
+	it("gives each cell style its number format, the workbook's own or built-in, as openpyxl does", () => {
 		const s = styles(
 			'<numFmts count="2"><numFmt numFmtId="164" formatCode="yyyy/mm/dd;@"/><numFmt numFmtId="14" formatCode="dd&quot;/&quot;mm"/></numFmts>' +
 				'<cellStyleXfs count="1"><xf numFmtId="22"/></cellStyleXfs><cellXfs count="5"><xf numFmtId="0"/><xf numFmtId="164"/><xf numFmtId="14"/><xf numFmtId="4"/><xf/></cellXfs>'
 		);
 		expect([s.format('0'), s.format('1'), s.format('2'), s.format('3'), s.format('4')]).toEqual(['General', 'yyyy/mm/dd;@', 'dd"/"mm', '#,##0.00', 'General']);
-		// No s, an unknown style, or an s that isn't a plain index: General, as SheetJS read CellXf[s].
-		expect([s.format(undefined), s.format('9'), s.format('01'), s.format(' 1')]).toEqual(['General', 'General', 'General', 'General']);
+		// No s is style 0; s is read with Python's int(); an index out of range has no format.
+		expect([s.format(undefined), s.format('01'), s.format(' 1'), s.format('+2'), s.format('9'), s.format('-1')]).toEqual(['General', 'yyyy/mm/dd;@', 'yyyy/mm/dd;@', 'dd"/"mm', undefined, undefined]);
+		expect(() => s.format('x')).toThrow(UnreadableWorkbookError);
 	});
 
-	it('moves format ids past 0x188 into the free slots below, and applies the Google Sheets fix', () => {
-		const s = styles('<numFmts><numFmt numFmtId="500" formatCode="0.000"/><numFmt numFmtId="170" formatCode="d.m"/></numFmts><cellXfs><xf numFmtId="500"/><xf numFmtId="170"/><xf numFmtId=""/><xf numFmtId="23"/></cellXfs>');
-		expect([s.format('0'), s.format('1'), s.format('2'), s.format('3')]).toEqual(['0.000', 'd\\.m', undefined, undefined]);
+	it('looks every id up as written: 0 and past 0x188 included, the last definition and the last block winning', () => {
+		const s = styles(
+			'<numFmts><numFmt numFmtId="0" formatCode="yyyy"/></numFmts><numFmts><numFmt numFmtId="500" formatCode="0.000"/><numFmt numFmtId="170" formatCode="d.m"/><numFmt numFmtId="170" formatCode="0.0"/></numFmts>' +
+				'<cellXfs><xf numFmtId="1"/></cellXfs><cellXfs><xf numFmtId="500"/><xf numFmtId="170"/><xf numFmtId="0"/><xf numFmtId="23"/><xf numFmtId="392"/></cellXfs>'
+		);
+		expect([s.format('0'), s.format('1'), s.format('2'), s.format('3'), s.format('4')]).toEqual(['0.000', '0.0', 'General', undefined, undefined]);
+		expect(styles('<numFmts><numFmt numFmtId="0" formatCode="yyyy"/></numFmts><cellXfs><xf numFmtId="0"/></cellXfs>').format(undefined)).toBe('yyyy');
 	});
 
-	it('reads everything as General without a <cellXfs>, and refuses a number format without a code', () => {
-		expect(styles('<numFmts><numFmt numFmtId="164" formatCode="yyyy"/></numFmts>').format('1')).toBe('General');
+	it('has no format without a <cellXfs>, and refuses a number format without a code or an id, or an id int() cannot read', () => {
+		expect(styles('<numFmts><numFmt numFmtId="164" formatCode="yyyy"/></numFmts>').format('0')).toBeUndefined();
 		expect(() => styles('<numFmts><numFmt numFmtId="164"/></numFmts>')).toThrow(UnreadableWorkbookError);
+		expect(() => styles('<numFmts><numFmt formatCode="yyyy"/></numFmts>')).toThrow(UnreadableWorkbookError);
+		expect(() => styles('<numFmts><numFmt numFmtId="x" formatCode="yyyy"/></numFmts>')).toThrow(UnreadableWorkbookError);
+		expect(() => styles('<cellXfs><xf numFmtId=""/></cellXfs>')).toThrow(UnreadableWorkbookError);
 	});
 
 	it('caches one index per distinct style', () => {

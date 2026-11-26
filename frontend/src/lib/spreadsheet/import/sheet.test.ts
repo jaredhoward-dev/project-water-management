@@ -19,7 +19,7 @@ describe('SheetReader', () => {
 			worksheet('<row r="1"><c r="A1"><v>1.5</v></c><c r="B1" t="s"><v>3</v></c><c r="C1" t="b"><v>1</v></c><c r="D1" t="e"><v>#N/A</v></c><c r="E1" t="str"><v>x</v></c></row>')
 		);
 		expect(cells.size).toBe(5);
-		expect(cells.cell(1, 1)).toEqual({ t: 'n', v: 1.5, z: 'General' });
+		expect(cells.cell(1, 1)).toEqual({ t: 'n', v: 1.5, z: undefined }); // no styles part: no format, a number, as in openpyxl
 		expect(cells.cell(3, 1)).toEqual({ t: 'b', v: true });
 		expect(cells.cell(4, 1)).toEqual({ t: 'e', v: 0x2a });
 		expect(cells.cell(5, 1)).toEqual({ t: 's', v: 'x' });

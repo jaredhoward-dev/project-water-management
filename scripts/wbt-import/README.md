@@ -514,10 +514,14 @@ and an object per cell, which a large workbook turns into a lot of memory. The
 reader gives the parser the cells SheetJS gave it (cached values, the number
 formats that mark a date, blanks for formula cells with no value), with two
 deliberate differences, both because the Python importer is the reference.
-The built-in number formats are openpyxl 3.1.5's table by id
-(`BUILTIN_FORMATS` in `workbookParts.ts`), not SheetJS's, which also has id
-56, a time format openpyxl lacks: a number styled with it is a number, as in
-Python (issue #895; re-check the table when the openpyxl pin moves). And cell
+A cell's number format is found as openpyxl 3.1.5 finds it (issue #895;
+`readStyles` in `workbookParts.ts`; re-check when the openpyxl pin moves):
+the built-in formats are openpyxl's table by id, not SheetJS's (which also
+has id 56, a time format openpyxl lacks); a workbook's own format replaces
+any id, 0 included, and ids past 0x188 are looked up as written (SheetJS
+moved them); a cell with no `s` has style 0, and `s` is read with Python's
+`int()` (`01`, ` 1`); the last `<numFmts>` and `<cellXfs>` block counts; an
+`s` or id `int()` can't read refuses the workbook, as openpyxl does. And cell
 text is decoded as openpyxl decodes it (issue #22). So the XML entities are
 expanded once, a formula's cached text included (SheetJS decoded it twice:
 `a&amp;amp;b` read `a&b`, openpyxl `a&amp;b`); Excel's `_xHHHH_` escapes are
@@ -535,7 +539,10 @@ the synthetic workbook, SheetJS-written workbooks and hand-written edge cases
 with both readers (SheetJS's in `sheetjsReference.ts`, test-only) and compares
 every cell through `B023Workbook`, and builds a workbook with a cell under
 every built-in format id 0–58 to pin which ones read as dates (openpyxl's
-twelve) and that SheetJS differs only at 56; `stringDecoding.test.ts` lists exactly the
+twelve) and that SheetJS differs only at 56, and a table of style cases
+(custom id 0, ids past 0x188, no `s`, `s` forms, repeated blocks, refusals)
+each pinned to what openpyxl read from that workbook and to SheetJS's
+reading where it differs; `stringDecoding.test.ts` lists exactly the
 fixture cells whose text SheetJS read differently; `sourceWorkbooks.test.ts`
 compares the client workbooks, allowing only differences that
 `explainedByDecoding()` puts down to the text decoding.
