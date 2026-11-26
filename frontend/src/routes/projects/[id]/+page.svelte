@@ -46,6 +46,7 @@
 	import { apanInputOf } from '#lib/model/systems.js';
 	import { untrack } from 'svelte';
 	import { afterNavigate, goto } from '$app/navigation';
+	import { confirmLeave, guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { trackClose } from '#lib/nav/closeNav.js';
 	import { resolve } from '$app/paths';
 	import { basePath } from '#lib/nav/base.js';
@@ -790,8 +791,11 @@
 		drawerOpen = !!drawerFarm;
 	});
 	$effect(() => {
-		if (!drawerOpen && untrack(() => drawerFarm)) goto(withoutFarm(page.url), { replace: true, reset: false });
+		if (!drawerOpen && untrack(() => drawerFarm)) void guardedGoto(withoutFarm(page.url), { replace: true, reset: false });
 	});
+	// Its closes ask the leave guard first, as the grid modal's and the node sheet's do: Stay keeps it
+	// open, rather than shutting it over a URL the guard kept naming it (issue #931).
+	const confirmDrawerClose = () => confirmLeave(withoutFarm(page.url));
 
 	// --- the grid modal: open while the URL names a grid, closed the same way --
 	// A tab's own grid (TAB_GRIDS: the Map's `grid=map-features`) is the tab's to open and close.
@@ -805,9 +809,10 @@
 	$effect(() => {
 		if (!gridOpen && untrack(() => gridParam) && !isTabGridId(untrack(() => gridParam)) && !untrack(() => movedGridHref(page.url))) {
 			// The modal shuts before the URL follows: a link to a grid waits for the drop (lib/nav/closeNav.ts).
-			void trackClose(goto(withoutParam(page.url, 'grid'), { replace: true, reset: false }));
+			void trackClose(guardedGoto(withoutParam(page.url, 'grid'), { replace: true, reset: false }));
 		}
 	});
+	const confirmGridClose = () => confirmLeave(withoutParam(page.url, 'grid'));
 	// A grid that left the modal: its old link goes where the grid is now (grid=demand → Crops & demand's table, issue #174).
 	$effect(() => {
 		const moved = movedGridHref(page.url);
@@ -1435,6 +1440,7 @@
 					{#snippet children(FarmCropsDrawer)}
 						<FarmCropsDrawer
 							bind:open={drawerOpen}
+							beforeclose={confirmDrawerClose}
 							{editor}
 							settings={project!.settings}
 							nodeId={drawerFarm}
@@ -1452,6 +1458,7 @@
 					{#snippet children(GridModal)}
 						<GridModal
 							bind:open={gridOpen}
+							beforeclose={confirmGridClose}
 							grid={openGrid}
 							{editor}
 							settings={project!.settings}

@@ -26,6 +26,7 @@
 
 	let {
 		open = $bindable(false),
+		beforeclose,
 		editor,
 		settings,
 		nodeId,
@@ -36,6 +37,8 @@
 		onModelChanged = () => {}
 	}: {
 		open?: boolean;
+		/** Asked before any close (Done, Close, Esc, the ✕); false keeps it open (the page's leave guard, issue #931). */
+		beforeclose?: () => boolean | Promise<boolean>;
 		editor: ModelEditor;
 		settings: ProjectSettings;
 		/** The farm (network node) whose areas are shown. */
@@ -50,6 +53,9 @@
 		/** After a value from land cover is saved to the model: reload the inputs. */
 		onModelChanged?: () => Promise<void> | void;
 	} = $props();
+	async function close() {
+		if (!beforeclose || (await beforeclose())) open = false;
+	}
 
 	const node = $derived(editor.model.nodes.find((n) => n.id === nodeId) ?? null);
 	const name = $derived(node?.name || '(unnamed)');
@@ -76,7 +82,7 @@
 	};
 </script>
 
-<Dialog bind:open title={node ? `${name}: planted areas` : 'Hydrological unit not found'} side>
+<Dialog bind:open {beforeclose} title={node ? `${name}: planted areas` : 'Hydrological unit not found'} side>
 	{#if !node}
 		<p>This hydrological unit isn't in the model any more. It may have been removed or renamed on the Network tab.</p>
 	{:else if planting.rows.length === 0}
@@ -150,9 +156,9 @@
 
 	{#snippet actions()}
 		{#if readonly || !node}
-			<button type="button" class="btn" onclick={() => (open = false)}>Close</button>
+			<button type="button" class="btn" onclick={close}>Close</button>
 		{:else}
-			<ModelSaveRow {editor} {onsave} ondone={() => (open = false)} bind:reason />
+			<ModelSaveRow {editor} {onsave} ondone={close} bind:reason />
 		{/if}
 	{/snippet}
 </Dialog>

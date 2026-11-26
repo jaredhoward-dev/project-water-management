@@ -2,6 +2,7 @@
 	import { confirmDialog } from '#lib/components/common/confirm.svelte.js';
 	import { onMount, tick, untrack } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { confirmLeave, guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { closeSettled, openAfterClose, trackClose } from '#lib/nav/closeNav.js';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
@@ -250,18 +251,30 @@
 	$effect(() => {
 		sheetOpen = !!editing;
 	});
+	/**
+	 * Where closing the sheet goes: `edit` dropped, with the section a link opened it on (`section=`),
+	 * and the pick (`node=`) when that node has gone (removed from the sheet), in one navigation, since
+	 * a second one started beside it from the same URL put back what the other took out.
+	 */
+	function sheetClosedHref(): string {
+		const url = new URL(page.url.href);
+		url.searchParams.delete('section');
+		const picked = url.searchParams.get('node');
+		if (picked && !nodes.some((n) => n.id === picked)) url.searchParams.delete('node');
+		return withoutParam(url, 'edit');
+	}
+	// Done, Esc, the ✕ and Close ask the leave guard first (a field holding text it can't take is
+	// dropped with the sheet): Stay keeps the sheet open, rather than shutting it over a URL the
+	// guard kept naming it (issue #931).
+	const confirmSheetClose = () => confirmLeave(sheetClosedHref());
+	async function closeSheet() {
+		if (await confirmSheetClose()) sheetOpen = false;
+	}
 	$effect(() => {
-		// Closed (Done, Esc, the ✕): drop `edit` in place, so Back goes to where it was opened from.
+		// Closed: drop `edit` in place, so Back goes to where it was opened from.
 		if (!sheetOpen && untrack(() => editParam)) {
-			// The section a link opened it on (`section=`) goes with it, and the pick (`node=`) when that
-			// node has gone (removed from the sheet): one navigation, since a second one started beside
-			// this from the same URL put back what the other took out.
-			const url = new URL(page.url.href);
-			url.searchParams.delete('section');
-			const picked = url.searchParams.get('node');
-			if (picked && !untrack(() => nodes.some((n) => n.id === picked))) url.searchParams.delete('node');
 			// The sheet shuts before the URL follows: an open waits for the drop (lib/nav/closeNav.ts).
-			void trackClose(goto(withoutParam(url, 'edit'), { replace: true, reset: false }));
+			void trackClose(guardedGoto(untrack(sheetClosedHref), { replace: true, reset: false }));
 		}
 	});
 	$effect(() => {
@@ -275,7 +288,8 @@
 		q.set('edit', id);
 		q.delete('section');
 		if (!only) q.set('node', id);
-		return goto(`?${q}`, { replace: replace, reset: false });
+		// Through the guard's goto: ‹ › and the picker replace, and a Leave after its question does too.
+		return guardedGoto(`?${q}`, { replace: replace, reset: false });
 	}
 	// Which nodes have a map feature, for their "Show on map" links (issue #326 A2): fetched after the
 	// tab has drawn, so the map's list never delays it (workspace/mapLinks.ts).
@@ -305,6 +319,13 @@
 	// pick (playbook § 2, as Dams' `dam=`). With none, nothing is picked. The grid modal's table
 	// keeps its pick to itself.
 	const nodeParam = $derived(only ? null : page.url.searchParams.get('node'));
+	// A pick naming a node the model hasn't (removed, or a stale or mistyped link) is replaced out of
+	// the URL (issue #931). Not while the sheet is open or closing: its close drops `node=` with `edit=`.
+	$effect(() => {
+		const id = nodeParam;
+		if (!id || editParam || nodes.some((n) => n.id === id)) return;
+		untrack(() => void goto(withoutParam(page.url, 'node'), { replace: true, reset: false }));
+	});
 	$effect(() => {
 		const id = nodeParam;
 		// A link with only `edit=` (the Dams page's Edit dam) picks the node it edits.
@@ -368,9 +389,8 @@
 		);
 		editor.removeNode(id);
 		if (selectedId === id) selectedId = null;
+		// From the sheet, closing it drops `node=` too (above); a pick of it elsewhere is dropped by the effect that follows `node=`.
 		if (editParam === id) sheetOpen = false;
-		// From the sheet, closing it drops `node=` too (above).
-		else if (nodeParam === id) void goto(withoutParam(page.url, 'node'), { replace: true, reset: false });
 		// The button that was pressed has gone (the row's ✕, or the sheet with its Remove and the
 		// card's Edit it would hand the focus back to): put the focus somewhere that still is.
 		await tick();
@@ -981,7 +1001,7 @@
 
 	<!-- A node's full form, over the map (`edit=<id>`): every field, with its help. -->
 	{#if editing}
-		<Dialog bind:open={sheetOpen} title={readonly ? `${editing.name || '(unnamed)'}: details` : `Edit ${editing.name || '(unnamed)'}`} side extraWide>
+		<Dialog bind:open={sheetOpen} beforeclose={confirmSheetClose} title={readonly ? `${editing.name || '(unnamed)'}: details` : `Edit ${editing.name || '(unnamed)'}`} side extraWide>
 			{#snippet subhead()}
 				<div class="picker sheet-picker">
 					<label for="node-pick" class="visually-hidden">Hydrological unit to edit</label>
@@ -1050,9 +1070,9 @@
 			</div>
 			{#snippet actions()}
 				{#if readonly || !onsave}
-					<button type="button" class="btn" onclick={() => (sheetOpen = false)}>Close</button>
+					<button type="button" class="btn" onclick={closeSheet}>Close</button>
 				{:else}
-					<ModelSaveRow {editor} {onsave} ondone={() => (sheetOpen = false)} bind:reason />
+					<ModelSaveRow {editor} {onsave} ondone={closeSheet} bind:reason />
 				{/if}
 			{/snippet}
 		</Dialog>
