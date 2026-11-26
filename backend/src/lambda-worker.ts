@@ -131,7 +131,9 @@ async function acceptRecord(record: SQSRecord): Promise<void> {
 	else if (message.type === 'rendered') {
 		await freeRenderSlot(answeredSlot(message), message.requestId);
 		const outcome = await acceptRenderResult(message);
-		if (outcome !== 'queued') logEvent('warn', { event: 'render_result_dropped', messageId: record.messageId, reason: outcome });
+		// The report was deleted while it rendered: its PDF is queued for removal (398), which is no fault.
+		if (outcome === 'orphan_queued') logEvent('info', { event: 'report_pdf_orphaned', messageId: record.messageId, reportId: message.reportId });
+		else if (outcome !== 'queued') logEvent('warn', { event: 'render_result_dropped', messageId: record.messageId, reason: outcome });
 	}
 	// An evidence pack's render outcome (render-results queue): becomes a pack_render job.
 	else if (message.type === 'rendered_pack') {

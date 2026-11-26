@@ -157,6 +157,14 @@ describe('handler', () => {
 		expect(acceptRenderResult).toHaveBeenLastCalledWith(legacy);
 		expect(freeRenderSlot.mock.calls).toEqual([[`report:${msg.reportId}`, undefined]]);
 		freeRenderSlot.mockClear();
+		// A report deleted while it rendered: its PDF is queued for removal (398), logged as info, not as a dropped answer.
+		const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+		warn.mockClear();
+		acceptRenderResult.mockResolvedValueOnce('orphan_queued');
+		await handler({ Records: [{ messageId: 'm4', body: JSON.stringify(msg) }] } as never);
+		expect(info).toHaveBeenCalledWith(JSON.stringify({ event: 'report_pdf_orphaned', messageId: 'm4', reportId: msg.reportId }));
+		expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('render_result_dropped'));
+		freeRenderSlot.mockClear();
 		acceptRenderResult.mockClear();
 	});
 

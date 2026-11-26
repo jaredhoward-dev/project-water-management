@@ -59,7 +59,7 @@ describe('renderer Lambda', () => {
 		expect(renderReportPdf).toHaveBeenCalledWith({ projectId: ids.projectId, runId: ids.runId, token: TOKEN }, expect.objectContaining({ timeoutMs: 90_000 }));
 		expect(putPdf).toHaveBeenCalledWith(`reports/${ids.projectId}/${ids.reportId}.pdf`, expect.any(Buffer));
 		expect(sent).toEqual([
-			{ url: 'https://sqs.example/render-results', message: { v: 1, type: 'rendered', reportId: ids.reportId, requestId: RID, result: { ok: true, pages: 9, bytes: 10, ms: 4200 } } }
+			{ url: 'https://sqs.example/render-results', message: { v: 1, type: 'rendered', reportId: ids.reportId, projectId: ids.projectId, requestId: RID, result: { ok: true, pages: 9, bytes: 10, ms: 4200 } } }
 		]);
 		expect(JSON.stringify(log.mock.calls)).not.toContain(TOKEN);
 	});
@@ -70,7 +70,7 @@ describe('renderer Lambda', () => {
 		const res = await handler({ Records: [record('m1', request)] } as never);
 		expect(res).toEqual({ batchItemFailures: [] });
 		expect(putPdf).not.toHaveBeenCalled();
-		expect(sent[0]!.message).toEqual({ v: 1, type: 'rendered', reportId: ids.reportId, requestId: RID, result: { ok: false, error: 'the render took longer than 90 s', retry: true } });
+		expect(sent[0]!.message).toEqual({ v: 1, type: 'rendered', reportId: ids.reportId, projectId: ids.projectId, requestId: RID, result: { ok: false, error: 'the render took longer than 90 s', retry: true } });
 	});
 
 	it('says only "could not be stored" when storage fails', async () => {
@@ -133,6 +133,7 @@ describe('renderer Lambda', () => {
 			v: 1,
 			type: 'rendered',
 			reportId: ids.reportId,
+			projectId: ids.projectId,
 			requestId: RID,
 			result: { ok: false, error: 'the request waited too long in the queue: its render token expired', retry: true }
 		});

@@ -163,6 +163,14 @@ export const reportRenderHandler = defineHandler({
 			console.error(`report ${report.id}: storing the PDF failed:`, (err as Error).message);
 			throw new JobError('the PDF could not be stored (is object storage running? `pnpm dev:s3:up`)');
 		}
+		// Deleted while it rendered (its account or project, 395): the deletion's erasure may have run before
+		// this PDF existed, so queue it for the tick to remove, and record nothing (398, issue #911). Asked
+		// after storing, on a fresh statement: a deletion committed later queues it through 395 instead.
+		const { rows: orphan } = await db.query<{ orphaned: boolean }>('SELECT app_report_pdf_orphaned($1, $2) AS orphaned', [job.projectId, report.id]);
+		if (orphan[0]?.orphaned) {
+			logEvent('info', { event: 'report_pdf_orphaned', reportId: report.id, projectId: job.projectId });
+			return;
+		}
 		logEvent('info', { event: 'report_rendered', reportId: report.id, projectId: job.projectId, pages: rendered.pages, bytes: rendered.pdf.length, ms: rendered.ms });
 		await finishReport(db, report, { pages: rendered.pages, bytes: rendered.pdf.length });
 	}
