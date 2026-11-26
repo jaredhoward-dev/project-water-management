@@ -225,9 +225,9 @@ stored only as SHA-256 hashes. Links point at `SITE_URL`:
 - **`GET /auth/me/export`** ("download my data", POPIA access;
   `backend/src/auth/export.ts`, 054_subject_export.sql) returns one JSON
   document, `{ format: 'water-management.subject-export', version: 1,
-  exportedAt, account, pendingEmailChange, projectMemberships, teamMemberships, scenarioMemberships, farms, notes,
+  exportedAt, account, pendingEmailChange, projectMemberships, teamMemberships, scenarioMemberships, scenarios, farms, notes,
   signoffs, invites, alertSubscriptions, alertDeliveries, alertFeedback, packNotices, erratumNotices, preferences,
-  reportSubscriptions, auditEvents, auditEventsTruncated }`. `alertFeedback`
+  billing, reverseTrialClaim, reportSubscriptions, auditEvents, auditEventsTruncated }`. `alertFeedback`
   is their "Was this useful?" rows on alert emails, answered or not,
   `[{ projectId, kind, sentAt, useful, comment, answeredAt }]` (151; never
   the token's hash or nonce). `preferences`
@@ -244,8 +244,18 @@ stored only as SHA-256 hashes. Links point at `SITE_URL`:
   they asked for and haven't confirmed, `{ newEmail, createdAt, expiresAt }`
   (347; never the link's hash), or `null`. `scenarioMemberships` is the
   applications they were added to as a co-worker, `[{ scenarioId, projectId,
-  projectName, scenarioName, addedAt, addedBy }]` (`scenario_member`; read
-  under RLS, so while their role still lets them read the scenario).
+  projectName, scenarioName, addedAt, addedBy }]` (`scenario_member`,
+  through `app_subject_scenario_memberships()`, 396: every row of theirs,
+  past RLS; a drop below contributor deletes the share itself, 049). `scenarios` is the scenarios they own, their
+  licence applications (`origin: 'applicant'`) and modelling scenarios
+  (`'team'`), as metadata, `[{ scenarioId, projectId, projectName, name,
+  origin, status, outcome, createdAt, submittedAt, decidedAt }]`
+  (`app_subject_scenarios()`, 396; never the ops or description, the
+  project's model record). `reverseTrialClaim` is `{ emailHash, claimedAt }`
+  when their current address had the Pro reverse trial (342; the SHA-256
+  of its canonical form, as `reverse_trial_claim` keeps it, found by
+  `app_subject_reverse_trial()`, 396), or `null`; a claim made under an
+  earlier address isn't linked to them and isn't found.
   `farms` is one entry per farm
   linked to the person (`projectId`, `farmName`, `linkedAt`, `linkedBy`),
   with the registered volumes matched to that farm (`allocations`, holder
