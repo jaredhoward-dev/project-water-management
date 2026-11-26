@@ -15581,7 +15581,11 @@ published.
   403/404 leaves out, while one whose preview is withheld (403
   `farm_preview_withheld`) stays and says why, as the farm page does, with
   no saved figures shown as current, its saved copy kept (issue #875):
-  `farm/load.ts` `cardOnFailure`), and goes straight to the only one. `/farm/[projectId]` is one farm (`?node=` and a
+  `farm/load.ts` `cardOnFailure`; a saved copy from an older publication
+  than the one the list names (another `publishedAt`) is not shown at all,
+  since it describes a superseded decision beside the card's current level
+  word, and the card says its figures couldn't be had instead, the copy
+  itself kept for the farm page: `savedForPublication`, issue #942), and goes straight to the only one. `/farm/[projectId]` is one farm (`?node=` and a
   switcher when the farmer has several there: a row of links above the name
   for up to 4 farms; past that, folded under "Your hydrological units in this catchment
   (N farms)", so the name and the WUA's notice stay on the first screen,
@@ -15600,7 +15604,8 @@ published.
   entry links), and from the Account, Alert emails and Invitations pages,
   carries that page as `?from=` (`farm/load.ts` `wordsHref`), and its back
   link returns there, named for the page it returns to (**My hydrological
-  unit**, **Your dam**, **Why?**, the who-decides page's title, **Account**,
+  unit**, **Your dam**, **Why?**, **Who decides?** (short, since the who-decides page's full title
+  wrapped to two or three lines in the header past 380 px, issue #942), **Account**,
   **Alert emails** or **Invitations**: `farmReturnPage`), so a farmer with
   several farms comes back to the one they were reading, and one reading
   what an alert email is comes back to their alert settings. `from` is
@@ -15889,7 +15894,9 @@ published.
   previewing while a cap or full-allocation run is published (`403
   farm_preview_withheld`, #523 I): the `withheld` state, saying why
   (worded from the code, `apiError.ts`), clearing nothing, since the farm
-  is still there; and a link to a unit that isn't the farmer's
+  is still there, with **Back to the workspace** under it as well as in the
+  preview banner, since only WUA staff previewing are ever withheld from
+  (issue #942); and a link to a unit that isn't the farmer's
   (`?node=` the catchment's list doesn't hold, while it holds others): "This
   hydrological unit isn’t linked to your account. If it should be, contact
   …", never "no longer" (it may never have been theirs), with **Your
@@ -16381,7 +16388,9 @@ the catalogue, [§ Language](#language)); both unit-tested.
   … comes" for one and "every alert email waits" for 0) ending in **What are
   alert emails?**, an inline link to the `farm-alerts` entry on
   `/farm/words` (inline so the line stays one row; with `?from=`, so its
-  back link is **Alert emails** and returns here), and, when mail is
+  back link is **Alert emails** and returns here; it stays inline and under
+  44 px tall by decision, issue #942: WCAG 2.2 SC 2.5.8 exempts a link in a
+  line of text, and enlarging it would break the one-row line), and, when mail is
   paused, the banner below. Then a card per catchment you can open, as many
   across as fit the page's own width (at least 34rem each: two at 1440 and
   1280, stacked on a phone; `auto-fit`, so a lone catchment takes the whole
@@ -16560,7 +16569,11 @@ signed in or out, for someone outside the project, on a phone first.
   privacy" and a dead link, so a chart-less answer asks the view again, and
   a link revoked or expired since the page loaded is dead, not private
   (`share/load.ts`); a link
-  without its token ("This page needs the whole link…"); and an error with
+  without its token ("This page needs the whole link…"), both ending in
+  **Go to the home page**, a link (a full tap target) to the landing page
+  (`/welcome`, which goes on to the device's language), which says what the app is and offers Sign in:
+  most readers of a share link are signed out and have no account, so the
+  home page rather than the sign-in page (issue #942); and an error with
   Try again. Every string is in `lib/components/share/share.ts`, the chart
   in `share/chart.ts`, the loading rules in `share/load.ts`, all
   unit-tested.
