@@ -398,6 +398,29 @@ test('a viewer sees the map, its sidebar row, the list, the card and Every featu
 	await expectNoViolations(v);
 });
 
+test('a refused siting or link puts the card’s select back to what is saved, beside the reason', async ({ page, owner }) => {
+	void owner;
+	const project = await seedRunnableProject(page.request, 'Catchment map refused edit');
+	await openMap(page, project.id);
+	await uploadThroughSheet(page, 'dam', 'dams.geojson', damGeoJson());
+	await showTab(page, 'features');
+	await row(page, 'Upper dam').click();
+	// The server refuses every change to a feature (as an expired session or a dropped connection would).
+	await page.route(/\/map\/features\/[0-9a-f-]+$/, (route) =>
+		route.request().method() === 'PATCH' ? route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'Something went wrong.' }) }) : route.fallback()
+	);
+	const siting = card(page).getByRole('combobox', { name: 'Where Upper dam stands against its river' });
+	await siting.selectOption({ label: 'Off-channel (filled by a pump or a furrow)' });
+	await expect(card(page).getByRole('alert')).toBeVisible();
+	await expect(siting).toHaveValue('');
+	await expect(siting).toBeEnabled();
+	const stands = card(page).getByRole('combobox', { name: 'What Upper dam stands for' });
+	const before = await stands.inputValue();
+	await stands.selectOption({ label: 'Upper farm' });
+	await expect(card(page).getByRole('alert')).toBeVisible();
+	await expect(stands).toHaveValue(before);
+});
+
 test('thirty units: the page fits the window, the list scrolls in its card, a linked pick is in view; the phone stacks', async ({ page, owner }) => {
 	void owner;
 	test.setTimeout(60_000);

@@ -1051,11 +1051,23 @@
 	}
 	const useM2 = (f: MapFeature) => (f.areaM2 === null ? null : takenAreaM2(f.areaM2, f.nonContributingM2, basisOf(f)));
 
-	async function link(f: MapFeature, nodeId: string) {
+	/**
+	 * A select's change the server refused: the select goes back to the saved value. Its `value` is one-way from the
+	 * feature, which a refused save leaves unchanged, so nothing else would undo the choice shown beside the error.
+	 */
+	const revert = (el: HTMLSelectElement, saved: string) => {
+		el.value = saved;
+	};
+
+	async function link(f: MapFeature, el: HTMLSelectElement) {
+		const nodeId = el.value;
 		busy = f.id;
 		rowError = null;
 		try {
-			await api.map.update(projectId, f.id, { nodeId: nodeId || null });
+			await api.map.update(projectId, f.id, { nodeId: nodeId || null }).catch((err: unknown) => {
+				revert(el, f.nodeId ?? '');
+				throw err;
+			});
 			await load();
 		} catch (err) {
 			rowError = { id: f.id, text: msg(err) };
@@ -1065,11 +1077,15 @@
 	}
 
 	/** Where a dam stands against its river (194): Start and Divide place a water user at the dam by this, '' leaving it to its outline. */
-	async function setDamPosition(f: MapFeature, value: string) {
+	async function setDamPosition(f: MapFeature, el: HTMLSelectElement) {
+		const value = el.value;
 		busy = f.id;
 		rowError = null;
 		try {
-			await api.map.update(projectId, f.id, { damPosition: value === 'on_channel' || value === 'off_channel' ? value : null });
+			await api.map.update(projectId, f.id, { damPosition: value === 'on_channel' || value === 'off_channel' ? value : null }).catch((err: unknown) => {
+				revert(el, f.damPosition ?? '');
+				throw err;
+			});
 			await load();
 		} catch (err) {
 			rowError = { id: f.id, text: msg(err) };
@@ -1329,7 +1345,7 @@
 {#snippet standsFor(f: MapFeature)}
 	{@const nodeKinds = KIND_NODES[f.kind]}
 	{#if canEdit && nodeKinds.length}
-		<select class="cap" aria-label="What {featureName(f)} stands for" value={f.nodeId ?? ''} disabled={busy === f.id} onchange={(e) => link(f, e.currentTarget.value)}>
+		<select class="cap" aria-label="What {featureName(f)} stands for" value={f.nodeId ?? ''} disabled={busy === f.id} onchange={(e) => link(f, e.currentTarget)}>
 			<option value="">Nothing</option>
 			{#each nodes.filter((n) => nodeKinds.includes(n.kind)) as n (n.id)}<option value={n.id}>{n.name}</option>{/each}
 		</select>
@@ -1341,7 +1357,7 @@
 <!-- A dam outline's position against its river (194): a select for editors, else its words. Start and Divide place a water user at the dam by it (a dam that is part of a unit is never placed, start-16). -->
 {#snippet damPosition(f: MapFeature)}
 	{#if canEdit}
-		<select class="cap" aria-label="Where {featureName(f)} stands against its river" aria-describedby="{uid}-dam-position" value={f.damPosition ?? ''} disabled={busy === f.id} onchange={(e) => setDamPosition(f, e.currentTarget.value)} data-testid="map-dam-position">
+		<select class="cap" aria-label="Where {featureName(f)} stands against its river" aria-describedby="{uid}-dam-position" value={f.damPosition ?? ''} disabled={busy === f.id} onchange={(e) => setDamPosition(f, e.currentTarget)} data-testid="map-dam-position">
 			{#each ['', 'on_channel', 'off_channel'] as const as v (v)}<option value={v}>{DAM_POSITION_LABEL[v]}</option>{/each}
 		</select>
 		<p class="hint muted" id="{uid}-dam-position">For your records, and for a water user placed at the dam in Start or Divide; unsaid, its outline decides. Its unit’s composite dam takes the shares of upstream inflow and runoff you enter on the unit.</p>
