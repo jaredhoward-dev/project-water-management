@@ -32,7 +32,7 @@ import { runTick } from '../jobs/runner.js';
  * (migration 219, the allocation holder salt; run_allocation_holder is keyed by run. Migration 264, a running
  * assistant turn's reserved budget: only the assistant's definer functions touch it).
  */
-const OWNER_ONLY_TABLES = ['allocation_holder_salt', 'assistant_reservation'] as const;
+const OWNER_ONLY_TABLES = ['allocation_holder_salt', 'assistant_reservation', 'report_pdf_erasure'] as const; // report_pdf_erasure: the owner-only queue of deleted reports' PDFs (395)
 
 type User = Awaited<ReturnType<typeof signUp>>;
 const ORIGIN = 'http://localhost:7777';
