@@ -2517,7 +2517,8 @@ worker tick: each status, then each key due by its load mark (≤ 200 a tick, ol
   the waterbody of the largest overlap: under 0.3 of the dam covered is
   **none** (Waterbodies doesn't hold it: under its 0.45 ha minimum, never
   seen wet, or traced elsewhere); at least 0.7 of the waterbody inside the
-  dam, and no other waterbody holding 0.1 of the dam, is **matched** (its
+  dam, and the other waterbodies together holding less than 0.1 of the dam,
+  is **matched** (its
   wet area is this dam's; the slack is the historical extent spilling past
   a traced outline at the inflow and the wall); anything else is **merged**
   (the waterbody also holds other water, or the dam is split over
