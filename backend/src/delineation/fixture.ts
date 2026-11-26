@@ -141,3 +141,27 @@ export function widerEast(dem: Dem, tiles = 2): Dem {
 		tile: (z, x, y) => dem.tile(z, x, y)
 	};
 }
+
+/**
+ * The fixture's DEM with a square of no-data cells (NaN) of half-side `r` round fixture cell (cx, cy), inside a tile that keeps
+ * its other data: a hole in the data, not a missing tile (issue #905).
+ */
+export function carved(dem: Dem, cx: number, cy: number, r = 3): Dem {
+	return {
+		info: () => dem.info(),
+		tile: async (z, x, y) => {
+			const t = await dem.tile(z, x, y);
+			if (!t || z !== FIXTURE_ZOOM) return t;
+			const out = new Float32Array(t.z);
+			const ox = (x - FIXTURE_X0) * FIXTURE_TILE;
+			const oy = (y - FIXTURE_Y0) * FIXTURE_TILE;
+			for (let yy = cy - r; yy <= cy + r; yy++)
+				for (let xx = cx - r; xx <= cx + r; xx++) {
+					const lx = xx - ox;
+					const ly = yy - oy;
+					if (lx >= 0 && ly >= 0 && lx < t.size && ly < t.size) out[ly * t.size + lx] = Number.NaN;
+				}
+			return { size: t.size, z: out };
+		}
+	};
+}

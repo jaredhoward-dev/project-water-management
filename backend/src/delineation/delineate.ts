@@ -430,7 +430,11 @@ export async function delineate(
 			aim = aimAt(mask, nCells, x0, y0);
 		};
 		const placed = place({ nx: nCells, ny: nCells, acc, edge, cellSizeM }, gx - x0, gy - y0, { snapRadiusM, minKm2 });
-		if (placed === null) throw new DelineationRefused('off_channel', offChannelText('that point', snapRadiusM));
+		if (placed === null) {
+			// No channel cell in reach: on a cell with no elevation (a hole in a tile with data), that is no data, not off-channel (issue #905).
+			if (Number.isNaN(before[Math.floor(gy - y0) * nCells + Math.floor(gx - x0)]!)) throw new DelineationRefused('no_data', 'The elevation model has no data at that point.');
+			throw new DelineationRefused('off_channel', offChannelText('that point', snapRadiusM));
+		}
 		if (placed.larger && !opts.keepPoint) {
 			const lx = placed.larger.cell % nCells;
 			const ly = (placed.larger.cell - lx) / nCells;

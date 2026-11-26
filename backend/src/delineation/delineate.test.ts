@@ -17,7 +17,7 @@ import {
 	tooLargeText,
 	type DelineationMethodFacts
 } from './delineate.js';
-import { BASIN_AREA_M2, DAM_CELL, FIXTURE_CELL_M, FIXTURE_CELLS, FIXTURE_ZOOM, fixtureElevation, fixtureLonLat, OUTLET_CELL, PAN, valleyUnitRing } from './fixture.js';
+import { BASIN_AREA_M2, carved, DAM_CELL, FIXTURE_CELL_M, FIXTURE_CELLS, FIXTURE_ZOOM, fixtureElevation, fixtureLonLat, OUTLET_CELL, PAN, valleyUnitRing } from './fixture.js';
 import { d8, DX, DY, edgeMask, fill, OUT } from './flow.js';
 import { ON_RIVER_METHOD, PAN_METHOD } from './pans.js';
 
@@ -99,6 +99,16 @@ describe('delineate (synthetic DEM)', () => {
 		expect(r.code).toBe('outside');
 		// In degrees south, as people read them (it said "-33.7243397° to -33.1375512° N").
 		expect(r.message).toMatch(/covers 20\.39° E to 21\.09° E, 33\.72° S to 33\.14° S\)\.$/);
+	});
+
+	it('refuses a click on a no-data cell inside a tile with data as no data, not off-channel (issue #905)', async () => {
+		const ridge = { x: OUTLET_CELL.x - 91, y: OUTLET_CELL.y - 120 };
+		const holed = carved(dem, ridge.x, ridge.y);
+		const e = await refusal(delineate(holed, at(ridge.x, ridge.y)));
+		expect(e.code).toBe('no_data');
+		expect(e.message).toBe('The elevation model has no data at that point.');
+		// Positive control: the same click on the uncarved DEM is off-channel (the test below).
+		expect((await refusal(delineate(dem, at(ridge.x, ridge.y)))).code).toBe('off_channel');
 	});
 
 	it('refuses a click with no terrain channel within the snap radius, saying to click on one (issue #472)', async () => {

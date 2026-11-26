@@ -1709,7 +1709,9 @@ to a point on a river. The design, the method and its accuracy are in
   channel runs within 150 m of that point. Zoom in until the terrain
   channels show (they're in the map's key), and click on one: they are the elevation
   model's rivers, which the outline follows. Zoom in further to see
-  smaller channels." The mapped river network
+  smaller channels." A click on a cell with no elevation data (a hole in
+  a tile, or no tile) is refused `no_data` instead: "The elevation model
+  has no data at that point." (issue #905). The mapped river network
   (HydroRIVERS, the basemap's waterways) never moves or chooses the
   outlet: the elevation model's rivers often run hundreds of metres from
   the mapped lines, and the outline follows the elevation model's
