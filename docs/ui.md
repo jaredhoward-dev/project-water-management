@@ -7060,7 +7060,10 @@ the automatic DWS feed's own code (`@water-management/engine/dws`), so a
 missing-data quality code (151, 165, 170, 172, 246, 247, 255), a blank value or
 a negative placeholder such as -999 is a gap, never a value. The summary adds a
 *DWS export* line (rows, the value column as the file's format block describes
-it, and how many rows were read as gaps and why) and the quality codes met; a
+it, and how many rows were read as gaps and why) and the quality codes met.
+When that block states the values in m³/s (`dws.ts` `unit`), the form's
+*Unit* is set to m³/s for a flow kind, so a unit left at l/s or ML/day from
+an earlier file can't scale the export by 1 000 or 86.4; a
 sub-daily DWS export (a TIME column) is refused. A plain date,value CSV reads
 a negative value as a gap too (issue #51: every kind is a rain, flow or
 evaporation, so −999 or −1 is a "no reading" placeholder), and its summary

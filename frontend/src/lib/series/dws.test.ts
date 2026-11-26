@@ -33,7 +33,8 @@ describe('parseDwsExport on the shared fixture', () => {
 			quality: { '1': 6, '2': 1, '60': 1, '170': 1, '255': 1 },
 			gaps: { code: 2, blank: 0, negative: 1 },
 			gapCodes: { '170': 1, '255': 1 },
-			column: 'Daily avg flow rate in cubic metres/sec 99999.999'
+			column: 'Daily avg flow rate in cubic metres/sec 99999.999',
+			unit: 'm³/s'
 		});
 		expect(r.values).not.toContain(-999);
 		// 20210105 carries 0.000 under code 255: a gap, not a dry day.
@@ -48,6 +49,14 @@ describe('parseDwsExport on the shared fixture', () => {
 });
 
 describe('parseDwsExport on other exports', () => {
+	it('gives the unit the format block states for its values (m³/s), and none it can’t name', () => {
+		const spec = (what: string) => `POS. 10-18 = ${what}\nDATE     D AVG F/R  QUAL\n20210101     1.500     1\n`;
+		expect(parseDwsExport(spec('Daily avg flow rate in cubic metres/sec')).dws!.unit).toBe('m³/s');
+		expect(parseDwsExport(spec('Daily average flow in m3/s')).dws!.unit).toBe('m³/s');
+		expect(parseDwsExport(spec('Daily average level in metres')).dws!.unit).toBeUndefined();
+		expect(parseDwsExport('20210101  1.5  1\n').dws!.unit).toBeUndefined();
+	});
+
 	it('reads headerless whitespace rows (date, value, quality), a tab-separated one too', () => {
 		const r = parseSeriesFile('20210101  1.5  1\n20210102  -999  1\n20210103\t2.25\t60\n');
 		expect(r.values).toEqual([1.5, null, 2.25]);

@@ -23,10 +23,14 @@ export interface DwsImport {
 	gapCodes: Record<string, number>;
 	/** The value column as the file's format block describes it ("Daily avg flow rate in cubic metres/sec"). */
 	column?: string;
+	/** The unit that block states for the values, when it names m³/s (DWS flow); absent otherwise. The form sets its Unit to it. */
+	unit?: 'm³/s';
 }
 
 const NO_READING = /^(na|nan|null|-)$/i;
 const VALUE_SPEC = /^\s*POS\.\s*10\s*-\s*18\s*=\s*/i;
+/** A stated unit of m³/s (the automatic feed's own check, backend feeds/sources/dws.ts M3S). */
+const M3S = /cubic met(re|er)s?\s*(\/|per)\s*s(ec(ond)?)?\b|\bm(3|³)\s*\/\s*s\b|\bcumecs\b/i;
 
 /**
  * Whether a file is a DWS-style table rather than a CSV: it has a DATE … QUAL
@@ -87,5 +91,6 @@ export function parseDwsExport(text: string): ParsedSeries {
 	}
 	if (byDay.size === 0 && /no data for this period/i.test(clean)) throw new CsvError('the DWS export says "No data for this period": it holds no days');
 	if (column) info.column = column;
+	if (column && M3S.test(column)) info.unit = 'm³/s';
 	return { ...denseDays(byDay), dateOrder: 'iso', dateOrderAssumed: false, dws: info };
 }
