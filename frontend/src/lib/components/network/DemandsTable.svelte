@@ -9,7 +9,7 @@
 	// planted areas (the farm drawer). Edits go into the shared ModelEditor.
 	import type { ProjectSettings } from '@water-management/engine';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { page } from '$app/state';
 	import { api, type AllocationList } from '#lib/api/index.js';
 	import { STATUS_LABEL } from '#lib/components/allocations/allocations.js';
@@ -59,7 +59,7 @@
 	const show = (m3Day: number) => fmtNum(m3Day * uv.scale, uv.decimals);
 	function pickUnit(v: string) {
 		const next = parseDemandsUnit(v);
-		void goto(next ? withParam(page.url, UNIT_PARAM, next) : withoutParam(page.url, UNIT_PARAM), { reset: false });
+		void guardedGoto(next ? withParam(page.url, UNIT_PARAM, next) : withoutParam(page.url, UNIT_PARAM), { reset: false });
 	}
 	// --- registered volumes (docs/allocations.md): per unit or user, read as the Allocations page reads them, so a viewer
 	// sees per-unit volumes only when the owners allow it, and a farmer is refused (no column) ---

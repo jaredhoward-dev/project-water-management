@@ -3,7 +3,7 @@
 	// The help landing page: the illustrated catchment tour, the setup path
 	// through the workspace tabs, and the guides that explain the model. The
 	// sidebar (search, every guide, the glossary) is the help layout's.
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { resolve } from '$app/paths';
 	import { basePath } from '#lib/nav/base.js';
 	import { page } from '$app/state';
@@ -21,7 +21,7 @@
 	// bookmarks) go on to the term's topic page.
 	$effect(() => {
 		const e = helpFor(hashId(page.url.hash));
-		if (e) goto(`${basePath()}${glossaryPath(e)}`, { replace: true });
+		if (e) guardedGoto(`${basePath()}${glossaryPath(e)}`, { replace: true });
 	});
 </script>
 

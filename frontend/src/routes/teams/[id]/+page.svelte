@@ -11,7 +11,7 @@
 	import { untrack } from 'svelte';
 	import { focusAfterRemove } from '#lib/a11y/focusAfterRemove.js';
 	import { removeMemberConfirm } from '#lib/teams/removeConfirm.js';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { openAfterClose, trackClose } from '#lib/nav/closeNav.js';
 	import { resolve } from '$app/paths';
 	import { basePath } from '#lib/nav/base.js';
@@ -108,7 +108,7 @@
 	$effect(() => {
 		// Closed (Done, Esc, the ✕): drop `settings` in place.
 		// The sheet shuts before the URL follows: a link to it waits for the drop (lib/nav/closeNav.ts).
-		if (!settingsOpen && untrack(() => settingsParam)) void trackClose(goto(withoutParam(page.url, 'settings'), { replace: true, reset: false }));
+		if (!settingsOpen && untrack(() => settingsParam)) void trackClose(guardedGoto(withoutParam(page.url, 'settings'), { replace: true, reset: false }));
 	});
 	const settingsHref = $derived(withParam(page.url, 'settings', '1'));
 
@@ -197,7 +197,7 @@
 		error = null;
 		try {
 			await api.teams.removeMember(teamId, m.userId);
-			if (self) return void (await goto(resolve('teams')));
+			if (self) return void (await guardedGoto(resolve('teams')));
 			const at = members.findIndex((x) => x.userId === m.userId);
 			members = members.filter((x) => x.userId !== m.userId);
 			if (team) team.memberCount -= 1;
@@ -260,7 +260,7 @@
 		error = null;
 		try {
 			await api.teams.remove(team.id);
-			await goto(resolve('teams'));
+			await guardedGoto(resolve('teams'));
 		} catch (err) {
 			error = msg(err);
 		} finally {

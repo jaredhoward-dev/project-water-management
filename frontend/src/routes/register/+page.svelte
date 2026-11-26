@@ -1,7 +1,7 @@
 <!-- i18n-section: register -->
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { api, ApiError, type InviteInfo } from '#lib/api/index.js';
@@ -143,7 +143,7 @@
 				// Through a matching invite: confirmed and signed in, straight to it.
 				registered = true;
 				session.user = result.user;
-				await goto(safeNext(page.url.searchParams.get('next'), resolve('')), { replace: true });
+				await guardedGoto(safeNext(page.url.searchParams.get('next'), resolve('')), { replace: true });
 				return;
 			}
 			// An ordinary sign-up: nobody is signed in until the address is
@@ -156,7 +156,7 @@
 			}
 			const login = new URLSearchParams({ confirm: 'sent' });
 			if (next) login.set('next', next);
-			await goto(resolve(`login?${login}`), { replace: true });
+			await guardedGoto(resolve(`login?${login}`), { replace: true });
 		} catch (err) {
 			error = errorText(err);
 		} finally {

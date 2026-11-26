@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { confirmDialog } from '#lib/components/common/confirm.svelte.js';
 	import { onMount, tick, untrack } from 'svelte';
-	import { goto } from '$app/navigation';
 	import { confirmLeave, guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { closeSettled, openAfterClose, trackClose } from '#lib/nav/closeNav.js';
 	import { resolve } from '$app/paths';
@@ -239,7 +238,7 @@
 			q.delete('view');
 			if (v === 'table') q.set('grid', 'nodes');
 			else if (v === 'node' && nodes[0]) q.set('edit', q.get('node') ?? nodes[0].id);
-			void goto(`?${q}`, { replace: true, reset: false });
+			void guardedGoto(`?${q}`, { replace: true, reset: false });
 		});
 	});
 
@@ -256,11 +255,11 @@
 	 * and the pick (`node=`) when that node has gone (removed from the sheet), in one navigation, since
 	 * a second one started beside it from the same URL put back what the other took out.
 	 */
-	function sheetClosedHref(): string {
+	function sheetClosedHref(removing: string | null = null): string {
 		const url = new URL(page.url.href);
 		url.searchParams.delete('section');
 		const picked = url.searchParams.get('node');
-		if (picked && !nodes.some((n) => n.id === picked)) url.searchParams.delete('node');
+		if (picked && (picked === removing || !nodes.some((n) => n.id === picked))) url.searchParams.delete('node');
 		return withoutParam(url, 'edit');
 	}
 	// Done, Esc, the ✕ and Close ask the leave guard first (a field holding text it can't take is
@@ -324,7 +323,7 @@
 	$effect(() => {
 		const id = nodeParam;
 		if (!id || editParam || nodes.some((n) => n.id === id)) return;
-		untrack(() => void goto(withoutParam(page.url, 'node'), { replace: true, reset: false }));
+		untrack(() => void guardedGoto(withoutParam(page.url, 'node'), { replace: true, reset: false }));
 	});
 	$effect(() => {
 		const id = nodeParam;
@@ -336,7 +335,7 @@
 	function pick(id: string) {
 		selectedId = id;
 		if (only || nodeParam === id) return;
-		void goto(withParam(page.url, 'node', id), { reset: false });
+		void guardedGoto(withParam(page.url, 'node', id), { reset: false });
 	}
 
 	function select(id: string) {
@@ -381,6 +380,9 @@
 		const question = removeMessage({ isFarm, areas, transfers: refs, cover, boreholes, demandObjects, farmers: farmerCount ? (farmerCount[id] ?? 0) : null, upstream, into });
 		const kind = node ? KIND_WORD[node.kind] : 'node';
 		if (question && !(await confirmDialog({ title: `Remove “${name}”?`, message: question, confirmLabel: `Remove ${kind}`, danger: true }))) return;
+		// Removed from its own sheet, the sheet closes with it: ask the leave guard first, as Done does,
+		// and on Stay remove nothing, so the sheet and its `edit=` stay together (issue #931).
+		if (editParam === id && !(await confirmLeave(sheetClosedHref(id)))) return;
 		// Where the focus goes once it is gone (removeQuestions.ts): the row after it in the table (else the one before).
 		const focusIds = nodeRemovedFocus(
 			view,

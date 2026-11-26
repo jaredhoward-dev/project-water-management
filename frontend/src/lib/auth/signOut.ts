@@ -5,7 +5,7 @@
 // and Sign in again with a code, the two-step banner's Sign in again, the
 // farm view's Sign out and Delete my account all end here.
 import { tick } from 'svelte';
-import { goto } from '$app/navigation';
+import { guardedGoto } from '#lib/nav/leaveGuard.js';
 import { basePath } from '#lib/nav/base.js';
 import { api } from '#lib/api/index.js';
 import { session } from '#lib/auth/session.svelte.js';
@@ -21,7 +21,7 @@ export async function forgetSession(to = '/login', options?: { replace?: boolean
 	session.user = null;
 	// Let the layout's route guard react first; the navigation below then wins.
 	await tick();
-	await goto(`${basePath()}${to}`, options);
+	await guardedGoto(`${basePath()}${to}`, options);
 }
 
 /** Sign out on the server (`end`, this device's logout by default; signed out here whatever it answers), then forgetSession(`to`). */

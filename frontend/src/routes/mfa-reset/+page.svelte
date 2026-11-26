@@ -8,7 +8,7 @@
 	// linked: the help (/help, /farm/words) needs a sign-in, and whoever opens
 	// this can't sign in.
 	import { onMount } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { api, ApiError } from '#lib/api/index.js';
@@ -22,7 +22,7 @@
 	// Read once, then dropped from the address bar so it doesn't linger in history.
 	const token = linkToken(page.url);
 	onMount(() => {
-		if (page.url.searchParams.has('token')) void goto(resolve('mfa-reset'), { replace: true, reset: false });
+		if (page.url.searchParams.has('token')) void guardedGoto(resolve('mfa-reset'), { replace: true, reset: false });
 	});
 
 	let busy = $state(false);

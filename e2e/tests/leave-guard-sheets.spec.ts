@@ -143,3 +143,33 @@ test('a `node=` naming no node in the model is replaced out of the URL', async (
 	await page.goBack();
 	expect(page.url()).not.toContain('node=no-such-node');
 });
+
+test('removing a node from its sheet asks the leave guard too: Stay keeps the node, the sheet and `edit=`', async ({ page, owner }) => {
+	void owner;
+	const project = await createProject(page.request, 'Sheet remove guard');
+	await putModel(page.request, project.id, sampleModel());
+	await page.goto(`/projects/${project.id}?tab=network`);
+	const sheet = await openNodeForm(page, 'Upper farm');
+	await expect.poll(() => param(page, 'edit')).not.toBeNull();
+	const edited = param(page, 'edit');
+	await sheet.getByLabel('Initial (%)').fill('150');
+
+	// The remove question, then the leave guard's: Stay removes nothing.
+	await sheet.getByRole('button', { name: 'Remove Upper farm' }).click();
+	await answerConfirm(page, true, 'Remove “Upper farm”?');
+	await answerConfirm(page, false, QUESTION);
+	await expect(sheet).toBeVisible();
+	await expect(sheet.getByLabel('Initial (%)')).toHaveValue('150');
+	await urlSettled(page);
+	expect(param(page, 'edit')).toBe(edited);
+
+	// Leave: the node goes, and the sheet with `edit=` and its `node=` pick, in place.
+	await sheet.getByRole('button', { name: 'Remove Upper farm' }).click();
+	await answerConfirm(page, true, 'Remove “Upper farm”?');
+	await answerConfirm(page, true, QUESTION);
+	await expect(sheet).toBeHidden();
+	await urlSettled(page);
+	expect(param(page, 'edit')).toBeNull();
+	expect(param(page, 'node')).toBeNull();
+	await expect(page.getByRole('list', { name: 'All hydrological units' }).getByRole('button', { name: /^Edit Upper farm/ })).toHaveCount(0);
+});

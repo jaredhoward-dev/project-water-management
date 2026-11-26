@@ -5,7 +5,7 @@
 	import { confirmDialog } from '#lib/components/common/confirm.svelte.js';
 	import { compareTabHref } from '#lib/components/compare/picker.js';
 	import { onDestroy, onMount, tick, untrack } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { runFitEngineVersions, toEpochDay, unitsWithoutGridApan, type SeriesMeta } from '@water-management/engine';
@@ -221,7 +221,7 @@
 			land: (id) => (fragmentShown ? landOnceShown(id) : undefined),
 			forward: (to) => {
 				forwarding = true;
-				void goto(to, { replace: true, reset: false });
+				void guardedGoto(to, { replace: true, reset: false });
 			}
 		});
 		if (forwarding) return;
@@ -247,7 +247,7 @@
 		if (id) url.searchParams.set('run', id);
 		else url.searchParams.delete('run');
 		if (url.search === page.url.search) return Promise.resolve();
-		return goto(url, { replace: how === 'default', reset: false });
+		return guardedGoto(url, { replace: how === 'default', reset: false });
 	}
 	/**
 	 * Go to latest: the button hides once the latest run shows, and it had the focus, so the focus goes to that run's
@@ -535,7 +535,7 @@
 			else url.searchParams.delete('q');
 			if (url.search === page.url.search) return;
 			written = words;
-			void queryStep.write(url.href, (replace) => goto(url, { replace, reset: false }));
+			void queryStep.write(url.href, (replace) => guardedGoto(url, { replace, reset: false }));
 		}, 300);
 	}
 	$effect(() => () => clearTimeout(queryTimer));

@@ -6,7 +6,7 @@
 	// protects may not be able to sign in. A button, not on load, like the
 	// confirmation page.
 	import { onMount } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { api, ApiError } from '#lib/api/index.js';
@@ -18,7 +18,7 @@
 
 	const token = linkToken(page.url);
 	onMount(() => {
-		if (page.url.searchParams.has('token')) void goto(resolve('mfa-reset/cancel'), { replace: true, reset: false });
+		if (page.url.searchParams.has('token')) void guardedGoto(resolve('mfa-reset/cancel'), { replace: true, reset: false });
 	});
 
 	let busy = $state(false);

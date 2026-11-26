@@ -1,6 +1,6 @@
 <!-- i18n-section: login -->
 <script lang="ts">
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { api, ApiError } from '#lib/api/index.js';
@@ -138,7 +138,7 @@
 		} catch {
 			// Nothing kept.
 		}
-		await goto(safeNext(page.url.searchParams.get('next'), resolve('')), { replace: true });
+		await guardedGoto(safeNext(page.url.searchParams.get('next'), resolve('')), { replace: true });
 	}
 
 	async function submitCode(e: SubmitEvent) {

@@ -18,7 +18,7 @@
 	// half-page. The Applicant view has no section header: its New
 	// application button sits at the top of the list instead.
 	import { tick, untrack } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { navigating, page } from '$app/state';
 	import { api, ApiError, type Run, type RunMeta, type Scenario, type ScenarioWithCheck } from '#lib/api/index.js';
 	import Dialog from '#lib/components/common/Dialog.svelte';
@@ -128,7 +128,7 @@
 		else q.delete('scenario');
 		q.delete('new');
 		q.delete('base');
-		return goto(`?${q}`, { reset: false, replace: replace });
+		return guardedGoto(`?${q}`, { reset: false, replace: replace });
 	}
 	// None picked: open the first (the newest). Not while the URL asks for the
 	// create dialog (it picks the new one), and not while any navigation is in
@@ -233,7 +233,7 @@
 	$effect(() => {
 		// Closed (Cancel, Esc, the ✕): drop `new` in place.
 		if (!createOpen && untrack(() => newParam)) {
-			void goto(withoutParam(page.url, 'new'), { replace: true, reset: false });
+			void guardedGoto(withoutParam(page.url, 'new'), { replace: true, reset: false });
 		}
 	});
 	$effect(() => {

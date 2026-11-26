@@ -72,7 +72,7 @@
 	// Delineate and Draw (D4).
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { tick, untrack } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { page } from '$app/state';
 	import { PUBLIC_CHANNELS_URL, PUBLIC_TERRAIN_URL, PUBLIC_TILES_GLYPHS_URL, PUBLIC_TILES_URL } from '$app/env/public';
 	import { api, type DamTraceProposal, type DamTraceState, type MinOccurrence, type DelineationState, type MapFeature, type MapFeatureList, type Role, type RunMeta, type StartState } from '#lib/api/index.js';
@@ -212,7 +212,7 @@
 		const q = new URLSearchParams(page.url.search);
 		q.set('feature', id);
 		q.delete('node');
-		return goto(`?${q}`, { reset: false });
+		return guardedGoto(`?${q}`, { reset: false });
 	}
 	/**
 	 * A pick from the list. Stacked (a phone, a narrow column) the card sits above the list, so bring
@@ -233,7 +233,7 @@
 		q.delete('node');
 		if (id) q.set('feature', id);
 		else q.delete('feature');
-		return goto(`?${q}`, { replace: true, reset: false });
+		return guardedGoto(`?${q}`, { replace: true, reset: false });
 	}
 
 	// --- the sheets and the grid: open while the URL names them; closing drops the param in place ---
@@ -244,7 +244,7 @@
 			open = asked;
 		});
 		$effect(() => {
-			if (!open && untrack(() => params.has(name))) void goto(withoutParam(page.url, name), { replace: true, reset: false });
+			if (!open && untrack(() => params.has(name))) void guardedGoto(withoutParam(page.url, name), { replace: true, reset: false });
 		});
 		return {
 			get open() {
@@ -313,7 +313,7 @@
 		if (params.get('checks') !== '1') return;
 		untrack(() => {
 			sideTab = 'checks';
-			void goto(withoutParam(page.url, 'checks'), { replace: true, reset: false });
+			void guardedGoto(withoutParam(page.url, 'checks'), { replace: true, reset: false });
 		});
 	});
 	const tabEls: Record<string, HTMLButtonElement | undefined> = $state({});
@@ -413,7 +413,7 @@
 		delineateAt = at;
 		delineateMinKm2 = at ? (shownChannelKm2() ?? null) : null;
 		delineateStep = 'ask';
-		await goto(withParam(page.url, 'delineate', '1'), { reset: false });
+		await guardedGoto(withParam(page.url, 'delineate', '1'), { reset: false });
 	}
 	/** A proposal came back: the drawing mode ends and the sheet (still open) shows it from the reloaded state. */
 	async function proposed() {
@@ -473,7 +473,7 @@
 		const sheet = backToSheet;
 		if (!sheet) return;
 		backToSheet = null;
-		await goto(withParam(page.url, sheet, '1'), { reset: false });
+		await guardedGoto(withParam(page.url, sheet, '1'), { reset: false });
 	}
 	/**
 	 * Leave the sheet for one of the map's own tools (the sheet's param goes first, in place). Every tool
@@ -481,7 +481,7 @@
 	 * delineation, never brings the sheet back.
 	 */
 	async function fromStart(start: () => unknown, back = true, sheet: 'start' | 'divide' = 'start') {
-		await goto(withoutParam(page.url, sheet), { replace: true, reset: false });
+		await guardedGoto(withoutParam(page.url, sheet), { replace: true, reset: false });
 		await start();
 		backToSheet = back ? sheet : null;
 	}
@@ -589,7 +589,7 @@
 	);
 	/** The delineated catchment's sheet: a unit meant inside the boundary, so switch to Sub-catchments, one per click (the proposal stays waiting). */
 	async function subcatchmentsFromSheet() {
-		await goto(withoutParam(page.url, 'delineate'), { replace: true, reset: false });
+		await guardedGoto(withoutParam(page.url, 'delineate'), { replace: true, reset: false });
 		startDividing();
 	}
 	function startDividing() {
@@ -688,7 +688,7 @@
 	}
 	async function pickPiece(key: string) {
 		pieceFocus = key;
-		await goto(withParam(page.url, pendingStart ? 'start' : 'divide', '1'), { reset: false });
+		await guardedGoto(withParam(page.url, pendingStart ? 'start' : 'divide', '1'), { reset: false });
 	}
 	$effect(() => {
 		// A sheet closed: nothing is lit or waiting to be focused.
@@ -839,7 +839,7 @@
 			return;
 		}
 		if (draft.mode === 'place') {
-			await goto(withParam(page.url, 'place', '1'), { reset: false });
+			await guardedGoto(withParam(page.url, 'place', '1'), { reset: false });
 			return;
 		}
 		const f = draft.feature;
@@ -1304,7 +1304,7 @@
 		onsave={saveDraft}
 		onpaste={() => (pasteOpen = true)}
 		oncoords={() =>
-			tracing ? goto(withParam(page.url, 'trace', '1'), { reset: false }) : delineating ? openDelineate(draft.coords[0] ?? null) : goto(withParam(page.url, 'place', '1'), { reset: false })}
+			tracing ? guardedGoto(withParam(page.url, 'trace', '1'), { reset: false }) : delineating ? openDelineate(draft.coords[0] ?? null) : guardedGoto(withParam(page.url, 'place', '1'), { reset: false })}
 		onlocated={located}
 		{delineating}
 		{tracing}
@@ -1870,7 +1870,7 @@
 					{features}
 					info={startInfo!}
 					bind:draft={startDraft}
-					onupload={() => fromStart(() => goto(withParam(page.url, 'upload', '1'), { reset: false }), false)}
+					onupload={() => fromStart(() => guardedGoto(withParam(page.url, 'upload', '1'), { reset: false }), false)}
 					ondelineate={delineation?.available ? () => fromStart(startDelineate) : null}
 					ondraw={() => fromStart(() => startDraw('catchment_boundary'))}
 					onplace={() => fromStart(startPlace)}

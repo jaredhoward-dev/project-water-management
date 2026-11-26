@@ -4,7 +4,7 @@
 	// opening it switches the account to that address. Works signed in or out (the token
 	// is the proof); signed in to that account, the session shows the new address at once.
 	import { onMount } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { api } from '#lib/api/index.js';
@@ -25,7 +25,7 @@
 	onMount(async () => {
 		// A real (not shallow) replace: a shallow entry keeps the tokened URL in SvelteKit's history state and Back
 		// from another page navigates to it, sending the spent link again (account.spec.ts). The component stays.
-		if (page.url.searchParams.has('token')) void goto(resolve('verify-email/change'), { replace: true, reset: false });
+		if (page.url.searchParams.has('token')) void guardedGoto(resolve('verify-email/change'), { replace: true, reset: false });
 		if (!token) return;
 		try {
 			const { email } = await emailAuth.confirmEmailChange(token);

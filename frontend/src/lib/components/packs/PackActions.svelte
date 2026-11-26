@@ -8,7 +8,7 @@
 	// where the statement is. The server holds every rule; this offers only
 	// what it would accept, and shows its refusal when something moved.
 	import { tick } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { resolve } from '$app/paths';
 	import { basePath } from '#lib/nav/base.js';
 	import { api, ApiError, type Pack, type PackIssueChecks } from '#lib/api/index.js';
@@ -107,7 +107,7 @@
 		error = null;
 		try {
 			const next = await api.packs.create(projectId, sourceRun, pack.id);
-			await goto(packHref(basePath(), projectId, next.id));
+			await guardedGoto(packHref(basePath(), projectId, next.id));
 		} catch (e) {
 			error = why(e);
 		} finally {
@@ -122,7 +122,7 @@
 		error = null;
 		try {
 			await api.packs.remove(projectId, pack.id);
-			await goto(reportHref);
+			await guardedGoto(reportHref);
 		} catch (e) {
 			error = why(e);
 		} finally {

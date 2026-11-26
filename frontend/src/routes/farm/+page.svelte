@@ -5,7 +5,7 @@
 	// %, the worst notice first. A farmer with one farm goes straight to its page. The root page sends
 	// a user whose every membership is `farmer` here.
 	import { onMount } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { resolve } from '$app/paths';
 	import { basePath } from '#lib/nav/base.js';
 	import type { FarmIndex, FarmView } from '@water-management/engine';
@@ -79,7 +79,7 @@
 			});
 			if (!list.length && failure) throw (failure as PromiseRejectedResult).reason;
 			if (list.length === 1) {
-				await goto(farmHref(basePath(), list[0]!.projectId, list[0]!.nodeId, false), { replace: true });
+				await guardedGoto(farmHref(basePath(), list[0]!.projectId, list[0]!.nodeId, false), { replace: true });
 				return;
 			}
 			failures = 0;

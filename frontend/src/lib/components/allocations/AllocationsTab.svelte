@@ -45,7 +45,7 @@
 	import { focusAfterRemove } from '#lib/a11y/focusAfterRemove.js';
 	import { tick, untrack } from 'svelte';
 	import { hashId, focusAnchor, holdAnchor } from '#lib/help/anchor.js';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { page } from '$app/state';
 	import type { AllocationComparison, AllocationMode } from '@water-management/engine';
 	import { api, type Allocation, type AllocationCapYears, type AllocationList, type Project, type RunMeta } from '#lib/api/index.js';
@@ -199,7 +199,7 @@
 	// A scenario's run names its scenario (runPickName), as the other pages' run pickers do.
 	const runLabel = (r: RunMeta) => `${runPickName(r)} · ${fmtDate(r.createdAt, true)}${r.published ? ' · published' : ''}`;
 	function pickRun(id: string) {
-		void goto(withParam(url, 'run', id), { reset: false });
+		void guardedGoto(withParam(url, 'run', id), { reset: false });
 	}
 
 	// --- the comparison for that run ---
@@ -322,7 +322,7 @@
 	function choose(e: MouseEvent, id: string) {
 		if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
 		e.preventDefault();
-		void goto(withParam(url, 'unit', id), { reset: false }).then(() => {
+		void guardedGoto(withParam(url, 'unit', id), { reset: false }).then(() => {
 			// Stacked, the detail is under the list; beside an opened list read far down, it has scrolled away above.
 			if (detailEl && (!side || detailEl.getBoundingClientRect().top < 0)) detailEl.scrollIntoView({ block: 'start' });
 		});
@@ -331,7 +331,7 @@
 	// --- the map of the units shaded by band (issue #510): `map=1`; a unit picked there opens its comparison above ---
 	const mapOpen = $derived(url.searchParams.get('map') === '1');
 	function pickFromMap(id: string) {
-		void goto(withParam(url, 'unit', id), { reset: false }).then(() => detailEl?.scrollIntoView({ block: 'start' }));
+		void guardedGoto(withParam(url, 'unit', id), { reset: false }).then(() => detailEl?.scrollIntoView({ block: 'start' }));
 	}
 	// A unit picked while the map shades what is registered: its registered users in the table above.
 	let usersFocus = $state<{ id: string; at: number } | null>(null);
@@ -355,7 +355,7 @@
 	});
 	$effect(() => {
 		// Closed (Save, Cancel, Esc, the ✕): drop `volume` in place, so Back goes to where it was opened from.
-		if (!formOpen && data && untrack(() => volumeParam)) void goto(withoutParam(url, 'volume'), { replace: true, reset: false });
+		if (!formOpen && data && untrack(() => volumeParam)) void guardedGoto(withoutParam(url, 'volume'), { replace: true, reset: false });
 	});
 	const importParam = $derived(url.searchParams.get('import'));
 	let importOpen = $state(false);
@@ -363,9 +363,9 @@
 		importOpen = canEdit && importParam === '1';
 	});
 	$effect(() => {
-		if (!importOpen && untrack(() => importParam)) void goto(withoutParam(url, 'import'), { replace: true, reset: false });
+		if (!importOpen && untrack(() => importParam)) void guardedGoto(withoutParam(url, 'import'), { replace: true, reset: false });
 	});
-	const openSheet = (name: string, value: string) => goto(withParam(url, name, value), { reset: false });
+	const openSheet = (name: string, value: string) => guardedGoto(withParam(url, name, value), { reset: false });
 
 	// Where a Delete sits: the Registered volumes table or the picked unit's volumes. After the delete the same list's
 	// next Delete takes the focus, else its heading (ui-playbook § "A delete puts the focus on what took the row's place").

@@ -8,7 +8,7 @@
 	// alerts off; a mail client's own one-click unsubscribe (RFC 8058) posts
 	// to the API directly. Its words come from $lib/i18n.
 	import { onMount } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { api, ApiError, type Unsubscribed } from '#lib/api/index.js';
@@ -27,7 +27,7 @@
 	onMount(() => {
 		token = fragmentToken(page.url.hash);
 		// Out of the address bar and the history once read.
-		if (page.url.hash) void goto(resolve('alerts/unsubscribe'), { replace: true, reset: false });
+		if (page.url.hash) void guardedGoto(resolve('alerts/unsubscribe'), { replace: true, reset: false });
 		status = token ? 'ask' : 'incomplete';
 	});
 

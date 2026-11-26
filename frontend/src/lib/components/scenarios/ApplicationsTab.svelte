@@ -18,7 +18,7 @@
 	// (AssessorQuestions.svelte, 164).
 	import { untrack } from 'svelte';
 	import { basePath } from '#lib/nav/base.js';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { page } from '$app/state';
 	import { api, type Pack, type Scenario } from '#lib/api/index.js';
 	import LoadState from '#lib/components/common/LoadState.svelte';
@@ -83,7 +83,7 @@
 	// In the URL like the filter, so a reload and Back keep it (issue #521); a new sort is a step in history.
 	const sort = $derived<ApplicationSort>(parseSort(page.url.searchParams.get('sort')));
 	function setSort(next: ApplicationSort) {
-		if (next !== sort) void goto(next === 'date' ? withoutParam(page.url, 'sort') : withParam(page.url, 'sort', next), { reset: false });
+		if (next !== sort) void guardedGoto(next === 'date' ? withoutParam(page.url, 'sort') : withParam(page.url, 'sort', next), { reset: false });
 	}
 	const assessView = $derived(page.url.searchParams.get('view') === 'assess');
 	const assessHref = $derived(withParam(page.url, 'view', 'assess'));

@@ -22,7 +22,7 @@
 	// confirm" until a run no longer warns, and a line offers Run now. A
 	// viewer reads it all, with the links but no ticks or buttons.
 	import { onMount, tick, untrack } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import type { ProjectSettings, RunSummary, SeriesMeta, WarningKept } from '@water-management/engine';
@@ -311,7 +311,7 @@
 	const checkHref = (c: string | null) => paramHref('check', c);
 	const runWarningsHref = $derived(showRun ? '#warn-run' : `${sourceHref('run')}#warn-run`);
 	function setRecord(id: string) {
-		void goto(id ? withParam(page.url, 'series', id) : withoutParam(page.url, 'series'), { reset: false });
+		void guardedGoto(id ? withParam(page.url, 'series', id) : withoutParam(page.url, 'series'), { reset: false });
 	}
 	const everyHref = $derived.by(() => `?tab=warnings&status=all${page.url.searchParams.get('run') ? `&run=${encodeURIComponent(page.url.searchParams.get('run')!)}` : ''}`);
 
@@ -331,7 +331,7 @@
 			if (words === filters.q) return;
 			written = words;
 			const href = words ? withParam(page.url, 'q', words) : withoutParam(page.url, 'q');
-			void queryStep.write(href, (replace) => goto(href, { replace, reset: false }));
+			void queryStep.write(href, (replace) => guardedGoto(href, { replace, reset: false }));
 		}, 300);
 	}
 	$effect(() => () => clearTimeout(queryTimer));
@@ -562,7 +562,7 @@
 		followAnchors({
 			page: 'warnings',
 			land: (hash) => (hash === 'warn-checks' || hash === 'warn-other' || hash === 'warn-run' ? landOnAnchor(hash) : undefined),
-			forward: (to) => void goto(to, { replace: true, reset: false })
+			forward: (to) => void guardedGoto(to, { replace: true, reset: false })
 		})
 	);
 

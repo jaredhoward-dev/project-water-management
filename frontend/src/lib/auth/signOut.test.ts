@@ -6,6 +6,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const calls: string[] = [];
 vi.mock('$app/navigation', () => ({ goto: vi.fn(async (to: string) => void calls.push(`goto ${to}`)) }));
+// closeNav/signOut go through the leave guard's guardedGoto, which reads the page's URL.
+vi.mock('$app/state', () => ({ page: { url: new URL('http://localhost/') } }));
 vi.mock('#lib/nav/base.js', () => ({ basePath: () => '' }));
 vi.mock('#lib/api/index.js', () => ({ api: { auth: { logout: vi.fn(async () => Promise.reject(new Error('offline'))) } } }));
 vi.mock('#lib/auth/session.svelte.js', () => ({ session: { user: { id: 'u1' } } }));

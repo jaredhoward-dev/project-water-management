@@ -26,18 +26,58 @@ const gotoOptions = new Map<string, GotoOptions>();
 /** Resolve a goto's target as SvelteKit does: against the page's URL. */
 const absolute = (url: string | URL) => new URL(url, page.url.href).href;
 
+/** The parts of an element `linkOptions` reads (an Element in the browser). */
+export interface LinkOptionSource {
+	getAttribute(name: string): string | null;
+	readonly parentElement: LinkOptionSource | null;
+}
+
+/**
+ * The goto options a click on a link has SvelteKit follow it with, read as SvelteKit 3 reads
+ * them: the nearest `data-sveltekit-replacestate` and `data-sveltekit-reset` on the link or
+ * above it ('' or 'true' on, 'false' off). SvelteKit 3 ignores `data-sveltekit-noscroll` and
+ * `-keepfocus` (it only warns of them), so they are not read here either: the repeat goes as
+ * the click went.
+ */
+export function linkOptions(el: LinkOptionSource | null): GotoOptions {
+	let replace: string | null = null;
+	let reset: string | null = null;
+	for (let e = el; e; e = e.parentElement) {
+		replace ??= e.getAttribute('data-sveltekit-replacestate');
+		reset ??= e.getAttribute('data-sveltekit-reset');
+	}
+	const on = (v: string | null) => (v === '' || v === 'true' ? true : v === 'false' ? false : undefined);
+	const opts: GotoOptions = {};
+	if (on(replace)) opts.replace = true;
+	if (on(reset) === false) opts.reset = false;
+	return opts;
+}
+
+// The last link clicked, with the options SvelteKit follows it with: its navigation comes
+// through beforeNavigate as type 'link', with no element to read them from.
+let lastLink: { href: string; opts: GotoOptions } | null = null;
+
+/** Note a click on a link (the guard's capturing listener; exported for its tests). */
+export function noteLinkClick(e: Pick<MouseEvent, 'target'>): void {
+	const t = e.target as (Element & { closest?: Element['closest'] }) | null;
+	const a = t?.closest?.('a[href]') as HTMLAnchorElement | null | undefined;
+	lastLink = a ? { href: new URL(a.href, page.url.href).href, opts: linkOptions(a) } : null;
+}
+
 /**
  * `goto`, with its options noted for the guard, so a navigation it stops and the person then
  * agrees to is made again with the same `replace`, `reset` and `state`.
  */
-export function guardedGoto(url: string | URL, opts: GotoOptions = {}): Promise<void> {
+export function guardedGoto(url: string | URL, opts?: GotoOptions): Promise<void> {
 	const href = absolute(url);
-	gotoOptions.set(href, opts);
+	const noted = opts ?? {};
+	gotoOptions.set(href, noted);
 	const forget = () => {
-		if (gotoOptions.get(href) === opts) gotoOptions.delete(href);
+		if (gotoOptions.get(href) === noted) gotoOptions.delete(href);
 	};
-	const nav = goto(url, opts);
-	nav.then(forget, forget);
+	// The options go on as given (none stays none), so goto sees exactly what the caller wrote.
+	const nav = opts === undefined ? goto(url) : goto(url, opts);
+	void Promise.resolve(nav).then(forget, forget);
 	return nav;
 }
 
@@ -78,7 +118,12 @@ export function installLeaveGuard(): void {
 			if (anyUnsaved()) e.preventDefault();
 		};
 		addEventListener('beforeunload', onUnload);
-		return () => removeEventListener('beforeunload', onUnload);
+		// Capturing, so it runs before SvelteKit's own click handler starts the navigation.
+		document.addEventListener('click', noteLinkClick, true);
+		return () => {
+			removeEventListener('beforeunload', onUnload);
+			document.removeEventListener('click', noteLinkClick, true);
+		};
 	});
 	beforeNavigate((nav) => {
 		const to = nav.to?.url ?? null;
@@ -94,7 +139,7 @@ export function installLeaveGuard(): void {
 		const dropped = unsavedDroppedBy(page.url, to);
 		if (!dropped.length) return;
 		// Read before the cancel settles the goto, which forgets them.
-		const opts = nav.type === 'goto' && to ? gotoOptions.get(to.href) : undefined;
+		const opts = !to ? undefined : nav.type === 'goto' ? gotoOptions.get(to.href) : nav.type === 'link' && lastLink?.href === to.href ? lastLink.opts : undefined;
 		nav.cancel();
 		if (asking) return;
 		void ask(dropped, to).then((ok) => {

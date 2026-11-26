@@ -15,6 +15,9 @@ vi.mock('$app/navigation', () => ({
 	},
 	goto: h.goto
 }));
+// closeNav/signOut go through the leave guard's guardedGoto, which reads the page's URL.
+vi.mock('$app/state', () => ({ page: { url: new URL('http://localhost/') } }));
+vi.mock('#lib/nav/base.js', () => ({ basePath: () => '' }));
 vi.mock('svelte', async (importOriginal) => ({
 	...(await importOriginal<typeof import('svelte')>()),
 	tick: async () => {

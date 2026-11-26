@@ -24,7 +24,7 @@
 	import { confirmDialog } from '#lib/components/common/confirm.svelte.js';
 	import { onDestroy, onMount, untrack } from 'svelte';
 	import { focusAfterRemove } from '#lib/a11y/focusAfterRemove.js';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { followAnchors } from '#lib/nav/anchorLanding.js';
 	import { page } from '$app/state';
 	import { fillHeader } from '#lib/components/workspace/headerSlot.svelte.js';
@@ -216,7 +216,7 @@
 		untrack(() => {
 			if (id === removedHere) return;
 			goneSeries = true;
-			void goto(withoutParam(page.url, 'series'), { reset: false, replace: true });
+			void guardedGoto(withoutParam(page.url, 'series'), { reset: false, replace: true });
 		});
 	});
 	// The note is about the default charted in the dead link's place: once the URL names a stored series by any
@@ -248,7 +248,7 @@
 			if (previewParam === null) return;
 			previewView = previewParam;
 			if (list.length) openPreviewAll();
-			else void goto(withoutParam(page.url, 'preview'), { reset: false, replace: true });
+			else void guardedGoto(withoutParam(page.url, 'preview'), { reset: false, replace: true });
 		});
 	});
 	$effect(() => {
@@ -257,7 +257,7 @@
 		const have = previewParam;
 		untrack(() => {
 			if (want === have) return;
-			void goto(want === null ? withoutParam(page.url, 'preview') : withParam(page.url, 'preview', want), { reset: false, replace: true });
+			void guardedGoto(want === null ? withoutParam(page.url, 'preview') : withParam(page.url, 'preview', want), { reset: false, replace: true });
 		});
 	});
 	/** The card header's "Preview all data": every column, nothing highlighted. */
@@ -284,7 +284,7 @@
 	function choose(id: string, replaceState = false) {
 		if (id === selectedId && seriesParam === id) return;
 		goneSeries = false;
-		void goto(withParam(page.url, 'series', id), { reset: false, replace: replaceState }).then(() => {
+		void guardedGoto(withParam(page.url, 'series', id), { reset: false, replace: replaceState }).then(() => {
 			if (!replaceState) showChart();
 		});
 	}
@@ -597,7 +597,7 @@
 			list = list.filter((x) => x.id !== s.id);
 			onSeriesChange?.(list);
 			// The deleted series was charted: back to the default, without a history entry for it.
-			if (seriesParam === s.id) void goto(withoutParam(page.url, 'series'), { reset: false, replace: true });
+			if (seriesParam === s.id) void guardedGoto(withoutParam(page.url, 'series'), { reset: false, replace: true });
 			// Its row, and the Delete that had the focus, have gone: the View of the series now in its place takes it.
 			await focusAfterRemove(at, '#series-rows button[aria-pressed]', 'ser-h');
 		} catch (e) {
@@ -857,7 +857,7 @@
 				}
 				return dataAnchor(hash) ? landOnAnchor(hash) : undefined;
 			},
-			forward: (to) => void goto(to, { replace: true, reset: false })
+			forward: (to) => void guardedGoto(to, { replace: true, reset: false })
 		})
 	);
 

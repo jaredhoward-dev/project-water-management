@@ -21,7 +21,9 @@ vi.mock('$app/state', () => ({ page: { get url() { return h.url; } } }));
 vi.mock('#lib/nav/base.js', () => ({ basePath: () => '' }));
 vi.mock('#lib/components/common/confirm.svelte.js', () => ({ confirmDialog: h.confirm }));
 
-import { confirmLeave, guardedGoto, installLeaveGuard } from './leaveGuard';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join, relative } from 'node:path';
+import { confirmLeave, guardedGoto, installLeaveGuard, linkOptions, noteLinkClick, type LinkOptionSource } from './leaveGuard';
 import { registerUnsaved } from './unsaved';
 
 function nav(to: string, extra: Partial<BeforeNavigate> = {}): BeforeNavigate & { cancel: ReturnType<typeof vi.fn> } {
@@ -151,5 +153,80 @@ describe('the leave guard', () => {
 			expect(await first).toBe(false);
 			expect(h.confirm).toHaveBeenCalledOnce();
 		});
+	});
+
+	describe('a link the guard stopped is followed again as SvelteKit followed it (issue #931)', () => {
+		beforeEach(() => {
+			unregister();
+			unregister = registerUnsaved({ dirty: () => true, what: 'fields that need fixing', leaves: (f, t) => f.search !== t.search });
+			vi.mocked(goto).mockClear();
+			h.confirm.mockResolvedValue(true);
+		});
+
+		/** A link with `attrs`, inside a parent with `parent`. */
+		function link(href: string, attrs: Record<string, string> = {}, parent: Record<string, string> = {}) {
+			const up: LinkOptionSource = { getAttribute: (n) => parent[n] ?? null, parentElement: null };
+			const a = { href, getAttribute: (n: string) => attrs[n] ?? null, parentElement: up };
+			return { ...a, closest: (sel: string) => (sel === 'a[href]' ? a : null) };
+		}
+
+		it('reads replacestate and reset from the link or the nearest element above it', () => {
+			expect(linkOptions(link('/x'))).toEqual({});
+			expect(linkOptions(link('/x', { 'data-sveltekit-replacestate': '' }))).toEqual({ replace: true });
+			expect(linkOptions(link('/x', {}, { 'data-sveltekit-replacestate': 'true', 'data-sveltekit-reset': 'false' }))).toEqual({ replace: true, reset: false });
+			// The nearest wins: the link's own 'false' over its parent's on.
+			expect(linkOptions(link('/x', { 'data-sveltekit-replacestate': 'false' }, { 'data-sveltekit-replacestate': '' }))).toEqual({});
+			// SvelteKit 3 ignores the old noscroll and keepfocus, so the repeat does too.
+			expect(linkOptions(link('/x', { 'data-sveltekit-noscroll': '', 'data-sveltekit-keepfocus': '' }))).toEqual({});
+		});
+
+		it('a replacing link, stopped and then agreed to, is repeated replacing', async () => {
+			noteLinkClick({ target: link('https://app.test/projects/p1?tab=outputs', { 'data-sveltekit-replacestate': '', 'data-sveltekit-reset': 'false' }) as unknown as EventTarget });
+			h.handler!(nav('https://app.test/projects/p1?tab=outputs', { type: 'link' } as Partial<BeforeNavigate>));
+			await vi.waitFor(() => expect(goto).toHaveBeenCalledOnce());
+			expect(vi.mocked(goto).mock.calls[0]).toEqual([new URL('https://app.test/projects/p1?tab=outputs'), { replace: true, reset: false }]);
+		});
+
+		it('positive control: a click on another link lends nothing to this navigation', async () => {
+			noteLinkClick({ target: link('https://app.test/projects/p1?tab=dams', { 'data-sveltekit-replacestate': '' }) as unknown as EventTarget });
+			h.handler!(nav('https://app.test/projects/p1?tab=river', { type: 'link' } as Partial<BeforeNavigate>));
+			await vi.waitFor(() => expect(goto).toHaveBeenCalledOnce());
+			expect(vi.mocked(goto).mock.calls[0]![1]).toBeUndefined();
+		});
+
+		it('guardedGoto hands goto the options exactly as given: none stays none', () => {
+			void guardedGoto('/teams');
+			expect(vi.mocked(goto).mock.calls[0]).toEqual(['/teams']);
+			void guardedGoto('/teams', { replace: true });
+			expect(vi.mocked(goto).mock.calls[1]).toEqual(['/teams', { replace: true }]);
+		});
+	});
+});
+
+// Every navigation goes through guardedGoto, so a Leave can repeat it with its options: no
+// module but the guard itself imports SvelteKit's goto.
+describe('no raw goto outside the guard (issue #931)', () => {
+	const SRC = join(__dirname, '..', '..');
+	const ALLOWED = new Set(['lib/nav/leaveGuard.ts']);
+	const RAW = /import\s*\{[^}]*\bgoto\b[^}]*\}\s*from\s*['"]\$app\/navigation['"]/;
+
+	function* sources(dir: string): Generator<string> {
+		for (const e of readdirSync(dir, { withFileTypes: true })) {
+			const p = join(dir, e.name);
+			if (e.isDirectory()) yield* sources(p);
+			else if (/\.(svelte|ts|js)$/.test(e.name) && !/\.test\.ts$/.test(e.name)) yield p;
+		}
+	}
+
+	it('the pattern catches a raw import (positive control)', () => {
+		expect(RAW.test("import { afterNavigate, goto } from '$app/navigation';")).toBe(true);
+		expect(RAW.test("import { afterNavigate } from '$app/navigation';")).toBe(false);
+	});
+
+	it('only the allowlist imports goto from $app/navigation', () => {
+		const files = [...sources(SRC)].map((p) => relative(SRC, p).split('\\').join('/'));
+		expect(files).toContain('lib/nav/leaveGuard.ts');
+		const raw = files.filter((f) => !ALLOWED.has(f) && RAW.test(readFileSync(join(SRC, f), 'utf8')));
+		expect(raw).toEqual([]);
 	});
 });
