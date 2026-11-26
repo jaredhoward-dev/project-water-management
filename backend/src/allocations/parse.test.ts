@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
+	idNumberProblem,
 	ImportRefused,
 	matchKey,
 	matchRow,
@@ -473,5 +474,19 @@ describe('matchRow', () => {
 		const rows = parseAllocationTable(FIXTURE, 'warms_extract').rows;
 		const matched = rows.filter((r) => matchRow(r, farms, []).nodeId !== null).length;
 		expect(matched / rows.length).toBeGreaterThanOrEqual(0.9);
+	});
+});
+
+describe('idNumberProblem (hand entry keeps ID numbers out, as the import does)', () => {
+	it('refuses a 13-digit number in the holder, reference, property or a condition, spaces aside', () => {
+		expect(idNumberProblem({ holder: '8001015009087' })).toMatch(/holder looks like an ID number/);
+		expect(idNumberProblem({ reference: '800101 5009 087' })).toMatch(/reference looks like an ID number/);
+		expect(idNumberProblem({ propertyRef: '8001015009087' })).toMatch(/property looks like an ID number/);
+		expect(idNumberProblem({ conditions: ['Meter monthly', '8001015009087'] })).toMatch(/condition looks like an ID number/);
+	});
+	it('passes names, registration-style numbers and fields not sent (positive control)', () => {
+		expect(idNumberProblem({ holder: 'Example Holdings', reference: 'Letter 2026-01-05', propertyRef: '123/456', conditions: ['No abstraction below 0.2 m3/s'] })).toBeNull();
+		expect(idNumberProblem({ holder: '800101500908' })).toBeNull();
+		expect(idNumberProblem({})).toBeNull();
 	});
 });

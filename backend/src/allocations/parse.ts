@@ -153,6 +153,23 @@ const FORBIDDEN_HEADER = /^(id|idno|idnr|idnumber|identity.*|rsaid.*|saidnumber|
 /** A 13-digit South African ID number, alone in a cell. */
 const LOOKS_LIKE_ID_NUMBER = /^\d{13}$/;
 
+/**
+ * Why a hand-entered allocation (POST / PATCH …/allocations) can't be stored, or null: a 13-digit number in its
+ * holder, reference, property or a condition looks like an ID number, which the import already refuses as a row
+ * problem (docs/security.md § Allocations: they never reach the database, whichever way a row comes in).
+ */
+export function idNumberProblem(a: { holder?: string; reference?: string; propertyRef?: string; conditions?: readonly string[] }): string | null {
+	const looks = (v: string | undefined) => v !== undefined && LOOKS_LIKE_ID_NUMBER.test(v.replace(/\s/g, ''));
+	for (const [f, label] of [
+		['holder', 'holder'],
+		['reference', 'reference'],
+		['propertyRef', 'property']
+	] as const)
+		if (looks(a[f])) return `${label} looks like an ID number; the app doesn't keep those`;
+	if (a.conditions?.some((c) => looks(c))) return "a condition looks like an ID number; the app doesn't keep those";
+	return null;
+}
+
 export const normaliseHeader = (h: string) => h.toLowerCase().replace(/[^a-z0-9]/g, '');
 
 export class ImportRefused extends Error {}
