@@ -57,6 +57,10 @@
 		searchSummary,
 		SEED_MAX,
 		seedError,
+		budgetError,
+		fitBlocker,
+		BUDGET_MAX,
+		BUDGET_MIN,
 		stageText,
 		planRuns,
 		stepWaterYears,
@@ -76,6 +80,8 @@
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import NumberInput from '#lib/components/common/NumberInput.svelte';
 	import Fold from '#lib/components/common/Fold.svelte';
+	import { provideInvalidFields, useInvalidFields } from '#lib/components/common/invalidFields.svelte.js';
+	import { ForwardingInvalidFields } from '#lib/components/common/forwardingInvalidFields.svelte.js';
 	import { fmtNum } from '#lib/format/number.js';
 
 	let {
@@ -124,6 +130,10 @@
 	} = $props();
 
 	const uid = $props.id();
+	// The panel's number fields that hold text they can't take: such a field keeps the stored value, so Fit would run on
+	// a number the field no longer shows. Counted here to hold the button, and still in the page's registry (the save
+	// bar, the leave guard, Discard), as before.
+	const invalid = provideInvalidFields(new ForwardingInvalidFields(useInvalidFields()));
 	const seedProblem = $derived(seedError(session.seed));
 	// Several searches from different seeds: nearly equal scores with scattered
 	// parameters show what the record can't pin down (calibration research CR-2).
@@ -236,7 +246,27 @@
 		planned?.error ?? (outletMissing ? 'The outlet has no flow record yet, so its step can’t be fitted: add one on Data, or untick Calibrate here at the outlet.' : null)
 	);
 	const noneTicked = $derived(!!planned?.none);
-	const canStart = $derived(hasObserved && !planError && free.length > 0 && session.budget !== null && session.budget >= 50 && !seedProblem && !priorProblem && startsOk && !session.busy);
+	const budgetProblem = $derived(budgetError(session.budget));
+	// The fields to fix before a fit: a stored value it can't use, or a field's text it can't take, by the field's id.
+	const SEARCH_NAMES: Record<string, string> = { budget: 'model runs per fit', starts: 'starts', seed: 'seed' };
+	const fix = $derived.by(() => {
+		const out: { name: string; inSearch: boolean }[] = [];
+		const named = (id: string) => {
+			const key = id.startsWith(`${uid}-`) ? id.slice(uid.length + 1) : '';
+			if (SEARCH_NAMES[key]) return { name: SEARCH_NAMES[key], inSearch: true };
+			if (key === 'prior-w') return { name: 'penalty weight', inSearch: false };
+			return null;
+		};
+		if (budgetProblem) out.push(named(`${uid}-budget`)!);
+		if (!startsOk) out.push(named(`${uid}-starts`)!);
+		if (seedProblem) out.push(named(`${uid}-seed`)!);
+		if (priorProblem) out.push(named(`${uid}-prior-w`)!);
+		for (const f of invalid.fields) out.push(named(f.id) ?? { name: f.label.replace(/\s*\(.*$/, '').toLowerCase() || 'highlighted field', inSearch: false });
+		return out;
+	});
+	const canStart = $derived(hasObserved && !planError && free.length > 0 && fix.length === 0 && !session.busy);
+	// Why the button is disabled, beside it (the plan's error has its own line under it).
+	const blocker = $derived(fitBlocker({ hasObserved, planError: !!planError, free: free.length, busy: session.busy, fix }));
 	const columns = $derived(report ? scoreColumns(report) : []);
 	// Model vs the mean-flow and climatology benchmarks (engine ≥ 1.19.0, CR-5); none on an older report.
 	const benchCols = $derived(benchmarkColumns(columns));
@@ -322,6 +352,30 @@
 	}
 
 	let heading = $state<HTMLElement | null>(null);
+	let fitBtn = $state<HTMLButtonElement | null>(null);
+	let cancelBtn = $state<HTMLButtonElement | null>(null);
+
+	/** Cancel swaps itself for Fit automatically: the focus follows to it rather than falling to the page (ui-playbook.md § 4). */
+	async function cancel() {
+		session.cancel();
+		await tick();
+		fitBtn?.focus();
+	}
+
+	// Fit automatically swaps itself for Cancel while the fit loads and runs, and Cancel back when it ends: whichever
+	// had the focus hands it to the other, so a keyboard user isn't dropped to the page's top. A finished fit's
+	// result is announced by the status line above; the focus stays on the button, not moved into the result.
+	let hadFocus = false;
+	$effect.pre(() => {
+		void session.busy;
+		hadFocus = untrack(() => !!document.activeElement && (document.activeElement === fitBtn || document.activeElement === cancelBtn));
+	});
+	$effect(() => {
+		const busy = session.busy;
+		if (!hadFocus) return;
+		hadFocus = false;
+		untrack(() => (busy ? cancelBtn : fitBtn))?.focus();
+	});
 
 	/** Discard takes the result, and the button with it: the focus goes to the card's heading (ui-playbook.md § 4; issue #586, C18). */
 	async function discard() {
@@ -444,8 +498,8 @@
 			</div>
 			<div class="field">
 				<label for="{uid}-budget">Model runs per fit <HelpTip key="calibration-search" label="About the search settings" /></label>
-				<NumberInput id="{uid}-budget" grouped min={50} max={10_000} step={50} bind:value={session.budget} disabled={status === 'running'} aria-describedby="{uid}-budget-h" />
-				<span class="hint" id="{uid}-budget-h">Default 1 500.</span>
+				<NumberInput id="{uid}-budget" grouped min={BUDGET_MIN} max={BUDGET_MAX} step={50} bind:value={session.budget} disabled={status === 'running'} aria-describedby="{uid}-budget-h" aria-invalid={budgetProblem ? 'true' : undefined} />
+				<span class="hint" id="{uid}-budget-h">{budgetProblem ?? 'Default 1 500.'}</span>
 			</div>
 			<div class="field">
 				<label for="{uid}-starts">Starts</label>
@@ -469,10 +523,19 @@
 		{/if}
 		<div class="action-row">
 			{#if status === 'running' || status === 'loading'}
-				<button type="button" class="btn" onclick={() => session.cancel()} disabled={status === 'loading'}>Cancel</button>
+				<!-- Cancel works while the data loads too: the session drops a fit cancelled before its worker starts. -->
+				<button type="button" class="btn" onclick={cancel} bind:this={cancelBtn}>Cancel</button>
 			{:else}
-				<button type="button" class="btn btn-primary" onclick={start} disabled={!canStart} aria-describedby={planError ? `${uid}-plan ${uid}-runs` : `${uid}-runs`}>Fit automatically</button>
+				<button
+					type="button"
+					class="btn btn-primary"
+					onclick={start}
+					disabled={!canStart}
+					bind:this={fitBtn}
+					aria-describedby={[blocker ? `${uid}-blocker` : null, planError ? `${uid}-plan` : null, `${uid}-runs`].filter(Boolean).join(' ')}>Fit automatically</button
+				>
 			{/if}
+			{#if blocker}<span class="small blocker" id="{uid}-blocker" data-testid="fit-blocker">{blocker}</span>{/if}
 			<span class="muted small" id="{uid}-runs" data-testid="fit-runs"
 				>{planned?.plan && planned.plan.length > 1
 					? `${fmtNum(runs)} runs in all over ${planned.plan.length} locations.`
@@ -818,6 +881,10 @@
 		align-items: center;
 		gap: 0 0.25rem;
 		min-height: 24px;
+	}
+	/* Why Fit automatically is disabled: body text, not muted, since it's the one thing to act on. */
+	.blocker {
+		color: var(--text-2);
 	}
 	.progress {
 		max-width: 520px;
