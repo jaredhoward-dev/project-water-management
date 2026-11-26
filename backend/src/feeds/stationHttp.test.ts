@@ -4,7 +4,7 @@ import type { RequestOptions } from 'node:https';
 import { describe, expect, it } from 'vitest';
 import { feedErrorMessage, FeedFormatError, FeedKeyRefusedError, FeedThrottledError, FeedUnavailableError } from './errors.js';
 import { THROTTLE_DEFAULT_SECONDS, THROTTLE_MAX_SECONDS } from './http.js';
-import { guardedLookup, MAX_HOPS, type Requester, safeUrl, StationAddressError, stationHttp, STATION_FAILURES } from './stationHttp.js';
+import { guardedLookup, MAX_HOPS, type Requester, safeUrl, StationAddressError, stationHttp, STATION_FAILURES, type StationThrottle } from './stationHttp.js';
 
 const KEY = 'sk_test_abcdefghijklmnop';
 
@@ -185,7 +185,7 @@ describe('stationHttp: a host that asked us to wait', () => {
 	});
 
 	it('pauses a 503 without Retry-After for the default, and never past the cap', async () => {
-		const throttle = new Map<string, { until: number }>();
+		const throttle: StationThrottle = new Map();
 		await stationHttp({ requester: fake(() => res(503)).requester, throttle }).get({ url: 'https://a.example.com/x', headers: {} }).catch(() => {});
 		await stationHttp({ requester: fake(() => res(429, { 'retry-after': '86400' })).requester, throttle }).get({ url: 'https://b.example.com/x', headers: {} }).catch(() => {});
 		const left = (h: string) => (throttle.get(h)!.until - Date.now()) / 1000;
