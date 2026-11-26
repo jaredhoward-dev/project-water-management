@@ -320,7 +320,7 @@ describe('GET /auth/me/export', () => {
 		}
 	});
 
-	it('hashes the canonical address in SQL exactly as reverseTrialHash does (canonical_email, 396)', async () => {
+	it('hashes the canonical address in SQL exactly as reverseTrialHash does (canonical_email, 396, 397), non-ASCII too', async () => {
 		const cases = [
 			'Plain@Example.com',
 			'  spaced@example.com\t',
@@ -331,7 +331,19 @@ describe('GET /auth/me/export', () => {
 			'two@at@example.com',
 			'@nolocal.com',
 			'no-at-sign',
-			'first.last+@gmail.com'
+			'first.last+@gmail.com',
+			// Non-ASCII (#914): only A-Z is lower-cased, on both sides, and only ASCII whitespace trimmed.
+			'İnci@Example.com', // JS toLowerCase gives i + U+0307, Postgres lower() i: kept as written
+			'ÉLODIE.Ü@BÜCHER.de',
+			'ΣΟΦΙΑ@example.gr', // final sigma
+			'Straße@Example.de',
+			'ǅemal@example.ba', // titlecase digraph
+			'K@example.com', // U+212A Kelvin sign
+			'\u00a0nbsp@example.com\u00a0', // a no-break space is not trimmed
+			'\ufeffbom@example.com',
+			'\u000bvt@example.com\u000b', // vertical tab is
+			'Ünï.Cödé+Tag@GoogleMail.com',
+			'用户@例子.广告'
 		];
 		for (const email of cases) {
 			const [row] = await asOwner(`SELECT canonical_email($1) AS c, encode(sha256(convert_to(canonical_email($1), 'UTF8')), 'hex') AS h`, [email]);

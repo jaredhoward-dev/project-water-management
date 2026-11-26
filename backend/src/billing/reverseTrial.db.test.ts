@@ -120,7 +120,7 @@ describe('granting the reverse trial', () => {
 		const email = `${local()}@example.com`;
 		const p = await person(email, false);
 		// Called directly as the unverified person: refused, nothing claimed.
-		const r = await withUser(p.id, (db) => db.query('SELECT app_reverse_trial_start($1) AS o', [reverseTrialHash(email)]));
+		const r = await withUser(p.id, (db) => db.query('SELECT app_reverse_trial_start() AS o'));
 		expect(r.rows[0].o).toBe('unverified');
 		expect(await asOwner(`SELECT 1 FROM reverse_trial_claim WHERE email_hash = decode($1, 'hex')`, [reverseTrialHash(email)])).toEqual([]);
 		expect(await liveSub(p)).toBeUndefined();
@@ -128,12 +128,40 @@ describe('granting the reverse trial', () => {
 		expect((await liveSub(p))?.status).toBe('trialing');
 	});
 
+	it("hashes the caller's own address itself: another address's hash can't be claimed, even through 342's signature (#914)", async () => {
+		// Verified while the trial is off, so the caller has no trial or claim yet; the database doesn't read the setting.
+		const caller = await person(`${local()}@example.com`);
+		const victimEmail = `${local()}@example.com`;
+		const victimHash = reverseTrialHash(victimEmail);
+		on();
+		// The old signature, as an older backend (or anyone with water_app) calls it, with someone else's hash: ignored.
+		const r = await withUser(caller.id, (db) => db.query('SELECT app_reverse_trial_start($1) AS o', [victimHash]));
+		expect(r.rows[0].o).toBe('started');
+		expect(await asOwner(`SELECT 1 FROM reverse_trial_claim WHERE email_hash = decode($1, 'hex')`, [victimHash])).toEqual([]);
+		// Positive control: what it claimed is the caller's own canonical address, and the trial is theirs.
+		expect(await asOwner(`SELECT 1 FROM reverse_trial_claim WHERE email_hash = decode($1, 'hex')`, [reverseTrialHash(caller.email)])).toHaveLength(1);
+		expect((await liveSub(caller))?.status).toBe('trialing');
+		// The victim's address still gets its one trial.
+		const victim = await person(victimEmail);
+		expect((await liveSub(victim))?.status).toBe('trialing');
+		expect(await asOwner(`SELECT 1 FROM reverse_trial_claim WHERE email_hash = decode($1, 'hex')`, [victimHash])).toHaveLength(1);
+	});
+
+	it('the no-argument form starts the caller’s own trial once; called again it answers live, then claimed after expiry', async () => {
+		const p = await person(`${local()}@example.com`);
+		const start = async () => (await withUser(p.id, (db) => db.query('SELECT app_reverse_trial_start() AS o'))).rows[0].o;
+		expect(await start()).toBe('started');
+		expect(await start()).toBe('live');
+		await asOwner(`UPDATE subscription SET status = 'expired' WHERE billing_account_id = (SELECT id FROM billing_account WHERE user_id = $1)`, [p.id]);
+		expect(await start()).toBe('claimed');
+	});
+
 	it('a live plan already there (a staff grant) keeps it and claims nothing', async () => {
 		const p = await person(`${local()}@example.com`);
 		const account = (await accountOf(p)) ?? ((await withUser(p.id, (db) => db.query('SELECT app_my_billing_account() AS a'))).rows[0].a as string);
 		await asOwner(`INSERT INTO subscription (billing_account_id, plan_code, status, provider) VALUES ($1, 'team', 'active', 'manual')`, [account]);
 		on();
-		const r = await withUser(p.id, (db) => db.query('SELECT app_reverse_trial_start($1) AS o', [reverseTrialHash(p.email)]));
+		const r = await withUser(p.id, (db) => db.query('SELECT app_reverse_trial_start() AS o'));
 		expect(r.rows[0].o).toBe('live');
 		expect(await asOwner(`SELECT 1 FROM reverse_trial_claim WHERE email_hash = decode($1, 'hex')`, [reverseTrialHash(p.email)])).toEqual([]);
 	});
