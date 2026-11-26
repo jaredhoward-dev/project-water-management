@@ -36,6 +36,7 @@ export interface DamRecord {
 /** What one input file says about a dam; the join fills the gaps from the others. */
 export type DamPart = Partial<Omit<DamRecord, 'registerNo'>> & { registerNo: string };
 
+/** A JSON or KML number (the overlay writes decimal degrees with a point; a lone comma is read as a decimal comma). The CSV's cells go through decimalMarkOf and numberWith below. */
 const num = (v: unknown): number | null => {
 	if (v === null || v === undefined) return null;
 	const s = String(v).trim().replace(/\s/g, '');
@@ -43,6 +44,56 @@ const num = (v: unknown): number | null => {
 	const n = Number(s.replace(',', '.'));
 	return Number.isFinite(n) ? n : null;
 };
+
+// ---------------------------------------------------------------------------
+// The CSV's numbers: decimal comma or decimal point (issue #886)
+// ---------------------------------------------------------------------------
+//
+// A list saved from a South African spreadsheet may write 12,5 for twelve and
+// a half, and one saved in another locale 1,234 for a thousand and more, so a
+// comma alone doesn't say which it is. Spaces (SA's thousands separator) are
+// dropped. Each number cell is read by its shape:
+//  * a single comma not followed by exactly three digits (12,5), or dots
+//    grouping thousands before a comma (1.234,5), or several dots grouping
+//    thousands (1.234.567): the file uses a decimal comma;
+//  * any dot that isn't one of those (12.5, -33.786, 1,234.5), or several
+//    commas grouping thousands (1,234,567): the file uses a decimal point;
+//  * one comma followed by exactly three digits, no dot (1,234): either.
+// The file's convention is what its unambiguous cells show, over every number
+// column, and settles the ambiguous ones. A file whose cells show both, or
+// none while some cell is ambiguous, has those values refused (left empty and
+// listed), never guessed: 1,234 read the wrong way is 1000 times off.
+export type DecimalMark = 'comma' | 'point';
+
+const DIGITS = /^[-+]?\d+$/;
+const AMBIGUOUS = /^[-+]?\d{1,3},\d{3}$/;
+const POINT_FORM = /^[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?$|^[-+]?\.\d+$/;
+const COMMA_FORM = /^[-+]?(?:\d{1,3}(?:\.\d{3})+|\d+)(?:,\d+)?$|^[-+]?,\d+$/;
+
+/** A number cell with its spaces dropped. */
+const squeeze = (v: unknown): string => (v === null || v === undefined ? '' : String(v).replace(/\s/g, ''));
+
+/** Which decimal mark a cell's shape shows, 'ambiguous' for 1,234, or null for a cell that says nothing (empty, digits only, not a number). */
+export function decimalMarkOf(v: unknown): DecimalMark | 'ambiguous' | null {
+	const s = squeeze(v);
+	if (!s || DIGITS.test(s)) return null;
+	if (AMBIGUOUS.test(s)) return 'ambiguous';
+	const point = POINT_FORM.test(s);
+	const comma = COMMA_FORM.test(s);
+	// A cell like 1.234 (one dot, three digits) fits both forms; a dot alone is read as a decimal point.
+	if (point) return 'point';
+	if (comma) return 'comma';
+	return null;
+}
+
+/** A number cell read with the file's decimal mark: null when empty or not a number. */
+export function numberWith(v: unknown, mark: DecimalMark): number | null {
+	const s = squeeze(v);
+	if (!s) return null;
+	if (mark === 'point') return POINT_FORM.test(s) ? Number(s.replace(/,/g, '')) : null;
+	return COMMA_FORM.test(s) ? Number(s.replace(/\./g, '').replace(',', '.')) : null;
+}
+
 const text = (v: unknown, max: number): string | null => {
 	const s = v === null || v === undefined ? '' : String(v).replace(/\s+/g, ' ').trim();
 	return s ? s.slice(0, max) : null;
@@ -123,6 +174,8 @@ const COLUMNS = {
 	lat: ['latdecimal', 'lat', 'latitude'],
 	lon: ['longitudedecimal', 'londecimal', 'lon', 'long', 'longitude']
 } as const;
+/** The columns read as numbers, whose cells settle the file's decimal mark. */
+const NUMBER_COLUMNS = ['wall', 'capacity1000', 'capacity', 'area', 'lat', 'lon'] as const;
 
 /** The DSO list saved as CSV (or any CSV with those columns). */
 export function damPartsFromCsv(csv: string): { parts: DamPart[]; problems: string[] } {
@@ -134,26 +187,47 @@ export function damPartsFromCsv(csv: string): { parts: DamPart[]; problems: stri
 	if (at.no < 0) return { parts: [], problems: ['the CSV file has no "No of dam" column'] };
 	const parts: DamPart[] = [];
 	const problems: string[] = [];
-	for (const [i, line] of lines.slice(1).entries()) {
-		const cells = csvCells(line);
+	const rows = lines.slice(1).map(csvCells);
+	const headers = csvCells(lines[0]!);
+	// The file's decimal mark, from every number cell's shape (above).
+	const seen = new Set<DecimalMark | 'ambiguous'>();
+	for (const cells of rows) for (const k of NUMBER_COLUMNS) if (at[k] >= 0) {
+		const m = decimalMarkOf(cells[at[k]]);
+		if (m) seen.add(m);
+	}
+	const mixed = seen.has('comma') && seen.has('point');
+	const mark: DecimalMark | null = mixed ? null : seen.has('comma') ? 'comma' : seen.has('point') ? 'point' : null;
+	if (mixed) problems.push('the CSV file writes decimals both with a comma (12,5) and with a point (12.5); save it again with one decimal mark');
+	for (const [i, cells] of rows.entries()) {
 		const get = (k: keyof typeof COLUMNS) => (at[k] >= 0 ? cells[at[k]] : undefined);
+		const cell = (k: (typeof NUMBER_COLUMNS)[number]): number | null => {
+			const v = get(k);
+			const m = decimalMarkOf(v);
+			if (m !== 'ambiguous') return numberWith(v, m ?? 'point');
+			if (mark) return numberWith(v, mark);
+			const why = mixed ? 'and the file’s other numbers disagree on which' : 'and no other number in the file says which';
+			problems.push(
+				`CSV row ${i + 2}: "${squeeze(v)}" in "${headers[at[k]]}" could be ${numberWith(v, 'point')} (a thousands comma) or ${numberWith(v, 'comma')} (a decimal comma), ${why}; left out (write it without the comma)`
+			);
+			return null;
+		};
 		const no = registerNo(get('no'));
 		if (!no) {
 			problems.push(`CSV row ${i + 2}: no register number`);
 			continue;
 		}
-		const thousands = num(get('capacity1000'));
+		const thousands = cell('capacity1000');
 		parts.push({
 			registerNo: no,
 			name: text(get('name'), 200) ?? undefined,
 			river: text(get('river'), 200),
 			farm: at.farm >= 0 ? text(get('farm'), 200) : undefined,
 			completionYear: completionYear(get('completed')),
-			wallHeightM: nonNeg(num(get('wall'))),
-			capacityM3: nonNeg(thousands !== null ? thousands * 1000 : num(get('capacity'))),
-			surfaceAreaM2: nonNeg(num(get('area'))),
-			lat: num(get('lat')) ?? undefined,
-			lon: num(get('lon')) ?? undefined
+			wallHeightM: nonNeg(cell('wall')),
+			capacityM3: nonNeg(thousands !== null ? thousands * 1000 : cell('capacity')),
+			surfaceAreaM2: nonNeg(cell('area')),
+			lat: cell('lat') ?? undefined,
+			lon: cell('lon') ?? undefined
 		});
 	}
 	return { parts, problems };

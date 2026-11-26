@@ -84,6 +84,15 @@ const sha = (b: Uint8Array) => createHash('sha256').update(b).digest('hex');
 const object = (bytes: Uint8Array): ReadObject => async () => ({ contentLength: bytes.byteLength, bytes: async () => bytes });
 let dir: string;
 let client: pg.Client;
+/**
+ * The waterbody rows (and their datasets' reference_load records) the fixture's uids held before this file ran:
+ * waterbody_reference is keyed by uid, so loading the synthetic clip as WB moves the shared 'synthetic' rows,
+ * and afterAll puts them back as they were, so no other DB file depends on the order files run in (issue #887).
+ */
+let waterbodiesBefore: unknown[] = [];
+let waterbodyLoadsBefore: unknown[] = [];
+const fixtureUids = () =>
+	(JSON.parse(readFileSync(SYNTHETIC_WATERBODIES_FILE, 'utf8')) as { features: { properties: { uid: string } }[] }).features.map((f) => f.properties.uid);
 
 /** Read `bytes` as `load`'s file and load it, as the Lambda does. */
 async function load(load: Record<string, unknown>, bytes: Uint8Array) {
@@ -102,6 +111,13 @@ beforeAll(async () => {
 	await loadSyntheticMapGrid(process.env.TEST_MIGRATION_DATABASE_URL!);
 	client = new pg.Client({ connectionString: process.env.TEST_MIGRATION_DATABASE_URL });
 	await client.connect();
+	waterbodiesBefore = (await client.query('SELECT * FROM waterbody_reference WHERE uid = ANY($1::text[])', [fixtureUids()])).rows;
+	waterbodyLoadsBefore = (
+		await client.query(
+			`SELECT * FROM reference_load WHERE kind = 'waterbodies' AND dataset IN (SELECT dataset FROM waterbody_reference WHERE uid = ANY($1::text[]))`,
+			[fixtureUids()]
+		)
+	).rows;
 });
 
 afterAll(async () => {
@@ -111,6 +127,11 @@ afterAll(async () => {
 	await client.query('DELETE FROM gazetteer_reference WHERE dataset = ANY($1::text[])', [[GZ, GZN]]);
 	await client.query('DELETE FROM rain_map_dataset WHERE dataset = ANY($1::text[])', [[MG, LY]]);
 	await client.query('DELETE FROM waterbody_reference WHERE dataset = ANY($1::text[])', [[WB, WB2]]);
+	// Put back the rows the WB loads moved (an exact copy, whatever dataset they were in), and their loads' records.
+	await client.query('INSERT INTO waterbody_reference SELECT * FROM jsonb_populate_recordset(NULL::waterbody_reference, $1::jsonb) ON CONFLICT (uid) DO NOTHING', [
+		JSON.stringify(waterbodiesBefore)
+	]);
+	await client.query('INSERT INTO reference_load SELECT * FROM jsonb_populate_recordset(NULL::reference_load, $1::jsonb) ON CONFLICT DO NOTHING', [JSON.stringify(waterbodyLoadsBefore)]);
 	await client.query('DELETE FROM quaternary_reference WHERE dataset = ANY($1::text[])', [[QT, QT2]]);
 	await client.query('DELETE FROM quaternary_evaporation WHERE dataset = $1', [QE]);
 	await client.query('DELETE FROM reference_load WHERE dataset = ANY($1::text[])', [[LC, `${LC}-other`, RV, EV, GZ, GZN, MG, LY, AP, WB, WB2, QT, QT2, QE]]);

@@ -18,6 +18,8 @@ export interface TiffSpec {
 	noData?: string;
 	/** GeoKeys: the model type (2 geographic) and the datum (4326). */
 	geoKeys?: [number, number];
+	/** GTRasterTypeGeoKey: 1 PixelIsArea, 2 PixelIsPoint (the tiepoint then names pixel (0, 0)'s centre); unset writes no key. */
+	rasterType?: number;
 	bits?: number;
 }
 
@@ -55,7 +57,8 @@ export function tiff(s: TiffSpec): Buffer {
 	if (s.tile) entries.push({ tag: 322, type: 3, values: [bw] }, { tag: 323, type: 3, values: [bh] });
 	else entries.push({ tag: 278, type: 3, values: [bh] });
 	const [modelType, datum] = s.geoKeys ?? [2, 4326];
-	entries.push({ tag: 34735, type: 3, values: [1, 1, 0, 2, 1024, 0, 1, modelType, 2048, 0, 1, datum] });
+	const keys = [1024, 0, 1, modelType, ...(s.rasterType === undefined ? [] : [1025, 0, 1, s.rasterType]), 2048, 0, 1, datum];
+	entries.push({ tag: 34735, type: 3, values: [1, 1, 0, keys.length / 4, ...keys] });
 	if (s.noData !== undefined) entries.push({ tag: 42113, type: 2, values: `${s.noData}\0` });
 	// Offsets and counts last: their values are known once the layout is.
 	const offTag = s.tile ? 324 : 273;

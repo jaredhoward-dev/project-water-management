@@ -7,10 +7,12 @@
 // reads (positive control), a farmer gets 403, a stranger 404; a viewer
 // can't accept; water_app can't write the table.
 import { SPAN_FROM_APAN } from '@water-management/engine';
+import pg from 'pg';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { loadSyntheticEvaporationStations } from '../../scripts/import-evaporation-stations.js';
 import { node, signUp } from '../__tests__/helpers.js';
 import { withUser } from '../db/tx.js';
+import { replaceEvaporationStations } from './loadEvaporationStations.js';
 
 type User = Awaited<ReturnType<typeof signUp>>;
 
@@ -181,5 +183,25 @@ describe('accepting a station', () => {
 		expect(monthly.body.series).toBeNull();
 		expect((await apanSeries(id)).map((s) => s.name)).toEqual(['My pan']);
 		expect((await reasons(id)).at(-1)).toMatch(/daily series not written/);
+	});
+});
+
+describe('replaceEvaporationStations', () => {
+	it('returns the codes it wrote, not the records: a repeated code is upserted over its earlier row', async () => {
+		const DS = 'test-replace-evaporation-stations-count';
+		const rec = (code: string, name: string) => ({ code, name, pan: 'class_a' as const, lon: 21, lat: -33, startDate: '2000-01-01', values: [5, null, 6], daysWithValue: 2, source: 'test' });
+		const client = new pg.Client({ connectionString: process.env.TEST_MIGRATION_DATABASE_URL });
+		await client.connect();
+		try {
+			expect(await replaceEvaporationStations(client, DS, [rec('X9E951', 'first'), rec('X9E952', 'other'), rec('X9E951', 'last')])).toBe(2);
+			const rows = await client.query<{ code: string; name: string }>('SELECT code, name FROM evaporation_station_reference WHERE dataset = $1 ORDER BY code', [DS]);
+			expect(rows.rows).toEqual([
+				{ code: 'X9E951', name: 'last' },
+				{ code: 'X9E952', name: 'other' }
+			]);
+		} finally {
+			await client.query('DELETE FROM evaporation_station_reference WHERE dataset = $1', [DS]);
+			await client.end();
+		}
 	});
 });
