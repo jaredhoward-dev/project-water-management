@@ -114,7 +114,7 @@ describe('the mock checkout, end to end', () => {
 		expect(plan.subscription).toMatchObject({ status: 'active', cancelAtPeriodEnd: false, seats: 1 });
 		const accountId = plan.account.id as string;
 		const [row] = await asOwner('SELECT provider, external_ref FROM subscription WHERE billing_account_id = $1', [accountId]);
-		expect(row).toEqual({ provider: 'mock', external_ref: `sub_mock_${accountId.replace(/-/g, '')}` });
+		expect(row).toMatchObject({ provider: 'mock', external_ref: expect.stringMatching(/^sub_mock_[0-9a-f]{24}$/) });
 		const events = await asOwner('SELECT type, outcome FROM billing_event WHERE account_id = $1 ORDER BY received_at, type', [accountId]);
 		expect(events.map((e) => e.type).sort()).toEqual(['checkout.completed', 'subscription.updated']);
 
@@ -148,6 +148,40 @@ describe('the mock checkout, end to end', () => {
 		const portal = await admin.call('POST', `/teams/${seatsTeam}/plan/portal`);
 		expect((await formPost(`${local(portal.body.url)}&action=cancel`)).status).toBe(303);
 		expect((await admin.call('GET', `/teams/${seatsTeam}/plan`)).body.subscription).toMatchObject({ seats: 5, cancelAtPeriodEnd: true });
+	});
+
+	it('a second checkout link still valid after the first was paid: the page shows the webhook’s conflict, not done (#929)', async () => {
+		const [payer] = (await Promise.all(['CoTwoLinks'].map((n) => signUp(n)))) as [User];
+		const first = await payer.call('POST', '/account/plan/checkout', { plan: 'pro', interval: 'month' });
+		const second = await payer.call('POST', '/account/plan/checkout', { plan: 'pro', interval: 'year' });
+		expect(first.status).toBe(200);
+		expect(second.status).toBe(200);
+		expect((await formPost(`${local(first.body.url)}&outcome=pays`)).status).toBe(303);
+		const again = await formPost(`${local(second.body.url)}&outcome=pays`);
+		expect(again.status).toBe(409);
+		const html = await again.text();
+		expect(html).toContain('data-mock-result="conflict"');
+		expect(html).not.toContain('checkout=done');
+		// The first subscription stays the one live, monthly.
+		expect((await payer.call('GET', '/account/plan')).body.subscription).toMatchObject({ status: 'active', interval: 'month' });
+	});
+
+	it('an invoice grant (manual) opens the mock portal with its invoices only, no cancel (#941)', async () => {
+		const [granted] = (await Promise.all(['CoInvoiced'].map((n) => signUp(n)))) as [User];
+		const accountId = (await granted.call('GET', '/account/plan')).body.account.id as string;
+		await asOwner(
+			`INSERT INTO subscription (billing_account_id, plan_code, provider, external_ref, status, period_start, period_end, seats)
+			 VALUES ($1, 'pro', 'manual', $2, 'active', now(), now() + interval '1 year', 1)`,
+			[accountId, `in_mock_${run}`]
+		);
+		const portal = await granted.call('POST', '/account/plan/portal');
+		expect(portal.status).toBe(200);
+		const html = await (await app.request(local(portal.body.url))).text();
+		expect(html).toContain('data-mock-subscription="manual"');
+		expect(html).toContain('data-mock-invoices');
+		expect(html).not.toContain('data-action="cancel"');
+		expect((await formPost(`${local(portal.body.url)}&action=cancel`)).status).toBe(409);
+		expect((await granted.call('GET', '/account/plan')).body.subscription).toMatchObject({ status: 'active', cancelAtPeriodEnd: false });
 	});
 
 	it('a token for one account can’t be turned to another: a changed payload is 404', async () => {

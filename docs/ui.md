@@ -598,6 +598,16 @@ address (`LANDING_ROUTES`, `addressFor` in `lib/auth/session.svelte.ts`).
   `@water-management/engine/plans` (`PLAN_FIGURES`), since a static page
   can't read the `plan` table; `backend/src/billing/planFigures.db.test.ts`
   fails when a migration moves a figure and that file doesn't follow.
+- **The cards' lines follow the figures** (#941; `cardLines` in
+  `lib/components/pricing/pricing.ts`). Free's and Pro's live line is "on
+  every catchment" when `liveCatchments` is unlimited, else the count; the
+  report line (`data-testid="reports-<plan>"`) is "Unlimited server PDF
+  reports, and scheduled report emails" for an unlimited plan with
+  `scheduledReports` (Pro today), "Unlimited server PDF reports" without
+  them, else the count a month, with "Scheduled report emails" on its own
+  line for a counted plan that has them. Team's "Everything in Pro" and
+  Pro's "Everything in Free" hold because each plan's figures cover the one
+  below (`coversPlan`, checked in `pricing.test.ts`).
 - **Links.** The landing page's closing panel ("See plans and prices") and
   its footer, in the page's language, and the Plan page's *See all plans*
   (in English, the workspace's language). The workspace's *Compare plans*

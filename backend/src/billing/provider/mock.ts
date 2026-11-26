@@ -45,6 +45,12 @@ export type MockSession =
 			/** The live subscription to offer to cancel, when there is one (the mock's own: external ref sub_mock_…). */
 			subscription: {
 				planCode: string;
+				/**
+				 * Which provider holds it and its id (333): `manual` (a staff or invoice grant) has nothing to cancel here, so the
+				 * page shows its invoices only (#941); absent on a token signed before, read as the mock's own.
+				 */
+				provider?: string;
+				externalRef?: string | null;
 				planName?: string;
 				status: string;
 				periodStart: string;
@@ -86,8 +92,15 @@ export function readMockSession(secret: string | undefined, token: string | unde
 	return s;
 }
 
-/** The mock's subscription id for an account: one per account, so a second "pays" updates it rather than making another. */
+/**
+ * The id the mock gave an account's subscriptions before #929, one per account: a portal token or seat change
+ * that names no id falls back to it. New checkouts never use it, since re-subscribing under the id of a
+ * subscription that ended meets "ended stays ended" (399) as a conflict.
+ */
 export const mockSubscriptionRef = (accountId: string) => `sub_mock_${accountId.replace(/-/g, '')}`;
+
+/** A new subscription id for each checkout, as Stripe makes one per Checkout session paid (#929). */
+export const newMockSubscriptionRef = () => `sub_mock_${randomBytes(12).toString('hex')}`;
 
 const eventId = () => `evt_mock_${randomBytes(12).toString('hex')}`;
 
@@ -107,6 +120,7 @@ const secs = (d: Date | string) => Math.floor(new Date(d).getTime() / 1000);
  * each item's price recurring at the interval, when there is one.
  */
 function subscriptionObject(
+	ref: string,
 	accountId: string,
 	planCode: string,
 	status: string,
@@ -122,7 +136,7 @@ function subscriptionObject(
 	const item = (quantity: number) => ({ object: 'subscription_item', quantity, ...price, current_period_start: start, current_period_end: end });
 	const extra = Math.max(0, seats - seatsIncluded);
 	return {
-		id: mockSubscriptionRef(accountId),
+		id: ref,
 		object: 'subscription',
 		status,
 		cancel_at_period_end: cancelAtPeriodEnd,
@@ -136,7 +150,7 @@ function subscriptionObject(
 export function paidEvents(s: Extract<MockSession, { kind: 'checkout' }>, nowMs = Date.now()): Record<string, unknown>[] {
 	const now = new Date(nowMs);
 	const created = secs(now);
-	const sub = subscriptionObject(s.accountId, s.planCode, 'active', created, secs(addInterval(now, s.interval)), false, s.seats ?? 1, s.seatsIncluded ?? 1, s.interval);
+	const sub = subscriptionObject(newMockSubscriptionRef(), s.accountId, s.planCode, 'active', created, secs(addInterval(now, s.interval)), false, s.seats ?? 1, s.seatsIncluded ?? 1, s.interval);
 	return [
 		{
 			id: eventId(),
@@ -152,13 +166,13 @@ export function paidEvents(s: Extract<MockSession, { kind: 'checkout' }>, nowMs 
 /** The event Stripe sends when the portal cancels at the period end: the subscription updated, still live until then. */
 export function cancelAtPeriodEndEvent(s: Extract<MockSession, { kind: 'portal' }>, nowMs = Date.now()): Record<string, unknown> | null {
 	const sub = s.subscription;
-	if (!sub) return null;
+	if (!sub || sub.provider === 'manual') return null;
 	return {
 		id: eventId(),
 		object: 'event',
 		type: 'customer.subscription.updated',
 		created: secs(new Date(nowMs)),
-		data: { object: subscriptionObject(s.accountId, sub.planCode, sub.status, secs(sub.periodStart), secs(sub.periodEnd), true, sub.seats, Math.min(sub.seats, sub.seatsIncluded ?? 1), sub.interval ?? null) }
+		data: { object: subscriptionObject(sub.externalRef || mockSubscriptionRef(s.accountId), s.accountId, sub.planCode, sub.status, secs(sub.periodStart), secs(sub.periodEnd), true, sub.seats, Math.min(sub.seats, sub.seatsIncluded ?? 1), sub.interval ?? null) }
 	};
 }
 
@@ -175,6 +189,7 @@ export function signedDelivery(secret: string, event: Record<string, unknown>, n
  */
 export function seatsChangedEvent(
 	accountId: string,
+	externalRef: string,
 	sub: { planCode: string; status: string; periodStart: string; periodEnd: string; cancelAtPeriodEnd: boolean },
 	seatsIncluded: number,
 	seats: number,
@@ -185,7 +200,7 @@ export function seatsChangedEvent(
 		object: 'event',
 		type: 'customer.subscription.updated',
 		created: secs(new Date(nowMs)),
-		data: { object: subscriptionObject(accountId, sub.planCode, sub.status, secs(sub.periodStart), secs(sub.periodEnd), sub.cancelAtPeriodEnd, seats, seatsIncluded) }
+		data: { object: subscriptionObject(externalRef, accountId, sub.planCode, sub.status, secs(sub.periodStart), secs(sub.periodEnd), sub.cancelAtPeriodEnd, seats, seatsIncluded) }
 	};
 }
 

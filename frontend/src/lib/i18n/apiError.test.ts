@@ -87,6 +87,14 @@ describe('errorText', () => {
 		expect(errorText(full)).toBe('Every editor seat on this team’s plan is in use. Ask a team admin to add a seat, then accept the invitation again.');
 	});
 
+	it('keys plan_limit on the refusal’s limit (#941): the live-catchment one isn’t a seat refusal, an unknown key reads as its status', () => {
+		const live = new ApiError(402, 'Free runs one catchment live', undefined, 'plan_limit', { limit: 1, used: 2, plan: 'free', key: 'live_catchments' });
+		expect(errorText(live)).toBe('This plan’s catchments with automatic updates are all in use. Ask the person who manages the plan to switch one off or choose another plan, then try again.');
+		expect(errorText(live)).not.toMatch(/seat/);
+		const other = new ApiError(402, 'x', undefined, 'plan_limit', { key: 'reports' });
+		expect(errorText(other)).not.toMatch(/seat|automatic updates/);
+	});
+
 	it('words a coded error from the catalogue, not the server’s English', () => {
 		expect(errorText(new ApiError(400, 'this link is invalid or has expired — request a new one', undefined, 'link_invalid'))).toBe(
 			'This link is invalid or has expired. Ask for a new one.'

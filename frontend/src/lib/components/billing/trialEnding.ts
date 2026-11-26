@@ -7,6 +7,7 @@
 // information note, never an error. English: the workspace and the Plan page
 // are; a farmer page never shows it. Inert until REVERSE_TRIAL is on: no trial
 // exists before then.
+import { PLAN_ENDED_GRACE_DAYS } from '@water-management/engine/plans';
 import { fmtDate } from '#lib/format/number.js';
 
 /** How long before the end the notice shows: the trial-ending email's window (346). */
@@ -23,5 +24,5 @@ export function trialEndingText(trialEnd: string | null | undefined, now: number
 	if (Number.isNaN(end)) return null;
 	const left = end - now;
 	if (left <= 0 || left > TRIAL_NOTICE_MS) return null;
-	return `Your Pro trial ends on ${fmtDate(trialEnd)}. Your account then moves to Free: nothing is charged, nothing is deleted, and catchments past Free’s live limit pause only after 14 days. Upgrade to keep Pro.`;
+	return `Your Pro trial ends on ${fmtDate(trialEnd)}. Your account then moves to Free: nothing is charged, nothing is deleted, and catchments past Free’s live limit pause only after ${PLAN_ENDED_GRACE_DAYS} days. Upgrade to keep Pro.`;
 }

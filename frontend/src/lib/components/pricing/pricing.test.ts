@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { setLocale } from '#lib/i18n/locale.svelte.js';
-import { assistantTimesFree, monthsFreeYearly, planFigures, rand, reverseTrialDays } from './pricing';
+import { assistantTimesFree, cardLines, coversPlan, monthsFreeYearly, planFigures, rand, reverseTrialDays } from './pricing';
 
 afterEach(() => setLocale('en'));
 
@@ -25,5 +25,18 @@ describe('the pricing page figures', () => {
 		expect(planFigures('pro').trialDays).toBe(14);
 		for (const flag of [undefined, '', 'false', '1', 'TRUE', ' true']) expect(reverseTrialDays(flag)).toBeNull();
 		expect(reverseTrialDays('true', { ...planFigures('pro'), trialDays: 0 })).toBeNull();
+	});
+
+	it('lists each card’s live catchments, reports and scheduled report emails from the figures (#941)', () => {
+		expect(cardLines(planFigures('free'))).toEqual({ live: { count: planFigures('free').liveCatchments }, reports: { count: planFigures('free').reportsPerMonth }, scheduledReports: false });
+		expect(cardLines(planFigures('pro'))).toEqual({ live: 'every', reports: 'unlimited', scheduledReports: true });
+		expect(cardLines({ ...planFigures('pro'), reportsPerMonth: 20, scheduledReports: false })).toMatchObject({ reports: { count: 20 }, scheduledReports: false });
+	});
+
+	it('“Everything in Free” and “Everything in Pro” hold: Pro’s figures cover Free’s, Team’s cover Pro’s (#941)', () => {
+		expect(coversPlan(planFigures('pro'), planFigures('free'))).toBe(true);
+		expect(coversPlan(planFigures('team'), planFigures('pro'))).toBe(true);
+		expect(coversPlan(planFigures('free'), planFigures('pro'))).toBe(false);
+		expect(coversPlan({ ...planFigures('team'), scheduledReports: false }, planFigures('pro'))).toBe(false);
 	});
 });

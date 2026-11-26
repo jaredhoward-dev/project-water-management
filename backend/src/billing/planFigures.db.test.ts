@@ -3,7 +3,7 @@
 // the migrations wrote (323_billing and later), so a price or limit moved in
 // one place and not the other fails here, not on the public page.
 import { describe, expect, it } from 'vitest';
-import { PLAN_FIGURES } from '@water-management/engine/plans';
+import { PLAN_ENDED_GRACE_DAYS, PLAN_FIGURES } from '@water-management/engine/plans';
 import { asOwner } from '../__tests__/helpers.js';
 
 interface PlanRow {
@@ -40,5 +40,14 @@ describe('the pricing page figures', () => {
 				trialDays: row.trial_days
 			}).toEqual(PLAN_FIGURES.find((p) => p.code === row.code));
 		}
+	});
+
+	it('the grace after a paid plan ends matches the interval the pause, the keep picker and the notices use (#941)', async () => {
+		// Each function's latest definition (a later migration's CREATE OR REPLACE wins in pg_proc).
+		const names = ['app_plan_pause_sync', 'app_billing_live_catchments', 'app_billing_notice_queue'];
+		const rows = (await asOwner(`SELECT proname, prosrc FROM pg_proc WHERE proname = ANY($1) ORDER BY proname`, [names])) as { proname: string; prosrc: string }[];
+		expect(rows.map((r) => r.proname).sort()).toEqual([...names].sort());
+		// The grace is the one `interval '<n> days'` each names for it (the notices' 3-day trial window aside).
+		for (const r of rows) expect({ fn: r.proname, grace: r.prosrc.includes(`interval '${PLAN_ENDED_GRACE_DAYS} days'`) }).toEqual({ fn: r.proname, grace: true });
 	});
 });

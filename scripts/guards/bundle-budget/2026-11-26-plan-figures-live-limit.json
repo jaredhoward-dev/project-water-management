@@ -1,0 +1,4 @@
+{
+	"addKb": 1,
+	"why": "#929/#941: the workspace's live-limit words and the plan page's grace read packages/engine/src/plans.ts; the pricing cards list their lines from the figures. Measured: total 2574 KB before, 2575 KB after (build:frontend + check:bundle)"
+}

@@ -158,6 +158,9 @@ export interface LiveSubscription {
 	seatsIncluded?: number;
 	/** How often it bills (332), so the mock's portal event carries it as Stripe would; null when not recorded. */
 	interval?: BillingInterval | null;
+	/** Which provider holds it and under which id (333): the mock's portal cancels its own by that id, and shows a `manual` one's invoices only. */
+	provider?: string;
+	externalRef?: string | null;
 }
 export interface ReturnUrls {
 	/** Where the provider sends the person back to: the plan page, with `?checkout=done` or `?checkout=cancelled` for checkout. */
@@ -361,8 +364,8 @@ function mockProvider(secret: string | undefined, now: () => number): BillingPro
 		async changeSeats(change) {
 			if (!secret) throw new BillingProviderError();
 			const { deliverMockEvent } = await import('./mockCheckout.js');
-			const event = seatsChangedEvent(change.accountId, change.subscription, change.plan.seatsIncluded, change.seats, now());
-			if (!(await deliverMockEvent(event))) throw new BillingProviderError();
+			const event = seatsChangedEvent(change.accountId, change.externalRef, change.subscription, change.plan.seatsIncluded, change.seats, now());
+			if (!(await deliverMockEvent(event)).taken) throw new BillingProviderError();
 		},
 		// No network: an invoice id from the key, so the same request answers the same invoice (as Stripe's would).
 		async createInvoice(req) {
