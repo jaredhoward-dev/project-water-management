@@ -1645,6 +1645,8 @@ export interface Publication extends Omit<PublicationMeta, 'restriction'> {
 	catchmentView: CatchmentView & { engineVersion: string; runoffModel: string; calibration: { nse: number | null; pbias: number | null; kge: number | null } | null };
 	updatedAt: string | null;
 	updatedBy: string | null;
+	/** 1 when published, one more on every notice save (issue #885); what a form's `basedOn` names. */
+	revision: number;
 }
 
 /**
@@ -1701,27 +1703,26 @@ export interface RunPublication {
 
 /**
  * The publication a form was filled in from (issue #863): its id and
- * updatedAt as read, id null when nothing was published. The server answers
- * 409 publication_changed when it is no longer the current one as it stands.
+ * revision as read (issue #885), both null when nothing was published. The
+ * server answers 409 publication_changed when it is no longer the current
+ * one as it stands. The API takes it as optional; the app's own writes
+ * always send it, so it is required here.
  */
-export interface PublicationBasis {
-	id: string | null;
-	updatedAt: string | null;
-}
+export type PublicationBasis = { id: string; revision: number } | { id: null; revision: null };
 
 export interface PublishRequest {
 	runId: string;
 	note?: string;
 	restriction?: PublicationRestriction;
 	nextExpectedOn?: string | null;
-	basedOn?: PublicationBasis;
+	basedOn: PublicationBasis;
 }
 
 export interface PublicationPatch {
 	note?: string;
 	restriction?: PublicationRestriction;
 	nextExpectedOn?: string | null;
-	basedOn?: PublicationBasis;
+	basedOn: PublicationBasis;
 }
 
 // --- Change history (WP-2.4, docs/api.md § History) ------------------------

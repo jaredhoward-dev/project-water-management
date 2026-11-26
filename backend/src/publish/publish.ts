@@ -85,6 +85,8 @@ export interface Publication extends Omit<PublicationMeta, 'restriction'> {
 	catchmentView: StoredCatchmentView;
 	updatedAt: string | null;
 	updatedBy: string | null;
+	/** 1 when published, one more on every notice save (389_publication_revision); what a form's `basedOn` names. */
+	revision: number;
 }
 
 /** Text the database can hold: trimmed, no NUL; empty means none. */
@@ -130,18 +132,21 @@ export const RestrictionBody = z
 
 /**
  * The publication a form was filled in from (issue #863): its `id` and
- * `updatedAt` as the client read them, `id: null` when nothing was
- * published. Publish and PATCH refuse `409 publication_changed` when it is
- * no longer the current publication as it stands, so a form opened before
- * another editor's change can't send the old restriction back. Optional, so
- * an API client that leaves it out keeps the last-write-wins behaviour.
+ * `revision` as the client read them (issue #885: a counter, not
+ * `updatedAt`, which the API gives to the millisecond), both null when
+ * nothing was published. Publish and PATCH refuse `409 publication_changed`
+ * when it is no longer the current publication as it stands, so a form
+ * opened before another editor's change can't send the old restriction
+ * back. Optional, so an API client that leaves it out keeps the
+ * last-write-wins behaviour; the app's own writes always send it.
  */
 export const BasedOnBody = z
 	.object({
 		id: z.string().uuid().nullable(),
-		updatedAt: z.string().max(40).nullable()
+		revision: z.number().int().min(1).max(2_147_483_647).nullable()
 	})
-	.strict();
+	.strict()
+	.refine((b) => (b.id === null) === (b.revision === null), { message: 'id and revision are both null (nothing published) or both set', path: ['revision'] });
 
 export const PublishBody = z
 	.object({
@@ -177,6 +182,7 @@ interface PublicationRow {
 	superseded_at: Date | null;
 	updated_at: Date | null;
 	updated_by_name: string | null;
+	revision: number;
 	endorsed_at: Date | null;
 	endorsed_by_name: string | null;
 	endorsement_note: string;
@@ -185,7 +191,7 @@ interface PublicationRow {
 const SELECT_PUBLICATION = `
 	SELECT p.id, p.run_id, p.published_at, pu.display_name AS published_by_name, p.note, p.restriction_level,
 		p.restriction_pct, p.notice, p.next_expected_on, p.catchment_view, p.superseded_at,
-		p.updated_at, uu.display_name AS updated_by_name, p.endorsed_at, eu.display_name AS endorsed_by_name, p.endorsement_note
+		p.updated_at, uu.display_name AS updated_by_name, p.revision, p.endorsed_at, eu.display_name AS endorsed_by_name, p.endorsement_note
 	FROM run_publication p
 	LEFT JOIN app_user pu ON pu.id = p.published_by
 	LEFT JOIN app_user uu ON uu.id = p.updated_by
@@ -231,7 +237,8 @@ function toPublication(r: PublicationRow, withNote: boolean, hiddenOutlet: strin
 		supersededAt: iso(r.superseded_at),
 		...(withNote ? { endorsement: endorsementOf(r) } : {}),
 		updatedAt: iso(r.updated_at),
-		updatedBy: r.updated_by_name
+		updatedBy: r.updated_by_name,
+		revision: r.revision
 	};
 }
 
@@ -395,9 +402,9 @@ export const PUBLICATION_CHANGED_MESSAGE =
 const publicationChanged = () => ApiError.coded(409, 'publication_changed', PUBLICATION_CHANGED_MESSAGE);
 
 /** Whether a form's basis is the current publication `cur` (null: nothing published) as it stands. */
-export function basedOnCurrent(basedOn: z.infer<typeof BasedOnBody>, cur: { id: string; updated_at: Date | null } | null): boolean {
+export function basedOnCurrent(basedOn: z.infer<typeof BasedOnBody>, cur: { id: string; revision: number } | null): boolean {
 	if (!cur) return basedOn.id === null;
-	return basedOn.id === cur.id && basedOn.updatedAt === iso(cur.updated_at);
+	return basedOn.id === cur.id && basedOn.revision === cur.revision;
 }
 
 export async function publishRun(
@@ -410,8 +417,8 @@ export async function publishRun(
 	await db.query(`SELECT pg_advisory_xact_lock(hashtextextended('run_publication:' || $1::text, 0))`, [projectId]);
 	if (body.basedOn) {
 		// FOR UPDATE: waits out a notice change in flight (PATCH holds the row) and reads it as committed.
-		const { rows: cur } = await db.query<{ id: string; updated_at: Date | null }>(
-			'SELECT id, updated_at FROM run_publication WHERE project_id = $1 AND superseded_at IS NULL FOR UPDATE',
+		const { rows: cur } = await db.query<{ id: string; revision: number }>(
+			'SELECT id, revision FROM run_publication WHERE project_id = $1 AND superseded_at IS NULL FOR UPDATE',
 			[projectId]
 		);
 		if (!basedOnCurrent(body.basedOn, cur[0] ?? null)) throw publicationChanged();
@@ -473,14 +480,14 @@ export async function publishRun(
 
 /** Change the current publication's notice, note or next date, without re-publishing, and record it in the decision log (`publication.notice_changed`). */
 export async function patchPublication(db: Db, projectId: string, pubId: string, body: z.infer<typeof PatchBody>): Promise<Publication> {
-	// FOR UPDATE: a second editor's change waits for this one, then reads it (and its updated_at) as committed.
-	const { rows } = await db.query<{ superseded: boolean; updated_at: Date | null }>(
-		'SELECT superseded_at IS NOT NULL AS superseded, updated_at FROM run_publication WHERE project_id = $1 AND id = $2 FOR UPDATE',
+	// FOR UPDATE: a second editor's change waits for this one, then reads it (and its revision) as committed.
+	const { rows } = await db.query<{ superseded: boolean; revision: number }>(
+		'SELECT superseded_at IS NOT NULL AS superseded, revision FROM run_publication WHERE project_id = $1 AND id = $2 FOR UPDATE',
 		[projectId, pubId]
 	);
 	if (!rows[0]) throw new ApiError(404, 'not found');
 	if (rows[0].superseded) throw ApiError.coded(409, 'publication_changed', 'this publication has been superseded; change the current one');
-	if (body.basedOn && !basedOnCurrent(body.basedOn, { id: pubId, updated_at: rows[0].updated_at })) throw publicationChanged();
+	if (body.basedOn && !basedOnCurrent(body.basedOn, { id: pubId, revision: rows[0].revision })) throw publicationChanged();
 	const set: [string, unknown][] = [];
 	if (body.note !== undefined) set.push(['note', body.note]);
 	if (body.nextExpectedOn !== undefined) set.push(['next_expected_on', body.nextExpectedOn]);

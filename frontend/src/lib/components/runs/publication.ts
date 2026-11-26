@@ -67,8 +67,8 @@ const emptyNotice = () => Object.fromEntries(LOCALES.map((code) => [code, ''])) 
 export const emptyDraft = (): NoticeDraft => ({ level: 'none', pct: '', notice: emptyNotice(), nextExpectedOn: '' });
 
 /** The basis a form sends with its save (issue #863): the publication it was filled in from, as read. */
-export function basisOf(p: Pick<Publication, 'id' | 'updatedAt'> | null): PublicationBasis {
-	return p ? { id: p.id, updatedAt: p.updatedAt } : { id: null, updatedAt: null };
+export function basisOf(p: Pick<Publication, 'id' | 'revision'> | null): PublicationBasis {
+	return p ? { id: p.id, revision: p.revision } : { id: null, revision: null };
 }
 
 /** The 409 code the server answers when that basis is no longer the current publication (backend publish/publish.ts). */
