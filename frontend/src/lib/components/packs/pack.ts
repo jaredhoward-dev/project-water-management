@@ -5,6 +5,7 @@
 // itself is WebCrypto's (sha256Hex).
 import { packManifestText, type PackManifest } from '@water-management/engine';
 import { fmtDate } from '#lib/format/number.js';
+import { fmtProjectDay } from '#lib/components/project/project.js';
 import { localTimeZone } from '#lib/components/report/serverPdf.js';
 import type { Pack, PackBundleCheck, PackIssueChecks, PackReproductionState, PackStatus, PackVerification } from '#lib/api/index.js';
 
@@ -39,10 +40,11 @@ export const PACK_STATUS_TONE: Record<PackStatus, 'awaiting' | 'good' | 'mixed' 
 /**
  * The stamp on every section of a pack (G12): "Issued · version 2 · 2026-09-29",
  * "Draft pack · not issued", "Superseded · version 1 · issued 2026-09-01",
- * "Withdrawn · version 1". A pack withdrawn after it was issued keeps its issue date.
+ * "Withdrawn · version 1". A pack withdrawn after it was issued keeps its issue date,
+ * the project's calendar day in `timeZone` (packTimeZone; issue #864), as its report dates its runs.
  */
-export function packStamp(p: Pick<Pack, 'status' | 'version' | 'issuedAt'>): string {
-	const issued = p.issuedAt ? fmtDate(p.issuedAt) : null;
+export function packStamp(p: Pick<Pack, 'status' | 'version' | 'issuedAt'>, timeZone?: string): string {
+	const issued = p.issuedAt ? fmtProjectDay(p.issuedAt, timeZone) : null;
 	switch (p.status) {
 		case 'draft':
 			return 'Draft pack · not issued';

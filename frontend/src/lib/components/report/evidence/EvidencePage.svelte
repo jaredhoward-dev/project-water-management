@@ -21,7 +21,7 @@
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import PackBadge from '#lib/components/packs/PackBadge.svelte';
 	import { issuedOf, packHref, packsOfRun } from '#lib/components/packs/pack.js';
-	import { fmtDate } from '#lib/format/number.js';
+	import { fmtProjectDay } from '#lib/components/project/project.js';
 	import Lazy from '#lib/components/common/Lazy.svelte';
 	import { loadOnce } from '#lib/components/common/lazy.js';
 	import { boardChecks, DRAFT_STAMP, refusedChecks } from './sections';
@@ -226,7 +226,7 @@
 							<li>
 								<PackBadge status={p.status} version={p.version} />
 								<a href={packHref(basePath(), projectId, p.id)}>Version {p.version}, code {p.shortCode}</a>
-								<span class="muted small">{p.issuedAt ? `issued ${fmtDate(p.issuedAt)}` : `drafted ${fmtDate(p.createdAt)}`}</span>
+								<span class="muted small">{p.issuedAt ? `issued ${fmtProjectDay(p.issuedAt, project?.timeZone)}` : `drafted ${fmtProjectDay(p.createdAt, project?.timeZone)}`}</span>
 							</li>
 						{/each}
 					</ul>
@@ -268,6 +268,7 @@
 					{projectId}
 					{runId}
 					assessed={report.futureYield.status === 'ok'}
+					timeZone={project?.timeZone}
 					onchange={async () => {
 						if (runId) report = await api.evidence.report(projectId, runId);
 					}}

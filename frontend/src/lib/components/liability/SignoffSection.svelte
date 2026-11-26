@@ -7,6 +7,7 @@
 	import type { PackSignoffList, Signoff, SignoffList } from '#lib/api/index.js';
 	import Lazy from '#lib/components/common/Lazy.svelte';
 	import { fmtDate } from '#lib/format/number.js';
+	import { fmtProjectDay, fmtProjectStamp } from '#lib/components/project/project.js';
 	import { registrationBody, registrationLine } from '@water-management/engine';
 	import { registrationHeading, shortHash, SIGNOFF_KIND_LABEL, type SignoffTarget } from './signoffForm';
 
@@ -16,8 +17,19 @@
 		projectId,
 		target,
 		list,
-		onchange
-	}: { projectId: string; target: SignoffTarget; list: SignoffList | PackSignoffList; onchange: (signoffs: Signoff[] | null) => void } = $props();
+		onchange,
+		timeZone
+	}: {
+		projectId: string;
+		target: SignoffTarget;
+		list: SignoffList | PackSignoffList;
+		onchange: (signoffs: Signoff[] | null) => void;
+		/** The project's IANA zone the evidence report dates in (issue #864); omitted, the viewer's zone (the run report). */
+		timeZone?: string;
+	} = $props();
+
+	const when = (iso: string) => (timeZone ? fmtProjectStamp(iso, timeZone) : fmtDate(iso, true));
+	const day = (iso: string) => (timeZone ? fmtProjectDay(iso, timeZone) : fmtDate(iso));
 
 	const what = $derived(target.kind === 'pack' ? 'evidence pack' : 'run');
 
@@ -32,11 +44,11 @@
 			{@const register = line ? registrationBody(s.registrationBody) : undefined}
 			<dl class="kv" aria-label="Sign-off by {s.fullName}">
 				<div><dt>Signed by</dt><dd>{s.fullName}</dd></div>
-				<div><dt>Signed</dt><dd>{fmtDate(s.signedAt, true)}</dd></div>
+				<div><dt>Signed</dt><dd>{when(s.signedAt)}</dd></div>
 				{#if s.packId}<div><dt>Signed as</dt><dd data-testid="signoff-kind">{SIGNOFF_KIND_LABEL[s.kind ?? 'specialist']}</dd></div>{/if}
 				<!-- The credential, then where to check it (a visible URL: reports are printed), then the scope it limits. -->
 				<div class="wide">
-					<dt data-testid="signoff-registration-heading">{registrationHeading(s.registrationCheck ?? null, (d) => fmtDate(d))}</dt>
+					<dt data-testid="signoff-registration-heading">{registrationHeading(s.registrationCheck ?? null, day)}</dt>
 					<dd>{line ?? `${s.registrationBody} ${s.registrationNo} (category and field not recorded)`}</dd>
 				</div>
 				{#if register}

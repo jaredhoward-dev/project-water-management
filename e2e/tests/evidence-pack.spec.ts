@@ -28,6 +28,7 @@ import { confirmAuthorityDelegate } from '../support/db.ts';
 import { answerConfirm } from '../support/confirm.ts';
 import { API_URL } from '../support/env.ts';
 import { expect, test } from '../support/fixtures.ts';
+import { DEFAULT_PROJECT_TIME_ZONE, projectDay } from '../support/dates.ts';
 import { dayFirst } from '../support/format.ts';
 import { box } from '../support/map.ts';
 import { runJobsTick } from '../support/jobs.ts';
@@ -184,8 +185,8 @@ test('a baseline pack is created, signed, issued and verified signed out; a copy
 	const issued = await getPack(page.request, project.id, packId);
 	expect(issued.status).toBe('issued');
 	const code = issued.shortCode;
-	// The day the pack was issued, day first in the page's zone (the e2e browser runs in UTC).
-	const stamp = `Issued · version 1 · ${dayFirst(issued.issuedAt!.slice(0, 10))}`;
+	// The day the pack was issued, day first, on the project's calendar (issue #864), not the browser's UTC one.
+	const stamp = `Issued · version 1 · ${dayFirst(projectDay(DEFAULT_PROJECT_TIME_ZONE, new Date(issued.issuedAt!)))}`;
 	for (const s of await stamps.all()) await expect(s).toHaveText(stamp);
 	const origin = new URL(page.url()).origin;
 	const line = `Manifest SHA-256 ${issued.manifestSha256} · verify code ${code} at ${origin}/verify/${code}`;

@@ -58,7 +58,7 @@
 	import { factorText, futureRows } from './future';
 	import { sourceLabel, sourceLine } from '#lib/components/runs/demandSources.js';
 	import { FORMER_MEMBER } from '#lib/format/maker.js';
-	import { fmtProjectDay } from '#lib/components/project/project.js';
+	import { DEFAULT_TIME_ZONE, fmtProjectDay, fmtProjectStamp } from '#lib/components/project/project.js';
 
 	let {
 		report,
@@ -83,7 +83,7 @@
 		signoffs?: SignoffList | PackSignoffList | null;
 		signoffTarget?: SignoffTarget | null;
 		onsignoffchange?: (next: SignoffList['signoffs'] | null) => void;
-		/** The project's IANA zone, which run dates are the calendar day in (issue #860); undefined = the default zone. */
+		/** The project's IANA zone, which every run, pack, nomination, revision, citation and sign-off date is read in (issues #860, #864); undefined = the default zone. */
 		timeZone?: string;
 	} = $props();
 
@@ -236,7 +236,7 @@
 						Only this report’s EWR verdicts and counts are shown: it rests on a run that caps use at, or scales demand to, the registered water volumes, which this project shows to its editors and owners only. No flow, volume, unit’s supply, registered-use comparison or run warning is given.
 					</p>
 				{/if}
-				<EvidenceSummary {report} {board} {boardNotFrozen} {authorisedBoard} {frozen} signoffs={signoffs?.signoffs ?? []} {verify} />
+				<EvidenceSummary {report} {board} {boardNotFrozen} {authorisedBoard} {frozen} signoffs={signoffs?.signoffs ?? []} {verify} {timeZone} />
 			{:else if s.id === 'river'}
 				<!-- evidence-12: the locality map, frozen into the report from the project's map features (issue #326 A5). -->
 				<LocalityMap {report} {frozen} />
@@ -333,7 +333,7 @@
 						<dt>Cited ensemble</dt>
 						<dd>
 							{#if report.uncertainty.cited}
-								{report.uncertainty.cited.id.slice(0, 8)}, started {fmtDate(report.uncertainty.cited.createdAt)} by {report.uncertainty.cited.createdBy ?? FORMER_MEMBER}
+								{report.uncertainty.cited.id.slice(0, 8)}, started {fmtProjectDay(report.uncertainty.cited.createdAt, timeZone)} by {report.uncertainty.cited.createdBy ?? FORMER_MEMBER}
 								<span class="sub">The first complete ensemble on the declared rule; seed {report.uncertainty.cited.seed}, drawn by the database</span>
 							{:else}<span class="na">None</span>{/if}
 						</dd>
@@ -348,7 +348,7 @@
 								{#each report.uncertainty.ledger as e (e.id)}
 									<tr>
 										<th scope="row">{e.id.slice(0, 8)}{e.cited ? ' (cited)' : ''}</th>
-										<td>{fmtDate(e.createdAt)}, {e.createdBy ?? FORMER_MEMBER}</td>
+										<td>{fmtProjectDay(e.createdAt, timeZone)}, {e.createdBy ?? FORMER_MEMBER}</td>
 										<td>{e.status === 'complete' ? 'complete' : 'started, not completed: no result stored'}</td>
 										<td class="num">{e.accepted === null ? '–' : `${fmtNum(e.accepted)} of ${fmtNum(e.members + 1)}`}</td>
 										<td>{!report.uncertainty.declared ? 'no rule declared' : e.departsFromDeclared.length ? e.departsFromDeclared.map((d) => `${d.label}: ${d.b} (rule ${d.a})`).join('; ') : 'follows it'}</td>
@@ -466,7 +466,7 @@
 						<tbody>
 							{#each report.credibility.nominations as n, i (i)}
 								<tr>
-									<th scope="row">{fmtDate(n.nominatedAt)}</th>
+									<th scope="row">{fmtProjectDay(n.nominatedAt, timeZone)}</th>
 									<td>{n.withdrawn ? 'Withdrawn' : `${n.runLabel || 'unlabelled run'}${n.runId === id.baseline.runId ? ' (this baseline)' : ''}`}</td>
 									<td>{n.nominatedBy ?? FORMER_MEMBER}</td>
 									<td>{n.reason}</td>
@@ -578,7 +578,7 @@
 							<tbody>
 								{#each cum.applications as o (o.scenarioId)}
 									<tr>
-										<th scope="row">“{o.scenarioName}”<span class="sub">run {fmtDate(o.runCreatedAt)}</span></th>
+										<th scope="row">“{o.scenarioName}”<span class="sub">run {fmtProjectDay(o.runCreatedAt, timeZone)}</span></th>
 										<td>{statusText(o)}{#if o.terms === 'licensed'}<span class="sub">run of its licensed terms</span>{/if}{#if o.reason}<span class="sub">{o.reason}</span>{/if}</td>
 										<td class="num">{o.ewrDays === null ? '–' : `${signed(o.ewrDays, 0)} days`}</td>
 										<td class="num">{o.reservePp === null ? '–' : `${signed(o.reservePp, 1)} pp`}</td>
@@ -662,7 +662,7 @@
 						</div>
 						{#if cb.assessment}
 							<p class="small" data-testid="evidence-combined-source">
-								From the cumulative assessment “{cb.assessment.name}”, made {fmtDate(cb.assessment.createdAt)}{cb.assessment.createdBy ? ` by ${cb.assessment.createdBy}` : ''}{cb.assessment.engineVersion
+								From the cumulative assessment “{cb.assessment.name}”, made {fmtProjectDay(cb.assessment.createdAt, timeZone)}{cb.assessment.createdBy ? ` by ${cb.assessment.createdBy}` : ''}{cb.assessment.engineVersion
 									? `, engine ${cb.assessment.engineVersion}`
 									: ''}: the baseline, each application alone and all together, run on one engine, so these changes may differ from the stored runs’ above.
 							</p>
@@ -1104,10 +1104,10 @@
 				</div>
 				<h3>A.4 Baseline history since the previous publication</h3>
 				{#if report.appendix.history}
-					<p class="small">Since the run published {fmtDate(report.appendix.history.since.publishedAt)}{report.appendix.history.truncated ? ' (the oldest changes are left out)' : ''}:</p>
+					<p class="small">Since the run published {fmtProjectDay(report.appendix.history.since.publishedAt, timeZone)}{report.appendix.history.truncated ? ' (the oldest changes are left out)' : ''}:</p>
 					<ul class="changes">
 						{#each report.appendix.history.revisions as rev, i (i)}
-							<li>{fmtDate(rev.createdAt)}{rev.actor ? `, ${rev.actor}` : ''}{rev.reason ? ` (“${rev.reason}”)` : ''}: {rev.changes.map((c) => c.text).join('; ') || 'no input changed'}</li>
+							<li>{fmtProjectDay(rev.createdAt, timeZone)}{rev.actor ? `, ${rev.actor}` : ''}{rev.reason ? ` (“${rev.reason}”)` : ''}: {rev.changes.map((c) => c.text).join('; ') || 'no input changed'}</li>
 						{:else}
 							<li class="na">No change to the inputs.</li>
 						{/each}
@@ -1125,7 +1125,7 @@
 				<h3>A.6 Every application run on this baseline</h3>
 				<ul class="changes" data-testid="evidence-application-runs">
 					{#each report.appendix.applicationRuns as r (r.runId)}
-						<li>{fmtDate(r.createdAt)}: “{r.scenarioName}”{r.label ? `, ${r.label}` : ''}, run by {r.createdBy ?? FORMER_MEMBER}{r.runId === id.application?.runId ? ' (this report)' : ''}</li>
+						<li>{fmtProjectDay(r.createdAt, timeZone)}: “{r.scenarioName}”{r.label ? `, ${r.label}` : ''}, run by {r.createdBy ?? FORMER_MEMBER}{r.runId === id.application?.runId ? ' (this report)' : ''}</li>
 					{:else}
 						<li class="na">None.</li>
 					{/each}
@@ -1154,7 +1154,7 @@
 				{/if}
 				<h3>B.2 Sign-off <HelpTip key={frozen ? 'pack-signoff' : 'signoff-statement'} label="About the sign-off" /></h3>
 				{#if signoffs && signoffTarget}
-					<SignoffSection {projectId} target={signoffTarget} list={signoffs} onchange={(n) => onsignoffchange?.(n)} />
+					<SignoffSection {projectId} target={signoffTarget} list={signoffs} onchange={(n) => onsignoffchange?.(n)} timeZone={timeZone ?? DEFAULT_TIME_ZONE} />
 				{:else}
 					<p class="na">Not signed.</p>
 				{/if}
@@ -1203,7 +1203,7 @@
 				<h3>Notes on the application run</h3>
 				{#if st.notes.trim()}
 					<p class="verbatim">{st.notes}</p>
-					{#if st.notesUpdatedAt}<p class="small muted">Last changed {fmtDate(st.notesUpdatedAt, true)}{st.notesUpdatedBy ? ` by ${st.notesUpdatedBy}` : ''}.</p>{/if}
+					{#if st.notesUpdatedAt}<p class="small muted">Last changed {fmtProjectStamp(st.notesUpdatedAt, timeZone)}{st.notesUpdatedBy ? ` by ${st.notesUpdatedBy}` : ''}.</p>{/if}
 				{:else}
 					<p class="na">None given.</p>
 				{/if}

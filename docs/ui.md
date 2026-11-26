@@ -14673,6 +14673,13 @@ Viewer role and up; a contributor or farmer is told it needs the viewer role.
 - **Entry links.** **Evidence report** on the Runs tab, beside **Report**,
   for the current nominated run or a scenario run; and in the head of a
   scenario's comparison (`ScenarioCompare`), for the scenario's last run.
+- **Dates** (issues #860, #864): every run, pack, nomination, publication,
+  endorsement, revision, citation and sign-off date on the page, and a
+  pack's stamp, is read in the project's time zone (`fmtProjectDay`, and
+  `fmtProjectStamp` where a time of day shows; `project/project.ts`), never
+  the viewer's, so one page never dates the same run in two zones. A pack's
+  page takes the zone from `packTimeZone` (a render session, which reads no
+  project, uses the renderer browser's zone, the project's).
 - **Board 1, the checks** (screen only, open by default): every check the
   engine makes (`evidenceChecks`), failures first, each marked *stops
   issue* or *printed, doesn't stop issue*, with what was found and the fix.

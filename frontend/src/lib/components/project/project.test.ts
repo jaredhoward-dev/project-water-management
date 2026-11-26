@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PROJECT_ANCHORS, projectAnchor, projectHref } from './links';
-import { byName, fmtProjectDay, foldRows, PEOPLE_SHOWN, projectContext, projectDay } from './project';
+import { byName, fmtProjectDay, fmtProjectStamp, foldRows, PEOPLE_SHOWN, projectContext, projectDay } from './project';
 
 describe('projectContext', () => {
 	// The created date is the viewer's calendar day (fmtDate), and no instant is
@@ -141,5 +141,29 @@ describe('fmtProjectDay (issue #860: the evidence report\'s run date)', () => {
 		expect(fmtProjectDay(null)).toBe('–');
 		expect(fmtProjectDay('')).toBe('–');
 		expect(fmtProjectDay('not a date', 'UTC')).toBe('not a date');
+	});
+
+	it('keeps a bare day as that day west of Greenwich (UTC midnight is the day before there)', () => {
+		expect(fmtProjectDay('2026-10-26', 'America/St_Johns')).toBe('26 Oct 2026');
+		expect(fmtProjectDay('2026-10-26', 'Pacific/Kiritimati')).toBe('26 Oct 2026');
+	});
+});
+
+describe('fmtProjectStamp (issue #864: a time of day in the evidence report)', () => {
+	it("prints the project's day and clock near midnight, whatever the device's zone (the suite runs under a skewed TZ)", () => {
+		expect(fmtProjectStamp('2026-10-26T22:30:00Z', 'Africa/Johannesburg')).toBe('27 Oct 2026 00:30');
+		expect(fmtProjectStamp('2026-10-26T21:59:00Z', 'Africa/Johannesburg')).toBe('26 Oct 2026 23:59');
+		expect(fmtProjectStamp('2026-10-26T22:30:00Z')).toBe('27 Oct 2026 00:30');
+		// Half-hour zone west of UTC: still the 26th.
+		expect(fmtProjectStamp('2026-10-27T01:00:00Z', 'America/St_Johns')).toBe('26 Oct 2026 22:30');
+		// Midnight is 00, never 24.
+		expect(fmtProjectStamp('2026-10-26T22:00:00Z', 'Africa/Johannesburg')).toBe('27 Oct 2026 00:00');
+	});
+
+	it('reads an unknown zone as the default one, and leaves a bare day, a missing or an unreadable date as fmtProjectDay does', () => {
+		expect(fmtProjectStamp('2026-10-26T22:30:00Z', 'Not/AZone')).toBe('27 Oct 2026 00:30');
+		expect(fmtProjectStamp('2026-10-26', 'America/St_Johns')).toBe('26 Oct 2026');
+		expect(fmtProjectStamp(null)).toBe('–');
+		expect(fmtProjectStamp('not a date')).toBe('not a date');
 	});
 });
