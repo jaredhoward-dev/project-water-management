@@ -7,7 +7,7 @@ import pg from 'pg';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { anon, app, asOwner, monthly, node, signUp } from '../__tests__/helpers.js';
 import { FARMER_NOTICE_VERSION, LEGAL_VERSION } from '@water-management/engine/legal';
-import { APP_USER_EXCLUDED, APP_USER_EXPORTED, EXPORT_COOLDOWN_SECONDS, USER_FK_COVERAGE } from './export.js';
+import { APP_USER_EXCLUDED, APP_USER_EXPORTED, EXPORT_COOLDOWN_SECONDS, MEMBER_FK_COVERAGE, USER_FK_COVERAGE } from './export.js';
 
 type User = Awaited<ReturnType<typeof signUp>>;
 type Doc = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -231,6 +231,60 @@ describe('GET /auth/me/export', () => {
 		}
 	});
 
+	it('gives the scenarios the person was added to (scenario_member), and not another member’s (positive control)', async () => {
+		const [helper, applicant] = (await Promise.all(['XHelper', 'XApplicant'].map((n) => signUp(n)))) as [User, User];
+		for (const u of [helper, applicant]) expect((await owner.call('POST', `/projects/${projectId}/members`, { email: u.email, role: 'contributor' })).status).toBe(201);
+		// Contributors share an application only within their party (049 app_share_allowed).
+		await asOwner(`UPDATE project_member SET party = 'Alpha Farms' WHERE project_id = $1 AND user_id = ANY($2)`, [projectId, [helper.id, applicant.id]]);
+		const [run] = await asOwner('SELECT id FROM model_run WHERE project_id = $1 ORDER BY created_at LIMIT 1', [projectId]);
+		// As the schema owner, acting as the applicant (the scenario trigger wants a signed-in user).
+		const client = new pg.Client({ connectionString: process.env.TEST_MIGRATION_DATABASE_URL });
+		await client.connect();
+		let app1: { id: string };
+		try {
+			await client.query('BEGIN');
+			await client.query(`SELECT set_config('app.current_user_id', $1, true)`, [applicant.id]);
+			[app1] = (
+				await client.query<{ id: string }>(
+					`INSERT INTO scenario (project_id, name, base_run_id, ops_sha256, owner_user_id, origin, status)
+					 VALUES ($1, 'Raise the Alpha weir', $2, repeat('0', 64), $3, 'applicant', 'draft') RETURNING id`,
+					[projectId, run.id, applicant.id]
+				)
+			).rows as [{ id: string }];
+			await client.query('INSERT INTO scenario_member (scenario_id, project_id, user_id, added_by) VALUES ($1, $2, $3, $4)', [app1.id, projectId, helper.id, applicant.id]);
+			await client.query('COMMIT');
+		} finally {
+			await client.end();
+		}
+		const mine = await download(helper);
+		expect(mine.doc.scenarioMemberships).toEqual([
+			{ scenarioId: app1.id, projectId, projectName: 'Export catchment', scenarioName: 'Raise the Alpha weir', addedAt: expect.any(String), addedBy: 'XApplicant' }
+		]);
+		// The applicant made it (scenario.created is theirs in auditEvents); they are no member of it, so no row of the helper's.
+		const theirs = await download(applicant);
+		expect(theirs.doc.scenarioMemberships).toEqual([]);
+		// Nor anyone else's.
+		expect((await download(farmer)).doc.scenarioMemberships).toEqual([]);
+	});
+
+	it('gives a pending change of address (the new address and when it lapses), never the link’s hash, and not to anyone else', async () => {
+		const LINK_HEX = '9a'.repeat(32);
+		await asOwner(`INSERT INTO email_change (user_id, new_email, token_hash, expires_at) VALUES ($1, 'farmer-new@example.com', decode($2, 'hex'), now() + interval '2 days')`, [
+			farmer.id,
+			LINK_HEX
+		]);
+		try {
+			const mine = await download(farmer);
+			expect(mine.doc.pendingEmailChange).toEqual({ newEmail: 'farmer-new@example.com', createdAt: expect.any(String), expiresAt: expect.any(String) });
+			expect(mine.text).not.toContain(LINK_HEX);
+			const theirs = await download(other);
+			expect(theirs.doc.pendingEmailChange).toBeNull();
+			expect(theirs.text).not.toContain('farmer-new@example.com');
+		} finally {
+			await asOwner('DELETE FROM email_change WHERE user_id = $1', [farmer.id]);
+		}
+	});
+
 	it('allows one export a minute per account (429 with Retry-After)', async () => {
 		expect((await download(farmer)).res.status).toBe(200);
 		const again = await app.request('/auth/me/export', { headers: { cookie: farmer.cookie, origin: ORIGIN } });
@@ -276,6 +330,18 @@ describe('export completeness guard', () => {
 			 WHERE c.contype = 'f' AND c.confrelid = 'app_user'::regclass ORDER BY 1`
 		);
 		expect(rows.map((r) => r.col).sort()).toEqual(Object.keys(USER_FK_COVERAGE).sort());
+	});
+
+	it('lists every person column reached through project_member or team_member (auth/export.ts MEMBER_FK_COVERAGE)', async () => {
+		// A composite key (project_id, user_id) → project_member points at a person as surely as one to app_user.
+		const { rows } = await db.query<{ col: string }>(
+			`SELECT c.conrelid::regclass::text || '.' || a.attname AS col
+			 FROM pg_constraint c
+			 JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY (c.conkey)
+			 JOIN pg_attribute fa ON fa.attrelid = c.confrelid AND fa.attnum = c.confkey[array_position(c.conkey, a.attnum)]
+			 WHERE c.contype = 'f' AND c.confrelid IN ('project_member'::regclass, 'team_member'::regclass) AND fa.attname = 'user_id' ORDER BY 1`
+		);
+		expect(rows.map((r) => r.col).sort()).toEqual(Object.keys(MEMBER_FK_COVERAGE).sort());
 	});
 
 	it('lists every app_user column as exported or deliberately left out', async () => {
