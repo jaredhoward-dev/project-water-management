@@ -31,6 +31,11 @@ export interface DwsImport {
 	 * A level or a volume never gets here: parseDwsExport refuses it.
 	 */
 	quantity?: 'flow' | 'unstated';
+	/**
+	 * The DWS station code the file names (A2H012, X0R000: a letter, a digit, the site type, three digits), when it
+	 * names one outside its data rows: a saved page's URL (Station=X0R000100.00) or a heading (issue #925).
+	 */
+	station?: string;
 }
 
 const NO_READING = /^(na|nan|null|-)$/i;
@@ -43,6 +48,26 @@ const M3S = /cubic met(re|er)s?\s*(\/|per)\s*s(ec(ond)?)?\b|\bm(3|³)\s*\/\s*s\b
 // matched loosely). Neither is a rain, a flow or an evaporation, the only kinds a series can be.
 const LEVEL = /\b(water\s+|surface\s+|dam\s+|gauge\s+)?(level|stage|height)\b/i;
 const VOLUME = /\b(volumes?|storage|stored|capacity)\b|million\s+cubic\s+met(re|er)s?|\b(m|h)m(3|³)(?!\w)|\bcubic\s+met(re|er)s?\b(?!\s*(\/|per))/i;
+
+// A DWS station code: drainage region letter, a digit, the site type (H river gauge, R reservoir, E weather
+// station …) and three digits, optionally with HyData's "100.00" suffix (Station=A2H012100.00).
+const STATION_CODE = /(?<![A-Za-z0-9])([A-Z]\d[A-Z]\d{3})(?=100\.00|[^A-Za-z0-9]|$)/;
+
+/** The station code a file's text names outside its data rows: one after "Station", else the first one. */
+function stationIn(text: string): string | undefined {
+	const named = /station\W{0,3}([A-Z]\d[A-Z]\d{3})(?=100\.00|[^A-Za-z0-9]|$)/i.exec(text);
+	if (named) return named[1]!.toUpperCase();
+	return STATION_CODE.exec(text)?.[1];
+}
+
+/** The station code in a file name ("X0R000.txt", "HyData X0R000 2020.html"), else undefined. */
+export function dwsStationInName(fileName: string | undefined): string | undefined {
+	const base = (fileName ?? '').split(/[\\/]/).pop() ?? '';
+	return STATION_CODE.exec(base.toUpperCase())?.[1];
+}
+
+/** Whether a station code is a reservoir's (R in the third place, HyData's SiteType=RES; backend feeds/sources/dws.ts). */
+export const isReservoirStation = (code: string | undefined): boolean => !!code && code[2] === 'R';
 
 /** Which unit a level or volume column is in, for the refusal ("in m", "in million m³"); undefined when the block doesn't say. */
 function levelOrVolume(column: string): { what: 'level' | 'volume'; unit?: string } | null {
@@ -63,6 +88,61 @@ function levelOrVolume(column: string): { what: 'level' | 'volume'; unit?: strin
 export function dwsFlowCheck(dws: DwsImport | undefined, kind: string): string | null {
 	if (!dws || dws.quantity !== 'unstated' || !kind.endsWith('_m3s')) return null;
 	return `The file's format block says its values are "${dws.column}", with no flow unit (m³/s), so they may be a dam's level or volume rather than a flow.`;
+}
+
+/**
+ * Something about a DWS export the form says before an upload: `confirm` is the checkbox's words when ticking it
+ * lets the upload go ahead, null when the upload is refused for this kind (another kind is the answer).
+ */
+export interface DwsCheck {
+	id: 'unstated' | 'reservoir' | 'flow-not-depth' | 'flow-station';
+	title: string;
+	message: string;
+	confirm: string | null;
+}
+
+/**
+ * Every check on uploading this DWS export as `kind` (issues #909, #925): an unstated unit taken as a flow
+ * (dwsFlowCheck), a reservoir station's table taken as a flow (its daily "flow" is the spillway discharge,
+ * not the river's), a stated flow (m³/s) taken as rain or evaporation, which is refused, and a
+ * river gauge's or reservoir's table with no stated unit taken as rain or evaporation, which is confirmed. `fileName`
+ * gives the station code when the text names none. `unit` is the form's unit, for the checkbox's words.
+ */
+export function dwsChecks(dws: DwsImport | undefined, kind: string, fileName?: string, unit = 'm³/s'): DwsCheck[] {
+	if (!dws) return [];
+	const checks: DwsCheck[] = [];
+	const flowKind = kind.endsWith('_m3s');
+	if (!flowKind && dws.quantity === 'flow') {
+		checks.push({
+			id: 'flow-not-depth',
+			title: 'A flow, not a depth',
+			message: `The file's format block says its values are "${dws.column}", a flow in m³/s, so they can't be imported as rain or evaporation (a depth in mm). Choose a flow kind, or export the station's rain or evaporation instead.`,
+			confirm: null
+		});
+	}
+	const station = dws.station ?? dwsStationInName(fileName);
+	// A river gauge's (H) or a reservoir's (R) table with no stated unit, taken as rain or evaporation: the station
+	// measures a flow or a spill, so the person says it is a depth first (the stated-m³/s case is refused above).
+	if (!flowKind && dws.quantity !== 'flow' && station && (station[2] === 'H' || station[2] === 'R')) {
+		const what = station[2] === 'R' ? 'a reservoir station, whose daily table is the spillway discharge' : 'a river gauge, whose daily table is a flow';
+		checks.push({
+			id: 'flow-station',
+			title: 'A flow station',
+			message: `${station} is ${what} (m³/s), not rain or evaporation, though the file states no unit.`,
+			confirm: `These values are daily depths in ${unit}, not a flow or discharge`
+		});
+	}
+	if (flowKind && isReservoirStation(station)) {
+		checks.push({
+			id: 'reservoir',
+			title: 'A reservoir station',
+			message: `${station} is a reservoir station (R in its code): DWS's daily table for a dam reports the spillway discharge worked out from the dam's level, not the river's flow, so it scores a run only where the spill is the flow you mean.`,
+			confirm: `These values are the spillway discharge I mean to import as ${kind === 'flow_observed_m3s' ? 'observed flow' : 'this flow'}`
+		});
+	}
+	const unstated = dwsFlowCheck(dws, kind);
+	if (unstated) checks.push({ id: 'unstated', title: 'Not said to be a flow', message: unstated, confirm: `These values are daily flows in ${unit}` });
+	return checks;
 }
 
 /**
@@ -136,5 +216,7 @@ export function parseDwsExport(text: string): ParsedSeries {
 			info.quantity = 'flow';
 		} else info.quantity = 'unstated';
 	}
+	const station = stationIn(lines.filter((l) => !DWS_ROW.test(l.trim())).join('\n') + (plain ? '' : `\n${clean}`));
+	if (station) info.station = station;
 	return { ...denseDays(byDay), dateOrder: 'iso', dateOrderAssumed: false, dws: info };
 }

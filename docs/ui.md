@@ -7118,7 +7118,23 @@ holds and its unit, since no series kind is a level or a volume. A block that
 states no flow unit at all can still go in as a flow kind, but only after the
 person ticks *These values are daily flows in (the chosen unit)* under *Not said to
 be a flow* (`dwsFlowCheck`; the upload stays disabled until then, and a new
-file clears the tick); headerless rows have no block, so nothing is asked. A plain date,value CSV reads
+file clears the tick); headerless rows have no block, so nothing is asked.
+Issue #925 adds two more (`dwsChecks`, each its own line in the summary). A
+reservoir station's daily table (an R in the station code's third place, as
+in the synthetic X0R000, HyData's `SiteType=RES`) has the river-gauge layout
+and says m³/s, but its flow is the dam's spillway discharge, not the river's:
+taken as a flow kind, *A reservoir station* says so and the upload waits for
+*These values are the spillway discharge I mean to import as observed flow*.
+The code is read from the file's text outside its data rows (a heading such
+as `X0R000 (…)`, or a saved page's `Station=X0R000100.00`), else from the
+file name (`X0R000.txt`); a river gauge (H) asks nothing. And a block that
+states m³/s is refused as a rain or evaporation kind (*A flow, not a depth*,
+no tick to get past it: pick a flow kind). A river gauge's (H) or a
+reservoir's (R) table that states no unit, taken as rain or evaporation, asks
+first (*A flow station*: the station measures a flow or a spill, not rain;
+*These values are daily depths in (the chosen unit), not a flow or
+discharge*); headerless rows take the code from the file name, and a weather
+station (E) asks nothing. A plain date,value CSV reads
 a negative value as a gap too (issue #51: every kind is a rain, flow or
 evaporation, so −999 or −1 is a "no reading" placeholder), and its summary
 adds a *Negative values* line with how many (`csv.ts` `negativeGaps`). In number fields, a comma is a thousands separator only in a

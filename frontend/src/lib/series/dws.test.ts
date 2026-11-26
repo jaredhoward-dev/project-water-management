@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { parseSeriesCsv } from './csv';
-import { dwsFlowCheck, isDwsExport, parseDwsExport } from './dws';
+import { dwsChecks, dwsFlowCheck, dwsStationInName, isDwsExport, parseDwsExport } from './dws';
 import { parseSeriesFile } from './file';
 
 // Synthetic (invented station and values), shared with the engine's and the DWS feed's
@@ -35,7 +35,8 @@ describe('parseDwsExport on the shared fixture', () => {
 			gapCodes: { '170': 1, '255': 1 },
 			column: 'Daily avg flow rate in cubic metres/sec 99999.999',
 			unit: 'm³/s',
-			quantity: 'flow'
+			quantity: 'flow',
+			station: 'X0H000'
 		});
 		expect(r.values).not.toContain(-999);
 		// 20210105 carries 0.000 under code 255: a gap, not a dry day.
@@ -145,5 +146,82 @@ describe('dwsFlowCheck (issue #909)', () => {
 		expect(dwsFlowCheck(parseDwsExport(spec('Daily pan evaporation in millimetres 9999.9')).dws, 'evap_apan_mm')).toBeNull();
 		expect(dwsFlowCheck(parseDwsExport('20210101  1.5  1\n').dws, 'flow_observed_m3s')).toBeNull();
 		expect(dwsFlowCheck(undefined, 'flow_observed_m3s')).toBeNull();
+	});
+});
+
+describe('dwsChecks (issue #925)', () => {
+	// Synthetic: an invented reservoir code (X0R000) in the river-gauge layout, as an archived RES page prints it.
+	const reservoir = fixture.replace('X0H000 (SYNTHETIC WEIR)', 'X0R000 (SYNTHETIC DAM)');
+	const ids = (cs: ReturnType<typeof dwsChecks>) => cs.map((c) => [c.id, c.confirm === null ? 'refused' : 'confirm']);
+
+	it('reads the station code from the heading, a saved page\'s URL, or else the file name', () => {
+		expect(parseDwsExport(reservoir).dws!.station).toBe('X0R000');
+		const page = `<html><a href="HyData.aspx?Station=X0R000100.00&DataType=Daily">x</a><p><pre>${fixture.replace('X0H000 (SYNTHETIC WEIR)\n', '')}</pre></html>`;
+		expect(parseDwsExport(page).dws!.station).toBe('X0R000');
+		expect(parseDwsExport('20210101  1.5  1\n').dws!.station).toBeUndefined();
+		expect(dwsStationInName('x0r000_daily.txt')).toBe('X0R000');
+		expect(dwsStationInName('HyData X0H000 2020.html')).toBe('X0H000');
+		expect(dwsStationInName('flows.txt')).toBeUndefined();
+	});
+
+	it('asks before a reservoir station\'s table goes in as a flow: its daily flow is the spillway discharge', () => {
+		const cs = dwsChecks(parseDwsExport(reservoir).dws, 'flow_observed_m3s');
+		expect(ids(cs)).toEqual([['reservoir', 'confirm']]);
+		expect(cs[0]!.message).toContain('X0R000 is a reservoir station');
+		expect(cs[0]!.message).toContain('spillway discharge');
+		expect(ids(dwsChecks(parseDwsExport(reservoir).dws, 'flow_logger_m3s'))).toEqual([['reservoir', 'confirm']]);
+		// The code from the file name, when the text names none.
+		const bare = parseDwsExport('20210101  1.5  1\n').dws;
+		expect(ids(dwsChecks(bare, 'flow_observed_m3s', 'X0R000.txt'))).toEqual([['reservoir', 'confirm']]);
+		expect(dwsChecks(bare, 'flow_observed_m3s', 'X0H000.txt')).toEqual([]);
+	});
+
+	it('asks nothing of a river gauge\'s stated flow taken as a flow', () => {
+		expect(dwsChecks(parseDwsExport(fixture).dws, 'flow_observed_m3s', 'X0R000.txt')).toEqual([]);
+		expect(dwsChecks(undefined, 'flow_observed_m3s', 'X0R000.txt')).toEqual([]);
+	});
+
+	it('refuses a stated flow (m³/s) as rain or evaporation, with no way to confirm it', () => {
+		for (const kind of ['rain_catchment_mm', 'rain_chirps_mm', 'evap_apan_mm', 'evap_et0_mm']) {
+			const cs = dwsChecks(parseDwsExport(fixture).dws, kind);
+			expect(ids(cs)).toEqual([['flow-not-depth', 'refused']]);
+			expect(cs[0]!.message).toContain("can't be imported as rain or evaporation");
+		}
+		expect(ids(dwsChecks(parseDwsExport(reservoir).dws, 'rain_catchment_mm'))).toEqual([['flow-not-depth', 'refused']]);
+	});
+
+	it('keeps the unstated-unit question, beside the reservoir one, with the form\'s unit', () => {
+		const unstated = reservoir.replace('Daily avg flow rate in cubic metres/sec', 'Daily average value');
+		const cs = dwsChecks(parseDwsExport(unstated).dws, 'flow_observed_m3s', undefined, 'l/s');
+		expect(ids(cs)).toEqual([
+			['reservoir', 'confirm'],
+			['unstated', 'confirm']
+		]);
+		expect(cs[1]!.confirm).toBe('These values are daily flows in l/s');
+		// An unstated unit as rain: not a stated flow, so not refused, but a reservoir's table is confirmed (below).
+		expect(ids(dwsChecks(parseDwsExport(unstated).dws, 'rain_catchment_mm'))).toEqual([['flow-station', 'confirm']]);
+	});
+
+	it('asks before a river gauge\'s or reservoir\'s table with no stated unit goes in as rain or evaporation', () => {
+		const strip = (t: string) => t.replace('Daily avg flow rate in cubic metres/sec', 'Daily average value');
+		const gauge = parseDwsExport(strip(fixture)).dws;
+		const dam = parseDwsExport(strip(reservoir)).dws;
+		for (const kind of ['rain_catchment_mm', 'evap_apan_mm']) {
+			const g = dwsChecks(gauge, kind, undefined, 'mm');
+			expect(ids(g)).toEqual([['flow-station', 'confirm']]);
+			expect(g[0]!.message).toContain('X0H000 is a river gauge');
+			expect(g[0]!.confirm).toBe('These values are daily depths in mm, not a flow or discharge');
+			expect(dwsChecks(dam, kind)[0]!.message).toContain('X0R000 is a reservoir station');
+		}
+		// Headerless rows: the code from the file name.
+		const bare = parseDwsExport('20210101  1.5  1\n').dws;
+		expect(ids(dwsChecks(bare, 'rain_catchment_mm', 'X0H000.txt'))).toEqual([['flow-station', 'confirm']]);
+		expect(ids(dwsChecks(bare, 'evap_apan_mm', 'X0R000.txt'))).toEqual([['flow-station', 'confirm']]);
+		// A weather station (E) or no code asks nothing; a stated flow is refused instead, not confirmed.
+		expect(dwsChecks(bare, 'evap_apan_mm', 'X0E000.txt')).toEqual([]);
+		expect(dwsChecks(bare, 'rain_catchment_mm', 'rain.txt')).toEqual([]);
+		expect(ids(dwsChecks(parseDwsExport(fixture).dws, 'rain_catchment_mm'))).toEqual([['flow-not-depth', 'refused']]);
+		// Taken as a flow, a river gauge's unstated table keeps only the unstated-unit question.
+		expect(ids(dwsChecks(gauge, 'flow_observed_m3s'))).toEqual([['unstated', 'confirm']]);
 	});
 });
