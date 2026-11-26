@@ -326,6 +326,9 @@ describe('what an item says', () => {
 			'Changed the publication’s restriction notice and next publication date'
 		);
 		expect(eventLine(ev('run.deleted', { runIds: ['a', 'b'], reason: 'trimmed' }))).toBe('Removed 2 old runs to stay within the storage cap');
+		// A run of an application not yet decided: no label in the log (runs/routes.ts).
+		expect(eventLine(ev('run.deleted', { runIds: ['a'], application: true, reason: 'deleted' }))).toBe('Deleted a run of an application');
+		expect(eventLine(ev('run.deleted', { runIds: ['a'], label: 'Scratch', reason: 'deleted' }))).toBe('Deleted the run “Scratch”');
 		expect(eventLine(ev('project.changed', { fields: ['name'], from: 'Old', to: 'New' }))).toBe('Renamed the project from “Old” to “New”');
 		expect(eventLine(ev('project.changed', { fields: ['time_zone'], timeZone: { from: 'Africa/Johannesburg', to: 'Africa/Windhoek' } }))).toBe(
 			'Set the time zone to Africa/Windhoek'

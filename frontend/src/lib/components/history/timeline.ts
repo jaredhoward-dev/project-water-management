@@ -337,7 +337,7 @@ export function eventLine(e: Pick<HistoryEvent, 'kind' | 'subject'>): string {
 			return 'Edited a run’s notes';
 		case 'run.deleted': {
 			const n = Array.isArray(s.runIds) ? s.runIds.length : 1;
-			return s.reason === 'trimmed' ? `Removed ${plural(n, 'old run')} to stay within the storage cap` : `Deleted the run${str(s.label) ? ` “${str(s.label)}”` : ''}`;
+			return s.reason === 'trimmed' ? `Removed ${plural(n, 'old run')} to stay within the storage cap` : s.application ? 'Deleted a run of an application' : `Deleted the run${str(s.label) ? ` “${str(s.label)}”` : ''}`;
 		}
 		case 'feed.configured': {
 			const feed = `the ${feedName(s.source)} feed`;

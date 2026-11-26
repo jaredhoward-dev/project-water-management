@@ -409,6 +409,30 @@ describe('withdraw, reopen and delete', () => {
 	});
 });
 
+describe('deleting a run of an application before it is decided', () => {
+	it('keeps the application’s name out of the project’s log, which every viewer reads (control: a team run’s label is logged)', async () => {
+		const sid = await apply(applicantB, 'Secret weir', []);
+		const older = (await applicantB.call('POST', `${P()}/scenarios/${sid}/runs`, {})).body.run.id as string;
+		expect((await applicantB.call('POST', `${P()}/scenarios/${sid}/runs`, {})).status).toBe(201);
+		expect((await applicantB.call('POST', `${P()}/scenarios/${sid}/submit`)).body.scenario.status).toBe('submitted');
+		// The assessors read a submitted application's runs, and may delete one that nothing keeps.
+		const del = await assessor.call('DELETE', `${P()}/runs/${older}`);
+		expect(del.status, JSON.stringify(del.body)).toBe(204);
+		const [event] = await asOwner(`SELECT subject FROM audit_event WHERE project_id = $1 AND kind = 'run.deleted' AND subject->'runIds' ? $2`, [projectId, older]);
+		expect(event.subject).toEqual(expect.objectContaining({ runIds: [older], application: true, reason: 'deleted' }));
+		expect(JSON.stringify(event.subject)).not.toContain('Secret weir');
+		// The viewer's History neither (they can't read the application until it is decided).
+		expect((await viewer.call('GET', `${P()}/scenarios/${sid}`)).status).toBe(404);
+		expect(JSON.stringify((await viewer.call('GET', `${P()}/history?kind=run`)).body)).not.toContain('Secret weir');
+		// Positive control: a team run's deletion names it.
+		const team = await runModel(owner, 'Scratch run');
+		expect((await assessor.call('DELETE', `${P()}/runs/${team}`)).status).toBe(204);
+		const [teamEvent] = await asOwner(`SELECT subject FROM audit_event WHERE project_id = $1 AND kind = 'run.deleted' AND subject->'runIds' ? $2`, [projectId, team]);
+		expect(teamEvent.subject).toEqual(expect.objectContaining({ runIds: [team], label: 'Scratch run' }));
+		expect(JSON.stringify((await viewer.call('GET', `${P()}/history?kind=run`)).body)).toContain('Scratch run');
+	});
+});
+
 describe('roles', () => {
 	it('lets a contributor linked to a farm read that farm’s publication row (control: one without a link can’t)', async () => {
 		expect(await rowsAs(applicantA, 'SELECT node_id FROM publication_farm')).toEqual([{ node_id: rooikloof.id }]);
