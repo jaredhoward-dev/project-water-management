@@ -8801,7 +8801,11 @@ fitted parameter was changed by hand; `otherPeriod` when the fit used another
 window, other exclusions or the other record, or (engine ≥ 1.69.0) when an
 automated fit's rule left water years out (§2.10j) that the settings don't
 exclude, so the run also scores days the fit never saw; settings excluding the
-fit's exclusions and those years are the fit's own days. A forcing change since the fit
+fit's exclusions and those years are the fit's own days. Exclusions, and a
+record's own missing periods, are compared by the days they leave out: a
+reworded reason, another order, a water year written as its dates or one
+period split in two is no change (before this, any edit to a reason read as
+`otherPeriod` and "The calibration exclusions have changed since the fit"). A forcing change since the fit
 (PE, CHIRPS, rain-source settings, and from engine 0.40.0 a daily A-pan series
 added, replaced or removed, §2.3a) doesn't change it: the question here is
 whether the scored days are the fitted ones, and they still are. That the fit
