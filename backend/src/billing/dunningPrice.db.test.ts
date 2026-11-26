@@ -11,6 +11,8 @@ import { readFileSync } from 'node:fs';
 import { DUNNING_GRACE_DAYS } from '@water-management/engine/plans';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { app, asOwner, signUp } from '../__tests__/helpers.js';
+import { OWNER_URL } from '../__tests__/test-db.js';
+import { gatherReport } from '../../scripts/billing-report.js';
 import { withoutUser, withUser } from '../db/tx.js';
 import { runTick } from '../jobs/runner.js';
 import { signPayload } from './provider/signature.js';
@@ -180,5 +182,73 @@ describe('405 (#928): the price must be the plan’s', () => {
 		const ref = `sub_px_team_${run}`;
 		expect(await post(event('subscription-team-seats', acc, { sub: ref, created: t0 }).replaceAll('sub_synthetic_team_0001', ref))).toBe('applied');
 		expect(await sub(ref)).toMatchObject({ status: 'active', plan_code: 'team', price_minor: String(249900 + 2 * 49900) });
+	});
+});
+
+describe('406: a price conflict is kept for the operator', () => {
+	let owner: User;
+	let account: string;
+	const t0 = Math.floor(Date.now() / 1000) - 3600;
+	const ref = `sub_cf_${run}`;
+	const held = `sub_cf_held_${run}`;
+	const conflicts = async (r: string) =>
+		(await asOwner(
+			`SELECT reason, plan_code, billing_interval, seats, amount_minor::int AS amount, currency, expected_minor::int AS expected, held, resolved_at
+			 FROM billing_conflict WHERE provider = 'mock' AND external_ref = $1 ORDER BY id`,
+			[r]
+		)) as { reason: string; amount: number | null; expected: number | null; held: boolean; resolved_at: Date | null }[];
+	const report = () => gatherReport(OWNER_URL, '2001-03', new Date());
+
+	beforeAll(async () => {
+		owner = await signUp('PriceConflict');
+		account = (await owner.call('GET', '/account/plan')).body.account.id;
+	});
+
+	it('records a refused new subscription (not held) with its reason and amounts, and the report lists it', async () => {
+		expect(await post(event('subscription-pro-repriced', account, { sub: ref, created: t0 }))).toBe('conflict');
+		expect(await post(event('subscription-pro-coupon', account, { sub: ref, created: t0 + 1 }))).toBe('conflict');
+		expect(await post(event('subscription-pro-priced', account, { sub: ref, created: t0 + 2, currency: 'usd' }))).toBe('conflict');
+		const rows = await conflicts(ref);
+		expect(rows.map((r) => [r.reason, r.amount, r.expected, r.held])).toEqual([
+			['amount', 100, 89900, false],
+			['discount', 89900, 89900, false],
+			['currency', 89900, 89900, false]
+		]);
+		expect(rows[0]).toMatchObject({ plan_code: 'pro', billing_interval: 'month', seats: 1, currency: 'zar', resolved_at: null });
+
+		const mine = (await report()).billingConflicts.filter((c) => c.externalRef === ref);
+		expect(mine).toHaveLength(3);
+		expect(mine[0]).toMatchObject({ accountId: account, reason: 'amount', amountMinor: 100, expectedMinor: 89900, held: false });
+		expect(JSON.stringify(mine)).not.toMatch(/@/); // ids and amounts, never an address
+	});
+
+	it('a later event that applies for the ref resolves its open conflicts, and the report drops them', async () => {
+		expect(await post(event('subscription-pro-priced', account, { sub: ref, created: t0 + 3 }))).toBe('applied');
+		expect((await conflicts(ref)).every((r) => r.resolved_at !== null)).toBe(true);
+		expect((await report()).billingConflicts.filter((c) => c.externalRef === ref)).toEqual([]);
+	});
+
+	it('a held subscription whose price drifted is recorded as held, and stays open until something applies', async () => {
+		const other = await signUp('PriceConflictHeld');
+		const acc = (await other.call('GET', '/account/plan')).body.account.id as string;
+		expect(await post(event('subscription-pro-priced', acc, { sub: held, created: t0 }))).toBe('applied');
+		expect(await post(event('subscription-pro-repriced', acc, { sub: held, created: t0 + 1 }))).toBe('conflict');
+		expect((await conflicts(held)).map((r) => [r.reason, r.held, r.resolved_at])).toEqual([['amount', true, null]]);
+		expect((await report()).billingConflicts.some((c) => c.externalRef === held && c.held)).toBe(true);
+	});
+
+	it('the purge keeps open rows and deletes resolved ones past the retention', async () => {
+		await asOwner(`UPDATE billing_conflict SET resolved_at = now() - interval '100 days' WHERE provider = 'mock' AND external_ref = $1`, [ref]);
+		await withoutUser((db) => db.query(`SELECT app_purge_billing_events(interval '90 days')`));
+		expect(await conflicts(ref)).toEqual([]);
+		expect(await conflicts(held)).toHaveLength(1);
+	});
+
+	it('water_app reads none of it', async () => {
+		const failure = await withUser(owner.id, (db) => db.query('SELECT 1 FROM billing_conflict LIMIT 1')).then(
+			() => 'ok',
+			(e: { code?: string }) => String(e.code)
+		);
+		expect(failure).toBe('42501');
 	});
 });

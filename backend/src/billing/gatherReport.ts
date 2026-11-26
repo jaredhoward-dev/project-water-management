@@ -5,7 +5,7 @@
 // Lambda's billing-report action (ops/ownerActions.ts), which answers with
 // redact(report) only. No dotenv here: the migrate Lambda bundles this module.
 import type pg from 'pg';
-import { buildReport, type AccountRow, type GateRefusalRow, type OrphanPendingRow, type PersonRow, type PlanLimits, type Report, type ReverseTrialRow } from './metrics.js';
+import { buildReport, type AccountRow, type GateRefusalRow, type OpenConflict, type OrphanPendingRow, type PersonRow, type PlanLimits, type Report, type ReverseTrialRow } from './metrics.js';
 
 /** The month's report (YYYY-MM, or null for the current SAST month), addresses included: redact before it leaves the caller. */
 export async function gatherReportOn(client: pg.ClientBase, month: string | null, now = new Date()): Promise<Report> {
@@ -74,5 +74,33 @@ export async function gatherReportOn(client: pg.ClientBase, month: string | null
 			`SELECT provider, event_id, type, received_at FROM billing_event WHERE outcome = 'orphan_pending' ORDER BY received_at`
 		)
 	).rows.map((r): OrphanPendingRow => ({ provider: r.provider, eventId: r.event_id, type: r.type, receivedAt: r.received_at }));
-	return buildReport(first.slice(0, 7), now, accounts, people, limits, refusals, trials, orphans);
+	// Open price conflicts (406), whatever the month: billing_conflict is owner-only and holds ids and amounts, no person.
+	const conflicts = (
+		await client.query<{
+			provider: string; billing_account_id: string; external_ref: string; event_id: string; reason: string; plan_code: string;
+			billing_interval: string | null; seats: number; amount_minor: string | null; currency: string | null; expected_minor: string | null;
+			held: boolean; created_at: Date;
+		}>(
+			`SELECT provider, billing_account_id, external_ref, event_id, reason, plan_code, billing_interval, seats, amount_minor, currency,
+			        expected_minor, held, created_at
+			 FROM billing_conflict WHERE resolved_at IS NULL ORDER BY created_at, id`
+		)
+	).rows.map(
+		(r): OpenConflict => ({
+			provider: r.provider,
+			accountId: r.billing_account_id,
+			externalRef: r.external_ref,
+			eventId: r.event_id,
+			reason: r.reason,
+			planCode: r.plan_code,
+			interval: r.billing_interval,
+			seats: r.seats,
+			amountMinor: r.amount_minor === null ? null : Number(r.amount_minor),
+			currency: r.currency,
+			expectedMinor: r.expected_minor === null ? null : Number(r.expected_minor),
+			held: r.held,
+			createdAt: r.created_at.toISOString()
+		})
+	);
+	return buildReport(first.slice(0, 7), now, accounts, people, limits, refusals, trials, orphans, conflicts);
 }

@@ -83,6 +83,7 @@ All in `backend/migrations/323_billing.sql`; columns and RLS in
 | `plan` | The plans (`free`, `pro`, `team`): name, monthly and annual price in ZAR cents, `limits` (a closed, CHECK-validated key set; a JSON `null` is unlimited), `features`, trial days, `active`. Written only by migrations |
 | `billing_account` | One per person or team that has needed one, and its lifetime count of projects created |
 | `subscription` | An account's plan, status (`lapsed`: overdue past the [dunning limit](#dunning-limit), not live), seats, period, `past_due_since` and accepted `price_minor` (405); at most one live per account. Written by the webhook (326) and the staff grant (330) |
+| `billing_conflict` | Subscription events refused for their price (406, owner-only): the operator's open actions ([§ Price check](#price-check)) |
 | `billing_grant_log` | The staff grant's audit log (330): every grant, revocation and expiry ([§ Staff grants](#staff-grants)) |
 | `usage_counter` | Monthly counts per account and kind (`reports`, `packs_issued`); `month` is the first day of the month in Africa/Johannesburg |
 
@@ -376,6 +377,7 @@ output never goes into an issue, a PR, a chat or an agent's transcript.
 
 | Metric | How it is worked out | Threshold (the issue's) |
 | --- | --- | --- |
+| Open price conflicts (printed second) | Rows of `billing_conflict` (406) not yet resolved, whatever the month, oldest first: the provider, subscription ref, account id, reason, plan, interval and seats, the amount carried and expected, held or not, the event id and when. Ids and amounts only, so `redact` keeps them ([§ Price check](#price-check)) | any one → not held: refund or grant it; held: check it in Stripe's dashboard |
 | Orphans past the retries (printed first) | Rows of `billing_event` still `orphan_pending` (352) more than 3 days after they were received, whatever the month: the provider, its event id, type and age, oldest first. Stripe has stopped redelivering them, so nothing will cancel or refund them but the operator ([deployment.md § Billing alarms](./deployment.md#billing-alarms)). No account or person: the account is gone | any one → finish it in Stripe's dashboard |
 | Activation | Verified sign-ups of the month (SAST) with a model run of their own (`model_run.trigger` `manual`: the live model, a scenario or a calibration they asked for, never a live catchment's automatic or forecast run; 402) within 7 days of signing up. Sign-ups under 7 days old are left out and counted as pending | < 30% → fix onboarding first |
 | Active Free accounts near / at each limit | Active = a run someone asked for (`manual`, as above: an account whose only runs this month are automatic is idle, 402), a server report or assistant use this month on the account's projects. Near ≥ 80% of the limit, at ≥ 100%, for reports (5), the assistant's dollars ($1), catchments (Free has no limit, so none) and live catchments (1: the share at the live-catchment limit). Catchments and live catchments are counted **today**; live is 338's count (`app_live_catchments_in_use`: an enabled feed or alert rule, automatic runs on, or a publication; [§ Live catchments](#live-catchments-free)), so an account past its limit from before enforcement counts as at it, and an idle account with a live catchment isn't in the share | > 15% at reports → 10 a month; < 3% at the monthly assistant cap → room to raise |
@@ -633,10 +635,24 @@ price ids to match; the amount, currency and interval are the check.
   interval, the total accepted before (`subscription.price_minor`), so a
   list price raised by a later migration never strands a subscriber on the
   old one. A seat change at an old price then needs the operator.
-- Anything else is a **`conflict`**: nothing written, a `200`, and a warn
-  line for the operator ([§ The route](#the-route)). A new subscription gets
-  no plan (the operator refunds it or grants the plan, [§ Staff
-  grants](#staff-grants)); a held one keeps its last accepted state.
+- Anything else is a **`conflict`**: nothing written to the subscription, a
+  `200`, a warn line ([§ The route](#the-route)), and a row in the
+  owner-only `billing_conflict` (406): the account, the provider's
+  subscription ref and event id, the reason (`amount`, `currency`,
+  `discount`, `interval`, `unpriced`), the plan, interval and seats claimed,
+  the amount and currency carried, the amount expected, and whether a
+  subscription was held. No card data, name or address. A new subscription
+  gets no plan, though the provider may be charging it (the operator refunds
+  it or grants the plan, [§ Staff grants](#staff-grants)); a held one keeps
+  its last accepted state. Every open row is listed in `pnpm
+  dev:billing:report` and its JSON (`billingConflicts`, [§ Metrics and the
+  abuse report](#metrics-and-the-abuse-report)) until a later event for that
+  subscription applies (a corrected price, a cancellation of a held one),
+  which resolves it. A delete for a subscription never held leaves it open:
+  the charge may still need a refund. Retention: open rows stay until
+  resolved or the account is deleted (cascade); resolved rows go 90 days
+  after resolution with the tick's billing event purge
+  ([security.md](./security.md) lists it).
 - An item whose price can't be read (no `unit_amount`: a tiered or metered
   price; no currency; items in different currencies) sends a `null` total,
   which never applies. An ended status (`canceled`, `expired`) applies
@@ -652,8 +668,11 @@ price ids to match; the amount, currency and interval are the check.
 - Fixtures: `subscription-pro-priced` (Pro monthly at the plan's price),
   `subscription-pro-repriced` (a dashboard price), `subscription-pro-coupon`
   (a 50 % coupon); the Team fixtures now carry their currency.
-- Tests: `billing/provider/stripe.test.ts` (`priceOf`) and
-  `billing/dunningPrice.db.test.ts`: a dashboard price, another currency and
+- Tests: `billing/provider/stripe.test.ts` (`priceOf`), `billing/metrics.test.ts`
+  (the report's conflict lines) and `billing/dunningPrice.db.test.ts`: the
+  conflict rows with their reasons and amounts, held or not, listed by the
+  report and resolved by a later applied event, the purge keeping open rows,
+  `water_app` reading none; a dashboard price, another currency and
   a coupon refused, new or held; the plan's price applied; a price accepted
   before kept; Team's extra seats summed; an ended status applied.
 
