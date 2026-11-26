@@ -128,12 +128,28 @@ export const RestrictionBody = z
 	.refine((r) => r.level !== 'none' || r.pct == null, { message: 'no restriction carries no percentage', path: ['pct'] })
 	.transform((r) => ({ level: r.level, pct: r.pct == null ? null : Math.round(r.pct * 100) / 100, notice: r.notice ?? {} }));
 
+/**
+ * The publication a form was filled in from (issue #863): its `id` and
+ * `updatedAt` as the client read them, `id: null` when nothing was
+ * published. Publish and PATCH refuse `409 publication_changed` when it is
+ * no longer the current publication as it stands, so a form opened before
+ * another editor's change can't send the old restriction back. Optional, so
+ * an API client that leaves it out keeps the last-write-wins behaviour.
+ */
+export const BasedOnBody = z
+	.object({
+		id: z.string().uuid().nullable(),
+		updatedAt: z.string().max(40).nullable()
+	})
+	.strict();
+
 export const PublishBody = z
 	.object({
 		runId: z.string().uuid(),
 		note: text.optional(),
 		restriction: RestrictionBody.optional(),
-		nextExpectedOn: isoDate.nullable().optional()
+		nextExpectedOn: isoDate.nullable().optional(),
+		basedOn: BasedOnBody.optional()
 	})
 	.strict();
 
@@ -141,7 +157,8 @@ export const PatchBody = z
 	.object({
 		note: text.optional(),
 		restriction: RestrictionBody.optional(),
-		nextExpectedOn: isoDate.nullable().optional()
+		nextExpectedOn: isoDate.nullable().optional(),
+		basedOn: BasedOnBody.optional()
 	})
 	.strict()
 	.refine((b) => b.note !== undefined || b.restriction !== undefined || b.nextExpectedOn !== undefined, 'send note, restriction or nextExpectedOn');
@@ -371,6 +388,18 @@ export const SCENARIO_NOT_PUBLISHABLE =
 export const ALLOCATION_MODE_NOT_PUBLISHABLE =
 	'a run that caps use at, or scales demand to, the registered volumes cannot be published: licence data never drives the baseline; publish a run that compares only';
 
+/** 409 publication_changed's words (issue #863): the form's publication is no longer the current one as it stands. */
+export const PUBLICATION_CHANGED_MESSAGE =
+	'the publication changed since this form was opened (another editor published or changed the notice); the form now shows the current one: check it and try again';
+
+const publicationChanged = () => ApiError.coded(409, 'publication_changed', PUBLICATION_CHANGED_MESSAGE);
+
+/** Whether a form's basis is the current publication `cur` (null: nothing published) as it stands. */
+export function basedOnCurrent(basedOn: z.infer<typeof BasedOnBody>, cur: { id: string; updated_at: Date | null } | null): boolean {
+	if (!cur) return basedOn.id === null;
+	return basedOn.id === cur.id && basedOn.updatedAt === iso(cur.updated_at);
+}
+
 export async function publishRun(
 	db: Db,
 	projectId: string,
@@ -379,6 +408,14 @@ export async function publishRun(
 	{ auto = false }: { auto?: boolean } = {}
 ): Promise<{ publication: Publication; farms: number }> {
 	await db.query(`SELECT pg_advisory_xact_lock(hashtextextended('run_publication:' || $1::text, 0))`, [projectId]);
+	if (body.basedOn) {
+		// FOR UPDATE: waits out a notice change in flight (PATCH holds the row) and reads it as committed.
+		const { rows: cur } = await db.query<{ id: string; updated_at: Date | null }>(
+			'SELECT id, updated_at FROM run_publication WHERE project_id = $1 AND superseded_at IS NULL FOR UPDATE',
+			[projectId]
+		);
+		if (!basedOnCurrent(body.basedOn, cur[0] ?? null)) throw publicationChanged();
+	}
 	const loaded = await loadProjectionRun(db, projectId, body.runId);
 	if (!loaded) throw new ApiError(400, 'no such run in this project');
 	// A scenario's run (or one whose scenario was deleted: its inputs still record it) is a what-if on a base run, never the
@@ -436,12 +473,14 @@ export async function publishRun(
 
 /** Change the current publication's notice, note or next date, without re-publishing, and record it in the decision log (`publication.notice_changed`). */
 export async function patchPublication(db: Db, projectId: string, pubId: string, body: z.infer<typeof PatchBody>): Promise<Publication> {
-	const { rows } = await db.query<{ superseded: boolean }>('SELECT superseded_at IS NOT NULL AS superseded FROM run_publication WHERE project_id = $1 AND id = $2', [
-		projectId,
-		pubId
-	]);
+	// FOR UPDATE: a second editor's change waits for this one, then reads it (and its updated_at) as committed.
+	const { rows } = await db.query<{ superseded: boolean; updated_at: Date | null }>(
+		'SELECT superseded_at IS NOT NULL AS superseded, updated_at FROM run_publication WHERE project_id = $1 AND id = $2 FOR UPDATE',
+		[projectId, pubId]
+	);
 	if (!rows[0]) throw new ApiError(404, 'not found');
-	if (rows[0].superseded) throw new ApiError(409, 'this publication has been superseded; change the current one');
+	if (rows[0].superseded) throw ApiError.coded(409, 'publication_changed', 'this publication has been superseded; change the current one');
+	if (body.basedOn && !basedOnCurrent(body.basedOn, { id: pubId, updated_at: rows[0].updated_at })) throw publicationChanged();
 	const set: [string, unknown][] = [];
 	if (body.note !== undefined) set.push(['note', body.note]);
 	if (body.nextExpectedOn !== undefined) set.push(['next_expected_on', body.nextExpectedOn]);
@@ -455,7 +494,7 @@ export async function patchPublication(db: Db, projectId: string, pubId: string,
 		 WHERE project_id = $1 AND id = $2 AND superseded_at IS NULL`,
 		[projectId, pubId, ...set.map(([, v]) => v)]
 	);
-	if (!rowCount) throw new ApiError(409, 'this publication has been superseded; change the current one');
+	if (!rowCount) throw ApiError.coded(409, 'publication_changed', 'this publication has been superseded; change the current one');
 	const publication = await getPublication(db, pubId);
 	const fields = (['note', 'restriction', 'nextExpectedOn'] as const).filter((k) => body[k] !== undefined);
 	await recordAudit(db, projectId, 'publication.notice_changed', noticeChangedSubject(publication, fields));

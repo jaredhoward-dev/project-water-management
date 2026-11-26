@@ -6,7 +6,7 @@ import { app, asOwner, makeStoredLegacyRun, monthly, node, signUp } from '../__t
 import { toEpochDay } from '@water-management/engine';
 import { withUser } from '../db/tx.js';
 import { trimRuns } from '../runs/execute.js';
-import { ALLOCATION_MODE_NOT_PUBLISHABLE } from './publish.js';
+import { ALLOCATION_MODE_NOT_PUBLISHABLE, PUBLICATION_CHANGED_MESSAGE } from './publish.js';
 
 type User = Awaited<ReturnType<typeof signUp>>;
 
@@ -282,7 +282,7 @@ describe('changing the notice', () => {
 				if (rows[0].n > 0) break;
 			}
 			await holder.query('COMMIT');
-			expect(await patch).toEqual({ status: 409, body: { error: 'this publication has been superseded; change the current one' } });
+			expect(await patch).toEqual({ status: 409, body: { error: 'this publication has been superseded; change the current one', code: 'publication_changed' } });
 		} finally {
 			// Put it back as the current one for the tests below. A superseded
 			// publication is frozen (067_final_states.sql), so only the schema
@@ -296,6 +296,51 @@ describe('changing the notice', () => {
 			await holder.end();
 		}
 		expect((await asOwner('SELECT note FROM run_publication WHERE id = $1', [cur.id]))[0].note).not.toBe('raced');
+	});
+
+	// Issue #863: two editors with the Publish dialog or the Edit notice form open on the same publication.
+	it('refuses a publish or notice save based on a publication another editor has changed since (409 publication_changed)', async () => {
+		const pid = await makeProject(owner, 'Based on');
+		expect((await owner.call('POST', `/projects/${pid}/members`, { email: editor.email, role: 'editor' })).status).toBe(201);
+		const get = async () => (await owner.call('GET', `/projects/${pid}/publication`)).body as { current: { id: string; updatedAt: string | null; restriction: unknown }; history: unknown[] };
+		const basisOf = (c: { id: string; updatedAt: string | null }) => ({ id: c.id, updatedAt: c.updatedAt });
+		const changed = { status: 409, body: { error: PUBLICATION_CHANGED_MESSAGE, code: 'publication_changed' } };
+		// Positive control: a first publication based on none.
+		const first = await publish(owner, await run(owner, pid), { basedOn: { id: null, updatedAt: null } }, pid);
+		expect(first.status).toBe(201);
+		const at = `/projects/${pid}/publication/${first.body.publication.id}`;
+		// Both editors open their forms on it.
+		const opened = basisOf((await get()).current);
+		expect(opened.updatedAt).toBeNull();
+		// The owner imposes a restriction from theirs (positive control: based on the current one, it lands).
+		const restricted = { level: 'restricted', pct: 30, notice: { en: 'Irrigation cut by 30 %.' } };
+		expect((await owner.call('PATCH', at, { restriction: restricted, nextExpectedOn: null, basedOn: opened })).status).toBe(200);
+		const after = await get();
+		expect(after.current.restriction).toEqual(restricted);
+		// The editor's stale Edit notice form and Publish dialog would lift it: both refused, nothing written.
+		expect(await editor.call('PATCH', at, { restriction: { level: 'none' }, nextExpectedOn: null, basedOn: opened })).toEqual(changed);
+		const runId = await run(editor, pid);
+		expect(await publish(editor, runId, { restriction: { level: 'none' }, basedOn: opened }, pid)).toEqual(changed);
+		const still = await get();
+		expect(still.current).toEqual(after.current);
+		expect(still.history).toHaveLength(after.history.length);
+		// A basis of nothing published, or of another publication, is stale too.
+		expect(await publish(editor, runId, { basedOn: { id: null, updatedAt: null } }, pid)).toEqual(changed);
+		expect(await editor.call('PATCH', at, { note: 'x', basedOn: { id: crypto.randomUUID(), updatedAt: still.current.updatedAt } })).toEqual(changed);
+		// Reloaded, the editor's form is based on the current one again: the save and the publish land.
+		const reloaded = basisOf(still.current);
+		const reworded = { ...restricted, notice: { en: 'Irrigate at night only.' } };
+		const saved = await editor.call('PATCH', at, { restriction: reworded, nextExpectedOn: null, basedOn: reloaded });
+		expect(saved.status).toBe(200);
+		// The owner's form, opened before that save, is now the stale one.
+		expect(await owner.call('PATCH', at, { note: 'late', basedOn: reloaded })).toEqual(changed);
+		const again = await publish(editor, runId, { restriction: reworded, basedOn: basisOf(saved.body.publication) }, pid);
+		expect(again.status).toBe(201);
+		expect(again.body.publication.restriction).toEqual(reworded);
+		// The superseded publication's form can't save either: the same code, so the panel reloads.
+		expect((await editor.call('PATCH', at, { note: 'late', basedOn: basisOf(saved.body.publication) })).body.code).toBe('publication_changed');
+		// Without basedOn (an API client from before #863), last write wins, as before.
+		expect((await owner.call('PATCH', `/projects/${pid}/publication/${again.body.publication.id}`, { note: 'no basis' })).status).toBe(200);
 	});
 
 	// Issue #861: publishRun reads a body with no restriction as "none" (api.md § Publication). No app

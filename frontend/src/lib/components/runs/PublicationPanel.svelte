@@ -13,13 +13,13 @@
 <script lang="ts">
 	import DayInput from '#lib/components/common/DayInput.svelte';
 	import { tick } from 'svelte';
-	import { api, PUBLICATION_TEXT_MAX, type Publication, type PublicationMeta, type Run } from '#lib/api/index.js';
+	import { api, ApiError, PUBLICATION_TEXT_MAX, type Publication, type PublicationBasis, type PublicationMeta, type Run } from '#lib/api/index.js';
 	import Dialog from '#lib/components/common/Dialog.svelte';
 	import LiveLimitNotice from '#lib/components/billing/LiveLimitNotice.svelte';
 	import { isLiveLimit } from '#lib/components/billing/liveLimit.js';
 	import { focusHeading } from '#lib/help/anchor.js';
 	import { fmtDay, fmtStamp } from '#lib/format/number.js';
-	import { damsWithoutStopLevel, draftFrom, emptyDraft, LEVEL_LABEL, noticeLanguages, noticeTextFields, parseDraft, publishBlocker, restrictionSummary, type NoticeDraft } from './publication';
+	import { basisOf, damsWithoutStopLevel, draftFrom, emptyDraft, PUBLICATION_CHANGED, PUBLICATION_CHANGED_TEXT, LEVEL_LABEL, noticeLanguages, noticeTextFields, parseDraft, publishBlocker, restrictionSummary, type NoticeDraft } from './publication';
 
 	let {
 		projectId,
@@ -93,6 +93,10 @@
 	// cancelled publish left its text in the edit form.
 	let draft = $state<NoticeDraft>(emptyDraft());
 	let pubDraft = $state<NoticeDraft>(emptyDraft());
+	// The publication each form was filled in from, sent with its save: the server refuses it with 409
+	// publication_changed once another editor has published or changed the notice since (issue #863).
+	let editBasis = $state<PublicationBasis>(basisOf(null));
+	let pubBasis = $state<PublicationBasis>(basisOf(null));
 	// A failed publish's message belongs to the dialog; a failed save's to the edit form.
 	let pubError = $state<string | null>(null);
 	// A first publication in a second catchment on Free (338): an information note, not an error.
@@ -105,6 +109,7 @@
 	function openPublish() {
 		// Start from the current notice: re-publishing usually keeps it.
 		pubDraft = draftFrom(current);
+		pubBasis = basisOf(current);
 		note = '';
 		pubError = null;
 		liveLimit = false;
@@ -114,6 +119,7 @@
 	// The head's Edit notice gives way to the form: the focus moves to its first field.
 	async function openEdit() {
 		draft = draftFrom(current);
+		editBasis = basisOf(current);
 		error = null;
 		done = null;
 		editing = true;
@@ -122,6 +128,23 @@
 	}
 
 	const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+	/**
+	 * After a 409 publication_changed: fetch the publication as it stands, hand it to the page, and
+	 * return it for the form to start again from (the draft is lost on purpose: it was written against
+	 * a notice that is no longer the one in force). Undefined when the fetch fails.
+	 */
+	async function reloadAfterChange(): Promise<{ current: Publication | null } | undefined> {
+		try {
+			const fresh = await api.publication.get(projectId);
+			if (fresh.current) onChange?.({ current: fresh.current, history: fresh.history });
+			return fresh;
+		} catch {
+			return undefined;
+		}
+	}
+	const isChanged = (e: unknown) => e instanceof ApiError && e.status === 409 && e.code === PUBLICATION_CHANGED;
+	const RELOAD_FAILED = 'Another editor published or changed the notice since you opened this form, so nothing was saved. Reload the page to see it.';
 
 	function cancelEdit() {
 		editing = false;
@@ -144,7 +167,8 @@
 				runId: run.id,
 				restriction: parsed.restriction,
 				nextExpectedOn: parsed.nextExpectedOn,
-				...(note.trim() ? { note: note.trim() } : {})
+				...(note.trim() ? { note: note.trim() } : {}),
+				basedOn: pubBasis
 			});
 			const published = `Published. ${farms === 1 ? '1 farmer view' : `${farms} farmer views`} updated.`;
 			dialogOpen = false;
@@ -167,7 +191,14 @@
 			await focusAfter('title');
 		} catch (e) {
 			if (isLiveLimit(e)) liveLimit = true;
-			else pubError = msg(e);
+			else if (isChanged(e)) {
+				const fresh = await reloadAfterChange();
+				if (fresh) {
+					pubDraft = draftFrom(fresh.current);
+					pubBasis = basisOf(fresh.current);
+				}
+				pubError = fresh ? PUBLICATION_CHANGED_TEXT : RELOAD_FAILED;
+			} else pubError = msg(e);
 		} finally {
 			saving = false;
 		}
@@ -184,14 +215,21 @@
 		saving = true;
 		error = null;
 		try {
-			const publication = await api.publication.update(projectId, current.id, { restriction: parsed.restriction, nextExpectedOn: parsed.nextExpectedOn });
+			const publication = await api.publication.update(projectId, current.id, { restriction: parsed.restriction, nextExpectedOn: parsed.nextExpectedOn, basedOn: editBasis });
 			editing = false;
 			done = 'Notice saved.';
 			// The history entry of the current publication carries its level too.
 			onChange?.({ current: publication, history: history.map((h) => (h.id === publication.id ? { ...h, restriction: { level: publication.restriction.level } } : h)) });
 			await focusAfter('edit');
 		} catch (err) {
-			error = msg(err);
+			if (isChanged(err)) {
+				const fresh = await reloadAfterChange();
+				if (fresh?.current) {
+					draft = draftFrom(fresh.current);
+					editBasis = basisOf(fresh.current);
+				}
+				error = fresh ? PUBLICATION_CHANGED_TEXT : RELOAD_FAILED;
+			} else error = msg(err);
 		} finally {
 			saving = false;
 		}

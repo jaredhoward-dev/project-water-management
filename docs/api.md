@@ -410,6 +410,13 @@ the frontend catalogue (same contract: add, never rename):
   kind they can queue is (`backend/src/jobs/contributorKinds.ts`, which a
   catalogue test holds to the job table's insert policies). Try again once
   the pending job has run.
+- `publication_changed` (`409` from `POST /projects/:id/publication` or
+  `PATCH /projects/:id/publication/:pubId`, [§ Publication](#publication)):
+  the request's `basedOn` is no longer the current publication as it
+  stands (another editor published, or changed the notice, since the form
+  was opened), or the PATCH named a superseded publication (issue #863).
+  The Publication panel reloads the publication, shows it in the form and
+  says why; nothing was written.
 - `assistant_off`, `assistant_rate_limited`, `assistant_budget_spent`,
   `assistant_input_too_large` (before a stream), and `assistant_hop_limit`,
   `assistant_output_limit`, `assistant_timeout`, `assistant_provider_error`
@@ -3690,8 +3697,8 @@ received. For a **forecast run** (WP-2.12) it is the day before
 | Method | Path | Body | Response | Min role |
 | --- | --- | --- | --- | --- |
 | GET | `/projects/:id/publication` | – | `{ current: Publication \| null, history: PublicationMeta[] }`, newest first, the current one included (at most 12) | farmer |
-| POST | `/projects/:id/publication` | `{ runId, note?, restriction?, nextExpectedOn? }` | `201 { publication, farms }`: supersedes the current publication; `farms` is how many farm projections were stored (every farm of the run that is still a farm of the project). `400` for a run not in this project; `409` for a legacy-runoff-model run (a stored run from before engine 1.0.0; a workbook comparison, not evidence) a run too old to project (from before engine 0.17.0, which has no EWR charge series), or a scenario run (its scenario's changes on a base run, also once the scenario is deleted: farmers are shown the catchment as it is), or a run that caps use at or scales demand to the registered volumes (only one from before 213 can be: licence data never drives the baseline, and its farm views would carry each farm's figures worked out from its volume, issue #523 finding I). Records `publication.published` in the season decision log (the notice, window, run identity and per-farm figures, issue #119; [data-model.md § Change history](./data-model.md)) | editor |
-| PATCH | `/projects/:id/publication/:pubId` | `{ note?, restriction?, nextExpectedOn? }` (at least one) | `{ publication }`: the notice, the note or the next date change without re-publishing; stamps `updatedAt` / `updatedBy`, and records `publication.notice_changed` with the whole notice as it then stands (issue #119). `409` for a superseded publication | editor |
+| POST | `/projects/:id/publication` | `{ runId, note?, restriction?, nextExpectedOn?, basedOn? }` | `201 { publication, farms }`: supersedes the current publication; `farms` is how many farm projections were stored (every farm of the run that is still a farm of the project). `400` for a run not in this project; `409` for a legacy-runoff-model run (a stored run from before engine 1.0.0; a workbook comparison, not evidence) a run too old to project (from before engine 0.17.0, which has no EWR charge series), or a scenario run (its scenario's changes on a base run, also once the scenario is deleted: farmers are shown the catchment as it is), or a run that caps use at or scales demand to the registered volumes (only one from before 213 can be: licence data never drives the baseline, and its farm views would carry each farm's figures worked out from its volume, issue #523 finding I); `409 publication_changed` when `basedOn` (below) isn't the current publication as it stands. Records `publication.published` in the season decision log (the notice, window, run identity and per-farm figures, issue #119; [data-model.md § Change history](./data-model.md)) | editor |
+| PATCH | `/projects/:id/publication/:pubId` | `{ note?, restriction?, nextExpectedOn?, basedOn? }` (at least one of the first three) | `{ publication }`: the notice, the note or the next date change without re-publishing; stamps `updatedAt` / `updatedBy`, and records `publication.notice_changed` with the whole notice as it then stands (issue #119). `409 publication_changed` for a superseded publication, or when `basedOn` (below) isn't this publication as it stands | editor |
 | POST | `/projects/:id/publication/:pubId/endorse` | `{ note?: ≤ 2000 }` | `{ publication: PublicationMeta }` with its `endorsement`: the responsible authority endorses this published baseline (163_licensing_authority; s41(2): the authority decides what evidence it accepts). Once per publication, current or superseded (an application may rest on either); the database stamps `endorsedAt` and `endorsedBy` and never lets them change. Needs two-step sign-in; records `publication.endorsed`. `403` unless the caller acts for the authority; `404` for another project's publication; `409` once endorsed | editor acting for the authority |
 | GET | `/projects/:id/restriction-log` | `?before=<next>&limit=1..100` (default 50) | `{ items: RestrictionDecision[], next }`, newest first: every restriction decision, read from the season decision log's `publication.published` and `publication.notice_changed` audit events (issue #119), which are kept for the life of the project, so it holds every publication, not only the 12 `run_publication` keeps. A notice change that sent only the note is left out. `RestrictionDecision = { id, kind: 'published' \| 'notice_changed', at, by, auto, publicationId, runId, restriction: { level, pct, notice }, nextExpectedOn?, note?, fields?, farms, season: { from, to, dataUntil } \| null, current, runKept }`: `by` is the actor's name then (`Deleted user` after an account deletion; `null` when no one is named), `restriction.notice` is `null` and `nextExpectedOn`/`note` absent for an event from before the decision log widened, `current` marks the current publication's decisions, `runKept` whether the run still exists. Never the per-unit figures (History's). `next` is an opaque cursor (`<ts>\|<id>`), `null` on the last page; a malformed one or limit is `400`. The Restriction log page ([ui.md § Restriction log](./ui.md#restriction-log-tabrestrictions)) | viewer |
 | GET | `/projects/:id/restriction-log/export.csv` | – | CSV attachment (`<project>_restriction-log_<date>.csv`, BOM, CRLF) of the whole log, newest first, unpaged (refused `413` past 20 000 decisions or the CSV size cap, never cut short): `decided_at_utc, decision` (`published` / `notice_changed`), `changed` (the parts a notice change sent, ` \| `-separated), `by, automatic, level, restriction_pct, in_force` (`yes` on the newest decision of the current publication), one `notice_<code>` column per language any decision was written in (English first), `notice_recorded` (`no` for an event from before the decision log widened), `next_expected_on, season_from, season_to, data_until, hydrological_units` (how many units a publication went to, never their figures), `staff_note, run_id, run_kept, publication_id`; formula-looking cells prefixed with `'`. Same rule as the list: `403` for a farmer, `404` for a non-member | viewer |
@@ -3711,6 +3718,17 @@ received. For a **forecast run** (WP-2.12) it is the day before
   force: the app's Publish dialog and an auto publish always send the
   current one, and words-only edits go through `PATCH`, which keeps the
   level unless `restriction` is sent (issue #861).
+- `basedOn = { id: uuid | null, updatedAt: string | null }` (issue #863):
+  the publication the form was filled in from, its `id` and `updatedAt`
+  exactly as `GET …/publication` gave them (`id: null` for a first
+  publication, when nothing was published). The server compares it with
+  the current publication under its row lock and refuses `409
+  publication_changed` when another editor has published or changed the
+  notice, note or next date since, so a stale form can't lift a new
+  restriction or put back a lifted one. Optional for backward
+  compatibility: a request without it is last-write-wins, as before. The
+  app's Publish dialog and Edit notice form always send it, and so does an
+  auto publish (which then leaves publishing to a person).
 - `PublicationMeta = { id, runId, publishedAt, publishedBy, restriction: { level }, supersededAt, endorsement? }`;
   `publishedBy` is a display name (`null` once that account is gone).
   `endorsement = { endorsedAt, endorsedBy, note } | null` (163): the
