@@ -1373,7 +1373,8 @@ runs in production as `JOB_TRANSPORT=sqs` (infra/jobs.tf):
   permission or target broken; with no retries each failed tick counts once); the oldest due job waiting longer than `jobs_backlog_alarm_seconds`
   (default 15 minutes; each tick logs `OldestDueJobAgeSeconds` as a
   CloudWatch embedded metric in `water-management/Jobs`); and any dead job
-  (a metric filter on the worker's `job_dead` log line). A project with the
+  (a metric filter on the worker's `job_dead` log line; a cancelled or
+  superseded job logs `job_cancelled` or `job_superseded` instead). A project with the
   `job_dead` alert on also emails its owners ([§ Alert emails](#alert-emails)).
   On a first deploy the worker is Terraform's stub, which throws on every
   tick until the first backend release: `worker-errors` goes to ALARM (and

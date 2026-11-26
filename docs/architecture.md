@@ -899,7 +899,9 @@ alerts plug in as a further kind.
   job (`app_cancel_job_outcome`, 285, which kills a waiting job outright and
   flags a running one, and says whether this call changed it) or the lease
   was lost, and the handler then stops: dead, `cancelled`, its work rolled
-  back. `future_yield` and `climate_factors` report after each model read
+  back. A cancel is not a dead letter: logged as `job_cancelled`, not
+  `job_dead`, so no alarm, and the job_dead alert counts neither a
+  cancelled job nor a superseded one (below; `alerts/evaluate.ts`). `future_yield` and `climate_factors` report after each model read
   from the copy, and `future_yield` after each case it runs
   (`runFutureYieldAsync`), so a cancel lands before the next.
 - **`yield`** (WP-3.6, `jobs/handlers/yield.ts`, [api.md § Yield](./api.md#yield)):
@@ -982,7 +984,10 @@ alerts plug in as a further kind.
   job, so it is finished as `dead` ("… (a newer job with the same key is
   queued)") and the newer one does the work: logged as `job_superseded`, not
   `job_dead`, so no alarm or `job_dead` alert (`jobs/runner.ts`
-  `recordFailure`).
+  `recordFailure`). A running job handed back (`JobRelease`) while a newer
+  one with its key waits is superseded the same way: going back to `queued`
+  would break the same index, and until 2026-11 the throw ended the tick each
+  time the job was claimed again.
 
 Adding a kind: write `jobs/handlers/<kind>.ts` with `defineHandler({ role,
 payload, run })` (`jobs/registry.ts` documents the contract) and list it in

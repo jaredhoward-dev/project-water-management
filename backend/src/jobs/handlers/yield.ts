@@ -13,10 +13,10 @@ import { ENGINE_VERSION, firmYield, isMonotone, prepareYield, resolveAllocationM
 import { ApiError } from '../../http/errors.js';
 import { requireRole } from '../../projects/access.js';
 import { YIELD_RESULTS_KEPT, yieldInputFor, YieldPayload, type YieldPoints } from '../../yield/store.js';
-import { JobError } from '../errors.js';
+import { JOB_CANCELLED, JobError } from '../errors.js';
 import { defineHandler } from '../registry.js';
 
-const CANCELLED = () => new JobError('cancelled', { retry: false });
+const CANCELLED = () => new JobError(JOB_CANCELLED, { retry: false });
 
 export const yieldHandler = defineHandler({
 	// And a contributor, on a dam of their own application only (yieldInputFor).

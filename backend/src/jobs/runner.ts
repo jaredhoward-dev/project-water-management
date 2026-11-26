@@ -23,7 +23,7 @@ import { type LicenceRecordResult, sendLicenceRecordNotices } from '../licence/r
 import { safeError, stackFrames } from '../logging/safeError.js';
 import { rank, requireRole } from '../projects/access.js';
 import { purgeReports, type ReportScheduleResult, scheduleDueReports } from '../reports/schedule.js';
-import { describeFailure, JOB_ERROR_MAX, JobError, JobRelease, LeaseLostError } from './errors.js';
+import { describeFailure, JOB_ERROR_MAX, JobError, JobRelease, JOB_CANCELLED, LeaseLostError, SUPERSEDED_NOTE } from './errors.js';
 import { handlers as builtInHandlers } from './handlers/index.js';
 import { claimJobs, finishJob, type JobStatus, nextJobDueSeconds, purgeJobs, queueStats, type QueueStats } from './queue.js';
 import type { ClaimedJob, HandlerRegistry, JobHandler } from './registry.js';
@@ -69,11 +69,23 @@ export async function runJob(job: ClaimedJob, registry: HandlerRegistry = builtI
 		}
 		if (err instanceof JobRelease) {
 			// Back to the queue, its attempt given back: too little time in this tick, nothing wrong with the job.
-			const { rows } = await withoutUser((db) =>
-				db.query<{ status: string | null }>('SELECT app_release_job($1, $2, $3) AS status', [job.id, job.leaseToken, err.delaySeconds])
-			);
+			let status: string | null;
+			try {
+				const { rows } = await withoutUser((db) =>
+					db.query<{ status: string | null }>('SELECT app_release_job($1, $2, $3) AS status', [job.id, job.leaseToken, err.delaySeconds])
+				);
+				status = rows[0]?.status ?? null;
+			} catch (e) {
+				// A newer job with its key was queued while it ran: back to queued would be two pending jobs with one key
+				// (job_dedupe_idx), and the throw took the rest of the tick with it, every time the job was claimed again.
+				// The newer job does the same work, so this one is superseded, as a failure is (recordFailure).
+				if (!isDedupeCollision(e)) throw e;
+				if ((await supersede(job, err.message)) !== 'dead') return 'lost';
+				logEvent('info', { event: 'job_superseded', jobId: job.id, projectId: job.projectId, kind: job.kind, attempts: job.attempts });
+				return 'dead';
+			}
 			logEvent('info', { event: 'job_released', jobId: job.id, kind: job.kind, delaySeconds: err.delaySeconds });
-			return rows[0]?.status === 'queued' ? 'released' : 'lost';
+			return status === 'queued' ? 'released' : 'lost';
 		}
 		const failure = describeFailure(err);
 		// Name, code and stack frames only: an error's text can carry personal
@@ -83,6 +95,10 @@ export async function runJob(job: ClaimedJob, registry: HandlerRegistry = builtI
 		if (superseded) {
 			// Not a dead letter: the newer job with its key does the work (no alarm, no job_dead alert).
 			logEvent('info', { event: 'job_superseded', jobId: job.id, projectId: job.projectId, kind: job.kind, attempts: job.attempts });
+		} else if (status === 'dead' && failure.message === JOB_CANCELLED) {
+			// Someone cancelled it while it ran: what they asked for, not a dead letter (no alarm, no job_dead alert).
+			logEvent('info', { event: 'job_cancelled', jobId: job.id, projectId: job.projectId, kind: job.kind, attempts: job.attempts });
+			if (handler?.onDead) await afterDeath(job, handler);
 		} else if (status === 'dead') {
 			// The alarm hook (infra/jobs.tf metric filter), and the owners' job_dead alert
 			// when the project has it on (a check queued now; never for a dead alert check).
@@ -127,13 +143,22 @@ async function recordFailure(
 	try {
 		return { status: await withoutUser((db) => finishJob(db, job, { ok: false, error: failure.message, retry: failure.retry })), superseded: false };
 	} catch (err) {
-		const e = err as { code?: unknown; constraint?: unknown };
-		if (!failure.retry || e.code !== '23505' || e.constraint !== DEDUPE_INDEX) throw err;
+		if (!failure.retry || !isDedupeCollision(err)) throw err;
 	}
-	const note = ' (a newer job with the same key is queued)';
-	const error = `${failure.message.slice(0, JOB_ERROR_MAX - note.length)}${note}`;
-	const status = await withoutUser((db) => finishJob(db, job, { ok: false, error, retry: false }));
+	const status = await supersede(job, failure.message);
 	return { status, superseded: status === 'dead' };
+}
+
+/** The error a write that would make two pending jobs with one dedupe key throws (job_dedupe_idx). */
+function isDedupeCollision(err: unknown): boolean {
+	const e = err as { code?: unknown; constraint?: unknown };
+	return e.code === '23505' && e.constraint === DEDUPE_INDEX;
+}
+
+/** Finish a job a newer one with its key replaces: dead, its message saying so, no retry. */
+async function supersede(job: ClaimedJob, message: string): Promise<JobStatus | null> {
+	const error = `${message.slice(0, JOB_ERROR_MAX - SUPERSEDED_NOTE.length)}${SUPERSEDED_NOTE}`;
+	return withoutUser((db) => finishJob(db, job, { ok: false, error, retry: false }));
 }
 
 /**

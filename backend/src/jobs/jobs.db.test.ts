@@ -8,13 +8,14 @@ import pg from 'pg';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { asOwner, monthly, node, signUp } from '../__tests__/helpers.js';
 import { withoutUser, withUser } from '../db/tx.js';
-import { JobError } from './errors.js';
+import { JobError, JobRelease } from './errors.js';
 import { claimJobs, enqueueJob, finishJob, nextJobDueSeconds } from './queue.js';
 import { defineHandler, type HandlerRegistry } from './registry.js';
 import { handlers } from './handlers/index.js';
 import { runJob, runTick } from './runner.js';
 import { RERUN_DEDUPE_KEY } from './handlers/rerun.js';
 import { wakeWorker } from './wake.js';
+import { evaluateAlerts } from '../alerts/evaluate.js';
 import { z } from 'zod';
 
 type User = Awaited<ReturnType<typeof signUp>>;
@@ -466,6 +467,101 @@ describe('claiming', () => {
 		const [newer] = await asOwner(`SELECT id, status, payload FROM job WHERE project_id = $1 AND dedupe_key = 'k' AND id <> $2`, [pid, a.id]);
 		expect(newer).toMatchObject({ status: 'done', payload: { label: 'newer' } });
 		expect(tick).toMatchObject({ claimed: 3, done: 2, dead: 1 });
+		await asOwner('DELETE FROM job WHERE project_id = $1', [pid]);
+	});
+	it('a running job handed back (JobRelease) while a newer one with its key is pending is superseded, and the tick goes on', async () => {
+		const u = await signUp('ReleaseSuperseded');
+		const pid = await project(u);
+		let calls = 0;
+		const registry: HandlerRegistry = {
+			// The first attempt hands itself back (a station fetch with no turn yet, too little time left in the tick)
+			// after new work with its key was queued (a feed's "Fetch now") while it ran.
+			rerun: defineHandler({
+				role: 'editor',
+				payload: z.object({}).passthrough(),
+				run: async () => {
+					if (calls++ > 0) return;
+					await enqueue(u, { projectId: pid, kind: 'rerun', dedupeKey: 'k', payload: { label: 'newer' } });
+					throw new JobRelease('waiting for a turn', 30);
+				}
+			})
+		};
+		const { job: a } = await enqueue(u, { projectId: pid, kind: 'rerun', dedupeKey: 'k' });
+		const { job: other } = await enqueue(u, { projectId: pid, kind: 'rerun', delaySeconds: 1 });
+		await makeDue(other.id);
+		await asOwner(`UPDATE job SET run_after = now() - interval '1 minute' WHERE id = $1`, [a.id]);
+
+		const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+		const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+		try {
+			// Handing it back to the queue would make two pending jobs with one key (job_dedupe_idx), which threw out of the tick.
+			const tick = await runTick({ handlers: registry, projectIds: [pid], feeds: false, reports: false, alerts: false });
+			const errors = spy.mock.calls.map((c) => c.join(' '));
+			const infos = info.mock.calls.map((c) => c.join(' '));
+			expect(await jobRow(a.id)).toMatchObject({ status: 'dead', attempts: 1, lease_token: null, last_error: 'waiting for a turn (a newer job with the same key is queued)' });
+			expect(errors.filter((l) => l.includes('"event":"job_dead"'))).toEqual([]);
+			expect(infos.filter((l) => l.includes('"event":"job_superseded"'))).toHaveLength(1);
+			expect(await jobRow(other.id)).toMatchObject({ status: 'done' });
+			const [newer] = await asOwner(`SELECT id, status, payload FROM job WHERE project_id = $1 AND dedupe_key = 'k' AND id <> $2`, [pid, a.id]);
+			expect(newer).toMatchObject({ status: 'done', payload: { label: 'newer' } });
+			expect(tick).toMatchObject({ claimed: 3, done: 2, dead: 1, released: 0 });
+		} finally {
+			spy.mockRestore();
+			info.mockRestore();
+			await asOwner('DELETE FROM job WHERE project_id = $1', [pid]);
+		}
+	});
+});
+
+describe('the job_dead alert counts dead letters, not cancels or superseded jobs', () => {
+	it('a cancelled job (waiting or running) and a superseded one neither log job_dead nor count; a real death does (positive control)', async () => {
+		const u = await signUp('DeadLetters');
+		const pid = await project(u);
+		const [rule] = await asOwner(`INSERT INTO alert_rule (project_id, kind, threshold) VALUES ($1, 'job_dead', 1) RETURNING id`, [pid]);
+		const cancel = (id: string) => withUser(u.id, async (db) => (await db.query('SELECT status, changed FROM app_cancel_job_outcome($1)', [id])).rows[0]);
+		// A waiting job cancelled: dead at once, "cancelled".
+		const { job: waiting } = await enqueue(u, { projectId: pid, kind: 'yield', payload: {} });
+		expect(await cancel(waiting.id)).toEqual({ status: 'dead', changed: true });
+		// A running job cancelled: flagged, and its handler stops at its next progress report.
+		const { job: running } = await enqueue(u, { projectId: pid, kind: 'yield', payload: {} });
+		const [claimed] = await withoutUser((db) => claimJobs(db, 1, 60, [pid]));
+		expect(claimed!.id).toBe(running.id);
+		expect(await cancel(running.id)).toEqual({ status: 'running', changed: true });
+		const registry: HandlerRegistry = {
+			yield: defineHandler({
+				role: 'editor',
+				payload: z.object({}).passthrough(),
+				run: async ({ progress }) => {
+					if (!(await progress(50))) throw new JobError('cancelled', { retry: false });
+				}
+			})
+		};
+		// A superseded job (its retry met a newer job with its key).
+		const { job: old } = await enqueue(u, { projectId: pid, kind: 'rerun', dedupeKey: 'k' });
+		await asOwner(`UPDATE job SET status = 'dead', finished_at = now(), last_error = $2 WHERE id = $1`, [old.id, 'the source timed out (a newer job with the same key is queued)']);
+
+		const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+		const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+		try {
+			expect(await runJob(claimed!, registry)).toBe('dead');
+			expect(await jobRow(running.id)).toMatchObject({ status: 'dead', last_error: 'cancelled' });
+			const errors = error.mock.calls.map((c) => c.join(' '));
+			// Not a dead letter: no job_dead line (the production alarm's metric filter), a job_cancelled one instead.
+			expect(errors.filter((l) => l.includes('"event":"job_dead"'))).toEqual([]);
+			expect(info.mock.calls.map((c) => c.join(' ')).filter((l) => l.includes('"event":"job_cancelled"'))).toHaveLength(1);
+		} finally {
+			error.mockRestore();
+			info.mockRestore();
+		}
+		const events = () => asOwner(`SELECT state, value::int AS value FROM alert_event WHERE rule_id = $1 ORDER BY id`, [rule.id]);
+		await withUser(u.id, (db) => evaluateAlerts(db, pid));
+		expect(await events()).toEqual([]);
+		// Positive control: a job that died of its own failure counts.
+		const { job: failed } = await enqueue(u, { projectId: pid, kind: 'rerun' });
+		await asOwner(`UPDATE job SET status = 'dead', finished_at = now(), last_error = 'the source timed out' WHERE id = $1`, [failed.id]);
+		await withUser(u.id, (db) => evaluateAlerts(db, pid));
+		expect(await events()).toEqual([{ state: 'firing', value: 1 }]);
+		await asOwner('DELETE FROM alert_event WHERE project_id = $1', [pid]);
 		await asOwner('DELETE FROM job WHERE project_id = $1', [pid]);
 	});
 });
