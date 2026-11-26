@@ -5,6 +5,7 @@
 //  - past the grace, enforced, the tick pauses every live catchment but one (the most recently active, or the one the
 //    owner chose), and the paused ones' feeds, automatic runs and alert checks stop while their settings stay on
 //    (positive control: the kept one still schedules all three);
+//  - Fetch now on a paused catchment is refused (plan_paused), as the scheduler passes it by;
 //  - the owner's choice moves the pause at once; a stranger can't choose;
 //  - an upgrade resumes everything; members read the pause, strangers don't (positive control);
 //  - the app role can't run the sweep outside the worker;
@@ -138,6 +139,23 @@ describe('341: pausing past Free’s limit after a downgrade', () => {
 			(await withoutUser((db) => db.query<{ n: number }>(`SELECT app_alert_schedule($1, interval '0', 10) AS n`, [p]))).rows[0]!.n;
 		expect(await schedule(b)).toBe(0);
 		expect(await schedule(c)).toBe(1);
+	});
+
+	it('Fetch now on a paused catchment is refused 409 plan_paused and queues nothing; on the kept one it fetches (positive control)', async () => {
+		enforce();
+		await retirePendingJobs(a, c);
+		const feedOf = async (p: string) => ((await asOwner('SELECT id FROM data_feed WHERE project_id = $1', [p])) as { id: string }[])[0]!.id;
+		const fetches = async (p: string) =>
+			((await asOwner(`SELECT count(*)::int AS n FROM job WHERE project_id = $1 AND kind = 'feed_fetch' AND status = 'queued'`, [p])) as { n: number }[])[0]!.n;
+		const refused = await owner.call('POST', `/projects/${a}/feeds/${await feedOf(a)}/run-now`);
+		expect(refused.status, JSON.stringify(refused.body)).toBe(409);
+		expect(refused.body.details).toEqual({ code: 'plan_paused' });
+		expect(refused.body.error).not.toMatch(/quota|402|plan_limit/i);
+		expect(await fetches(a)).toBe(0);
+		const kept = await owner.call('POST', `/projects/${c}/feeds/${await feedOf(c)}/run-now`);
+		expect([200, 202], JSON.stringify(kept.body)).toContain(kept.status);
+		expect(await fetches(c)).toBe(1);
+		await retirePendingJobs(c);
 	});
 
 	it('members read the pause, strangers don’t (positive control: the member)', async () => {
