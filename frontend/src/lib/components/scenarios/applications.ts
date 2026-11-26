@@ -85,3 +85,23 @@ export function statusPill(a: Pick<Scenario, 'status' | 'outcome'>): { text: str
 	const TONE: Record<ScenarioOutcome, 'good' | 'mixed' | 'bad'> = { licence_issued: 'good', licence_refused: 'bad', application_rejected: 'bad', not_considered: 'mixed' };
 	return a.outcome ? { text: OUTCOME_LABEL[a.outcome], tone: TONE[a.outcome] } : { text: 'Decided', tone: 'neutral' };
 }
+
+/** What the Application panel adds to a refused move's error once it has read the application again. */
+export const APPLICATION_CHANGED_TEXT = 'It changed since this page read it (someone else may have withdrawn, reopened or decided it): it now shows where it stands.';
+
+/**
+ * After the server refused a move on an application: a 409 is a conflict
+ * (another user withdrew, reopened, submitted or decided it since the panel
+ * read it), so read it again and hand it back, for the panel to show its
+ * current status and moves rather than the stale ones. Any other refusal, or
+ * a read that fails, gives null: the panel stays as it was, with the error.
+ */
+export async function rereadAfterConflict<T>(e: unknown, reread: () => Promise<T>): Promise<T | null> {
+	const status = typeof e === 'object' && e !== null ? (e as { status?: unknown }).status : undefined;
+	if (status !== 409) return null;
+	try {
+		return await reread();
+	} catch {
+		return null;
+	}
+}
