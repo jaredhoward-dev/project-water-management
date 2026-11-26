@@ -33,9 +33,11 @@
 	// stored at it; a unit without a station under per-unit rain, its §2.4h
 	// chain instead: own gauge, catchment gauge × MAP ratio, CHIRPS raw and
 	// levelled, rain used and the link each day came from), or a group (stations, the average catchment rainfall, flow).
-	// The column checkboxes hide columns within the view. SeriesTab keeps the
+	// The column checkboxes hide columns within the view, and only that view: switching views shows the new
+	// one's columns whole (issue #933; a column hidden in All stayed hidden in a unit's view). SeriesTab keeps the
 	// view in the URL (`preview=`) while the dialog is open.
 	import { rainCredits, type DailySeries, type NetworkNode, type ProjectSettings, type SeriesMeta } from '@water-management/engine';
+	import { untrack } from 'svelte';
 	import Dialog from '#lib/components/common/Dialog.svelte';
 	import { followRetry } from '#lib/components/common/loadState.js';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
@@ -155,6 +157,16 @@
 	// A view this project doesn't offer (a stale link to a deleted unit) reads as All, and says so in the URL too.
 	$effect(() => {
 		if (open && list.length && view !== activeView) view = activeView;
+	});
+	// Columns hidden belong to the view they were hidden in: a new view starts with every column shown.
+	let hiddenIn = untrack(() => activeView);
+	$effect(() => {
+		const v = activeView;
+		untrack(() => {
+			if (v === hiddenIn) return;
+			hiddenIn = v;
+			if (hidden.size) hidden = new Set();
+		});
 	});
 	const viewColumns = $derived(columnsForView(activeView, columns, { list, areas: areas ?? [] }));
 	const visibleColumns = $derived(viewColumns.filter((c) => !hidden.has(c.id)));

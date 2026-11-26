@@ -36,6 +36,7 @@
 	import NodeCard from './NodeCard.svelte';
 	import NodeDetail from './NodeDetail.svelte';
 	import { TABLES_MENU, withParam, withoutParam } from '#lib/workspace/overlays.js';
+	import { farmDrawerHref, hrefWith, nodeSheetHref } from '#lib/nav/tabUrl.js';
 	import { mapNodeHref } from '#lib/workspace/mapLinks.js';
 	import { MappedNodes } from '#lib/workspace/mappedNodes.svelte.js';
 	import NotesDrawer from '#lib/components/notes/NotesDrawer.svelte';
@@ -228,7 +229,9 @@
 	// (`edit=<nodeId>`). `view` is 'table' only inside the grid modal.
 	type View = 'map' | 'table';
 	const view = $derived<View>(only === 'table' ? 'table' : 'map');
-	// Old links: `view=table` opens the node table, `view=node` a node's form.
+	// Old links: `view=table` opens the node table, `view=node` a node's form. On a network with no
+	// node yet there is no form to open: the map says so (oldNodeLink) rather than quietly landing.
+	let oldNodeLink = $state(false);
 	$effect(() => {
 		if (only) return;
 		const v = page.url.searchParams.get('view');
@@ -238,8 +241,12 @@
 			q.delete('view');
 			if (v === 'table') q.set('grid', 'nodes');
 			else if (v === 'node' && nodes[0]) q.set('edit', q.get('node') ?? nodes[0].id);
+			else if (v === 'node') oldNodeLink = true;
 			void goto(`?${q}`, { replace: true, reset: false });
 		});
+	});
+	$effect(() => {
+		if (nodes.length) untrack(() => (oldNodeLink = false));
 	});
 
 	// --- the node sheet: a node's full form over the map, while the URL names it (`edit=<id>`) ---
@@ -311,11 +318,11 @@
 		untrack(() => (selectedId = id ?? editing?.id ?? null));
 	});
 
-	/** Picks a node on the map: a new history entry, so Back steps back through the picks. */
+	/** Picks a node on the map: a new history entry, so Back steps back through the picks (playbook § 2, issue #521). */
 	function pick(id: string) {
 		selectedId = id;
 		if (only || nodeParam === id) return;
-		void goto(withParam(page.url, 'node', id), { reset: false });
+		void goto(hrefWith(page.url, { node: id }), { reset: false });
 	}
 
 	function select(id: string) {
@@ -360,7 +367,8 @@
 		const question = removeMessage({ isFarm, areas, transfers: refs, cover, boreholes, demandObjects, farmers: farmerCount ? (farmerCount[id] ?? 0) : null, upstream, into });
 		const kind = node ? KIND_WORD[node.kind] : 'node';
 		if (question && !(await confirmDialog({ title: `Remove “${name}”?`, message: question, confirmLabel: `Remove ${kind}`, danger: true }))) return;
-		// Where the focus goes once it is gone (removeQuestions.ts): the row after it in the table (else the one before).
+		// Where the focus goes once it is gone (removeQuestions.ts): the row after it in the table or the map's
+		// list (else the one before).
 		const focusIds = nodeRemovedFocus(
 			view,
 			nodes.map((n) => n.id),
@@ -584,10 +592,7 @@
 	});
 	/** The farm drawer over the map, in place of the sheet. */
 	function plantedHref(id: string): string {
-		const q = new URLSearchParams(page.url.search);
-		q.delete('edit');
-		q.set('farm', id);
-		return `?${q}`;
+		return farmDrawerHref(page.url, id);
 	}
 	const totalArea = $derived(nodes.reduce((s, n) => s + (n.areaKm2 || 0), 0));
 	const farmArea = $derived(farms.reduce((s, n) => s + (n.areaKm2 || 0), 0));
@@ -793,7 +798,7 @@
 										<td class="num by-month vol" data-testid="divert-by-month-{node.id}">
 											<span class="cell-label" aria-hidden="true">{cardLabel(f)} <span class="u">{f.unit}</span></span>
 											{#if projectId}
-												<a href="?tab=network&edit={encodeURIComponent(node.id)}&section=routing" aria-label="{c.aria}: edit it in the hydrological unit’s form" title="Set by month: the one value isn’t used. Edit the months in the hydrological unit’s form.">{c.text}</a>
+												<a href={nodeSheetHref(page.url, node.id, 'routing')} aria-label="{c.aria}: edit it in the hydrological unit’s form" title="Set by month: the one value isn’t used. Edit the months in the hydrological unit’s form.">{c.text}</a>
 											{:else}
 												<span aria-hidden="true" title="Set by month: the one value isn’t used.">{c.text}</span><span class="visually-hidden">{c.aria}</span>
 											{/if}
@@ -908,6 +913,11 @@
 	{#if nodes.length === 0}
 		<section class="panel" aria-label="No hydrological units yet">
 			<div class="empty" data-testid="network-empty">
+				{#if oldNodeLink}
+					<p class="muted small" role="status" data-testid="network-old-node-link">
+						The link opened a hydrological unit’s form, but this network has no hydrological units yet, so it shows the map.
+					</p>
+				{/if}
 				{#if readonly}
 					<p>No hydrological units yet. An editor builds the network here or from the Map.</p>
 				{:else}
@@ -942,7 +952,7 @@
 					{#each nodes as n (n.id)}
 						{@const band = dotBand(n.id)}
 						<li class:on={n.id === selectedId}>
-							<button type="button" class="node-row" aria-pressed={n.id === selectedId} onclick={() => pick(n.id)}>
+							<button type="button" class="node-row" id="node-list-{n.id}" aria-pressed={n.id === selectedId} onclick={() => pick(n.id)}>
 								<span class="dot {n.kind}" data-band={band} aria-hidden="true"></span>
 								<span class="nm">{n.name || '(unnamed)'}</span>
 								<span class="meta muted">{n.downstreamNodeId === null ? 'outlet' : `→ ${labelOf(n.downstreamNodeId)}`}</span>

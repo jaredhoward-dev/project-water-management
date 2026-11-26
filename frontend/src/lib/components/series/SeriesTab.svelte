@@ -29,6 +29,7 @@
 	import { page } from '$app/state';
 	import { fillHeader } from '#lib/components/workspace/headerSlot.svelte.js';
 	import { withParam, withoutParam } from '#lib/workspace/overlays.js';
+	import { seriesPickHref } from '#lib/nav/tabUrl.js';
 	import {
 		agreementOptions,
 		checkSeries,
@@ -281,11 +282,12 @@
 		if ((e.target as Element).closest('button, a, input, select, summary, [role="menu"]')) return;
 		choose(id);
 	}
-	/** Chart a series: a URL change, so it can be shared and Back returns; the chart, under the table, comes into view. */
+	/** Chart a series: a URL change, so it can be shared and Back returns; the chart, under the table, comes into view.
+	 *  The pick drops `view=`, `rain=` and `feed=`, which belonged to the link that arrived (issue #933, lib/nav/tabUrl.ts). */
 	function choose(id: string, replaceState = false) {
 		if (id === selectedId && seriesParam === id) return;
 		goneSeries = false;
-		void goto(withParam(page.url, 'series', id), { reset: false, replace: replaceState }).then(() => {
+		void goto(seriesPickHref(page.url, id), { reset: false, replace: replaceState }).then(() => {
 			if (!replaceState) showChart();
 		});
 	}

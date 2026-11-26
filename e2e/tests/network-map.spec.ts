@@ -579,7 +579,8 @@ test('removing a node from its sheet asks, names what goes with it, and leaves t
 	await expect(box.getByRole('button', { name: 'Remove hydrological unit' })).toBeVisible();
 	await answerConfirm(page, true);
 	await expect(page.getByRole('dialog', { name: /^Edit / })).toHaveCount(0);
-	await expect(page.getByRole('heading', { name: 'All hydrological units' })).toBeFocused();
+	// The focus goes to the list row now in its place, as the node table does (issue #933).
+	await expect(nodeList(page).getByRole('button', { name: /^Lower farm/ })).toBeFocused();
 	await expect(nodeList(page).getByRole('button', { name: /^(?!Edit |Details )/ })).toHaveCount(2);
 });
 

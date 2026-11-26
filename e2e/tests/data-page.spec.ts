@@ -548,7 +548,7 @@ test('Data feeds is a section of its own: named as its heading in the menu, the 
 	await expectNoViolations(v, { include: '#data-feeds' });
 });
 
-test('?rain=units#data-feeds opens Rain for each unit on its heading once per arrival: Close gives the focus back and it stays shut, a reload opens it again', async ({ page, owner }) => {
+test('?rain=units#data-feeds opens Rain for each unit on its heading once per arrival: Close gives the focus back, drops rain= and it stays shut, a reload too', async ({ page, owner }) => {
 	void owner;
 	const project = await createProject(page.request, 'Data feeds rain arrival');
 	await page.goto(`/projects/${project.id}?tab=series&rain=units#data-feeds`);
@@ -561,13 +561,17 @@ test('?rain=units#data-feeds opens Rain for each unit on its heading once per ar
 	await unitRain.getByRole('button', { name: 'Close' }).click();
 	await expect(unitRain).toHaveCount(0);
 	await expect(feeds.getByRole('button', { name: 'Attach a feed' })).toBeFocused();
-	// The URL still asks, but this arrival was answered: a refreshed list doesn't open it again.
+	// Closing the card removes its parameter in place (issue #933): the tab and the fragment stay.
+	await expect(page).not.toHaveURL(/[?&]rain=/);
+	await expect(page).toHaveURL(/[?&]tab=series(?:&[^#]*)?#data-feeds$/);
 	await feeds.getByRole('button', { name: 'Refresh status' }).click();
 	await expect(feeds.getByRole('status').filter({ hasText: 'Status refreshed.' })).toBeVisible();
 	await expect(unitRain).toHaveCount(0);
 
+	// A reload no longer reopens the proposal that was closed.
 	await page.reload();
-	await expect(unitRain.getByRole('heading', { name: 'Rain for each unit' })).toBeFocused();
+	await expect(feeds.getByRole('button', { name: 'Attach a feed' })).toBeVisible();
+	await expect(unitRain).toHaveCount(0);
 });
 
 test('Data checks: each series named charts it; the heading is named alone; the key keeps each colour with its words; the period link lands on Settings', async ({ page, owner }) => {

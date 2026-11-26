@@ -21,6 +21,7 @@
 	import { WATER_YEAR_MONTHS } from '#lib/format/months.js';
 	import type { ModelEditor } from '#lib/model/editor.svelte.js';
 	import { withoutParam, withParam } from '#lib/workspace/overlays.js';
+	import { demandEditHref } from '#lib/nav/tabUrl.js';
 	import { demandRows, demandShares, demandTotal, type DemandRow } from './demands';
 	import { DEMANDS_UNIT_CHOICES, demandsUnitView, parseDemandsUnit, UNIT_PARAM } from './demandUnits';
 	import { nodeSpans, registeredCells, registeredTotal } from './demandsRegistered';
@@ -82,7 +83,7 @@
 	const regTotal = $derived(cells ? registeredTotal(cells) : null);
 
 	/** Where the rest of a row is set: a unit's crops in its farm drawer on Crops & demand, anything else in its node's sheet. */
-	const editHref = (r: DemandRow) => (r.kind === 'crops' ? `?tab=crops&farm=${encodeURIComponent(r.nodeId)}` : `?tab=network&edit=${encodeURIComponent(r.nodeId)}&section=demand`);
+	const editHref = (r: DemandRow) => demandEditHref(page.url, r.kind, r.nodeId);
 
 	/** Writes one month of an editable row into the model (a monthly object's `monthlyM3Day`, a user's `userDemandM3Day`). */
 	function setMonth(r: DemandRow, m: number, v: number | null) {
