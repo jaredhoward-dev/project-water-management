@@ -25,7 +25,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 /** The actions the workflow offers: every owner action but the address lookup (billing-account). */
-export const WORKFLOW_ACTIONS = ['billing-grants', 'billing-grant', 'billing-revoke', 'billing-report', 'authority-confirm'];
+export const WORKFLOW_ACTIONS = ['billing-grants', 'billing-grant', 'billing-revoke', 'billing-report', 'authority-confirm', 'billing-conflicts', 'billing-conflict-resolve'];
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DAY = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
@@ -40,9 +40,11 @@ const READS = {
 	'billing-grants': ['account_id', 'user_id', 'team_id'],
 	'billing-report': ['month'],
 	'authority-confirm': ['project_id', 'user_id', 'reference'],
+	'billing-conflicts': ['all'],
+	'billing-conflict-resolve': ['conflict_id', 'reason'],
 };
 /** An input's default (unset) value: empty, `plan: none`, `replace: false`. */
-const unset = (k, v) => v === undefined || v === null || v === '' || (k === 'plan' && v === 'none') || (k === 'replace' && (v === false || v === 'false'));
+const unset = (k, v) => v === undefined || v === null || v === '' || (k === 'plan' && v === 'none') || ((k === 'replace' || k === 'all') && (v === false || v === 'false'));
 const str = (v) => (typeof v === 'string' ? v.trim() : v === undefined || v === null ? '' : String(v));
 
 /**
@@ -95,12 +97,18 @@ export function buildPayload(inputs, actor) {
 		const month = str(i.month);
 		if (month && !MONTH.test(month)) errors.push('input month is not YYYY-MM');
 		if (month) payload.month = month;
+	} else if (action === 'billing-conflicts') {
+		payload = { ...payload, all: i.all === true || i.all === 'true' };
+	} else if (action === 'billing-conflict-resolve') {
+		const idText = str(i.conflict_id);
+		if (!/^[1-9][0-9]{0,14}$/.test(idText)) errors.push('input conflict_id is not a conflict id (the # in the conflicts list)');
+		payload = { ...payload, conflictId: Number(idText), reason: text('reason', 500), by: actor };
 	} else if (action === 'authority-confirm') {
 		if (unset('project_id', i.project_id)) errors.push('input project_id is required');
 		if (unset('user_id', i.user_id)) errors.push('input user_id is required (the person’s id, never their address)');
 		payload = { ...payload, projectId: id('project_id'), userId: id('user_id'), reference: text('reference', 200) };
 	}
-	if (!actor && (action === 'billing-grant' || action === 'billing-revoke')) errors.push('GITHUB_ACTOR is not set');
+	if (!actor && (action === 'billing-grant' || action === 'billing-revoke' || action === 'billing-conflict-resolve')) errors.push('GITHUB_ACTOR is not set');
 	return errors.length ? { errors } : { payload };
 }
 

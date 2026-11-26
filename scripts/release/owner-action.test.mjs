@@ -12,7 +12,7 @@ const PERSON = '7e8f9a0b-1c2d-4e3f-8a4b-5c6d7e8f9a0b';
 const TEAM = '0b0e7f4e-2f7c-4a43-9d55-3f1f7a8f1c01';
 const PROJECT = '6a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d';
 /** The dispatch form's defaults, as the event file carries them. */
-const blank = { account_id: '', user_id: '', team_id: '', plan: 'none', until: '', replace: false, reason: '', month: '', project_id: '', reference: '' };
+const blank = { account_id: '', user_id: '', team_id: '', plan: 'none', until: '', replace: false, reason: '', month: '', conflict_id: '', all: false, project_id: '', reference: '' };
 const build = (inputs) => buildPayload({ ...blank, ...inputs }, 'octocat');
 const errors = (inputs) => {
 	const r = build(inputs);
@@ -43,6 +43,17 @@ test('builds each action’s payload from ids, marked via workflow', () => {
 	assert.deepEqual(build({ action: 'authority-confirm', project_id: PROJECT, user_id: PERSON, reference: 'CMA letter 2026/07' }), {
 		payload: { action: 'authority-confirm', via: 'workflow', projectId: PROJECT, userId: PERSON, reference: 'CMA letter 2026/07' },
 	});
+});
+
+test('builds the billing conflict actions (406): the list, and a resolve by the conflict id with the actor', () => {
+	assert.deepEqual(build({ action: 'billing-conflicts' }), { payload: { action: 'billing-conflicts', via: 'workflow', all: false } });
+	assert.deepEqual(build({ action: 'billing-conflicts', all: 'true' }), { payload: { action: 'billing-conflicts', via: 'workflow', all: true } });
+	assert.deepEqual(build({ action: 'billing-conflict-resolve', conflict_id: ' 12 ', reason: 'Refunded in Stripe' }), {
+		payload: { action: 'billing-conflict-resolve', via: 'workflow', conflictId: 12, reason: 'Refunded in Stripe', by: 'octocat' },
+	});
+	assert.match(errors({ action: 'billing-conflict-resolve', conflict_id: 'x', reason: 'r' }), /input conflict_id is not a conflict id/);
+	assert.match(errors({ action: 'billing-conflict-resolve', conflict_id: '3', reason: '' }), /input reason must be 1–500 characters/);
+	assert.match(errors({ action: 'billing-conflicts', account_id: ACCOUNT }), /input account_id is not used by billing-conflicts/);
 });
 
 test('refuses any input containing @, naming the input and never the value', () => {

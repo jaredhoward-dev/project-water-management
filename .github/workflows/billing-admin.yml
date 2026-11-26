@@ -47,6 +47,8 @@ name: Owner action (billing, authority)
 #   gh workflow run billing-admin.yml -f action=billing-grant -f user_id=<uuid> -f plan=pro -f reason="Founding user"      (a person with no billing account yet)
 #   gh workflow run billing-admin.yml -f action=billing-revoke -f team_id=<uuid> -f reason="Pilot ended"
 #   gh workflow run billing-admin.yml -f action=billing-grants            (every live grant; give account_id, user_id or team_id for one account's log)
+#   gh workflow run billing-admin.yml -f action=billing-conflicts         (open subscription price conflicts, 406; -f all=true for the resolved ones too)
+#   gh workflow run billing-admin.yml -f action=billing-conflict-resolve -f conflict_id=12 -f reason="Refunded in Stripe"      (who and why kept on the row)
 #   gh workflow run billing-admin.yml -f action=billing-report -f month=2026-11
 #   gh workflow run billing-admin.yml -f action=authority-confirm -f project_id=<uuid> -f user_id=<uuid> -f reference="<the letter>"
 
@@ -63,6 +65,8 @@ on:
           - billing-revoke
           - billing-report
           - authority-confirm
+          - billing-conflicts
+          - billing-conflict-resolve
       account_id:
         description: 'Grant, revoke, grants: the billing account’s id. Ids only, never an address (find one: deployment.md § Owner actions)'
         required: false
@@ -103,7 +107,7 @@ on:
         type: boolean
         default: false
       reason:
-        description: 'Grant, revoke: the reason, 1–500 characters, no address. The customer reads it (their plan page, Download my data)'
+        description: 'Grant, revoke: the reason, 1–500 characters, no address. The customer reads it (their plan page, Download my data). Conflict-resolve: why (operator-only)'
         required: false
         type: string
         default: ''
@@ -112,6 +116,16 @@ on:
         required: false
         type: string
         default: ''
+      conflict_id:
+        description: 'Conflict-resolve: the billing conflict’s id (the # in billing-conflicts)'
+        required: false
+        type: string
+        default: ''
+      all:
+        description: 'Conflicts: list the resolved ones too'
+        required: false
+        type: boolean
+        default: false
       project_id:
         description: 'Authority-confirm: the project’s id'
         required: false
@@ -260,6 +274,12 @@ jobs:
                 | walk(if type == "string" and (test("@") or (test("^[A-Za-z0-9 ,.:;()/%$_’–-]{0,200}$") | not)) then "(hidden)" else . end)
                 | tostring),
               "```"
+            elif .action == "billing-conflicts" then
+              "Billing conflicts: \(.conflicts | length). Resolutions are not printed here (pnpm dev:billing:conflict --list shows them).", "",
+              "| # | provider | subscription | account | reason | plan | seats | amount | expected | held | resolved |", "|---|---|---|---|---|---|---|---|---|---|---|",
+              (.conflicts[] | "| \(.id | count) | \(.provider | safe("^(mock|manual|stripe)$")) | \(.externalRef | safe("^[A-Za-z0-9_]{1,255}$")) | \(.accountId | id) | \(.reason | safe("^[a-z]+$")) | \(.planCode | plan) | \(.seats | count) | \(if .amountMinor == null then "unpriced" else (.amountMinor | count) + " " + (.currency | safe("^[a-z]{3}$")) end) | \(if .expectedMinor == null then "n/a" else (.expectedMinor | count) end) | \(if .held == true then "held" else "NOT HELD" end) | \(if .resolvedAt == null then "open" else "resolved" end) |")
+            elif .action == "billing-conflict-resolve" then
+              "Resolved billing conflict \(.conflict.id | count) (\(.conflict.externalRef | safe("^[A-Za-z0-9_]{1,255}$"))); who and why are kept on its row."
             elif .action == "authority-confirm" then
               "Confirmed person \(.userId | id) as acting for the responsible authority of project \(.projectId | id) (History: authority.confirmed by Operator)."
             else "Unknown answer." end' result.json | tee -a "$GITHUB_STEP_SUMMARY"

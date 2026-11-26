@@ -22,6 +22,13 @@
 --      resolved rows resolved longer ago than the billing events' retention
 --      (90 days). Unresolved rows stay until resolved or the account goes:
 --      each is an open action for the operator.
+--   4. app_billing_conflict_resolve(id, reason, by): the operator resolves one
+--      by hand (refunded in Stripe, granted the plan, accepted the price), as
+--      the schema owner (pnpm dev:billing:conflict --resolve, or the migrate
+--      Lambda's billing-conflict-resolve owner action). The row keeps who
+--      resolved it, why and when (resolved_by, resolution): its own audit
+--      trail, operator-only like the row (the customer never reads it, unlike
+--      a staff grant's reason). Owner-only: no grant to water_app.
 
 CREATE TABLE billing_conflict (
 	id                 bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -39,6 +46,10 @@ CREATE TABLE billing_conflict (
 	held               boolean NOT NULL,
 	created_at         timestamptz NOT NULL DEFAULT now(),
 	resolved_at        timestamptz,
+	-- Who resolved it ('event': a later event applied; else the operator's name or GitHub login), and why.
+	resolved_by        text CHECK (resolved_by IS NULL OR length(resolved_by) BETWEEN 1 AND 100),
+	resolution         text CHECK (resolution IS NULL OR length(resolution) BETWEEN 1 AND 500),
+	CHECK ((resolved_at IS NULL) = (resolved_by IS NULL) AND (resolved_at IS NULL) = (resolution IS NULL)),
 	UNIQUE (provider, event_id)
 );
 COMMENT ON TABLE billing_conflict IS
@@ -47,6 +58,32 @@ CREATE INDEX billing_conflict_account_idx ON billing_conflict (billing_account_i
 CREATE INDEX billing_conflict_open_idx ON billing_conflict (provider, external_ref) WHERE resolved_at IS NULL;
 ALTER TABLE billing_conflict ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON billing_conflict FROM PUBLIC, water_app;
+
+CREATE FUNCTION app_billing_conflict_resolve(p_id bigint, p_reason text, p_by text) RETURNS billing_conflict
+	LANGUAGE plpgsql SET search_path = public
+	AS $$
+	DECLARE
+		v_row billing_conflict;
+	BEGIN
+		IF p_reason IS NULL OR length(btrim(p_reason)) NOT BETWEEN 1 AND 500 OR p_by IS NULL OR length(btrim(p_by)) NOT BETWEEN 1 AND 100
+		   OR btrim(p_by) = 'event' THEN
+			RAISE EXCEPTION 'give the reason (1-500 characters) and who resolves it (1-100, not "event")' USING ERRCODE = 'invalid_parameter_value';
+		END IF;
+		SELECT * INTO v_row FROM billing_conflict WHERE id = p_id FOR UPDATE;
+		IF NOT FOUND THEN
+			RAISE EXCEPTION 'no billing conflict %', p_id USING ERRCODE = 'no_data_found';
+		END IF;
+		IF v_row.resolved_at IS NOT NULL THEN
+			RAISE EXCEPTION 'billing conflict % is already resolved', p_id USING ERRCODE = 'invalid_parameter_value';
+		END IF;
+		UPDATE billing_conflict SET resolved_at = now(), resolved_by = btrim(p_by), resolution = btrim(p_reason)
+			WHERE id = p_id RETURNING * INTO v_row;
+		RETURN v_row;
+	END
+	$$;
+REVOKE ALL ON FUNCTION app_billing_conflict_resolve(bigint, text, text) FROM PUBLIC, water_app;
+COMMENT ON FUNCTION app_billing_conflict_resolve(bigint, text, text) IS
+	'The operator resolves one billing conflict by hand (406, issue #928), keeping who and why on the row. Schema owner only.';
 
 -- From 327's definition (its latest): resolved conflicts follow the billing events' retention.
 CREATE OR REPLACE FUNCTION app_purge_billing_events(p_age interval) RETURNS integer
@@ -461,7 +498,8 @@ CREATE OR REPLACE FUNCTION app_billing_apply(p_provider text, p_event_id text, p
 
 		-- 406: an event that applied to a subscription settles its open price conflicts (a corrected price, a cancellation).
 		IF v_outcome = 'applied' AND v_apply THEN
-			UPDATE billing_conflict SET resolved_at = now() WHERE provider = p_provider AND external_ref = v_ref AND resolved_at IS NULL;
+			UPDATE billing_conflict SET resolved_at = now(), resolved_by = 'event', resolution = 'a later event for the subscription applied ('
+			                                || p_event_id || ')' WHERE provider = p_provider AND external_ref = v_ref AND resolved_at IS NULL;
 		END IF;
 		v_outcome := coalesce(v_outcome, 'recorded');
 		-- 399: the subscription it names, so a delete that arrives before the subscription is remembered.

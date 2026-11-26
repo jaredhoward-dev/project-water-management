@@ -8,12 +8,15 @@
 //    nothing; a price accepted before stays accepted on the same plan (a raised list price never strands a
 //    subscriber); an ended status applies whatever its price.
 import { readFileSync } from 'node:fs';
+import pg from 'pg';
 import { DUNNING_GRACE_DAYS } from '@water-management/engine/plans';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { app, asOwner, signUp } from '../__tests__/helpers.js';
 import { OWNER_URL } from '../__tests__/test-db.js';
 import { gatherReport } from '../../scripts/billing-report.js';
 import { withoutUser, withUser } from '../db/tx.js';
+import { ownerActionCode, parseOwnerAction, runOwnerAction } from '../ops/ownerActions.js';
+import { ConflictError, listConflicts, resolveConflict } from './conflicts.js';
 import { runTick } from '../jobs/runner.js';
 import { signPayload } from './provider/signature.js';
 
@@ -58,6 +61,8 @@ const planOf = async (u: User) => (await u.call('GET', '/account/plan')).body.pl
 const tick = () => runTick({ feeds: false, reports: false, alerts: false, maxJobs: 0 });
 const overdueFor = (ref: string, days: number) =>
 	asOwner(`UPDATE subscription SET past_due_since = now() - make_interval(days => $2) WHERE provider = 'mock' AND external_ref = $1`, [ref, days]);
+
+const report = () => gatherReport(OWNER_URL, '2001-03', new Date());
 
 beforeAll(() => {
 	vi.stubEnv('BILLING_PROVIDER', 'mock');
@@ -197,8 +202,7 @@ describe('406: a price conflict is kept for the operator', () => {
 			 FROM billing_conflict WHERE provider = 'mock' AND external_ref = $1 ORDER BY id`,
 			[r]
 		)) as { reason: string; amount: number | null; expected: number | null; held: boolean; resolved_at: Date | null }[];
-	const report = () => gatherReport(OWNER_URL, '2001-03', new Date());
-
+	
 	beforeAll(async () => {
 		owner = await signUp('PriceConflict');
 		account = (await owner.call('GET', '/account/plan')).body.account.id;
@@ -250,5 +254,49 @@ describe('406: a price conflict is kept for the operator', () => {
 			(e: { code?: string }) => String(e.code)
 		);
 		expect(failure).toBe('42501');
+	});
+});
+
+describe('406: the operator resolves a conflict by hand (pnpm dev:billing:conflict, the owner actions)', () => {
+	const t0 = Math.floor(Date.now() / 1000) - 1800;
+	const ref = `sub_cf_hand_${run}`;
+
+	it('lists it open, resolves it with who and why kept, refuses a second resolve and an unknown id', async () => {
+		const u = await signUp('ConflictHand');
+		const acc = (await u.call('GET', '/account/plan')).body.account.id as string;
+		expect(await post(event('subscription-pro-repriced', acc, { sub: ref, created: t0 }))).toBe('conflict');
+
+		const owner = new pg.Client({ connectionString: OWNER_URL });
+		await owner.connect();
+		try {
+			const open = (await listConflicts(owner)).filter((c) => c.externalRef === ref);
+			expect(open).toHaveLength(1);
+			expect(open[0]).toMatchObject({ accountId: acc, reason: 'amount', held: false, resolvedAt: null });
+
+			const r = await runOwnerAction(owner, parseOwnerAction({ action: 'billing-conflict-resolve', via: 'workflow', conflictId: open[0]!.id, reason: 'Refunded in Stripe', by: 'operator' }));
+			expect(r).toMatchObject({ action: 'billing-conflict-resolve', conflict: { id: open[0]!.id, resolvedBy: 'operator', resolution: 'Refunded in Stripe' } });
+			expect((await listConflicts(owner)).some((c) => c.externalRef === ref)).toBe(false);
+			expect((await listConflicts(owner, true)).find((c) => c.externalRef === ref)?.resolvedAt).not.toBeNull();
+			expect((await report()).billingConflicts.some((c) => c.externalRef === ref)).toBe(false);
+
+			const again = await resolveConflict(owner, { id: open[0]!.id, reason: 'twice', by: 'operator' }).catch((e: Error) => e);
+			expect(again).toBeInstanceOf(ConflictError);
+			expect(ownerActionCode(again)).toBe('invalid');
+			const none = await resolveConflict(owner, { id: 999_999_999, reason: 'x', by: 'operator' }).catch((e: Error) => e);
+			expect(ownerActionCode(none)).toBe('no_conflict');
+			// The by 'event' marker is the webhook's own.
+			expect(await resolveConflict(owner, { id: open[0]!.id, reason: 'x', by: 'event' }).catch((e: ConflictError) => e.code)).toBe('invalid');
+		} finally {
+			await owner.end();
+		}
+	});
+
+	it('the app role cannot resolve one', async () => {
+		const u = await signUp('ConflictStranger');
+		const code = await withUser(u.id, (db) => db.query(`SELECT app_billing_conflict_resolve(1, 'x', 'y')`)).then(
+			() => 'ok',
+			(e: { code?: string }) => String(e.code)
+		);
+		expect(code).toBe('42501');
 	});
 });

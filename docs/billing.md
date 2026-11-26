@@ -648,8 +648,20 @@ price ids to match; the amount, currency and interval are the check.
   dev:billing:report` and its JSON (`billingConflicts`, [§ Metrics and the
   abuse report](#metrics-and-the-abuse-report)) until a later event for that
   subscription applies (a corrected price, a cancellation of a held one),
-  which resolves it. A delete for a subscription never held leaves it open:
-  the charge may still need a refund. Retention: open rows stay until
+  which resolves it (`resolved_by` `event`). A delete for a subscription
+  never held leaves it open: the charge may still need a refund.
+- **Resolving one by hand.** Once the operator has refunded or granted it in
+  the provider's dashboard (or accepted the price), `pnpm
+  dev:billing:conflict --resolve <id> --reason "…" [--by <name>]` (the id is
+  the `#` in `--list`; `--list --all` shows the resolved ones too) runs
+  `app_billing_conflict_resolve` as the schema owner. The row keeps who
+  resolved it, why and when (`resolved_by`, `resolution`, `resolved_at`): its
+  audit trail, operator-only like the row (unlike a staff grant's reason, the
+  customer never reads it). An unknown id or one already resolved is
+  refused. Production runs the same as the `billing-conflicts` and
+  `billing-conflict-resolve` owner actions through the billing-admin
+  workflow, ids only ([deployment.md § Owner
+  actions](./deployment.md#owner-actions)). Retention: open rows stay until
   resolved or the account is deleted (cascade); resolved rows go 90 days
   after resolution with the tick's billing event purge
   ([security.md](./security.md) lists it).
@@ -671,7 +683,8 @@ price ids to match; the amount, currency and interval are the check.
 - Tests: `billing/provider/stripe.test.ts` (`priceOf`), `billing/metrics.test.ts`
   (the report's conflict lines) and `billing/dunningPrice.db.test.ts`: the
   conflict rows with their reasons and amounts, held or not, listed by the
-  report and resolved by a later applied event, the purge keeping open rows,
+  report and resolved by a later applied event, resolved by hand with who and
+  why kept (an unknown id and a second resolve refused), the purge keeping open rows,
   `water_app` reading none; a dashboard price, another currency and
   a coupon refused, new or held; the plan's price applied; a price accepted
   before kept; Team's extra seats summed; an ended status applied.

@@ -14,6 +14,7 @@
 		"authority:confirm": "tsx scripts/authority-confirm.ts",
 		"billing:report": "tsx scripts/billing-report.ts",
 		"billing:grant": "tsx scripts/billing-grant.ts",
+		"billing:conflict": "tsx scripts/billing-conflict.ts",
 		"billing:invoice": "tsx scripts/billing-invoice.ts",
 		"build": "esbuild src/lambda.ts --external:playwright-core --bundle --platform=node --target=node24 --format=esm --minify --keep-names --sourcemap --outfile=dist/lambda.mjs --banner:js=\"import{createRequire}from'module';const require=createRequire(import.meta.url);\"",
 		"check": "tsc -p tsconfig.json --noEmit",
