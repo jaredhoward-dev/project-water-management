@@ -531,3 +531,22 @@ test('an applicant sees the published DWS gauge record in a catchment with two f
 	await expect(gauge.getByText('Observed flow at the outlet · DWS gauge record')).toBeVisible();
 	await expectNoViolations(a);
 });
+
+test('an applicant’s Withdraw refused because the application already moved shows it as it stands now, not the stale moves', async ({ page, owner, signIn }) => {
+	void owner;
+	const applicant = await signIn('Conflict applicant');
+	const { project, runId, upper } = await seedApplicantProject(page, 'Applications conflict', applicant.user);
+	const sid = await submitApplication(applicant.context.request, project.id, runId, upper, NAME);
+	const a = applicant.page;
+	await a.goto(`/projects/${project.id}?tab=scenarios&scenario=${sid}`);
+	const panel = a.getByTestId('application-panel');
+	await expect(panel).toContainText('Submitted: the assessors can see it');
+	// Behind the page (another tab of theirs): withdrawn already.
+	expect((await applicant.context.request.post(`${API_URL}/projects/${project.id}/scenarios/${sid}/withdraw`, { data: {} })).status()).toBe(200);
+	await panel.getByRole('button', { name: 'Withdraw', exact: true }).click();
+	// The refusal says why, and the panel reads the application again: withdrawn, with the move it allows now.
+	await expect(panel.getByRole('alert')).toContainText('it now shows where it stands');
+	await expect(panel).toContainText('Withdrawn: the assessors can still see it.');
+	await expect(panel.getByRole('button', { name: 'Withdraw', exact: true })).toHaveCount(0);
+	await expect(panel.getByRole('button', { name: 'Reopen as a draft' })).toBeEnabled();
+});

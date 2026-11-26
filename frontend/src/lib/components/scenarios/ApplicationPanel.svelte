@@ -34,6 +34,7 @@
 	import LicenceTermsView from './LicenceTermsView.svelte';
 	import { onDestroy } from 'svelte';
 	import { earliestEventDate, eventHeading, licenceLine, licensedRunState, licensedTerms, nextEvents, PUBLIC_RECORD_HINT } from './licence';
+	import { APPLICATION_CHANGED_TEXT, rereadAfterConflict } from './applications';
 	import {
 		api,
 		DECISION_EVENT_FORUM_LABEL,
@@ -134,7 +135,11 @@
 			note = what;
 		} catch (e) {
 			const p = scenarioProblems(e);
-			error = p.length ? `${msg(e)}: ${p.join('; ')}` : msg(e);
+			const text = p.length ? `${msg(e)}: ${p.join('; ')}` : msg(e);
+			// A 409 is usually another user's move (withdrawn, reopened, decided): show the application as it stands now.
+			const fresh = await rereadAfterConflict(e, () => api.scenarios.get(projectId, s.id));
+			if (fresh) onchange(fresh);
+			error = fresh ? `${text}. ${APPLICATION_CHANGED_TEXT}` : text;
 		} finally {
 			busy = false;
 		}

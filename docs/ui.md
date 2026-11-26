@@ -13701,7 +13701,10 @@ mode ("Your applications"; `?scenario=<id>` selects one):
   it", "Submitted: the assessors can see it, and its changes are frozen", …),
   the owner's **Submit to the assessors** (confirmed; disabled while a change
   doesn't apply), **Withdraw** and **Reopen as a draft**, the decision once
-  made (outcome, by whom, when, the reasons), and **Shared with**: the
+  made (outcome, by whom, when, the reasons; a move the server refuses with a
+  `409`, because someone else withdrew, reopened or decided it meanwhile,
+  reads the application again and says it now shows where it stands,
+  `rereadAfterConflict` in `applications.ts`), and **Shared with**: the
   people who read it, Remove / Leave, and for the owner a **Share with**
   picker of the people they may share it with (`…/share-candidates`: an
   applicant's own applying party; no address box, so it says nothing about
@@ -15142,7 +15145,9 @@ their own application's in [their own view](#the-applicants-pack-view).
 - **Where it stands** (`packs/PackActions.svelte`): a draft's checklist from
   the API (the frozen report may be issued, both runs still carry the
   server's stamp, signed under the current pack statement), each ticked or
-  with what to do; an issued pack's issue stamp; a superseded pack's link to
+  with what to do, and a link where the way out is on another page (`issueChecklist`'s
+  `fix`: **Open the evidence report** to draft again, **Open Registration checks**
+  for the Project page's panel); an issued pack's issue stamp; a superseded pack's link to
   the newer version; a withdrawn pack's reason, marked as shown publicly
   (for a draft withdrawn before issue, which has no verify page, marked as
   the members' only, and the page prints no verify line or **Verify page**
@@ -15153,8 +15158,11 @@ their own application's in [their own view](#the-applicants-pack-view).
   draft** (an unsigned draft only), **New version…** of an issued pack (a
   new draft from the same run's report, superseding it once issued),
   **Withdraw…** (a dialog asking for a reason, 1–1 000 characters, that says
-  the reason is public, or for a draft that it stays with the members). The server holds every rule and its refusal is
-  shown with the ways out it names.
+  the reason is public, or for a draft that it stays with the members). A withdrawn pack's editor gets
+  **Open the evidence report**, to draft a new pack there (nothing moves a withdrawn one again). The server holds every rule and its refusal is
+  shown with the ways out it names; a `409` (another editor issued, withdrew or re-signed it, or a check moved) also reads
+  the pack again, so the board shows where it stands. Issue and Withdraw take their own button away, so the focus then
+  goes to the board (`tabindex="-1"`), not `<body>`.
 - **Sign-off** is Appendix B.2's, against the pack statement: **Sign off this
   evidence pack…** opens the run's sign-off dialog with the pack's version,
   manifest hash and engines, the eleventh confirmation, and first a warning

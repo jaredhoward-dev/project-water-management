@@ -220,6 +220,18 @@ describe('issueChecklist', () => {
 		expect(unchecked.filter((c) => !c.ok)).toEqual([expect.objectContaining({ id: 'registrationChecked', todo: expect.stringContaining('Dr X') })]);
 		expect(stale[2]!.todo).toMatch(/can’t be issued\. Draft the pack again/);
 	});
+
+	it('names where each failing check’s way out is, so the page can link it', () => {
+		const all = issueChecklist({ issuable: false, runsVerified: false, errataRecorded: false, signed: false, registrationCheckRequired: true, registrationUnchecked: ['Dr X'] });
+		// Drafting again happens on the run's evidence report; the registration check on the Project page; signing is on the pack page itself.
+		expect(Object.fromEntries(all.map((c) => [c.id, c.fix]))).toEqual({
+			issuable: 'report',
+			runsVerified: null,
+			errataRecorded: 'report',
+			signed: null,
+			registrationChecked: 'registration'
+		});
+	});
 });
 
 describe('the verify page’s lookup (lookUpCode, latestOnly)', () => {
