@@ -1618,7 +1618,14 @@ reads it.
   `pnpm import:dam-register list.csv doc.kml --dataset DSO-2025-07 --source "DWS Dam Safety Office, List of Registered Dams, July 2025"`.
   The loader joins them by register number ("No of dam" / `No_of_dam`),
   converts the capacity to m³, takes a year from "Completion date", and
-  lists every dam it skipped (no position, no name). A load replaces every
+  lists every dam it skipped (no position, no name). The CSV's numbers may
+  use a decimal comma (a South African export) or a decimal point: spaces
+  are dropped, and the file's mark is read from its unambiguous cells
+  (`12,5` or `1.234,5` a comma; `12.5`, `1,234.5` or `1,234,567` a point),
+  which settles a `1,234` (a thousand and more, or one and a bit). When no
+  other number says which, or the file writes both marks, such a value is
+  left out and listed, never guessed (issue #886, `loadDamRegister.ts`
+  `decimalMarkOf`). A load replaces every
   row of its dataset in one transaction. Production loading goes through
   the reference-dataset path, which refuses the register while its licence
   is unconfirmed ([deployment.md § Reference datasets](./deployment.md#reference-datasets)).
@@ -2925,7 +2932,10 @@ it.
   (the Western Cape's south coast, measured 2026-10-01), from 1.3 billion pixels. The grid must line up with
   the raster (the cell a whole number of pixels, the corner on a cell edge),
   so each cell's share is exact and no cell straddles two tiles; anything else
-  is refused with the reason. No GeoTIFF code is in a Lambda bundle.
+  is refused with the reason. The corner comes from the tiepoint, read by the
+  raster type key: PixelIsArea (the default) ties the pixel's corner,
+  PixelIsPoint its centre, so the corner is half a pixel west and north
+  (issue #886); any other raster type is refused. No GeoTIFF code is in a Lambda bundle.
 - **A polygon's cultivated area** (`geo/cropland.ts`) is the sum, over the
   cells it covers, of the cell's area on the WGS84 ellipsoid × the share of
   the cell inside the polygon (exact clipping, `geo/gridShares.ts`, the same

@@ -110,3 +110,23 @@ describe('the nearest gauging stations', () => {
 		await expect(withUser(owner.id, (db) => db.query(`DELETE FROM gauge_station_reference`))).rejects.toThrow(/permission denied/);
 	});
 });
+
+describe('replaceStations', () => {
+	it('returns the codes it wrote, not the records: a repeated code is upserted over its earlier row', async () => {
+		const DS = 'test-replace-stations-count';
+		const rec = (code: string, name: string) => ({ code, name, river: '', lon: 21, lat: -33, catchmentKm2: null, recordStart: null, recordEnd: null, source: 'test' });
+		const client = new pg.Client({ connectionString: process.env.TEST_MIGRATION_DATABASE_URL });
+		await client.connect();
+		try {
+			expect(await replaceStations(client, DS, [rec('X9H951', 'first'), rec('X9H952', 'other'), rec('X9H951', 'last')])).toBe(2);
+			const rows = await client.query<{ code: string; name: string }>('SELECT code, name FROM gauge_station_reference WHERE dataset = $1 ORDER BY code', [DS]);
+			expect(rows.rows).toEqual([
+				{ code: 'X9H951', name: 'last' },
+				{ code: 'X9H952', name: 'other' }
+			]);
+		} finally {
+			await client.query('DELETE FROM gauge_station_reference WHERE dataset = $1', [DS]);
+			await client.end();
+		}
+	});
+});

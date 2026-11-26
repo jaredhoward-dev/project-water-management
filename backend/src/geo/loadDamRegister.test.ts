@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { parseDamArgs, readDamFiles, SYNTHETIC_DAM_FILE } from '../../scripts/import-dam-register.js';
 import { SYNTHETIC_DAM_DATASET } from './damProposals.js';
-import { completionYear, csvCells, damPartsFromCsv, damPartsFromJson, damPartsFromKml, joinDamParts } from './loadDamRegister.js';
+import { completionYear, csvCells, damPartsFromCsv, decimalMarkOf, numberWith, damPartsFromJson, damPartsFromKml, joinDamParts } from './loadDamRegister.js';
 
 const LIST_CSV = [
 	'No of dam,WMA,Name of dam,Dam Status,Town nearest,Province,Region,Completion date,River or Watercourse,Dam type,Wall height (m),Crest Length (m),Spillway Type,Capacity (1000 cub m),Purpose,Registration date',
@@ -62,6 +62,60 @@ describe('the DSO list as CSV', () => {
 		expect(parts[0]).toMatchObject({ registerNo: 'Z900/01', name: 'TESTKLOOF DAM', river: 'TESTRIVIER', capacityM3: 1_250_000, wallHeightM: 12.5, completionYear: 1986 });
 		expect(parts[1]).toMatchObject({ registerNo: 'Z900/02', name: 'NAAMLOOS "B" DAM', capacityM3: 75_500, completionYear: null });
 		expect(parts[0]!.lon).toBeUndefined();
+	});
+
+	describe('decimal commas and thousands commas (issue #886)', () => {
+		const HEAD = 'No of dam,Name of dam,Wall height (m),Capacity (1000 cub m)';
+		const csv = (...rows: string[]) => [HEAD, ...rows].join('\n');
+		const caps = (r: ReturnType<typeof damPartsFromCsv>) => r.parts.map((p) => [p.wallHeightM, p.capacityM3]);
+
+		it('reads each cell’s shape: a decimal comma, a decimal point, thousands groups, or 1,234 (either)', () => {
+			expect(['12,5', '1.234,5', '1.234.567', ',5'].map(decimalMarkOf)).toEqual(['comma', 'comma', 'comma', 'comma']);
+			expect(['12.5', '-33.786', '1,234.5', '1,234,567', '1.234'].map(decimalMarkOf)).toEqual(['point', 'point', 'point', 'point', 'point']);
+			expect(['1,234', '-12,500', ' 1,234 '].map(decimalMarkOf)).toEqual(['ambiguous', 'ambiguous', 'ambiguous']);
+			expect(['', '1250', '1 250', 'n/a', '1,23,456'].map(decimalMarkOf)).toEqual([null, null, null, null, null]);
+			expect([numberWith('1,234', 'point'), numberWith('1,234', 'comma'), numberWith('1 234,5', 'comma'), numberWith('1,234,567.5', 'point')]).toEqual([1234, 1.234, 1234.5, 1234567.5]);
+			expect([numberWith('12,5', 'point'), numberWith('12.5', 'comma'), numberWith('x', 'point')]).toEqual([null, null, null]);
+		});
+
+		it('settles 1,234 by the decimal point the file’s other numbers use: a thousands comma', () => {
+			const r = damPartsFromCsv(csv('Z900/01,A,12.5,"1,234"', 'Z900/02,B,6,"75.5"'));
+			expect(r.problems).toEqual([]);
+			expect(caps(r)).toEqual([
+				[12.5, 1_234_000],
+				[6, 75_500]
+			]);
+		});
+
+		it('settles 1,234 by the decimal comma the file’s other numbers use (a South African export)', () => {
+			const r = damPartsFromCsv(csv('Z900/01,A,"12,5","1,234"', 'Z900/02,B,6,"1 250"'));
+			expect(r.problems).toEqual([]);
+			expect(caps(r)).toEqual([
+				[12.5, 1_234],
+				[6, 1_250_000]
+			]);
+		});
+
+		it('refuses 1,234 when nothing else in the file says which, naming the row, the column and both readings', () => {
+			const r = damPartsFromCsv(csv('Z900/01,A,12,"1,234"', 'Z900/02,B,6,1250'));
+			expect(r.problems).toEqual([
+				'CSV row 2: "1,234" in "Capacity (1000 cub m)" could be 1234 (a thousands comma) or 1.234 (a decimal comma), and no other number in the file says which; left out (write it without the comma)'
+			]);
+			expect(caps(r)).toEqual([
+				[12, null],
+				[6, 1_250_000]
+			]);
+		});
+
+		it('refuses 1,234 in a file that writes both marks, and says so, still reading the unambiguous cells', () => {
+			const r = damPartsFromCsv(csv('Z900/01,A,"12,5","1,234"', 'Z900/02,B,6.5,1250'));
+			expect(r.problems[0]).toMatch(/both with a comma \(12,5\) and with a point \(12\.5\)/);
+			expect(r.problems[1]).toMatch(/^CSV row 2: "1,234" .* the file’s other numbers disagree on which; left out/);
+			expect(caps(r)).toEqual([
+				[12.5, null],
+				[6.5, 1_250_000]
+			]);
+		});
 	});
 
 	it('refuses a file without the register number column', () => {

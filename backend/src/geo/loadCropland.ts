@@ -125,10 +125,16 @@ export function readTiffInfo(buf: Buffer): TiffInfo | string {
 	if (!scale || scale.length < 2 || !tie || tie.length < 6) return 'the TIFF has no georeference (ModelPixelScale and ModelTiepoint): give a GeoTIFF';
 	// A GeoTIFF in another projection than plain longitude and latitude would need reprojecting first.
 	const geoKeys = tags.get(34735) ?? [];
+	// GTRasterTypeGeoKey (1025): 1 PixelIsArea (the default), 2 PixelIsPoint.
+	let rasterType = 1;
 	for (let k = 4; k + 3 < geoKeys.length; k += 4) {
 		if (geoKeys[k] === 1024 && geoKeys[k + 3] !== 2) return 'the raster is not in geographic coordinates: reproject it to EPSG:4326 first';
 		if (geoKeys[k] === 2048 && geoKeys[k + 3] !== 4326 && geoKeys[k + 3] !== 32767) return `the raster's datum is EPSG:${geoKeys[k + 3]}, not WGS84 (EPSG:4326)`;
+		if (geoKeys[k] === 1025) rasterType = geoKeys[k + 3]!;
 	}
+	if (rasterType !== 1 && rasterType !== 2) return `the raster's raster type (GTRasterTypeGeoKey ${rasterType}) is neither PixelIsArea nor PixelIsPoint`;
+	// PixelIsPoint (GeoTIFF 1.1 § 2.5.2.2): the tiepoint names pixel (i, j)'s centre, so its corner is half a pixel west and north.
+	const half = rasterType === 2 ? 0.5 : 0;
 	const nd = ascii.get(42113);
 	const noData = nd !== undefined && nd.trim() !== '' && Number.isFinite(Number(nd)) ? Number(nd) : null;
 	return {
@@ -142,8 +148,8 @@ export function readTiffInfo(buf: Buffer): TiffInfo | string {
 		predictor,
 		pixelW: scale[0]!,
 		pixelH: scale[1]!,
-		west: tie[3]! - tie[0]! * scale[0]!,
-		north: tie[4]! + tie[1]! * scale[1]!,
+		west: tie[3]! - (tie[0]! + half) * scale[0]!,
+		north: tie[4]! + (tie[1]! + half) * scale[1]!,
 		noData
 	};
 }
