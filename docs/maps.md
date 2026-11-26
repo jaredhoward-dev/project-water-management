@@ -2417,7 +2417,11 @@ in [design/start-from-map.md](./design/start-from-map.md); the screen in
   150 m of the outlet gauge. Move the gauge onto a terrain channel …");
   any other such point is dropped with the reason
   "has no terrain channel within 150 m: move it onto one of the elevation
-  model’s channels". From `start-7` to `start-14` the points were placed by
+  model’s channels". A point on a cell with no elevation data (a tile the
+  DEM lacks) is not off-channel: the outlet gauge, or a click that would be
+  the lowest, is refused `no_data` ("The elevation model has no data at
+  …"), and any other is dropped as "is where the elevation model has no
+  data" (issue #905). From `start-7` to `start-14` the points were placed by
   the mapped river's rules (a reach's area matched, the river asked
   for at a confluence, a junction side kept, a red-line or gully rule);
   those were retired in `start-15`. A point placed

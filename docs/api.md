@@ -4351,7 +4351,9 @@ window is refused there, the quick plan standing.
   never places them. An outlet gauge with none within 150 m is refused
   (422 `off_channel`); any other point with none is in `dropped` with the
   reason "has no terrain channel within 150 m: move it onto one of the
-  elevation model’s channels". A unit's boundary is placed at its
+  elevation model’s channels". A point on a cell with no elevation data is
+  refused (422 `no_data`) when it is the outlet gauge or a click, else
+  dropped as "is where the elevation model has no data" (issue #905). A unit's boundary is placed at its
   most-drained cell inside the catchment (`placedBy: 'unit'`, `start-16`);
   the dam rules below place only a water user at a dam. `placement = { placedBy: 'snapped' \|
   'larger' \| 'exact' \| 'polygon' \| 'boundary' \| 'unit', larger: { at, distanceM,
