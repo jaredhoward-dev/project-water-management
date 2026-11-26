@@ -313,6 +313,15 @@ describe('decimal commas and delimiters', () => {
 		expect(stationDays(r, f, '2024-03-01', '2024-03-02', LATER).values).toEqual([1.5, 0]);
 		expect(stationFormatProblem({ ...f, delimiter: ',' })).toMatch(/decimal comma/);
 	});
+	it('refuses a decimal point under a decimal comma rather than read 1.5 as 15 mm', () => {
+		const f: StationFormat = { format: 'csv', delimiter: ';', decimalComma: true, time: 'Datum', value: 'Neerslag', timeFormat: 'DD/MM/YYYY', resolution: 'daily' };
+		expect(() => readStationAnswer('Datum;Neerslag\n01/03/2024;1.5', f)).toThrow(/line 2: the value “1\.5” is not a number/);
+		expect(() => readStationAnswer('Datum;Neerslag\n01/03/2024;0.254', f)).toThrow(/“0\.254” is not a number/);
+		expect(() => readStationAnswer('Datum;Neerslag\n01/03/2024;12.34,5', f)).toThrow(/not a number/);
+		// A dot is still a thousands separator where it groups whole thousands.
+		const r = readStationAnswer('Datum;Neerslag\n01/03/2024;1.234,5\n02/03/2024;-1.000', f);
+		expect(r.readings.map((x) => x.value)).toEqual([1234.5, -1000]);
+	});
 });
 
 describe('the URL’s {start} and {end}', () => {
