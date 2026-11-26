@@ -191,8 +191,12 @@ export const runRoutes = new Hono<AuthEnv>()
 			// 022_publication), or the evidence history names is kept (their foreign
 			// keys refuse it too); a pinned one until it is unpinned. The row is
 			// locked (FOR UPDATE) so the check and the DELETE see the same run.
-			const { rows: kept } = await db.query<{ pinned: boolean; published: boolean; cited: boolean; kept: boolean }>(
-				`SELECT r.pinned, ${RUN_PUBLISHED_SQL} AS published, model_run_cited(r.id) AS cited, ${RUN_KEPT_SQL} AS kept FROM model_run r WHERE r.project_id = $1 AND r.id = $2 FOR UPDATE`,
+			// A run of an application not yet decided: its label (the application's name by default) stays out of the
+			// project's log, which every viewer reads, as run.created keeps it out (045_contributor_scope).
+			const { rows: kept } = await db.query<{ pinned: boolean; published: boolean; cited: boolean; kept: boolean; application: boolean }>(
+				`SELECT r.pinned, ${RUN_PUBLISHED_SQL} AS published, model_run_cited(r.id) AS cited, ${RUN_KEPT_SQL} AS kept,
+					EXISTS (SELECT 1 FROM scenario s WHERE s.id = r.scenario_id AND s.origin = 'applicant' AND s.status <> 'decided') AS application
+				 FROM model_run r WHERE r.project_id = $1 AND r.id = $2 FOR UPDATE OF r`,
 				[id, runId]
 			);
 			if (!kept[0]) throw new ApiError(404, 'not found');
@@ -214,7 +218,12 @@ export const runRoutes = new Hono<AuthEnv>()
 			// The row is locked and was readable, so nothing else removed it: row-level
 			// security refused the delete. That is a refusal, not "not found".
 			if (!gone[0]) throw new ApiError(409, "this run can't be deleted");
-			await recordAudit(db, id, 'run.deleted', { runIds: [runId], label: gone[0].label, runCreatedAt: gone[0].created_at.toISOString(), reason: 'deleted' });
+			await recordAudit(db, id, 'run.deleted', {
+				runIds: [runId],
+				...(kept[0].application ? { application: true } : { label: gone[0].label }),
+				runCreatedAt: gone[0].created_at.toISOString(),
+				reason: 'deleted'
+			});
 			return c.body(null, 204);
 		});
 	});

@@ -2057,9 +2057,10 @@ scenario is `'team'`, and behaves exactly as above).
   closed). The points are whole and never come with a volume. The
   Applicant view shows it all under the changes (ui.md § Applications).
 - **The log.** `scenario.created / changed / submitted / withdrawn /
-  reopened / decided / shared / unshared / deleted` and `run.created` carry
-  `application: true` and no name until the application is decided (every
-  viewer reads the project's history).
+  reopened / decided / shared / unshared / deleted`, `run.created` and an
+  assessor's `run.deleted` of one of its runs carry `application: true` and
+  no name or run label until the application is decided (every viewer reads
+  the project's history).
 
 ### The WULA reference
 

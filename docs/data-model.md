@@ -1091,7 +1091,9 @@ the result change?", and put back any earlier version.
   `series.held` (WP-2.16: an API key's
   pushed days the data-quality rules flag, with `negative`, `outlier`, up to
   5 `examples` and the `source` label; automatic runs wait until a person
-  runs the model, `series/hold.ts`), `run.created/changed/deleted/trimmed`, `feed.configured`,
+  runs the model, `series/hold.ts`), `run.created/changed/deleted/trimmed`
+  (a run of an application not yet decided: `application: true` in place
+  of its label, which is the application's name by default), `feed.configured`,
   `feed.failed` (only the first failure after a success), `project.changed`,
   `report_schedule.configured`, `scenario.created/changed/deleted`, the
   application workflow's `scenario.submitted/withdrawn/reopened/decided/shared/unshared`
@@ -3337,7 +3339,7 @@ Plain-text notes and comments kept against what they are about (WP-2.7;
   it was written, when an edit replaced it, by whom: the author, the only
   one who edits). Written by the `note_write_revision` trigger (`AFTER
   UPDATE OF body`, `SECURITY DEFINER`) on every body change of a note with a
-  `scenario_id`; other notes keep none. RLS: SELECT where the note itself is
+  `scenario_id` or (since 128) a `pack_id`; other notes keep none. RLS: SELECT where the note itself is
   readable (the policy's subquery runs under the caller's note policies);
   water_app has SELECT only (the catalogue test's append-only and
   written-through-a-function lists). Indexed on `(note_id, edited_at)`,
