@@ -6,7 +6,7 @@ import { packManifestText, type PackManifest } from '@water-management/engine';
 import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Pack, PackReproductionState } from '#lib/api/index.js';
-import { checkableAccept, checkableFiles, checkFile, earlierStatementNote, errataFoundSinceNote, issueChecklist, issuedOf, lookUpCode, manifestFileName, manifestFileText, packHref, packStamp, packTimeZone, packsByScenario, packsOfRun, packVerifyLine, packVerifyRef, reproductionNote, sha256Hex, verifyUrl } from './pack';
+import { checkableAccept, checkableFiles, checkFile, earlierStatementNote, errataFoundSinceNote, issueChecklist, issuedOf, lookUpCode, manifestFileName, manifestFileText, packHref, packStamp, packTimeZone, packsByScenario, packsOfRun, packVerifyLine, packVerifyRef, reproductionNote, sha256Hex, SIGNOFF_ANCHOR, verifyUrl } from './pack';
 import { latestOnly } from '#lib/api/latest.js';
 
 const tz = process.env.TZ;
@@ -223,14 +223,25 @@ describe('issueChecklist', () => {
 
 	it('names where each failing check’s way out is, so the page can link it', () => {
 		const all = issueChecklist({ issuable: false, runsVerified: false, errataRecorded: false, signed: false, registrationCheckRequired: true, registrationUnchecked: ['Dr X'] });
-		// Drafting again happens on the run's evidence report; the registration check on the Project page; signing is on the pack page itself.
+		// Drafting again happens on the run's evidence report; the registration check on the Project page; signing in Appendix B.2 further down (issue #934).
 		expect(Object.fromEntries(all.map((c) => [c.id, c.fix]))).toEqual({
 			issuable: 'report',
 			runsVerified: null,
 			errataRecorded: 'report',
-			signed: null,
+			signed: 'signoff',
 			registrationChecked: 'registration'
 		});
+		expect(SIGNOFF_ANCHOR).toBe('ev-b2-h');
+	});
+
+	it('says an unsigned draft that can’t be issued can simply be deleted, and a signed one withdrawn (issue #934)', () => {
+		const checks = { issuable: false, runsVerified: true, errataRecorded: true, signed: false };
+		const todo = (n?: number) => issueChecklist(checks, n)[0]!.todo;
+		expect(todo(0)).toMatch(/No one has signed this draft, so simply delete it \(or withdraw it\), and draft again/);
+		expect(todo(2)).toMatch(/It is signed, so withdraw it, and draft again/);
+		expect(todo(2)).not.toMatch(/delete/);
+		// Count unknown: both ways out, the delete one conditional.
+		expect(todo()).toMatch(/Withdraw it \(or, while no one has signed it, simply delete it\)/);
 	});
 });
 

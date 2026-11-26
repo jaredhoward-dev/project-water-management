@@ -13720,7 +13720,8 @@ mode ("Your applications"; `?scenario=<id>` selects one):
   made (outcome, by whom, when, the reasons; a move the server refuses with a
   `409`, because someone else withdrew, reopened or decided it meanwhile,
   reads the application again and says it now shows where it stands,
-  `rereadAfterConflict` in `applications.ts`), and **Shared with**: the
+  `rereadAfterConflict` in `applications.ts`, in one sentence with the
+  server's words in brackets, `applicationConflictText`, issue #934), and **Shared with**: the
   people who read it, Remove / Leave, and for the owner a **Share with**
   picker of the people they may share it with (`…/share-candidates`: an
   applicant's own applying party; no address box, so it says nothing about
@@ -15118,7 +15119,7 @@ their own application's in [their own view](#the-applicants-pack-view).
   the authority and not through the applicant, the members acting for the
   responsible authority as ticked checkboxes, an optional note and
   **Send**, then "Sent to …"; with none, it says the authority confirms
-  them in Acts for the authority (229; a proposal alone isn't enough); [evidence-pack.md § Sending it to the authority](./evidence-pack.md#sending-it-to-the-authority))
+  them in Acts for the authority, linked (`?tab=project#delegates-h`, issue #934; 229; a proposal alone isn't enough); [evidence-pack.md § Sending it to the authority](./evidence-pack.md#sending-it-to-the-authority))
   and **Notes**, and the version, code, manifest hash, PDF hash
   (or that none is recorded) and the bundle's hash. When an erratum found
   since the manifest was frozen applies to either run's engine or its fit's
@@ -15163,7 +15164,11 @@ their own application's in [their own view](#the-applicants-pack-view).
   server's stamp, signed under the current pack statement), each ticked or
   with what to do, and a link where the way out is on another page (`issueChecklist`'s
   `fix`: **Open the evidence report** to draft again, **Open Registration checks**
-  for the Project page's panel); an issued pack's issue stamp; a superseded pack's link to
+  for the Project page's panel, and **Go to Appendix B.2** for the "Not signed"
+  line, to B.2's heading `#ev-b2-h` further down, issue #934). A draft that
+  can't be issued says how to start again: an unsigned one can simply be
+  deleted (or withdrawn), a signed one is withdrawn (`issueChecklist`'s
+  `signoffs`); an issued pack's issue stamp; a superseded pack's link to
   the newer version; a withdrawn pack's reason, marked as shown publicly
   (for a draft withdrawn before issue, which has no verify page, marked as
   the members' only, and the page prints no verify line or **Verify page**

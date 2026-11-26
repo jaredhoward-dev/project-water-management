@@ -16,7 +16,7 @@
 	import { confirmDialog } from '#lib/components/common/confirm.svelte.js';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { fmtDate } from '#lib/format/number.js';
-	import { issueChecklist, packHref } from './pack';
+	import { issueChecklist, packHref, SIGNOFF_ANCHOR } from './pack';
 
 	let {
 		projectId,
@@ -39,7 +39,7 @@
 	let busy = $state(false);
 	let error = $state<string | null>(null);
 	let note = $state('');
-	const checklist = $derived(issue ? issueChecklist(issue) : []);
+	const checklist = $derived(issue ? issueChecklist(issue, pack.signoffs) : []);
 	const canIssue = $derived(pack.status === 'draft' && manifestMatches && !!issue && checklist.every((c) => c.ok));
 	const sourceRun = $derived(pack.scenarioRunId ?? pack.baselineRunId);
 	const reportHref = $derived(resolve(`projects/${encodeURIComponent(projectId)}/report?run=${encodeURIComponent(sourceRun)}&evidence`));
@@ -158,7 +158,7 @@
 									>Open the evidence report</a
 								>{:else if !c.ok && c.fix === 'registration'}<a href={resolve(`projects/${encodeURIComponent(projectId)}?tab=project#regcheck-h`)} data-testid="pack-check-fix"
 									>Open Registration checks</a
-								>{/if}</span
+								>{:else if !c.ok && c.fix === 'signoff'}<a href="#{SIGNOFF_ANCHOR}" data-testid="pack-check-fix">Go to Appendix B.2</a>{/if}</span
 						>
 					</li>
 				{/each}
