@@ -171,7 +171,7 @@ export function fixtureRequester(now: () => number = Date.now): Requester {
 	};
 }
 
-/** The fixtures' station client: the real guarded client, answered by the synthetic API. */
+/** The fixtures' station client: the real guarded client, answered by the synthetic API, with a pause map of its own per fetch (as `pacer: null`), so the synthetic /v1/throttled never holds back the next fixture fetch. */
 export function fixtureStationHttp(now: () => number = Date.now): StationHttp {
-	return stationHttp({ requester: fixtureRequester(now) });
+	return stationHttp({ requester: fixtureRequester(now), throttle: new Map() });
 }

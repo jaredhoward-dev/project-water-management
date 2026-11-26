@@ -334,7 +334,9 @@ in `infra/feeds.tf`):
   (default 7) for late readings.
 - **Limits we keep to (the polite-client checklist, as far as it applies):**
   one descriptive user agent with a contact; one request at a time per host,
-  about one a second (`hostPacer`); `Retry-After` honoured on 429 and 503; a **401 or 403
+  about one a second (`hostPacer`); `Retry-After` honoured on 429 and 503 (the host is
+  left alone for it by every station feed in the process, 60 s without one, at most
+  15 minutes, then the scheduler's backoff; `stationHttp.ts`); a **401 or 403
   stops the feed and backs it off for hours** (2 h × 2ⁿ, 242), never a retry
   storm against the owner's provider account; a 30 s deadline and an 8 MB cap
   per answer; no compression. No conditional GETs: these APIs answer a query,
