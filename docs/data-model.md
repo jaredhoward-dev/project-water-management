@@ -5177,7 +5177,12 @@ One scheduled feed per row ([architecture.md § Data feeds](./architecture.md#da
     `water_app`): the first instant `app_feed_is_due` turns true, so the
     backoff arithmetic lives in one place; NULL when never scheduled. The
     feed list (`feeds/store.ts`) returns it as `nextAttemptAt` for an enabled
-    feed with an acting user, null otherwise.
+    feed with an acting user, null otherwise. 377 gives a throttle its own
+    floor: when `last_error` matches `^the source is unreachable: HTTP
+    (429|503): the source asked us to slow down` (`FeedThrottledError`), the
+    failing backoff is 1 h × 2^(failures − 1) and at least the
+    `Retry-After: N s` the message names, still capped at the day (issue
+    #877).
   - Held while a fetch is out (`app_feed_fetch_out(fetch_job_id, now)`, 276,
     plain, pinned `search_path`, revoked from `PUBLIC`): `app_due_feeds` and
     `app_claim_feed` skip a due feed whose `fetch_job_id` names a

@@ -560,14 +560,57 @@ describe('the scheduler', () => {
 		// Five would be 32 h: capped at the day, so a refused feed still tries once a day.
 		expect(await dueAfter(5, 23 * 60, refused)).toBe(false);
 		expect(await dueAfter(5, 24 * 60, refused)).toBe(true);
-		// Positive controls: an unavailable or throttled source keeps 15 minutes, doubling.
+		// Positive control: an unavailable source keeps 15 minutes, doubling (a throttled one has its own floor, 377, tested below).
 		expect(await dueAfter(1, 16, feedErrorMessage(new FeedUnavailableError('HTTP 502')))).toBe(true);
-		expect(await dueAfter(1, 16, feedErrorMessage(new FeedThrottledError(429, 60)))).toBe(true);
 		// DWS's ScriptServer error page is the site down for a while: retried like any outage.
 		expect(await dueAfter(1, 16, feedErrorMessage(new FeedServerError(DWS_SERVER_ERROR, DWS_SERVER_ERROR_LABEL)))).toBe(true);
 		expect(await dueAfter(2, 28, feedErrorMessage(new FeedServerError(DWS_SERVER_ERROR, DWS_SERVER_ERROR_LABEL)))).toBe(false);
 		// An older stored 403, from before FeedRefusedError, is no refusal to the backoff.
 		expect(await dueAfter(1, 16, 'the source is unreachable: HTTP 403')).toBe(true);
+	});
+
+	it('a throttled feed (HTTP 429/503) backs off 1 h × 2^(failures − 1), at least its Retry-After, never beyond the day; an ordinary failure keeps 15 min (positive control; 377)', async () => {
+		const client = new pg.Client({ connectionString: process.env.TEST_MIGRATION_DATABASE_URL });
+		await client.connect();
+		try {
+			const next = async (source: string, failures: number, error: string | null) =>
+				(await client.query<{ at: Date | null }>('SELECT app_feed_next_attempt($1, $2, $3, $4, $5) AS at', [source, 'daily', failures, '2026-03-01T09:00:00Z', error])).rows[0]!.at?.toISOString() ?? null;
+			// The stored messages exactly as the fetch writes them (feeds/errors.ts), so the SQL's pattern can't drift from them.
+			const none = feedErrorMessage(new FeedThrottledError(429));
+			const short = feedErrorMessage(new FeedThrottledError(429, 120));
+			const busy = feedErrorMessage(new FeedThrottledError(503));
+			// Positive controls: an ordinary failure keeps 15 minutes (a minute's slack for the tick), a refusal 2 hours.
+			expect(await next('dws', 1, feedErrorMessage(new FeedUnavailableError('HTTP 502')))).toBe('2026-03-01T09:14:00.000Z');
+			expect(await next('dws', 1, feedErrorMessage(new FeedRefusedError()))).toBe('2026-03-01T10:59:00.000Z');
+			// A throttle: an hour, whether 429 or 503, with no Retry-After or a shorter one.
+			for (const error of [none, short, busy]) expect(await next('dws', 1, error), error).toBe('2026-03-01T09:59:00.000Z');
+			// Doubling: three throttles, four hours.
+			expect(await next('chirps', 3, none)).toBe('2026-03-01T12:59:00.000Z');
+			// A longer Retry-After is the floor: 3 h asked after one throttle.
+			expect(await next('dws', 1, feedErrorMessage(new FeedThrottledError(429, 3 * 3600)))).toBe('2026-03-01T11:59:00.000Z');
+			// A Retry-After past the day, or a huge one: capped at the day (the schedule's own instant).
+			expect(await next('dws', 1, feedErrorMessage(new FeedThrottledError(503, 3 * 86_400)))).toBe('2026-03-02T08:59:00.000Z');
+			expect(await next('dws', 1, feedErrorMessage(new FeedThrottledError(503, 999_999_999)))).toBe('2026-03-02T08:59:00.000Z');
+			// A slot that comes first still wins: GEFS's 08:45 UTC the next day before a 1 d Retry-After.
+			expect(await next('chirps_gefs', 1, feedErrorMessage(new FeedThrottledError(429, 86_400)))).toBe('2026-03-02T08:45:00.000Z');
+			// A message stored before 377 reads as a throttle too.
+			expect(await next('dws', 1, 'the source is unreachable: HTTP 429: the source asked us to slow down, so the feed tries again later')).toBe('2026-03-01T09:59:00.000Z');
+			// "Retry-After" in any other message is no throttle: an outage's wording can't stretch its backoff.
+			expect(await next('dws', 1, 'the source is unreachable: HTTP 502 (Retry-After: 7200 s)')).toBe('2026-03-01T09:14:00.000Z');
+			// Through the scheduler's claim, as a feed row: not due at 16 min, due at the hour.
+			const owner = await signUp('Throttled');
+			const pid = await project(owner);
+			const id = (await owner.call('POST', `/projects/${pid}/feeds`, chirps())).body.feed.id;
+			const dueAfter = async (minutesAgo: number) => {
+				await asOwner(`UPDATE data_feed SET consecutive_failures = 1, last_error = $2, last_scheduled_at = now() - make_interval(mins => $3) WHERE id = $1`, [id, short, minutesAgo]);
+				return (await claimDue(50)).length === 1;
+			};
+			expect(await dueAfter(16)).toBe(false);
+			expect(await dueAfter(58)).toBe(false);
+			expect(await dueAfter(59)).toBe(true);
+		} finally {
+			await client.end();
+		}
 	});
 
 	it('app_feed_next_attempt is the first instant app_feed_is_due turns true: each schedule, the failing and the refused backoff (243)', async () => {

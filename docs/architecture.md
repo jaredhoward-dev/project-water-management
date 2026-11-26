@@ -1222,7 +1222,8 @@ row names a source, where to read it and the series it merges into:
     windows (72 requests) the first day and 24 a day after, plus any Run now
     (rate limited per feed). A failing fetch
     stops at its first failed request and retries on the scheduler's backoff
-    (15 minutes doubling, hours after a refused key).
+    (15 minutes doubling, an hour and at least its `Retry-After` after a
+    429/503, hours after a refused key).
   - *The guard* (`stationHttp.ts`): the one feed path that asks a URL a
     person typed, from a fetcher with open egress. https on port 443 only,
     no `user:password@`; the host resolved at connect time and the whole
@@ -1812,9 +1813,11 @@ row names a source, where to read it and the series it merges into:
   together: a failure between them rolls the claim back and the next tick
   tries again, and one feed's failure doesn't hold up the rest (#32). A
   failing feed retries sooner: 15 minutes after one failure, doubling up to
-  the day (2 hours, doubling, when the source refused it with HTTP 403;
-  Throttling below). When that is (`app_feed_next_attempt`,
-  243_feed_next_attempt.sql, the same rule `app_feed_is_due` now reads) is
+  the day (2 hours, doubling, when the source refused it with HTTP 403; an
+  hour, doubling, and at least its `Retry-After`, when it throttled with
+  429 or 503; Throttling below). When that is (`app_feed_next_attempt`,
+  243_feed_next_attempt.sql, last defined in 377_feed_throttle_backoff.sql,
+  the same rule `app_feed_is_due` now reads) is
   the feed list's `nextAttemptAt`, and a failing feed's card says it ("It
   tries again after 10:13."; ui.md § Data feeds). **A feed whose fetch is
   still out is not due** (276, `app_feed_fetch_out`): in production a fetch
@@ -2054,9 +2057,13 @@ For a source still fetched per feed (`FEED_FETCHER`, `jobs/transport.ts`):
   15 minutes, `THROTTLE_*` in `feeds/http.ts`), remembered across a warm
   Lambda's invocations, so the fetches queued behind it (in the pacer, too:
   the pause is checked once a request holds its slot) fail without asking.
-  The feed records the failure and the scheduler's backoff takes it from
-  there (15 minutes, doubling up to a day); a success restarts the backfill
-  chain. An HTTP 403 is a `FeedRefusedError` (also a `FeedUnavailableError`,
+  The feed records the failure, its stored message naming the
+  `Retry-After` the source sent ("… asked us to slow down and to wait 2
+  minutes (Retry-After: 120 s) …", or that it gave none; `FeedThrottledError`
+  in `feeds/errors.ts`), and the scheduler backs a throttled feed off on its
+  own floor: an hour, doubling, and at least that `Retry-After`, up to a day
+  (`377_feed_throttle_backoff.sql`, issue #877); a success restarts the
+  backfill chain. An HTTP 403 is a `FeedRefusedError` (also a `FeedUnavailableError`,
   `refused` in the fetcher's log), kept apart from throttling: CHC answers
   403 to an address it has blocked for volume (2026-10-25: each new
   fetcher environment, with its own outbound address, got through a fetch

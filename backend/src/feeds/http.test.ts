@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { FeedRefusedError, FeedThrottledError, FeedUnavailableError, feedErrorMessage } from './errors.js';
+import { FeedRefusedError, FeedThrottledError, FeedUnavailableError, feedErrorMessage, waitWords } from './errors.js';
 import {
 	feedHttp,
 	FEED_HOST_PATHS,
@@ -79,7 +79,11 @@ describe('liveHttp', () => {
 		const err = await liveHttp(busy, throttle).range('https://data.chc.ucsb.edu/a.tif', 0, 7).catch((e: unknown) => e);
 		expect(err).toBeInstanceOf(FeedThrottledError);
 		expect(err).toBeInstanceOf(FeedUnavailableError);
-		expect(err).toMatchObject({ status: 429, retryAfterSeconds: 120, message: 'HTTP 429: the source asked us to slow down, so the feed tries again later' });
+		expect(err).toMatchObject({ status: 429, retryAfterSeconds: 120 });
+		// The stored message names the wait the source asked for, in words and in seconds (the scheduler reads the seconds, 377).
+		expect(feedErrorMessage(err)).toBe(
+			'the source is unreachable: HTTP 429: the source asked us to slow down and to wait 2 minutes (Retry-After: 120 s), so the feed waits at least an hour, or longer if it asked, before asking again'
+		);
 		// The next request to that host, from any client sharing the state, fails at once without asking.
 		const ok = respond(206, 'ab');
 		await expect(liveHttp(ok, throttle).range('https://data.chc.ucsb.edu/b.tif', 0, 1)).rejects.toMatchObject({ status: 429, retryAfterSeconds: expect.any(Number) });
@@ -90,6 +94,37 @@ describe('liveHttp', () => {
 		throttle.get('data.chc.ucsb.edu')!.until = Date.now() - 1;
 		expect(new TextDecoder().decode((await liveHttp(ok, throttle).range('https://data.chc.ucsb.edu/b.tif', 0, 1))!)).toBe('ab');
 		expect(throttle.has('data.chc.ucsb.edu')).toBe(false);
+	});
+
+	it('stores a throttle with the Retry-After the source sent, seconds or an HTTP date, and says when it sent none (issue #877)', async () => {
+		const throttled = async (status: 429 | 503, retryAfter: string | null) => {
+			const headers: Record<string, string> = retryAfter === null ? {} : { 'retry-after': retryAfter };
+			return liveHttp(vi.fn(async () => new Response('', { status, headers })), new Map()).text('https://data.chc.ucsb.edu/p').catch((e: unknown) => e);
+		};
+		expect(feedErrorMessage(await throttled(503, '3600'))).toBe(
+			'the source is unreachable: HTTP 503: the source asked us to slow down and to wait 60 minutes (Retry-After: 3600 s), so the feed waits at least an hour, or longer if it asked, before asking again'
+		);
+		// An HTTP date: the seconds from now to it.
+		const date = await throttled(429, new Date(Date.now() + 3 * 3600_000).toUTCString());
+		expect((date as FeedThrottledError).retryAfterSeconds).toBeGreaterThan(3 * 3600 - 5);
+		expect(feedErrorMessage(date)).toMatch(/^the source is unreachable: HTTP 429: the source asked us to slow down and to wait 3 hours \(Retry-After: \d+ s\), so the feed waits/);
+		// None, or one we can't read: said, so the operator knows the wait is ours.
+		for (const v of [null, 'soon'])
+			expect(feedErrorMessage(await throttled(429, v))).toBe(
+				'the source is unreachable: HTTP 429: the source asked us to slow down but gave no Retry-After, so the feed waits at least an hour before asking again'
+			);
+		// The longest Retry-After we read still fits the fetcher's answer (jobs/transport.ts: 300 characters).
+		expect(feedErrorMessage(new FeedThrottledError(503, 999_999_999)).length).toBeLessThanOrEqual(300);
+		expect([1, 45, 119, 120, 7199, 7200, 172_799, 172_800].map(waitWords)).toEqual([
+			'1 second',
+			'45 seconds',
+			'119 seconds',
+			'2 minutes',
+			'120 minutes',
+			'2 hours',
+			'48 hours',
+			'2 days'
+		]);
 	});
 
 	it('reads HTTP 403 as refused, not throttled, and stops asking that host for an hour, whatever Retry-After says (positive control: another host is asked)', async () => {
