@@ -21,7 +21,8 @@ import {
 	type MemberMetrics,
 	type MemberScores
 } from './ensemble';
-import { pairedRefusal, runPairedEnsemble, summarisePaired } from './paired';
+import { pairedNeedsRerun, pairedRefusal, runPairedEnsemble, summarisePaired } from './paired';
+import { ENGINE_VERSION } from '../version';
 import { latinHypercube } from './sample';
 import { memberMismatches, pickCheckedMembers, sampleMismatches, verifyEnsemble, verifyPaired } from './verify';
 import { diffEnsembleOptions, type AcceptanceThresholds } from './options';
@@ -661,6 +662,78 @@ describe('paired bands on the difference between a run and its baseline', () => 
 		expect([s.carriesMeasures, o.carriesMeasures]).toEqual([true, false]);
 		// The measures it always had are unchanged.
 		expect(o.ewrDaysNotMet).toEqual(summarisePaired(baseline, paired).ewrDaysNotMet);
+	});
+
+	it('on the baseline’s own engine, re-run nothing and use its stored figures, as before issue #897', () => {
+		expect(pairedNeedsRerun(baseline)).toBe(false);
+		expect(pairedNeedsRerun({ engineVersion: undefined })).toBe(false);
+		const paired = runPairedEnsemble(application, baseline);
+		expect(paired).not.toHaveProperty('rerun');
+		// Bit for bit the stored-figures path: no engine version given is the same run, and the summary adds no key.
+		expect(runPairedEnsemble(application, { ...baseline, engineVersion: undefined })).toEqual(paired);
+		const s = summarisePaired(baseline, paired);
+		expect(s).not.toHaveProperty('baselineRerunFrom');
+		expect(s.decisionRule).not.toMatch(/engine/);
+	});
+
+	describe('a baseline stored on another engine (issue #897)', () => {
+		// Its stored figures as another engine might have left them: every number nudged, so subtracting them would band the engine's change.
+		const nudge = (m: MemberMetrics): MemberMetrics =>
+			JSON.parse(JSON.stringify(m), (_k, v: unknown) => (typeof v === 'number' && v !== 0 ? v * 1.01 + 0.5 : v)) as MemberMetrics;
+		const older = { ...baseline, engineVersion: '0.0.0-older', members: baseline.members.map((m) => (m.metrics ? { ...m, metrics: nudge(m.metrics) } : m)) };
+		const kept = baseline.members.filter((m) => m.accepted);
+
+		it('needs the baseline run’s inputs, re-runs its kept sets on them, and gives exactly zero for the same inputs', () => {
+			expect(pairedNeedsRerun(older)).toBe(true);
+			expect(() => runPairedEnsemble(base, older)).toThrow(/stored on engine 0\.0\.0-older: its run's inputs are needed/);
+			const same = runPairedEnsemble(base, older, { baselineInput: base });
+			expect(same.engineVersion).toBe(ENGINE_VERSION);
+			expect(same.rerun!.baselineEngineVersion).toBe('0.0.0-older');
+			expect(same.rerun!.members.map((m) => m.index)).toEqual(kept.map((m) => m.index));
+			const s = summarisePaired(older, same, { own: ['F2'] });
+			expect(s.members).toBe(kept.length);
+			for (const b of [s.ewrDaysNotMet, s.shortfallMm3, s.marOutflowMm3, s.marNaturalMm3, s.noFlowDays!, ...s.ewrDaysNotMetByMonth, ...s.annual.map((y) => y.outflow)]) {
+				expect([b.p5, b.p50, b.p95, b.min, b.max]).toEqual([0, 0, 0, 0, 0]);
+			}
+			expect([s.ewrDaysNotMetWorse, s.shortfallWorse, s.noFlowDaysWorse]).toEqual([0, 0, 0]);
+			expect(s.baselineRerunFrom).toBe('0.0.0-older');
+			expect(s.decisionRule).toMatch(/run on engine 0\.0\.0-older; its sets were run again on both runs' inputs on one engine/);
+			// Without the re-run, the stored figures would put the engine's own change into the band.
+			const stale = summarisePaired(older, { header: same.header, members: same.members });
+			expect(stale.marOutflowMm3.max).not.toBe(0);
+		});
+
+		it('band the application’s change exactly as on the baseline’s own engine', () => {
+			const now = summarisePaired(baseline, runPairedEnsemble(application, baseline), { own: ['F2'] });
+			const { baselineRerunFrom, decisionRule, ...across } = summarisePaired(older, runPairedEnsemble(application, older, { baselineInput: base }), { own: ['F2'] });
+			const { decisionRule: rule, ...want } = now;
+			expect(across).toEqual(want);
+			expect(baselineRerunFrom).toBe('0.0.0-older');
+			expect(decisionRule.startsWith(rule)).toBe(true);
+		});
+
+		it('the server’s check of the re-run catches a forged baseline set', () => {
+			const r = runPairedEnsemble(application, older, { baselineInput: base });
+			const random = new Rng(3).next.bind(new Rng(3));
+			expect(verifyPaired(base, options, older.header, kept, r.rerun!.members, 3, random).mismatches).toEqual([]);
+			const forged = r.rerun!.members.map((p) => ({ ...p, metrics: { ...p.metrics, marOutflowMm3: p.metrics.marOutflowMm3 + 1 } }));
+			expect(verifyPaired(base, options, older.header, kept, forged, 1, () => 0).mismatches.join(' ')).toMatch(/marOutflowMm3/);
+		});
+
+		it('stops when cancelled during the baseline’s re-run, with progress over both sides', () => {
+			const seen: number[] = [];
+			const r = runPairedEnsemble(application, older, {
+				baselineInput: base,
+				onProgress: (p) => {
+					seen.push(p.total);
+					return p.done === 2;
+				}
+			});
+			expect(r.cancelled).toBe(true);
+			expect(r.members).toEqual([]);
+			expect(r.rerun!.members).toHaveLength(2);
+			expect(seen[0]).toBe(2 * kept.length);
+		});
 	});
 
 	it('refuse two runoff models (never pooled) and two different periods', () => {

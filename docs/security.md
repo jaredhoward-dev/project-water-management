@@ -2420,7 +2420,9 @@ In short:
     server has regenerated the whole Latin-hypercube sample from the seed and
     re-run member 0 and **three members picked with `crypto.randomInt`**,
     finding the same scores, verdicts and outputs (`verifyEnsemble`,
-    `verifyPaired`, tolerance 1e-6 relative); the bands are then summarised
+    `verifyPaired`, tolerance 1e-6 relative; a paired band on a baseline
+    stored on another engine also posts that baseline's kept sets re-run on
+    its own run's inputs, checked the same way, issue #897); the bands are then summarised
     on the server from the members, and the header (farms, sites, EWR line)
     comes from the server's own run of member 0;
   - limits: an unchecked member's outputs are taken on trust, so a forger

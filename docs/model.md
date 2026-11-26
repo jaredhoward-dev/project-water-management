@@ -10405,7 +10405,20 @@ it never changes a run's results.
   catchment-response uncertainty both runs share, so the band is the change's
   own impact (a licence application's extra impact, [run-comparison.md](./run-comparison.md)).
   Members are judged once, on the baseline: an application changes the
-  network, not the observed history. The same inputs give exactly zero. A
+  network, not the observed history. The same inputs give exactly zero. Both
+  sides of every pair run on one engine (issue #897): when the baseline's
+  ensemble was stored on another engine (`pairedNeedsRerun`, an engine bump
+  since), its stored figures are that engine's, and subtracting them would
+  put the engine's own changes into "B − A". The paired job then also re-runs
+  the kept sets, unchanged, on the baseline run's own inputs
+  (`PairedResult.rerun`, with `baselineEngineVersion`), and the difference is
+  taken between the two re-runs; the summary's `baselineRerunFrom` and its
+  decision rule name the older engine. The kept sets are still the ones the
+  baseline's rule kept on its own engine (they are not judged again), so a
+  band cited before a bump stays the one cited. Refusing such a pair would
+  instead block every application on that baseline after a bump. On the
+  baseline's own engine nothing is re-run, and the stored figures are used
+  exactly as before (tested to the bit). A
   paired band is refused when the baseline's ensemble varied the pan
   coefficient and the other run is GR4J on a monthly PE row, which doesn't
   use it: the pairs would not be the same members.
