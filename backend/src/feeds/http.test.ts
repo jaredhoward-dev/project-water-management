@@ -161,6 +161,29 @@ describe('liveHttp', () => {
 		expect(throttle.size).toBe(0);
 	});
 
+	it('a request refused while the host is paused names a Retry-After only when the source gave one (issue #898)', async () => {
+		const throttle: ThrottleState = new Map();
+		const ok = respond(200, 'ok');
+		// No Retry-After: our own 60 s pause holds the host, and the local refusal says the source gave none.
+		await expect(liveHttp(respond(429), throttle).text('https://data.chc.ucsb.edu/p')).rejects.toMatchObject({ status: 429, retryAfterSeconds: null });
+		expect(throttle.get('data.chc.ucsb.edu')).toMatchObject({ sourceRetryAfter: false });
+		const local = await liveHttp(ok, throttle).text('https://data.chc.ucsb.edu/q').catch((e: unknown) => e);
+		expect(local).toMatchObject({ status: 429, retryAfterSeconds: null });
+		expect(feedErrorMessage(local)).toBe(
+			'the source is unreachable: HTTP 429: the source asked us to slow down but gave no Retry-After, so the feed waits at least an hour before asking again'
+		);
+		expect(ok).not.toHaveBeenCalled();
+		// With one: the local refusal names the time left of the wait the source asked for.
+		await expect(liveHttp(respond(503, '', { 'retry-after': '300' }), throttle).text('https://www.dws.gov.za/p')).rejects.toMatchObject({ status: 503, retryAfterSeconds: 300 });
+		expect(throttle.get('www.dws.gov.za')).toMatchObject({ sourceRetryAfter: true });
+		const asked = (await liveHttp(ok, throttle).text('https://www.dws.gov.za/q').catch((e: unknown) => e)) as FeedThrottledError;
+		expect(asked).toMatchObject({ status: 503 });
+		expect(asked.retryAfterSeconds).toBeGreaterThan(290);
+		expect(asked.retryAfterSeconds).toBeLessThanOrEqual(300);
+		expect(feedErrorMessage(asked)).toMatch(/^the source is unreachable: HTTP 503: the source asked us to slow down and to wait 5 minutes \(Retry-After: (29\d|300) s\)/);
+		expect(ok).not.toHaveBeenCalled();
+	});
+
 	it('a 503 without Retry-After pauses the default; a Retry-After past the cap pauses only the cap', async () => {
 		const throttle: ThrottleState = new Map();
 		await expect(liveHttp(respond(503), throttle).text('https://data.chc.ucsb.edu/p')).rejects.toMatchObject({ status: 503, retryAfterSeconds: null });

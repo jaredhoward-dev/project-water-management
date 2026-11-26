@@ -2063,7 +2063,9 @@ For a source still fetched per feed (`FEED_FETCHER`, `jobs/transport.ts`):
   The feed records the failure, its stored message naming the
   `Retry-After` the source sent ("… asked us to slow down and to wait 2
   minutes (Retry-After: 120 s) …", or that it gave none; `FeedThrottledError`
-  in `feeds/errors.ts`), and the scheduler backs a throttled feed off on its
+  in `feeds/errors.ts`; a fetch refused locally while the host is paused names
+  the time left only when the source gave a `Retry-After`, never our own 60 s
+  default, issue #898), and the scheduler backs a throttled feed off on its
   own floor: an hour, doubling, and at least that `Retry-After`, up to a day
   (`377_feed_throttle_backoff.sql`, issue #877); a success restarts the
   backfill chain. An HTTP 403 is a `FeedRefusedError` (also a `FeedUnavailableError`,
