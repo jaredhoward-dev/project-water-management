@@ -209,7 +209,9 @@
 	/** Send the issued pack to the members acting for the responsible authority (licensing build item 13). */
 	let sendOpen = $state(false);
 	const ready = $derived(status === 'loaded');
-	const stamp = $derived(pack ? packStamp(pack) : '');
+	/** The zone the report and its stamp date in (issue #864): the project's, or in a render session the browser's. */
+	const timeZone = $derived(packTimeZone(project, !!session.user?.renderSession));
+	const stamp = $derived(pack ? packStamp(pack, timeZone) : '');
 	const verify = $derived(pack ? packVerifyRef(pack, page.url.origin, basePath()) : null);
 	// The frozen project name, as the manifest recorded it.
 	const footer = $derived(
@@ -373,7 +375,7 @@
 		<PackActions {projectId} {pack} issue={detail.issue} manifestMatches={detail.manifestMatches} {canEdit} onchange={reload} />
 		<Lazy load={loadReport}>
 			{#snippet children(EvidenceReportView)}
-				<EvidenceReportView {report} {projectId} {stamp} {verify} frozen {signoffs} signoffTarget={{ kind: 'pack', id: pack!.id }} onsignoffchange={reload} timeZone={packTimeZone(project, !!session.user?.renderSession)} />
+				<EvidenceReportView {report} {projectId} {stamp} {verify} frozen {signoffs} signoffTarget={{ kind: 'pack', id: pack!.id }} onsignoffchange={reload} {timeZone} />
 			{/snippet}
 		</Lazy>
 	{/if}

@@ -10,7 +10,7 @@
 	// 284_cancel_future_jobs). Never on a pack: a pack freezes § 8 as it was drafted.
 	import { onDestroy, untrack } from 'svelte';
 	import { api, type FutureYieldState } from '#lib/api/index.js';
-	import { fmtDate } from '#lib/format/number.js';
+	import { fmtProjectDay } from '#lib/components/project/project.js';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { cancellableJobStatus, jobStatus } from '#lib/components/yield/yield.js';
 
@@ -18,7 +18,8 @@
 		projectId,
 		runId,
 		assessed,
-		onchange
+		onchange,
+		timeZone
 	}: {
 		projectId: string;
 		runId: string;
@@ -26,6 +27,8 @@
 		assessed: boolean;
 		/** The job finished: read the report again. */
 		onchange: () => Promise<void> | void;
+		/** The project's IANA zone, which the result's run date is read in, as § 8 dates it (issue #864); undefined = the default zone. */
+		timeZone?: string;
 	} = $props();
 
 	let fy = $state.raw<FutureYieldState | null>(null);
@@ -95,7 +98,7 @@
 	<p class="board-h"><span id="ev-future-h">§ 8 Future yield</span> <HelpTip key="future-climate" label="About the future climate" /></p>
 	<p class="small muted">
 		{#if assessed && fy?.result}
-			Run {fmtDate(fy.result.createdAt)}{fy.result.createdBy ? ` by ${fy.result.createdBy}` : ''}. Run it again when the climate projections or this application run change; a pack
+			Run {fmtProjectDay(fy.result.createdAt, timeZone)}{fy.result.createdBy ? ` by ${fy.result.createdBy}` : ''}. Run it again when the climate projections or this application run change; a pack
 			drafted now freezes what § 8 shows.
 		{:else}
 			§ 8 hasn’t been run for this application run, so it reads “Not assessed”. It runs the baseline and the application again under each climate model’s change factors, about 40

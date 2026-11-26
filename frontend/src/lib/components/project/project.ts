@@ -4,6 +4,8 @@ import { fmtDate, fmtDay, zonedIsoDate } from '#lib/format/number.js';
 /** The zone a project dates its downloads by when the API sends none (issue #45). */
 export const DEFAULT_TIME_ZONE = 'Africa/Johannesburg';
 
+const BARE_DAY = /^\d{4}-\d{2}-\d{2}$/;
+
 /**
  * The project's calendar day (YYYY-MM-DD) at an ISO moment, in its time zone
  * (DEFAULT_TIME_ZONE when the API sends none), never UTC's or the device's:
@@ -23,11 +25,46 @@ export function projectDay(iso: string, timeZone: string = DEFAULT_TIME_ZONE): s
 /**
  * A moment as the project's calendar day for a reader, "27 Oct 2026": a run's
  * or a pack's date in a report (issue #860), never UTC's day (an ISO slice)
- * or the device's.
+ * or the device's. A bare day (YYYY-MM-DD) is that day, never moved by a zone.
  */
 export function fmtProjectDay(iso: string | null | undefined, timeZone?: string): string {
 	if (!iso || Number.isNaN(new Date(iso).getTime())) return iso || '–';
+	// A bare day has no time to move: UTC midnight is the day before west of Greenwich.
+	if (BARE_DAY.test(iso)) return fmtDay(iso);
 	return fmtDay(projectDay(iso, timeZone));
+}
+
+const stampFormats = new Map<string, Intl.DateTimeFormat>();
+
+function zonedStampParts(at: Date, timeZone: string): { day: string; time: string } {
+	let f = stampFormats.get(timeZone);
+	if (!f) {
+		f = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+		stampFormats.set(timeZone, f);
+	}
+	const p = Object.fromEntries(f.formatToParts(at).map((x) => [x.type, x.value]));
+	return { day: `${p.year}-${p.month}-${p.day}`, time: `${p.hour}:${p.minute}` };
+}
+
+/**
+ * A moment with its time of day as the project's clock reads it, "27 Oct
+ * 2026 00:30": a sign-off or a notes edit in an evidence report (issue #864),
+ * beside run dates fmtProjectDay prints, so one page never dates in two
+ * zones. DEFAULT_TIME_ZONE when none is given; a zone Intl doesn't know falls
+ * back to it. A bare day (no time) is that day; a missing or unreadable date
+ * is left as fmtProjectDay leaves it.
+ */
+export function fmtProjectStamp(iso: string | null | undefined, timeZone: string = DEFAULT_TIME_ZONE): string {
+	if (!iso || Number.isNaN(new Date(iso).getTime())) return iso || '–';
+	if (BARE_DAY.test(iso)) return fmtDay(iso);
+	const at = new Date(iso);
+	let parts: { day: string; time: string };
+	try {
+		parts = zonedStampParts(at, timeZone);
+	} catch {
+		parts = zonedStampParts(at, DEFAULT_TIME_ZONE);
+	}
+	return `${fmtDay(parts.day)} ${parts.time}`;
 }
 
 /**
