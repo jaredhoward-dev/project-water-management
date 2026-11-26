@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '#lib/api/client.js';
-import { cardOnFailure, classify, farmHref, farmReturn, pickNode, wordsHref, worstFirst } from './load';
+import { cardOnFailure, classify, farmHref, farmReturn, farmReturnPage, pickNode, wordsHref, worstFirst } from './load';
 
 describe('what a failed request means', () => {
 	it('403 and 404 mean access removed; 0 means no signal; the rest a failure', () => {
@@ -36,10 +36,33 @@ describe('which farm to show', () => {
 	});
 });
 
+describe('the words page names its back link for the page it returns to', () => {
+	it('says which farm page a return address is', () => {
+		expect(farmReturnPage('/farm/p1')).toBe('farm');
+		expect(farmReturnPage('/farm/p1?node=n-2')).toBe('farm');
+		expect(farmReturnPage('/farm/p1/dam?node=n_2')).toBe('dam');
+		expect(farmReturnPage('/farm/p1/why')).toBe('why');
+		expect(farmReturnPage('/farm/p1/who-decides?node=n')).toBe('who-decides');
+	});
+	it('names the account pages that link to a farmer word', () => {
+		expect(farmReturnPage('/account')).toBe('account');
+		expect(farmReturnPage('/account/alerts')).toBe('alerts');
+		expect(farmReturnPage('/account/invitations')).toBe('invitations');
+	});
+	it('is null for anything farmReturn refuses', () => {
+		for (const bad of [null, '', '/farm/words', '/farm/p1/settings', '//evil.example/farm/p1/dam']) expect(farmReturnPage(bad)).toBeNull();
+	});
+});
+
 describe('the words page returns to the farm page it was opened from', () => {
 	it('takes a farm page, its sub-pages and ?node=', () => {
 		for (const ok of ['/farm/p1', '/farm/p1?node=n-2', '/farm/p1/why', '/farm/p1/dam?node=n_2', '/farm/p1/who-decides'])
 			expect(farmReturn(ok)).toBe(ok);
+	});
+	it('takes the account pages that link to a farmer word, exactly', () => {
+		for (const ok of ['/account', '/account/alerts', '/account/invitations']) expect(farmReturn(ok)).toBe(ok);
+		for (const bad of ['/account/', '/account/plan', '/account/alerts?x=1', '/account/alerts/../../projects', '/accounts', '//account/alerts', '/account/alerts#x'])
+			expect(farmReturn(bad)).toBeNull();
 	});
 	it('refuses anything else, so ?from= is never an open redirect', () => {
 		for (const bad of [
@@ -63,13 +86,18 @@ describe('the words page returns to the farm page it was opened from', () => {
 		expect(wordsHref('', { pathname: '/farm/p1/why', search: '?node=n1' }, 'farm-reserve')).toBe(`/farm/words?from=${encodeURIComponent('/farm/p1/why?node=n1')}#farm-reserve`);
 		expect(wordsHref('/app', { pathname: '/app/farm/p1', search: '' })).toBe(`/app/farm/words?from=${encodeURIComponent('/farm/p1')}`);
 	});
-	it('adds nothing from a page that is not a farm page', () => {
-		expect(wordsHref('', { pathname: '/account', search: '' })).toBe('/farm/words');
+	it('adds nothing from a page that is neither a farm page nor an account page that links a word', () => {
+		expect(wordsHref('', { pathname: '/projects/p1', search: '' })).toBe('/farm/words');
+		expect(wordsHref('', { pathname: '/account/plan', search: '' })).toBe('/farm/words');
+	});
+	it('carries the alert settings, so the words page leads back to them, not to the list of units', () => {
+		expect(wordsHref('', { pathname: '/account/alerts', search: '' }, 'farm-alerts')).toBe(`/farm/words?from=${encodeURIComponent('/account/alerts')}#farm-alerts`);
+		expect(wordsHref('/app', { pathname: '/app/account', search: '' })).toBe(`/app/farm/words?from=${encodeURIComponent('/account')}`);
 	});
 	it('on the words page, passes on its own from, never a bad one', () => {
 		expect(wordsHref('', { pathname: '/farm/words', search: '?from=%2Ffarm%2Fp1' })).toBe(`/farm/words?from=${encodeURIComponent('/farm/p1')}`);
 		expect(wordsHref('', { pathname: '/farm/words', search: '?from=%2F%2Fevil.example' })).toBe('/farm/words');
-		expect(wordsHref('', { pathname: '/account', search: '' }, 'farm-modelled')).toBe('/farm/words#farm-modelled');
+		expect(wordsHref('', { pathname: '/projects', search: '' }, 'farm-modelled')).toBe('/farm/words#farm-modelled');
 	});
 });
 
@@ -109,5 +137,14 @@ describe('cardOnFailure (/farm: a card whose figures fail)', () => {
 		expect(cardOnFailure(new ApiError(403, 'x'), () => saved)).toEqual({ drop: true });
 		// A 404 carrying the code is still removed (classify reads the code only on a 403).
 		expect(cardOnFailure(new ApiError(404, 'x', undefined, 'farm_preview_withheld'), () => saved)).toEqual({ drop: true });
+	});
+});
+
+describe('cardOnFailure keeps when the saved copy was saved', () => {
+	it('hands back the saved entry whole, so the /farm card can say the figures are the phone’s copy from then', () => {
+		const entry = { view: { farm: 'saved copy' }, savedAt: 1_700_000_000_000, usedAt: 1_700_000_100_000 };
+		const next = cardOnFailure(new ApiError(500, 'x'), () => entry);
+		expect(next).toEqual({ drop: false, withheld: false, view: entry });
+		expect(next.drop === false && !next.withheld && next.view?.savedAt).toBe(1_700_000_000_000);
 	});
 });

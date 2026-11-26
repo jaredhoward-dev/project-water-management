@@ -15477,7 +15477,10 @@ published.
   `worstFirst`), each with its notice level, received %, dam %, or "Not published yet" (while a card's
   figures load it says "Updating…", and when neither they nor a saved copy
   can be had, "We couldn’t load your hydrological unit", never a blank
-  line; a farm whose figures answer 403/404, unlinked since the list loaded,
+  line; when the live figures fail but the phone has a saved copy, the card
+  shows the copy under the farm page's own failed-update line, "We couldn’t
+  update your figures. These are the figures saved on this phone at …",
+  never as if current; a farm whose figures answer 403/404, unlinked since the list loaded,
   leaves the list and its saved copy goes, as a project the list's own
   403/404 leaves out, while one whose preview is withheld (403
   `farm_preview_withheld`) stays and says why, as the farm page does, with
@@ -15498,11 +15501,16 @@ published.
   waits: what accepting means, who sees what); `lib/help/farmer.test.ts` checks each
   link's entry exists in English and Afrikaans). Every link to it from a farm page
   (the Menu, the main page's foot, Why?'s, the dam page's and the cards'
-  entry links) carries that page as `?from=` (`farm/load.ts` `wordsHref`),
-  and its back link, **My hydrological unit**, returns there, so a farmer
-  with several farms comes back to the one they were reading. `from` is
+  entry links), and from the Account, Alert emails and Invitations pages,
+  carries that page as `?from=` (`farm/load.ts` `wordsHref`), and its back
+  link returns there, named for the page it returns to (**My hydrological
+  unit**, **Your dam**, **Why?**, the who-decides page's title, **Account**,
+  **Alert emails** or **Invitations**: `farmReturnPage`), so a farmer with
+  several farms comes back to the one they were reading, and one reading
+  what an alert email is comes back to their alert settings. `from` is
   taken only when it is a farm page's own address (`/farm/<id>`, its `/why`,
-  `/dam` or `/who-decides`, an optional `?node=`; `farmReturn`), never
+  `/dam` or `/who-decides`, an optional `?node=`) or exactly `/account`,
+  `/account/alerts` or `/account/invitations` (`farmReturn`), never
   another site or app page; without one the back link is **Your
   hydrological units** to `/farm`. The root
   page sends a user whose every membership is `farmer` to `/farm`; the
@@ -16276,8 +16284,8 @@ the catalogue, [§ Language](#language)); both unit-tested.
   `dailyCap`, and `capNotice` in `alerts/words.ts` words it, "1 alert email
   … comes" for one and "every alert email waits" for 0) ending in **What are
   alert emails?**, an inline link to the `farm-alerts` entry on
-  `/farm/words` (inline so the line stays one row; no `?from=`, so its back
-  link is **Your hydrological units**), and, when mail is
+  `/farm/words` (inline so the line stays one row; with `?from=`, so its
+  back link is **Alert emails** and returns here), and, when mail is
   paused, the banner below. Then a card per catchment you can open, as many
   across as fit the page's own width (at least 34rem each: two at 1440 and
   1280, stacked on a phone; `auto-fit`, so a lone catchment takes the whole
