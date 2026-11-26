@@ -119,12 +119,32 @@ export function zoneOffsetMs(tz: string, t: number): number {
 	return asUtc - Math.floor(t / 1000) * 1000;
 }
 
-/** The instant a wall-clock time in `tz` names (the earlier one in a repeated hour). */
-export function localToInstant(tz: string, y: number, mo: number, d: number, h = 0, mi = 0, s = 0): number {
+/**
+ * Every instant a wall-clock time in `tz` names, earliest first: one as a rule, two in the hour an
+ * autumn clock change repeats, none in the hour a spring change skips. The candidate offsets are the
+ * zone's a day either side, which finds every transition but two within one day of each other.
+ */
+export function localInstants(tz: string, y: number, mo: number, d: number, h = 0, mi = 0, s = 0): number[] {
 	const wall = Date.UTC(y, mo - 1, d, h, mi, s);
-	let t = wall - zoneOffsetMs(tz, wall);
-	t = wall - zoneOffsetMs(tz, t);
-	return t;
+	const out: number[] = [];
+	for (const off of new Set([zoneOffsetMs(tz, wall - DAY_MS), zoneOffsetMs(tz, wall + DAY_MS)])) {
+		const t = wall - off;
+		if (zoneOffsetMs(tz, t) === off) out.push(t);
+	}
+	return out.sort((a, b) => a - b);
+}
+
+/**
+ * The instant a wall-clock time in `tz` names: the earlier one in a repeated hour, and in a skipped
+ * hour the time read with the offset before the change (02:30 on a spring-forward day that jumps
+ * from 02:00 to 03:00 is 03:30 after it), as JavaScript's Temporal does by default. The day
+ * boundaries of stationRange use this; readStationAnswer refuses a skipped time instead.
+ */
+export function localToInstant(tz: string, y: number, mo: number, d: number, h = 0, mi = 0, s = 0): number {
+	const all = localInstants(tz, y, mo, d, h, mi, s);
+	if (all.length > 0) return all[0]!;
+	const wall = Date.UTC(y, mo - 1, d, h, mi, s);
+	return wall - zoneOffsetMs(tz, wall - DAY_MS);
 }
 
 /** The epoch day of an instant's wall-clock date in `tz`, after shifting the clock back `shiftMs`. */
@@ -379,6 +399,10 @@ export function readStationAnswer(text: string, f: StationFormat): StationReadin
 	if (pairs.length > STATION_MAX_READINGS) throw new StationFormatError(`the answer holds ${pairs.length} readings, more than a feed reads (${STATION_MAX_READINGS}): ask for fewer days a request`);
 
 	const out = new Map<number, number | null>();
+	// A sub-daily wall time in the hour an autumn clock change repeats names two instants. Records
+	// come oldest first, so the first record at that wall time is the earlier instant and the second
+	// the later; a third is a repeat of the later one. Counted per wall time, in record order.
+	const seenWall = new Map<number, number>();
 	for (const p of pairs) {
 		const t = parseTime(p.time, f.timeFormat);
 		if (!t) throw new StationFormatError(`${p.where}: the time “${clip(String(p.time ?? ''))}” doesn’t match the time format (${clip(f.timeFormat)})`);
@@ -389,7 +413,23 @@ export function readStationAnswer(text: string, f: StationFormat): StationReadin
 			at = t.wall ? toEpochDay(fromEpochDay(Math.floor(Date.UTC(t.wall.y, t.wall.mo - 1, t.wall.d) / DAY_MS))) : localEpochDay(tz, t.instant!);
 		} else {
 			if (t.wall?.dateOnly) throw new StationFormatError(`${p.where}: the time “${clip(String(p.time))}” has no hour, but the readings are sub-daily`);
-			at = t.instant ?? localToInstant(tz, t.wall!.y, t.wall!.mo, t.wall!.d, t.wall!.h, t.wall!.mi, t.wall!.s);
+			if (t.instant !== undefined) at = t.instant;
+			else {
+				const w = t.wall!;
+				const all = localInstants(tz, w.y, w.mo, w.d, w.h, w.mi, w.s);
+				if (all.length === 0) {
+					throw new StationFormatError(
+						`${p.where}: the time “${clip(String(p.time))}” doesn’t exist in ${tz} (its clocks skip that hour in spring): set the time zone the logger keeps, or read times with their offset`
+					);
+				}
+				if (all.length === 1) at = all[0]!;
+				else {
+					const key = Date.UTC(w.y, w.mo - 1, w.d, w.h, w.mi, w.s);
+					const n = seenWall.get(key) ?? 0;
+					seenWall.set(key, n + 1);
+					at = all[Math.min(n, all.length - 1)]!;
+				}
+			}
 		}
 		const value = v === null ? null : v * scale;
 		if (out.has(at)) {

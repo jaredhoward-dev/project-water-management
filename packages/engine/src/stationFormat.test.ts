@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	atPath,
 	formatStationTime,
+	localInstants,
 	localToInstant,
 	previewStationAnswer,
 	readStationAnswer,
@@ -88,6 +89,73 @@ describe('time zones', () => {
 		// London, summer (UTC+1) and winter (UTC+0).
 		expect(localToInstant('Europe/London', 2024, 7, 1, 8)).toBe(at('2024-07-01T07:00:00Z'));
 		expect(localToInstant('Europe/London', 2024, 1, 1, 8)).toBe(at('2024-01-01T08:00:00Z'));
+	});
+});
+
+describe('clock changes (issue #908)', () => {
+	// Europe/Berlin, 2024: 31 March 02:00 CET jumps to 03:00 CEST (01:00Z); 27 October 03:00 CEST falls back to 02:00 CET (01:00Z).
+	const BER = 'Europe/Berlin';
+	it('a repeated autumn hour names two instants and localToInstant takes the earlier', () => {
+		expect(localInstants(BER, 2024, 10, 27, 2, 30)).toEqual([at('2024-10-27T00:30:00Z'), at('2024-10-27T01:30:00Z')]);
+		expect(localToInstant(BER, 2024, 10, 27, 2, 30)).toBe(at('2024-10-27T00:30:00Z'));
+		expect(localToInstant(BER, 2024, 10, 27, 3, 0)).toBe(at('2024-10-27T02:00:00Z'));
+		expect(localToInstant(BER, 2024, 10, 27, 1, 59)).toBe(at('2024-10-26T23:59:00Z'));
+	});
+	it('a skipped spring hour names none, and localToInstant reads it with the offset before the change', () => {
+		expect(localInstants(BER, 2024, 3, 31, 2, 30)).toEqual([]);
+		expect(localToInstant(BER, 2024, 3, 31, 2, 30)).toBe(at('2024-03-31T01:30:00Z'));
+		expect(localToInstant(BER, 2024, 3, 31, 1, 59)).toBe(at('2024-03-31T00:59:00Z'));
+		expect(localToInstant(BER, 2024, 3, 31, 3, 0)).toBe(at('2024-03-31T01:00:00Z'));
+	});
+	it('Johannesburg (no daylight saving) has one instant for every hour of those days', () => {
+		for (const [mo, d] of [[3, 31], [10, 27]] as const) {
+			for (let h = 0; h < 24; h++) expect(localInstants(SAST, 2024, mo, d, h, 30)).toEqual([Date.UTC(2024, mo - 1, d, h - 2, 30)]);
+		}
+	});
+
+	const hourly: StationFormat = { format: 'csv', time: 'time', value: 'rain', timeFormat: 'YYYY-MM-DD HH:mm', timeZone: BER, resolution: 'subdaily', dayStartHour: 0 };
+	it('readings in the repeated hour, oldest first, are the earlier then the later instant', () => {
+		const csv = ['time,rain', '2024-10-27 01:30,0.1', '2024-10-27 02:00,0.2', '2024-10-27 02:30,0.3', '2024-10-27 02:00,0.4', '2024-10-27 02:30,0.5', '2024-10-27 03:00,0.6'].join('\n');
+		const r = readStationAnswer(csv, hourly);
+		expect(r.readings).toEqual([
+			{ at: at('2024-10-26T23:30:00Z'), value: 0.1 },
+			{ at: at('2024-10-27T00:00:00Z'), value: 0.2 },
+			{ at: at('2024-10-27T00:30:00Z'), value: 0.3 },
+			{ at: at('2024-10-27T01:00:00Z'), value: 0.4 },
+			{ at: at('2024-10-27T01:30:00Z'), value: 0.5 },
+			{ at: at('2024-10-27T02:00:00Z'), value: 0.6 }
+		]);
+		// All six fall in the 25-hour calendar day of 27 October.
+		expect(stationDays(r, hourly, '2024-10-27', '2024-10-27', LATER).values[0]).toBeCloseTo(2.1, 9);
+	});
+	it('two equal readings in the repeated hour are both kept, a third repeat of it must agree', () => {
+		const csv = ['time,rain', '2024-10-27 02:30,0.2', '2024-10-27 02:30,0.2'].join('\n');
+		expect(readStationAnswer(csv, hourly).readings).toHaveLength(2);
+		expect(readStationAnswer(`${csv}\n2024-10-27 02:30,0.2`, hourly).readings).toHaveLength(2);
+		expect(() => readStationAnswer(`${csv}\n2024-10-27 02:30,0.9`, hourly)).toThrow(/line 4: two readings at the same time disagree/);
+	});
+	it('refuses a time the spring change skips, naming the line and the zone', () => {
+		const csv = ['time,rain', '2024-03-31 01:30,0.1', '2024-03-31 02:30,0.2', '2024-03-31 03:30,0.3'].join('\n');
+		expect(() => readStationAnswer(csv, hourly)).toThrow(/line 3: the time “2024-03-31 02:30” doesn’t exist in Europe\/Berlin/);
+		const ok = readStationAnswer(['time,rain', '2024-03-31 01:30,0.1', '2024-03-31 03:30,0.3'].join('\n'), hourly);
+		expect(ok.readings.map((x) => x.at)).toEqual([at('2024-03-31T00:30:00Z'), at('2024-03-31T01:30:00Z')]);
+	});
+	it('a time with its offset needs no record order', () => {
+		const f = { ...hourly, timeFormat: 'iso' };
+		const json = ['time,rain', '2024-10-27T02:30:00+01:00,0.5', '2024-10-27T02:30:00+02:00,0.3'].join('\n');
+		expect(readStationAnswer(json, f).readings).toEqual([
+			{ at: at('2024-10-27T00:30:00Z'), value: 0.3 },
+			{ at: at('2024-10-27T01:30:00Z'), value: 0.5 }
+		]);
+	});
+	it('daily totals across both changes land on consecutive days, and the range covers the 23- and 25-hour days', () => {
+		const f: StationFormat = { ...daily, timeZone: BER };
+		for (const [a, b, c] of [['2024-03-30', '2024-03-31', '2024-04-01'], ['2024-10-26', '2024-10-27', '2024-10-28']]) {
+			const text = JSON.stringify({ data: [{ date: a, rain: 1 }, { date: b, rain: 2 }, { date: c, rain: 3 }] });
+			expect(stationDays(readStationAnswer(text, f), f, a!, c!, LATER).values).toEqual([1, 2, 3]);
+		}
+		expect(stationRange(f, '2024-03-31', '2024-03-31')).toEqual({ startMs: at('2024-03-30T23:00:00Z'), endMs: at('2024-03-31T22:00:00Z') });
+		expect(stationRange(f, '2024-10-27', '2024-10-27')).toEqual({ startMs: at('2024-10-26T22:00:00Z'), endMs: at('2024-10-27T23:00:00Z') });
 	});
 });
 
