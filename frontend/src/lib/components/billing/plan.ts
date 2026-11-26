@@ -41,6 +41,11 @@ export function subscriptionLine(s: Subscription | null): { text: string; warn: 
 		case 'trialing':
 			return { text: s.trialEnd ? `Trial ends ${fmtDate(s.trialEnd)}` : 'On a trial', warn: false };
 		case 'active':
+			// A plan the operator gave ends on its date by design (its cancel_at_period_end is set), so it is said
+			// plainly, never in the warning colour of a cancellation (330, 335).
+			if (s.granted === 'staff')
+				return { text: s.periodEnd ? `Granted by the operator until ${fmtDate(s.periodEnd)}` : 'Granted by the operator, with no end date', warn: false };
+			if (s.granted === 'invoice') return { text: s.periodEnd ? `Paid by invoice; runs until ${fmtDate(s.periodEnd)}` : 'Paid by invoice', warn: false };
 			if (!s.periodEnd) return { text: 'Active', warn: false };
 			return s.cancelAtPeriodEnd
 				? { text: `Ends ${fmtDate(s.periodEnd)}; it won't renew`, warn: true }
@@ -201,8 +206,16 @@ export function hasPaidSubscription(p: Pick<AccountPlan, 'subscription'>): boole
  */
 export function billingActions(p: AccountPlan): { upgrade: { code: 'pro' | 'team'; name: string } | null; manage: boolean } {
 	if (p.provider !== 'mock' && p.provider !== 'stripe') return { upgrade: null, manage: false };
+	// A staff grant has nothing at the provider to manage (no customer, no subscription there; checkout refuses it
+	// too): the page says it is the operator's instead (grantNote).
+	if (p.subscription?.granted === 'staff') return { upgrade: null, manage: false };
 	if (hasPaidSubscription(p)) return { upgrade: null, manage: true };
 	return { upgrade: p.account.kind === 'team' ? { code: 'team', name: 'Team' } : { code: 'pro', name: 'Pro' }, manage: false };
+}
+
+/** The line a staff grant shows in place of the billing buttons: who changes it. Null for anything else. */
+export function grantNote(s: Subscription | null | undefined): string | null {
+	return s?.granted === 'staff' && s.status === 'active' ? 'To change or end this plan, ask the operator. Nothing is charged for it here.' : null;
 }
 
 /** The most editor seats one checkout sells; the API holds the same ceiling (billing/provider.ts MAX_CHECKOUT_SEATS) and refuses past it. */

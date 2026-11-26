@@ -296,3 +296,34 @@ test('during a reverse trial’s last 3 days the Plan page warns and offers Upgr
 	await plan.getByRole('link', { name: 'See all plans' }).click();
 	await expect(page).toHaveURL(/\/welcome\/pricing$/);
 });
+
+// A staff grant (330; docs/billing.md § Staff grants): the plan is answered here with page.route as Pro granted by
+// the operator until a date (provider `manual`, so `granted: 'staff'`). The page says who gave it, in the plain
+// colour (not a cancellation's warning), and offers neither Upgrade (checkout refuses a grant) nor Manage billing
+// (nothing at the provider to manage), but says to ask the operator. The backend's unit test covers `granted`.
+test('a staff grant says it is the operator’s and offers no billing buttons', async ({ page, owner }) => {
+	void owner;
+	const periodEnd = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString();
+	await page.route(`${API_URL}/account/plan`, async (route) => {
+		if (route.request().method() !== 'GET') return route.fallback();
+		const res = await route.fetch();
+		const body = (await res.json()) as { plan: Record<string, unknown> };
+		await route.fulfill({
+			response: res,
+			json: {
+				...body,
+				plan: { ...body.plan, code: 'pro', name: 'Pro' },
+				subscription: { status: 'active', seats: 1, periodStart: new Date().toISOString(), periodEnd, trialEnd: null, cancelAtPeriodEnd: true, interval: null, reverseTrial: false, granted: 'staff' }
+			}
+		});
+	});
+	await page.goto('/account/plan');
+	const plan = page.getByRole('region', { name: 'Plan', exact: true });
+	const line = plan.locator('[data-subscription="active"]');
+	await expect(line).toHaveText(/^Granted by the operator until /);
+	await expect(line).not.toHaveClass(/\bwarn\b/);
+	await expect(plan.locator('[data-grant-note]')).toHaveText('To change or end this plan, ask the operator. Nothing is charged for it here.');
+	await expect(plan.getByRole('button', { name: 'Manage billing' })).toHaveCount(0);
+	await expect(plan.getByRole('button', { name: MONTHLY })).toHaveCount(0);
+	await expectNoViolations(page);
+});
