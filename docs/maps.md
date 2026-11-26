@@ -1716,7 +1716,9 @@ to a point on a river. The design, the method and its accuracy are in
   channel runs within 150 m of that point. Zoom in until the terrain
   channels show (they're in the map's key), and click on one: they are the elevation
   model's rivers, which the outline follows. Zoom in further to see
-  smaller channels." The mapped river network
+  smaller channels." A click on a cell with no elevation data (a hole in
+  a tile, or no tile) is refused `no_data` instead: "The elevation model
+  has no data at that point." (issue #905). The mapped river network
   (HydroRIVERS, the basemap's waterways) never moves or chooses the
   outlet: the elevation model's rivers often run hundreds of metres from
   the mapped lines, and the outline follows the elevation model's
@@ -2424,7 +2426,11 @@ in [design/start-from-map.md](./design/start-from-map.md); the screen in
   150 m of the outlet gauge. Move the gauge onto a terrain channel …");
   any other such point is dropped with the reason
   "has no terrain channel within 150 m: move it onto one of the elevation
-  model’s channels". From `start-7` to `start-14` the points were placed by
+  model’s channels". A point on a cell with no elevation data (a tile the
+  DEM lacks) is not off-channel: the outlet gauge, or a click that would be
+  the lowest, is refused `no_data` ("The elevation model has no data at
+  …"), and any other is dropped as "is where the elevation model has no
+  data" (issue #905). From `start-7` to `start-14` the points were placed by
   the mapped river's rules (a reach's area matched, the river asked
   for at a confluence, a junction side kept, a red-line or gully rule);
   those were retired in `start-15`. A point placed

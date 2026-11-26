@@ -748,6 +748,8 @@ export async function delineateUnits(
 		const OUTLET = '';
 		/** The points (by key) with no terrain channel within the snap radius (place.ts): never placed. */
 		const offChannel = new Set<string>();
+		/** The points (by key) on a cell of the window with no elevation data (a tile the DEM lacks): never placed, and not off-channel (issue #905). */
+		const noData = new Set<string>();
 		/** The least channel area each snapped point (by key) went on, for the method (placementText). */
 		const usedKm2 = new Map<string, number>();
 		const snapAt = (p: Position, key?: string, hints: PlacementHints = {}): number | null => {
@@ -764,7 +766,8 @@ export async function delineateUnits(
 			if (key !== undefined) usedKm2.set(key, minKm2);
 			const placed = place({ nx: nCells, ny: nCells, acc, edge, cellSizeM }, x, y, { snapRadiusM, minKm2 });
 			if (!placed) {
-				if (key !== undefined) offChannel.add(key);
+				// No channel cell in reach: the point is on no data (its own cell has no elevation), else off every channel.
+				if (key !== undefined) (Number.isNaN(before[Math.floor(y) * nCells + Math.floor(x)]!) ? noData : offChannel).add(key);
 				return null;
 			}
 			if (placed.larger && hints.useLarger) {
@@ -806,6 +809,7 @@ export async function delineateUnits(
 			for (const p of req.points) {
 				if (p.geometry.type !== 'Point') continue;
 				const c = snapAt(p.geometry.coordinates, p.id, p);
+				if (noData.has(p.id)) throw new DelineationRefused('no_data', `The elevation model has no data at ${p.name ?? 'a click'}.`);
 				if (offChannel.has(p.id)) throw new DelineationRefused('off_channel', offChannelText(p.name ?? 'a click', snapRadiusM));
 				if (c === null || (outlet >= 0 && acc[c]! <= acc[outlet]!)) continue;
 				outlet = c;
@@ -815,6 +819,7 @@ export async function delineateUnits(
 			if (outlet < 0) throw new DelineationRefused('no_data', 'The elevation model has no data around the clicks.');
 		} else if (fixedOutlet) {
 			const c = snapAt(fixedOutlet, OUTLET, req.outletHints);
+			if (noData.has(OUTLET)) throw new DelineationRefused('no_data', 'The elevation model has no data at the outlet gauge.');
 			if (offChannel.has(OUTLET)) throw new DelineationRefused('off_channel', offChannelText('the outlet gauge', snapRadiusM, 'gauge'));
 			if (c === null) throw new DelineationRefused('no_data', 'The elevation model has no data around the outlet.');
 			outlet = c;
@@ -957,6 +962,10 @@ export async function delineateUnits(
 					cell = snapAt(rings[0]![0]!, p.id);
 					if (cell !== null) moved = movedM(rings[0]![0]!, cell);
 				}
+			}
+			if (noData.has(p.id)) {
+				dropped.push({ id: p.id, reason: 'is where the elevation model has no data' });
+				continue;
 			}
 			if (offChannel.has(p.id)) {
 				dropped.push({ id: p.id, reason: `has no terrain channel within ${snapRadiusM} m: move it onto one of the elevation model’s channels` });

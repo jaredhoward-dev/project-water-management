@@ -375,7 +375,7 @@ describe('delineateUnits (synthetic DEM)', () => {
 	it('divides at the clicks when their box’s centre has no tile: the tile side from a tile in the box (issue #874)', async () => {
 		// The DEM's bounds run two tiles past its data; a click there moves the clicks' box's centre onto a missing tile.
 		const holed = widerEast(dem);
-		// Placed exactly (a click past the data snaps to no channel and is refused off_channel, a separate matter).
+		// Placed exactly (a click past the data snaps to no channel and would be refused no_data, issue #905).
 		const far: UnitPoint = { id: 'far', role: 'dam', exact: true, geometry: { type: 'Point', coordinates: at(900, 300) } };
 		const centreCol = Math.floor((DAM_CELL.x + 900) / 2 / FIXTURE_TILE);
 		expect(await holed.tile(FIXTURE_ZOOM, FIXTURE_X0 + centreCol, FIXTURE_Y0 + 1)).toBeNull();
@@ -392,6 +392,20 @@ describe('delineateUnits (synthetic DEM)', () => {
 		const e = await delineateUnits(holed, { outlet: 'lowest', boundary: null, points: [point('a', 600, 300), point('b', 700, 320)] }).catch((x: unknown) => x);
 		expect(e).toBeInstanceOf(DelineationRefused);
 		expect((e as DelineationRefused).code).toBe('no_data');
+	});
+
+	it('refuses a click where the DEM has no tile as no data, not off-channel (issue #905)', async () => {
+		const holed = widerEast(dem);
+		// The dam's click is on data; the second is east of the data, inside the stated bounds, on cells with no elevation.
+		const e = await delineateUnits(holed, { outlet: 'lowest', boundary: null, points: [point('dam', DAM_CELL.x, DAM_CELL.y + 1), { ...point('east', 900, 300), name: 'East' }] }).catch((x: unknown) => x);
+		expect(e).toBeInstanceOf(DelineationRefused);
+		expect((e as DelineationRefused).code).toBe('no_data');
+		expect((e as DelineationRefused).message).toBe('The elevation model has no data at East.');
+		// Positive control: a click on data with no channel near it (just past the ridge, as delineate.test.ts's) is still off-channel.
+		const off = await delineateUnits(holed, { outlet: 'lowest', boundary: null, points: [point('dam', DAM_CELL.x, DAM_CELL.y + 1), { ...point('ridge', OUTLET_CELL.x - 91, OUTLET_CELL.y - 120), name: 'Ridge' }] }).catch((x: unknown) => x);
+		expect(off).toBeInstanceOf(DelineationRefused);
+		expect((off as DelineationRefused).code).toBe('off_channel');
+		expect((off as DelineationRefused).message).toMatch(/^No terrain channel runs within 150 m of Ridge\./);
 	});
 
 	it('finds the outlet inside a boundary when none is given', async () => {
