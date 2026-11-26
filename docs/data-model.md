@@ -5075,6 +5075,21 @@ runbook ([deployment.md § Restoring the database](./deployment.md#restoring-the
 step 6a), which reads it on the old instance and deletes each row again on
 the restored one.
 
+### Report PDF erasure (395_report_pdf_erasure.sql)
+
+`report_pdf_erasure (id, project_id, report_id, queued_at, attempts)`: a
+report row deleted while its PDF may still be stored (younger than 8 days:
+its requester's account or its project deleted, by either path) is queued
+here by an `AFTER DELETE` trigger on `report` (`report_pdf_erasure_record`,
+SECURITY DEFINER); older rows are `app_purge_reports`' own. Ids only, the
+object key derived in code (`reportKey`), no foreign keys, owner-only like
+`erasure_log` (`OWNER_ONLY`). The job tick claims a batch
+(`app_report_pdf_erasures`, fewest attempts first, `FOR UPDATE SKIP
+LOCKED`), deletes each PDF from storage and settles it
+(`app_report_pdf_erasures_settle`: removed entries go, failed ones count an
+attempt); both functions refuse anything but the worker's context
+(`reports/erasure.ts`, `reports/erasure.db.test.ts`; issue #903).
+
 ### Reference loads (192_feature_names_reference_load.sql, 248_reference_load_provenance.sql)
 
 `reference_load (kind, dataset, source_key, source_sha256, loaded_at)`,

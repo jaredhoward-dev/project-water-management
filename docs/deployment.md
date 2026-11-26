@@ -5088,7 +5088,11 @@ Every step is an ordinary app action by an owner unless it says "operator".
    random id only, never an address or a name. Both paths, the self-service
    one and the SQL below, also write the id to the `erasure_log` table (159),
    which a restore reads to delete the account again
-   ([§ Restoring the database](#restoring-the-database), step 6a). Otherwise
+   ([§ Restoring the database](#restoring-the-database), step 6a), and
+   queue their report PDFs for removal (395, issue #903): the worker's next
+   tick deletes them from the reports bucket, so there is nothing to delete
+   in S3 by hand (a delete it couldn't make logs
+   `report_pdf_erasure_failed` and is retried each tick). Otherwise
    (they can't sign in, or ask another way): a request may come by email or
    any other expedient way (POPIA s24,
    Regulation 3); act on it as soon as reasonably practicable. Confirm it

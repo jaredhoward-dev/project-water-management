@@ -3221,7 +3221,13 @@ sequenceDiagram
   A missed week is sent once, late; older misses aren't replayed.
 - **Retention:** PDFs 7 days (the bucket's lifecycle in production); the
   tick deletes report rows after 8 days (`app_purge_reports`), and locally
-  their MinIO objects too.
+  their MinIO objects too. A row deleted sooner (its requester's account
+  or its project deleted, by the API or the operator's SQL) queues its PDF's
+  removal: a trigger on `report` writes the ids to the owner-only
+  `report_pdf_erasure` (395, issue #903), and each tick deletes up to 100 of
+  those PDFs from storage (`reports/erasure.ts`; MinIO or the bucket, the
+  worker's role holding `s3:DeleteObject` on `reports/*` only), dropping
+  each entry once its object is gone and retrying the rest next tick.
 
 Where the render runs (`REPORT_RENDERER`, `jobs/transport.ts`):
 
