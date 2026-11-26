@@ -41,6 +41,15 @@ describe('stationHttp: what it refuses before asking', () => {
 		['https://[::1]/x', /private or reserved/],
 		['https://[::ffff:127.0.0.1]/x', /private or reserved/],
 		['https://0x7f.1/x', /private or reserved/],
+		// Decimal, octal and short IPv4 forms (the URL parser rewrites them to dotted quads), and IPv4 inside IPv6 written in hex.
+		['https://2130706433/x', /private or reserved/],
+		['https://017700000001/x', /private or reserved/],
+		['https://127.1/x', /private or reserved/],
+		['https://0/x', /private or reserved/],
+		['https://[::ffff:a9fe:a9fe]/x', /private or reserved/],
+		['https://[::ffff:0:7f00:1]/x', /private or reserved/],
+		['https://[::7f00:1]/x', /private or reserved/],
+		['https://[::]/x', /private or reserved/],
 		['https://[fd00:ec2::254]/x', /private or reserved/],
 		['https://localhost/x', /public internet name/],
 		['https://metadata.internal/x', /public internet name/]

@@ -3428,6 +3428,11 @@ the key another way.
   `credential.test.ts`). The URL's host is written out, never a placeholder
   (`config.ts` `stationUrlProblem`): with `{station}` in the host, an edit of
   the station ID would move the key to another site under the same binding.
+  The check compares the URL's parsed origin with the placeholders filled
+  in several ways, not only the text after `https://`: the URL parser also
+  reads `https:\\host`, `https:host` and `https:/host` and drops tabs and
+  newlines, and `https:\\{station}%2ecom/` once passed as the site
+  `x.com` while the station ID chose the real one (`config.test.ts`).
 
 - **Who can open it: only the fetcher.** The private key
   (`FEED_CREDENTIAL_PRIVATE_KEY`) is the fetcher Lambda's runtime secret

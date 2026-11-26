@@ -538,7 +538,11 @@ export function stationUrlProblem(raw: string): string | null {
 	// The site itself is fixed: a placeholder in the host would let an edit of the station ID (or the dates) send the
 	// key to another site while its binding (credential.ts credentialBinding) still read the same origin.
 	const authority = /^[a-z][a-z0-9+.-]*:\/\/([^/?#]*)/i.exec(raw.trim())?.[1] ?? '';
-	if (authority.includes('{')) return 'the URL’s site (its host) must be written out: put {station}, {start} and {end} in its path or query';
+	// The regex reads only the canonical `scheme://authority`; the URL parser also takes `https:\\host`, `https:host`,
+	// `https:/host` and drops tabs and newlines, so the origin itself is compared with the placeholders filled two
+	// ways each (letters, and digits for a port): a placeholder anywhere in the site changes it.
+	const origins = new Set(['x', 'y', '0', '1'].flatMap((v) => URL.parse(raw.replace(/\{(station|start|end)\}/g, v))?.origin ?? []));
+	if (authority.includes('{') || origins.size > 1) return 'the URL’s site (its host) must be written out: put {station}, {start} and {end} in its path or query';
 	const url = URL.parse(raw.replace(/\{(station|start|end)\}/g, 'x'));
 	if (!url) return 'not a valid URL (it starts https://)';
 	const problem = urlProblem(url);
