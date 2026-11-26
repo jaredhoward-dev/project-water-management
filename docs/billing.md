@@ -377,6 +377,7 @@ output never goes into an issue, a PR, a chat or an agent's transcript.
 | Metric | How it is worked out | Threshold (the issue's) |
 | --- | --- | --- |
 | Orphans past the retries (printed first) | Rows of `billing_event` still `orphan_pending` (352) more than 3 days after they were received, whatever the month: the provider, its event id, type and age, oldest first. Stripe has stopped redelivering them, so nothing will cancel or refund them but the operator ([deployment.md § Billing alarms](./deployment.md#billing-alarms)). No account or person: the account is gone | any one → finish it in Stripe's dashboard |
+| Teams over their paid seats (403) | Team accounts with `over_seats_since` set whose live Team plan pays for fewer seats than `app_team_seats_in_use` counts now (a stale marker is never listed), whatever the month: the account and team ids, editors, seats and since when, longest over first. Ids and numbers only, so redaction keeps them | any one → the team's new editors are refused; check the portal's quantity setting (§ Team seats) |
 | Activation | Verified sign-ups of the month (SAST) with a model run of their own (`model_run.trigger` `manual`: the live model, a scenario or a calibration they asked for, never a live catchment's automatic or forecast run; 402) within 7 days of signing up. Sign-ups under 7 days old are left out and counted as pending | < 30% → fix onboarding first |
 | Active Free accounts near / at each limit | Active = a run someone asked for (`manual`, as above: an account whose only runs this month are automatic is idle, 402), a server report or assistant use this month on the account's projects. Near ≥ 80% of the limit, at ≥ 100%, for reports (5), the assistant's dollars ($1), catchments (Free has no limit, so none) and live catchments (1: the share at the live-catchment limit). Catchments and live catchments are counted **today**; live is 338's count (`app_live_catchments_in_use`: an enabled feed or alert rule, automatic runs on, or a publication; [§ Live catchments](#live-catchments-free)), so an account past its limit from before enforcement counts as at it, and an idle account with a live catchment isn't in the share | > 15% at reports → 10 a month; < 3% at the monthly assistant cap → room to raise |
 | Reverse trial → paid within 30 days | The reverse trials (342) that **began in the report's SAST month**: `billing_grant_log` `grant` rows by `reverse trial`, one per account (one trial per canonical email). Paid = the account's first paid plan at or after the trial's start: a subscription from a payment provider (`stripe`, or `mock` locally) whose first payment was taken: `active`, `past_due` or `canceled` (so a plan bought and later cancelled counts; not `trialing`, and not `expired`, Stripe's `incomplete_expired`, a first payment never made), or a paid B2B invoice's grant (`billing_grant_log` `grant` by `invoice`, 335); a staff grant is not paid. Converted when it came at most 30 days after the start. A trial under 30 days old is left out and counted as pending (with how many of those already pay). A deleted account's trial goes with it (`billing_grant_log` cascades) | |
@@ -1008,10 +1009,17 @@ invites"; Enforcement design, "Editors per catchment / Team seats").
   add that commits first is counted by the cut (recorded over), a cut that
   commits first is read by the add's guard (refused, enforced). The seat
   guard refuses any new seat while the team is over, as before; nobody loses
-  a seat. The plan page reads `team.overSeats { seats, editors, since }` from
-  `app_account_plan`, worked out at each read (null within its seats), and
-  the job tick clears the marker once editors are made viewers or seats
-  bought. **What the portal should allow:** configure Stripe's customer
+  a seat. With enforcement off (shadow mode, 404) the seat triggers still
+  reach the guard for a change that gives a new seat, and the guard records
+  the team over its seats rather than refusing. The plan page reads
+  `team.overSeats { seats, editors, since }` from `app_account_plan`, worked
+  out at each read (null within its seats), and shows a note on the Plan
+  card: how many editors over, that everyone keeps access but no one new can
+  be made an editor, and to add seats with *Change seats* or make editors
+  viewers (`plan.ts` `overSeatsNotice`; `billing-seats.spec.ts`). The
+  operator report lists the teams over their seats (§ Metrics and the abuse
+  report). The job tick clears the marker once editors are made viewers or
+  seats bought. **What the portal should allow:** configure Stripe's customer
   portal without quantity changes on the extra-seat item (seats change
   through *Change seats*, which refuses a cut below the editors in use); the
   record is the backstop if it is ever allowed.

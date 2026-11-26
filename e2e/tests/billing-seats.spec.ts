@@ -167,3 +167,23 @@ test('a team admin raises the assistant share through the confirm dialog', async
 	await page.reload();
 	await expect(plan.getByRole('region', { name: 'Assistant share' }).getByRole('spinbutton')).toHaveValue('80');
 });
+
+// 403 (issue #926): a team with more editors than its plan pays for (seats cut in Stripe's portal) sees a note on its
+// Plan card saying how many over and what to do. The API's team.overSeats is mocked onto the real plan answer.
+test('a team over its paid seats sees the over-seats note on its Plan card', async ({ page, owner }) => {
+	void owner;
+	const teamId = await teamOnTeamPlan(page, 'Over seats Team');
+	await page.route(`${API_URL}/teams/${teamId}/plan`, async (route) => {
+		if (route.request().method() !== 'GET') return route.fallback();
+		const res = await route.fetch();
+		const body = (await res.json()) as { team: Record<string, unknown> };
+		body.team = { ...body.team, editorCount: 5, overSeats: { seats: 3, editors: 5, since: '2026-11-20T08:00:00.000Z' } };
+		await route.fulfill({ response: res, json: body });
+	});
+	await page.reload();
+	const plan = page.getByRole('region', { name: 'Plan', exact: true });
+	const note = plan.locator('[data-over-seats]');
+	await expect(note).toHaveText(/^This team has 5 editors but its plan pays for 3 editor seats since .+: 2 over\./);
+	await expect(note).toContainText('Add 2 seats with Change seats, or make 2 editors viewers.');
+	await expectNoViolations(page);
+});

@@ -4843,9 +4843,15 @@ export interface AccountPlan {
 	/**
 	 * A team account's editor seats in use (332): the distinct people with editor or owner on its projects; and the
 	 * share (1–100 %) of its monthly assistant dollars one member may use on a per-seat plan (339; default 50, a team
-	 * admin sets it with POST …/plan/assistant-share). null on a person's account.
+	 * admin sets it with POST …/plan/assistant-share). null on a person's account. `overSeats` (403, issue #926): more
+	 * editors than a live Team plan's paid seats (a seat cut in the provider's portal), worked out at each read, with
+	 * when the subscription was first seen so (null when not recorded yet); null within its seats, absent from an older API.
 	 */
-	team: { editorCount: number; assistantMemberMaxPct: number } | null;
+	team: {
+		editorCount: number;
+		assistantMemberMaxPct: number;
+		overSeats?: { seats: number; editors: number; since: string | null } | null;
+	} | null;
 	usage: {
 		/** "YYYY-MM", the month in Africa/Johannesburg. */
 		month: string;

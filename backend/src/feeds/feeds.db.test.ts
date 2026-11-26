@@ -334,6 +334,11 @@ describe('feed routes across projects and roles', () => {
 		expect((await tick()).done).toBe(1);
 		vi.stubEnv('BILLING_ENFORCED', '');
 		expect((await asOwner('SELECT project_id FROM project_plan_pause WHERE project_id = $1', [pid])).length).toBe(1);
+		// The job ended done (not failed or retried), and fetched nothing: no attempt on the feed, no days.
+		expect(await asOwner(`SELECT status, attempts FROM job WHERE kind = 'feed_fetch' AND payload ->> 'feedId' = $1`, [id])).toEqual([
+			{ status: 'done', attempts: 1 }
+		]);
+		expect((await series(owner, pid, 'rain_forecast_mm'))?.values.filter((v) => v !== null) ?? []).toEqual([]);
 		expect((await asOwner('SELECT last_attempt_at FROM data_feed WHERE id = $1', [id]))[0].last_attempt_at).toBeNull();
 		// Positive control: resumed (the kept catchment's feed off, so the account is back within Free), the same feed fetches.
 		expect((await owner.call('PATCH', `/projects/${other}/feeds/${keptFeed}`, { enabled: false })).status).toBe(200);

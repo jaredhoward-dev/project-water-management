@@ -253,6 +253,27 @@ describe('orphans past the provider\'s retries (352)', () => {
 	});
 });
 
+describe('teams over their paid seats (403, issue #926)', () => {
+	it('lists a team recorded over its seats with its ids and numbers; not one recorded but back within them', async () => {
+		const admin = await signUp('MetricsOverSeats');
+		const m1 = await signUp('MetricsOverM1');
+		const teamId = (await admin.call('POST', '/teams', { name: `Metrics over ${crypto.randomUUID().slice(0, 8)}` })).body.team.id as string;
+		const account = ((await asOwner(`SELECT billing_account_ensure('team', $1) AS id`, [teamId])) as { id: string }[])[0]!.id;
+		await asOwner(`INSERT INTO team_member (team_id, user_id, role) VALUES ($1, $2, 'member') ON CONFLICT DO NOTHING`, [teamId, m1.id]);
+		// Team with 1 paid seat (seats below the included 3 count as 3): give it 4 editors by direct SQL, then the subscription.
+		const extra = await Promise.all(['MetricsOverM2', 'MetricsOverM3'].map((n) => signUp(n)));
+		for (const u of extra) await asOwner(`INSERT INTO team_member (team_id, user_id, role) VALUES ($1, $2, 'member')`, [teamId, u.id]);
+		await asOwner(`INSERT INTO subscription (billing_account_id, plan_code, status, seats, provider) VALUES ($1, 'team', 'active', 3, 'mock')`, [account]);
+		const mine = (r: Awaited<ReturnType<typeof gatherReport>>) => r.overSeats.filter((o) => o.accountId === account);
+		const r = await gatherReport(process.env.TEST_MIGRATION_DATABASE_URL!, '2001-03');
+		expect(mine(r)).toEqual([{ accountId: account, teamId, seats: 3, editors: 4, since: expect.any(String) }]);
+		// Positive control the other way: one member made a viewer, back within 3 seats: not listed, even before the tick clears the marker.
+		await asOwner(`UPDATE team_member SET role = 'viewer' WHERE team_id = $1 AND user_id = $2`, [teamId, extra[0]!.id]);
+		expect(mine(await gatherReport(process.env.TEST_MIGRATION_DATABASE_URL!, '2001-03'))).toEqual([]);
+		await asOwner(`DELETE FROM subscription WHERE billing_account_id = $1`, [account]);
+	});
+});
+
 describe('owner only', () => {
 	it('water_app can neither execute nor call them; the owner can (positive control)', async () => {
 		const grants = (await asOwner(

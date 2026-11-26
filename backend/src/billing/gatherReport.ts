@@ -1,11 +1,11 @@
 // The billing metrics report's rows (325_billing_metrics's owner-only
-// functions, 338's live count, 342's reverse trials in billing_grant_log, 352's orphans still pending) on a schema-owner connection, built into the report by
+// functions, 338's live count, 342's reverse trials in billing_grant_log, 352's orphans still pending, 403's teams over their seats) on a schema-owner connection, built into the report by
 // metrics.ts (issue #641; docs/billing.md § Metrics and the abuse report).
 // Two callers: the local script (scripts/billing-report.ts) and the migrate
 // Lambda's billing-report action (ops/ownerActions.ts), which answers with
 // redact(report) only. No dotenv here: the migrate Lambda bundles this module.
 import type pg from 'pg';
-import { buildReport, type AccountRow, type GateRefusalRow, type OrphanPendingRow, type PersonRow, type PlanLimits, type Report, type ReverseTrialRow } from './metrics.js';
+import { buildReport, type AccountRow, type GateRefusalRow, type OrphanPendingRow, type OverSeatsRow, type PersonRow, type PlanLimits, type Report, type ReverseTrialRow } from './metrics.js';
 
 /** The month's report (YYYY-MM, or null for the current SAST month), addresses included: redact before it leaves the caller. */
 export async function gatherReportOn(client: pg.ClientBase, month: string | null, now = new Date()): Promise<Report> {
@@ -74,5 +74,19 @@ export async function gatherReportOn(client: pg.ClientBase, month: string | null
 			`SELECT provider, event_id, type, received_at FROM billing_event WHERE outcome = 'orphan_pending' ORDER BY received_at`
 		)
 	).rows.map((r): OrphanPendingRow => ({ provider: r.provider, eventId: r.event_id, type: r.type, receivedAt: r.received_at }));
-	return buildReport(first.slice(0, 7), now, accounts, people, limits, refusals, trials, orphans);
+	// Teams over their paid seats today (403's over_seats_since, recounted now so a stale marker never lists): ids and numbers only.
+	const overSeats = (
+		await client.query<{ account_id: string; team_id: string; seats: string; editors: string; since: Date }>(
+			`SELECT * FROM (
+			   SELECT b.id AS account_id, b.team_id, b.over_seats_since AS since,
+			          greatest(coalesce((pl.limits ->> 'seats_included')::bigint, 1), coalesce(s.seats, 0)) AS seats,
+			          app_team_seats_in_use(b.team_id) AS editors
+			   FROM billing_account b
+			   JOIN subscription s ON s.billing_account_id = b.id AND s.status IN ('trialing', 'active', 'past_due') AND s.plan_code = 'team'
+			   JOIN plan pl ON pl.code = s.plan_code
+			   WHERE b.over_seats_since IS NOT NULL AND b.team_id IS NOT NULL
+			 ) o WHERE o.editors > o.seats`
+		)
+	).rows.map((r): OverSeatsRow => ({ accountId: r.account_id, teamId: r.team_id, seats: Number(r.seats), editors: Number(r.editors), since: r.since.toISOString() }));
+	return buildReport(first.slice(0, 7), now, accounts, people, limits, refusals, trials, orphans, overSeats);
 }

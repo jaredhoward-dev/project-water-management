@@ -269,6 +269,23 @@ export function editorsHint(editorCount: number | null | undefined): string | nu
 	return `This team has ${fmtNum(editorCount)} editor${editorCount === 1 ? '' : 's'}.`;
 }
 
+/**
+ * The notice when a team has more editors than its plan pays for (403, issue #926: seats cut in the provider's
+ * portal): how many over, that no one loses access, that new editors are refused, and what to do. Null within its
+ * seats, on a person's account, or from an older API that sends no `overSeats`.
+ */
+export function overSeatsNotice(plan: Pick<AccountPlan, 'team'>): string | null {
+	const o = plan.team?.overSeats;
+	if (!o || !Number.isInteger(o.seats) || !Number.isInteger(o.editors) || o.editors <= o.seats) return null;
+	const over = o.editors - o.seats;
+	const since = o.since ? ` since ${fmtDate(o.since)}` : '';
+	return (
+		`This team has ${fmtNum(o.editors)} editors but its plan pays for ${fmtNum(o.seats)} editor seat${o.seats === 1 ? '' : 's'}${since}: ` +
+		`${fmtNum(over)} over. Everyone keeps their access, but no one new can be made an editor. ` +
+		`Add ${over === 1 ? 'a seat' : `${fmtNum(over)} seats`} with Change seats, or make ${over === 1 ? 'an editor a viewer' : `${fmtNum(over)} editors viewers`}.`
+	);
+}
+
 /** The line under the seat field: "3 editor seats included; each extra one is R 499.00 a month or R 4 990.00 a year." */
 export function seatHint(seats: SeatOffer, currency: string): string {
 	return `${fmtNum(seats.included)} editor seats included; each extra one is ${fmtPrice(seats.extraMonthlyMinor, currency)} a month or ${fmtPrice(seats.extraAnnualMinor, currency)} a year. Up to ${fmtNum(seats.max)}.`;

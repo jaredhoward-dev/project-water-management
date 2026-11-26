@@ -267,3 +267,20 @@ describe('staleOrphans (352: an orphan the provider stopped retrying)', () => {
 		expect(none.split('\n')[2]).toBe("Orphaned subscriptions still pending past the provider's 3-day retries: none");
 	});
 });
+
+describe('teams over their paid seats (403, issue #926)', () => {
+	const now = new Date('2026-11-24T12:00:00Z');
+	const FREE = {};
+	const over = (accountId: string, since: string) => ({ accountId, teamId: `team-${accountId}`, seats: 3, editors: 5, since });
+
+	it('lists them longest over first, ids and numbers only, and redact keeps them; none says so', () => {
+		const r = buildReport('2026-11', now, [], [], FREE, [], [], [], [over('b', '2026-11-22T00:00:00.000Z'), over('a', '2026-11-20T00:00:00.000Z')]);
+		expect(r.overSeats.map((o) => o.accountId)).toEqual(['a', 'b']);
+		expect(redact(r).overSeats).toEqual(r.overSeats);
+		const text = formatReport(redact(r), false);
+		expect(text).toContain('Teams over their paid editor seats: 2 (new editors refused until they add seats or make editors viewers)');
+		expect(text).toContain('  account a  team team-a  5 editors on 3 seats  since 2026-11-20T00:00:00.000Z');
+		expect(JSON.parse(JSON.stringify(r)).overSeats[0]).toEqual(over('a', '2026-11-20T00:00:00.000Z'));
+		expect(formatReport(buildReport('2026-11', now, [], [], FREE), false)).toContain('Teams over their paid editor seats: none');
+	});
+});

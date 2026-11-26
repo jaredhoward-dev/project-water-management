@@ -149,6 +149,54 @@ describe('403: a team over its paid seats', () => {
 	});
 });
 
+describe('404: shadow mode records a team going over its seats on an editor add', () => {
+	it('off, an editor past the paid seats is added (not refused) and the team recorded over; back within, the tick clears it', async () => {
+		const admin = await signUp('ShadowOsAdmin');
+		const extra = await Promise.all(['ShadowOsM1', 'ShadowOsM2', 'ShadowOsM3'].map((n) => signUp(n)));
+		const teamId = (await admin.call('POST', '/teams', { name: `Shadow over ${crypto.randomUUID().slice(0, 8)}` })).body.team.id as string;
+		const account = ((await asOwner(`SELECT billing_account_ensure('team', $1) AS id`, [teamId])) as { id: string }[])[0]!.id;
+		await asOwner(`INSERT INTO subscription (billing_account_id, plan_code, status, seats, provider) VALUES ($1, 'team', 'active', 3, 'mock')`, [account]);
+		// The admin and two members: at the 3 seats, nothing recorded (positive control).
+		for (const u of extra.slice(0, 2)) await asOwner(`INSERT INTO team_member (team_id, user_id, role) VALUES ($1, $2, 'member')`, [teamId, u.id]);
+		expect(await overSince(account)).toBeNull();
+		// A fourth editor with billing off (asOwner sets no app.billing_enforced): added, and recorded over.
+		await asOwner(`INSERT INTO team_member (team_id, user_id, role) VALUES ($1, $2, 'member')`, [teamId, extra[2]!.id]);
+		expect(await overSince(account)).not.toBeNull();
+		expect((await admin.call('GET', `/teams/${teamId}/plan`)).body.team.overSeats).toMatchObject({ seats: 3, editors: 4 });
+		await asOwner(`UPDATE team_member SET role = 'viewer' WHERE team_id = $1 AND user_id = $2`, [teamId, extra[2]!.id]);
+		await tick();
+		expect(await overSince(account)).toBeNull();
+		await asOwner(`DELETE FROM subscription WHERE billing_account_id = $1`, [account]);
+	});
+});
+
+describe('403: the seat sync and 341’s pause sync on one subscription take their locks in one order', () => {
+	it('a status change, a seat change and an editor add at once all complete, with no deadlock', async () => {
+		const admin = await signUp('LockOrderAdmin');
+		const m = await signUp('LockOrderM1');
+		const teamId = (await admin.call('POST', '/teams', { name: `Lock order ${crypto.randomUUID().slice(0, 8)}` })).body.team.id as string;
+		const account = ((await asOwner(`SELECT billing_account_ensure('team', $1) AS id`, [teamId])) as { id: string }[])[0]!.id;
+		await asOwner(`INSERT INTO subscription (billing_account_id, plan_code, status, seats, provider) VALUES ($1, 'team', 'active', 3, 'mock')`, [account]);
+		await asOwner(`INSERT INTO team_member (team_id, user_id, role) VALUES ($1, $2, 'viewer')`, [teamId, m.id]);
+		for (let round = 0; round < 5; round++) {
+			const clients = await Promise.all([ownerClient(), ownerClient(), ownerClient()]);
+			try {
+				for (const c of clients) await c.query('BEGIN');
+				const writes = [
+					clients[0]!.query(`UPDATE subscription SET status = $2 WHERE billing_account_id = $1`, [account, round % 2 ? 'active' : 'past_due']),
+					clients[1]!.query(`UPDATE subscription SET seats = $2 WHERE billing_account_id = $1`, [account, 3 + (round % 2)]),
+					clients[2]!.query(`UPDATE team_member SET role = $3 WHERE team_id = $1 AND user_id = $2`, [teamId, m.id, round % 2 ? 'viewer' : 'member'])
+				].map((q, i) => q.then(() => clients[i]!.query('COMMIT')));
+				const results = await Promise.allSettled(writes);
+				expect(results.filter((r) => r.status === 'rejected').map((r) => (r as PromiseRejectedResult).reason?.code)).toEqual([]);
+			} finally {
+				for (const c of clients) await c.end();
+			}
+		}
+		await asOwner(`DELETE FROM subscription WHERE billing_account_id = $1`, [account]);
+	});
+});
+
 describe('403: a paused catchment moving accounts re-syncs both at once', () => {
 	it('the moved catchment loses its pause and the old account its grace, with no tick between', async () => {
 		const owner = await signUp('MovePauseOwner');

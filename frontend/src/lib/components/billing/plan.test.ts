@@ -14,6 +14,7 @@ import {
 	fmtPrice,
 	fmtUsdMicros,
 	monthName,
+	overSeatsNotice,
 	priceLine,
 	seatHint,
 	seatOffer,
@@ -373,6 +374,22 @@ describe('Team seats at checkout', () => {
 		expect(startingSeats(offer, null)).toBe(3);
 		expect(startingSeats(offer, undefined)).toBe(3);
 		expect(startingSeats(offer, MAX_CHECKOUT_SEATS + 10)).toBe(MAX_CHECKOUT_SEATS);
+	});
+
+	it('overSeatsNotice says how far over the paid seats a team is and what to do; nothing within them (403, issue #926)', () => {
+		const team = (overSeats: unknown) => ({ team: { editorCount: 5, assistantMemberMaxPct: 50, overSeats } }) as Parameters<typeof overSeatsNotice>[0];
+		const two = overSeatsNotice(team({ seats: 3, editors: 5, since: '2026-11-20T08:00:00.000Z' }))!;
+		expect(two).toMatch(/^This team has 5 editors but its plan pays for 3 editor seats since .+: 2 over\./);
+		expect(two).toContain('Everyone keeps their access, but no one new can be made an editor.');
+		expect(two).toContain('Add 2 seats with Change seats, or make 2 editors viewers.');
+		const one = overSeatsNotice(team({ seats: 3, editors: 4, since: null }))!;
+		expect(one).toMatch(/^This team has 4 editors but its plan pays for 3 editor seats: 1 over\./);
+		expect(one).toContain('Add a seat with Change seats, or make an editor a viewer.');
+		// Within its seats, none, an older API (absent), or a person's account: nothing.
+		expect(overSeatsNotice(team({ seats: 5, editors: 5, since: null }))).toBeNull();
+		expect(overSeatsNotice(team(null))).toBeNull();
+		expect(overSeatsNotice(team(undefined))).toBeNull();
+		expect(overSeatsNotice({ team: null })).toBeNull();
 	});
 
 	it('editorsHint says how many editors the team has; nothing when unknown', () => {
