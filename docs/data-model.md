@@ -4268,7 +4268,8 @@ The background job queue's source of truth ([architecture.md § Background work]
 | `acting_user_id` | The member who queued it (stamped by the insert trigger): an editor, or any viewer for `report_render` (`023_reports.sql`). The job runs as this user under RLS |
 | `created_at`, `started_at`, `finished_at` | `finished_at` is set exactly when `done` or `dead` |
 | `progress` | 0–100 while a running job reports it (040_yield), else NULL. Written only by `app_job_progress`; cleared by the enqueue trigger and when a worker claims the job (`job_progress_reset`); a finished job keeps its last value |
-| `cancel_requested_at` | When someone cancelled the job while it ran (040_yield, `app_cancel_job`); NULL otherwise. Cleared by the enqueue trigger |
+| `cancel_requested_at` | When someone cancelled the job while it ran (040_yield, `app_cancel_job`); NULL otherwise. Cleared by the enqueue trigger. A flagged job is never retried or handed back (394): it is dead as `cancelled` |
+| `dead_reason` | Why a `dead` job died (394_job_dead_reason, issue #904): `cancelled` (someone cancelled it), `superseded` (a newer job with its dedupe key does the work) or `failed` (a dead letter: the production alarm and the `job_dead` alert count only these). NULL unless `dead` (a CHECK). Set by every function that kills a job; the `job_settle_dead_reason` trigger clears it on a live job (so an enqueue can't forge one) and records `failed` for a death written without one. Jobs dead before 394 got theirs from their `last_error` text ('cancelled', the "… (a newer job with the same key is queued)" suffix) |
 
 - **Enqueue** is a plain INSERT as the signed-in editor. The `job_enqueue`
   trigger stamps the acting user and resets every lifecycle column (a forged
@@ -4283,12 +4284,24 @@ The background job queue's source of truth ([architecture.md § Background work]
     dedupe key has one running; sets `running`, bumps `attempts`, draws a new
     `lease_token`. Returns routing columns only (id, project, kind, acting
     user, lease, attempts), never the payload. A lease that ran out with no
-    attempts left becomes `dead` instead. With `projects` (123), only those
+    attempts left becomes `dead` instead (`failed`), and so does one someone
+    cancelled (`cancelled`, 394) rather than running again only to stop. With `projects` (123), only those
     projects' jobs are claimed or marked dead: the e2e suite's tick, so
     parallel tests never run each other's jobs. Production passes none.
-  - `app_finish_job(id, lease, ok, error, retry)`: only with the current
-    lease (a stale worker gets `NULL` and rolls back); `done`, `failed` with
-    backoff, or `dead`.
+  - `app_finish_job_outcome(id, lease, ok, error, retry, dead_reason)` (394)
+    → `(status, dead_reason)`: only with the current lease (a stale worker
+    gets `NULL`s and rolls back); `done`, `failed` with backoff, or `dead`
+    with the caller's reason (`cancelled`, `superseded`, or `failed` by
+    default; anything else is `invalid_parameter_value`). A failure that would
+    retry on a job someone cancelled is `dead` as `cancelled` instead, its
+    error 'cancelled'; one with no retry keeps the caller's reason, so a real
+    error stays a dead letter. The runner calls this.
+  - `app_finish_job(id, lease, ok, error, retry)` (016, latest 394): the
+    same, returning only the status, the reason inferred from the error text
+    (kept for a backend from before 394).
+  - `app_release_job(id, lease, delay)` (191, latest 394): a `JobRelease`
+    hands the job back to `queued` with its attempt given back; a job someone
+    cancelled is `dead` as `cancelled` instead, and the function returns `dead`.
   - `app_purge_jobs(age)`: deletes `done`/`dead` jobs finished longer ago
     than `age` (at least a day; the tick passes 30 days). Every key to `job`
     is ON DELETE SET NULL, so the rows that named a purged job stay with
@@ -4309,7 +4322,7 @@ The background job queue's source of truth ([architecture.md § Background work]
     session's user, the one who queued it or an editor of its project, and
     for `yield`, `delineate` (191), `future_yield` and `climate_factors` (284)
     jobs only: a `queued` or `failed` job becomes `dead` with `last_error =
-    'cancelled'`; a `running` one not flagged yet gets `cancel_requested_at`.
+    'cancelled'` and `dead_reason = 'cancelled'` (394); a `running` one not flagged yet gets `cancel_requested_at`.
     `status` is the job's status afterwards (NULL for a job that isn't the
     caller's to cancel); `changed` is whether this call did either, so a
     second cancel, of a job already dead or flagged, answers false. The cancel
@@ -4450,6 +4463,13 @@ a wrapper over it (same signature and grants: expand only, so a backend still
 calling it while the migration lands keeps working). The yield, future yield
 and climate factors cancel routes answer `cancelled: false` for a job already
 dead or already flagged.
+
+Migration 394 (`394_job_dead_reason.sql`, issue #904) adds `job.dead_reason`
+(backfilled for jobs already dead from their error text), the
+`job_settle_dead_reason` trigger and `app_finish_job_outcome`, makes
+`app_finish_job` a wrapper over it (expand only, as 285), and has
+`app_release_job`, `app_claim_jobs` and `app_cancel_job_outcome` record the
+reason, ending a running job someone cancelled instead of queueing it again.
 
 ### Automated calibrations (108_auto_calibration.sql, 290_auto_calibration_work.sql)
 
