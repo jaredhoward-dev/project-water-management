@@ -14,6 +14,7 @@
 // is their sum, and a day counts only when every one of them was seen clearly
 // by the same source that day.
 import { estimatedDamAreaForEngine, resolveDamCurve, toEpochDay, type DamCurvePoint } from '@water-management/engine';
+import { WITHIN_SHARE, withinOfFull } from './within.js';
 
 /**
  * Where an observation comes from (dam_observation.source): DE Africa Waterbodies (a polygon's area series), WOfS
@@ -77,8 +78,8 @@ export const OBSERVED = {
 	/** A mismatch needs the other side clearly not in that state: not full means under this share, not empty means over it. */
 	clearlyNotFull: 0.8,
 	clearlyWet: 0.2,
-	/** A pair agrees when the two areas are within this share of the full area. */
-	withinShare: 0.1
+	/** A pair agrees when the two areas are within this share of the full area (within.ts, the S1/S2 agreement's rule too). */
+	withinShare: WITHIN_SHARE
 } as const;
 
 /** Why an observation wasn't compared. */
@@ -287,7 +288,7 @@ function agreement(c: readonly ComparedPoint[], full: number | null): { compared
 	return {
 		compared: n,
 		biasPctOfFull: n && full ? (diff.reduce((s, d) => s + d, 0) / n / full) * 100 : null,
-		withinShare: n && full ? diff.filter((d) => Math.abs(d) <= OBSERVED.withinShare * full).length / n : null
+		withinShare: n && full ? c.filter((p) => withinOfFull(p.modelledAreaM2!, p.wetAreaM2, full, OBSERVED.withinShare)).length / n : null
 	};
 }
 

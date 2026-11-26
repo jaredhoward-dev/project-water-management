@@ -43,6 +43,14 @@ describe('agreementPairs', () => {
 		expect(pairs[0]).toMatchObject({ s1Share: 0.6, s2Share: 0.5 });
 	});
 
+	it('agrees at exactly 0.1 F where the shares round over it (issue #867), as the comparison does', () => {
+		// 4000/F − 3000/F is 0.4 − 0.3 = 0.10000000000000003 > 0.1: the old share form called this pair outside.
+		const within = (a: number, b: number) => agreementPairs([row('2026-07-01', a)], [row('2026-07-01', b)], F).map((p) => p.within);
+		expect(within(4000, 3000)).toEqual([true]);
+		expect(within(3000, 4000)).toEqual([true]);
+		expect(within(4001, 3000)).toEqual([false]);
+	});
+
 	it('pairs only views that saw at least 90 % of the outline clearly, on both sides', () => {
 		const s2 = [row('2026-07-01', 5000, 89.9), row('2026-07-02', 5000, 90)];
 		expect(agreementPairs([row('2026-07-01', 5000)], s2, F).map((p) => p.s2Date)).toEqual(['2026-07-02']);

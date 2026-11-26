@@ -11829,7 +11829,11 @@ together.
 - **Summary.** Over the compared views: the bias, mean(M − O) ÷ F × 100
   (+: the model holds more water surface than seen; as a share of F so an
   empty dam's view doesn't divide by zero), and the share within
-  ±10 % of F (|M − O| ≤ 0.1 F), with the counts of each flag.
+  ±10 % of F (|M − O| ≤ 0.1 F), with the counts of each flag. This and the
+  S1/S2 agreement apply one rule (`dams/observed/within.ts`, issue #867):
+  the two areas' difference in m² against 0.1 F, with a relative tolerance
+  of 10⁻⁹ of the band so a pair exactly 0.1 F apart counts as within in
+  both, whatever floating point does to it (0.4 − 0.3 is just over 0.1).
 - **What it can't say.** A satellite sees surface, not volume: through the
   curve or the power law, a surface error at a shallow edge is a small volume
   error, and a dam whose area hardly changes as it fills (steep sides) shows
