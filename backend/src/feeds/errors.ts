@@ -26,19 +26,36 @@ export class FeedUnavailableError extends Error {
 	override readonly name = 'FeedUnavailableError';
 }
 
+/** A Retry-After in the feed panel's words: "45 seconds", "2 minutes", "3 hours", "2 days" (rounded up). */
+export function waitWords(seconds: number): string {
+	const unit = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
+	if (seconds < 120) return unit(seconds, 'second');
+	if (seconds < 120 * 60) return unit(Math.ceil(seconds / 60), 'minute');
+	if (seconds < 48 * 3600) return unit(Math.ceil(seconds / 3600), 'hour');
+	return unit(Math.ceil(seconds / 86_400), 'day');
+}
+
 /**
  * The source answered HTTP 429 or 503: it is limiting how fast we ask, or is
- * briefly overloaded. A FeedUnavailableError like any other (the feed shows
- * failing and its next fetch waits out the scheduler's backoff), but the
- * live client also stops asking that host for a while (http.ts), so a
- * throttled source isn't hammered by the fetches still queued for it.
+ * briefly overloaded. A FeedUnavailableError (the feed shows failing), but
+ * with its own backoff: the stored message (feedErrorMessage: "the source is
+ * unreachable: HTTP 429: the source asked us to slow down…") is what
+ * app_feed_next_attempt (377_feed_throttle_backoff.sql) reads to wait an hour
+ * × 2^(failures − 1), and at least the "Retry-After: N s" it names, capped at
+ * the day (issue #877). The live client also stops asking that host for a
+ * while (http.ts), so a throttled source isn't hammered by the fetches still
+ * queued for it. feeds.db.test.ts pins this text to the SQL's pattern.
  */
 export class FeedThrottledError extends FeedUnavailableError {
 	readonly status: 429 | 503;
 	/** The source's Retry-After, in seconds, when it gave a usable one. */
 	readonly retryAfterSeconds: number | null;
 	constructor(status: 429 | 503, retryAfterSeconds: number | null = null) {
-		super(`HTTP ${status}: the source asked us to slow down, so the feed tries again later`);
+		super(
+			retryAfterSeconds === null
+				? `HTTP ${status}: the source asked us to slow down but gave no Retry-After, so the feed waits at least an hour before asking again`
+				: `HTTP ${status}: the source asked us to slow down and to wait ${waitWords(retryAfterSeconds)} (Retry-After: ${retryAfterSeconds} s), so the feed waits at least an hour, or longer if it asked, before asking again`
+		);
 		this.status = status;
 		this.retryAfterSeconds = retryAfterSeconds;
 	}
