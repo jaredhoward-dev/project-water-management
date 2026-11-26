@@ -106,6 +106,7 @@
 	import { headerSlot } from '#lib/components/workspace/headerSlot.svelte.js';
 	import { sectionContext } from '#lib/components/workspace/context.js';
 	import { GRID_TAB, isGridId, isTabGridId, movedGridHref, withParam, withoutParam } from '#lib/workspace/overlays.js';
+	import { failureForPage, inFlightFor, withCreatedRun, type RunFailure, type RunInFlight } from '#lib/components/runs/runInFlight.js';
 	import {
 		ALL_TABS,
 		addsData,
@@ -360,6 +361,28 @@
 	let dragDepth = $state(0);
 	let banner = $state<{ text: string; added: number } | null>(null);
 	let rerunning = $state(false);
+	/**
+	 * A run Runs & results started that is still going (issue #923). Kept here, like `rerunning`, so leaving the tab
+	 * and coming back finds it: Run model stays disabled and the progress carries on, and no second run starts.
+	 */
+	let tabRun = $state<RunInFlight | null>(null);
+	/** That run failed while its project's Runs & results wasn't open: said on the notice line until dismissed or the next run. */
+	let tabRunFailure = $state<RunFailure | null>(null);
+	const tabRunError = $derived(tabRunFailure?.projectId === projectId ? tabRunFailure.text : null);
+	function tabRunStarted(flight: RunInFlight) {
+		tabRun = flight;
+		tabRunFailure = null;
+		const clear = () => {
+			if (tabRun === flight) tabRun = null;
+		};
+		flight.done.then(clear, (err: unknown) => {
+			clear();
+			// Read where the person is when it fails: on that project's Runs & results the tab says it itself.
+			tabRunFailure = failureForPage(flight, err, { projectId, tab });
+		});
+	}
+	/** Any run going on this project, the page's or the tab's: no other starts until it ends. */
+	const runGoing = $derived(rerunning || inFlightFor(tabRun, projectId) !== null);
 	let rerunError = $state<string | null>(null);
 
 
@@ -455,15 +478,16 @@
 	async function startRun(label?: string, forecast = false) {
 		rerunning = true;
 		rerunError = null;
+		tabRunFailure = null;
 		// Started on Calibration, the run opens there, on How the shown run fits, so the calibration loop (fit, run,
 		// read the fit) stays on one page (issue #586 round 3); from anywhere else, in Runs & results.
 		const here = runOpensHere;
 		// Started on Warnings (its Run now, issue #611), the run opens back there, on the new run's warnings.
 		const onWarnings = tab === 'warnings';
 		try {
-			const { run: r, removedRunIds } = await api.runs.create(projectId, label, { forecast });
-			const { summary: _s, ...meta } = r;
-			setRuns([meta, ...(runs ?? []).filter((x) => x.id !== r.id && !removedRunIds.includes(x.id))]);
+			const created = await api.runs.create(projectId, label, { forecast });
+			const r = created.run;
+			setRuns(withCreatedRun(runs ?? [], created));
 			banner = null;
 			await goto(here ? `?tab=calibration&run=${r.id}#cal-fit` : onWarnings ? `?tab=warnings&run=${r.id}#warn-run` : `?tab=runs&run=${r.id}`, { reset: false });
 			if (onWarnings) landOnAnchor('warn-run');
@@ -773,7 +797,7 @@
 		return true;
 	}
 	async function runModel(label?: string, forecast = false) {
-		if (rerunning) return;
+		if (runGoing) return;
 		if (await saveBeforeRun()) await startRun(label, forecast);
 	}
 
@@ -1140,7 +1164,7 @@
 	{@const behind = !banner && behindRun.length > 0 && tab !== 'runs'}
 	{@const paused = pausedNotice(project, basePath())}
 	{@const trial = trialNotice(project, basePath())}
-	{#if !canEdit || banner || behind || rerunError || paused || trial}
+	{#if !canEdit || banner || behind || rerunError || tabRunError || paused || trial}
 		<div class="notice-line" data-testid="notice-line">
 			{#if trial}
 				<!-- 349: the person's reverse trial ends within 3 days (billing/trialEnding.ts); an information note, not an error. -->
@@ -1177,7 +1201,7 @@
 					{#if banner.added > 0 && rerunQueued}
 						<span data-testid="rerun-queued">{queuedSentence}</span>
 					{:else if canEdit && banner.added > 0}
-						<button type="button" class="btn btn-primary btn-sm" disabled={rerunning} onclick={rerun}>{rerunning ? 'Running model…' : 'Re-run model'}</button>
+						<button type="button" class="btn btn-primary btn-sm" disabled={runGoing} onclick={rerun}>{runGoing ? 'Running model…' : 'Re-run model'}</button>
 					{/if}
 					<button type="button" class="btn btn-ghost btn-sm" onclick={() => (banner = null)}>Dismiss</button>
 				</span>
@@ -1185,10 +1209,17 @@
 				<span class="note note-info behind" role="status">
 					<!-- On a phone the series' names are for screen readers only, so the words and Re-run model share one line. -->
 					<span class="note-text">New data since the last run<span class="behind-list">{' '}({behindRun.map((s) => s.name || kindLabel(s.kind)).join(', ')})</span>.</span>
-					{#if rerunQueued}<span data-testid="rerun-queued">{queuedSentence}</span>{:else if canEdit}<button type="button" class="btn btn-sm rerun" disabled={rerunning} onclick={rerun}>{rerunning ? 'Running model…' : 'Re-run model'}</button>{/if}
+					{#if rerunQueued}<span data-testid="rerun-queued">{queuedSentence}</span>{:else if canEdit}<button type="button" class="btn btn-sm rerun" disabled={runGoing} onclick={rerun}>{runGoing ? 'Running model…' : 'Re-run model'}</button>{/if}
 				</span>
 			{/if}
 			{#if rerunError}<span class="note err" role="alert">The run didn’t start: {rerunError}</span>{/if}
+			{#if tabRunError}
+				<!-- A run started on Runs & results failed while the person was elsewhere (issue #923, runs/runInFlight.ts). -->
+				<span class="note err" role="alert" data-testid="tab-run-failed">
+					<span class="note-text">The run from Runs &amp; results failed: {tabRunError}</span>
+					<button type="button" class="btn btn-ghost btn-sm" onclick={() => (tabRunFailure = null)}>Dismiss</button>
+				</span>
+			{/if}
 		</div>
 	{/if}
 {/snippet}
@@ -1336,7 +1367,7 @@
 				{:else if tab === 'warnings'}
 					<Lazy load={LOAD.warnings}>
 						{#snippet children(WarningsTab)}
-							<WarningsTab {projectId} project={project!} {series} {runs} {canEdit} nodes={editor.model.nodes} issues={editor.issues} blockers={settings.blockers} behind={fresh?.behind ?? []} running={rerunning} onRun={() => void runModel('After fixing warnings')} {onProjectChange} />
+							<WarningsTab {projectId} project={project!} {series} {runs} {canEdit} nodes={editor.model.nodes} issues={editor.issues} blockers={settings.blockers} behind={fresh?.behind ?? []} running={runGoing} onRun={() => void runModel('After fixing warnings')} {onProjectChange} />
 						{/snippet}
 					</Lazy>
 				{:else if tab === 'runs'}
@@ -1352,6 +1383,8 @@
 								modelDirty={editor.dirty}
 								{unsaved}
 								busy={rerunning}
+								inFlight={inFlightFor(tabRun, projectId)}
+								onRunStarted={tabRunStarted}
 								beforeRun={saveBeforeRun}
 								onRunsChange={setRuns}
 								onInputsRestored={reloadInputs}
