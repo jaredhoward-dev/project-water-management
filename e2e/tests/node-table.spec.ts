@@ -266,3 +266,18 @@ test('removing a row asks when something goes with it, then puts the focus on th
 	await expect(grid.getByRole('textbox', { name: 'Name' }).nth(1)).toHaveValue('Lower farm');
 	await expect(grid.getByRole('textbox', { name: 'Name' }).nth(1)).toBeFocused();
 });
+
+test('removing the table’s last row puts the focus on the empty table’s Add outflow gauge, not the page', async ({ page, owner }) => {
+	void owner;
+	const project = await createProject(page.request, 'Node table remove last');
+	await page.goto(`/projects/${project.id}?tab=network&grid=nodes`);
+	const grid = page.getByRole('dialog', { name: 'Hydrological unit table' });
+	const addFirst = grid.getByRole('button', { name: 'Add outflow gauge' });
+	await addFirst.click();
+	await expect(grid.getByRole('textbox', { name: 'Name' })).toHaveCount(1);
+	// A new row holds nothing that goes with it, so it goes without a question; the toolbar went with it, and the
+	// focus once fell to the page (its target, the toolbar's Add, was gone).
+	await grid.getByRole('button', { name: /^Remove / }).click();
+	await expect(grid.getByRole('textbox', { name: 'Name' })).toHaveCount(0);
+	await expect(addFirst).toBeFocused();
+});

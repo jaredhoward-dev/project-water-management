@@ -3635,7 +3635,9 @@ itself.
     hydrological unit** / **Remove gauge** / **Remove other water user**.
     After a removal the focus goes to the All hydrological units heading (the sheet and
     the card's Edit it opened from are gone); in the node table, to the next
-    row's name (else **+ Add hydrological unit**).
+    row's name (else **+ Add hydrological unit**, else, once the last row
+    has gone with the toolbar, the empty table's **Add outflow gauge**;
+    `nodeRemovedFocus` in `removeQuestions.ts`).
 
   Every field of the old Table and One node layouts is a click away (Edit,
   Tables → Hydrological unit table), so nothing was removed.

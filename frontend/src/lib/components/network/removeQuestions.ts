@@ -102,6 +102,20 @@ export function focusAfter(i: number, count: number): number | null {
 	return Math.min(i, left - 1);
 }
 
+/**
+ * Where the focus goes once a hydrological unit is removed (NetworkTab's remove): element ids in order, the first
+ * still on the page taking it. In the node table, the row now in its place (the next, else the one before), else
+ * the toolbar's Add, else the empty table's own Add outflow gauge: removing the last row takes the toolbar away
+ * too, and the focus fell to the page. On the map, the All hydrological units heading, else its empty state's Add.
+ * `ids` are the nodes before the removal, `at` the removed one's index.
+ */
+export function nodeRemovedFocus(view: 'map' | 'table', ids: readonly string[], at: number): string[] {
+	if (view === 'map') return ['all-nodes-h', 'net-empty-add'];
+	const j = at < 0 ? null : focusAfter(at, ids.length);
+	const left = ids.filter((_, i) => i !== at);
+	return [...(j !== null ? [`node-name-${left[j]}`] : []), 'net-add-node', 'net-table-empty-add'];
+}
+
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 function listAnd(parts: string[]): string {
 	return parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}` : (parts[0] ?? '');
