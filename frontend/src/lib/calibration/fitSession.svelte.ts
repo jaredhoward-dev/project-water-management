@@ -71,11 +71,6 @@ export class FitSession {
 	/** Which step is running, for the progress line; null for one fit. */
 	stepProgress = $state<Pick<StepwiseProgress, 'step' | 'steps' | 'zoneNodeId'> | null>(null);
 	error = $state<string | null>(null);
-	/** The running fit's starts and validation, for its progress bar. */
-	runStarts = $state(1);
-	runValidate = $state(true);
-	/** Whether the running fit also fits without the regional prior (engine 1.120.0), for its progress bar. */
-	runPriorCost = $state(false);
 	/** The shown report has been written into the form. */
 	applied = $state(false);
 	ran: FitRan | null = null;

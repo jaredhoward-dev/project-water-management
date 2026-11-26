@@ -1,4 +1,4 @@
-import { calibrate, defaultProjectSettings, ENGINE_VERSION, fitRecordStatus, forecastSplit, rainCheckLimits, type CalibrationReport, type ModelInput, type ProjectSettings } from '@water-management/engine';
+import { calibrate, defaultProjectSettings, ENGINE_VERSION, fitRecordStatus, forecastSplit, rainCheckLimits, type CalibrationProgress, type CalibrationReport, type ModelInput, type ProjectSettings } from '@water-management/engine';
 import { describe, expect, it } from 'vitest';
 import { tipFor } from '#lib/help/tips.js';
 import { fmtNum } from '#lib/format/number.js';
@@ -101,57 +101,102 @@ describe('fitParams', () => {
 	});
 });
 
+/** A 3-year gauge record: one farm draining to it (too few water years for the dry → wet test). */
+function threeYearInput(): ModelInput {
+	const days = 3 * 365;
+	const rain = Array.from({ length: days }, (_, i) => (i % 11 === 0 ? 30 : i % 4 === 0 ? 2 : 0));
+	const flow = Array.from({ length: days }, (_, i) => 0.05 + 0.4 * Math.exp(-(i % 11) / 2));
+	const node = { sortOrder: 0, pctUpstreamToDam: 0, pctRunoffToDam: 0, damCapacityM3: 0, damInitialPct: 0, damMinPct: 0, divertCapacityM3Day: 0, irrigationEfficiency: 1, returnFlowFraction: 0, damAreaFullM2: null, damAreaExponent: 0.7, damSeepagePerDay: 0 };
+	return {
+		settings: { ...defaultProjectSettings(), runoffModel: 'gr4j', apanMm: [150, 180, 200, 210, 180, 150, 100, 60, 40, 40, 60, 100] },
+		model: {
+			nodes: [
+				{ ...node, id: 'G', name: 'G', kind: 'gauge', downstreamNodeId: null, areaKm2: 0 },
+				{ ...node, id: 'F', name: 'F', kind: 'farm', downstreamNodeId: 'G', areaKm2: 20 }
+			],
+			crops: [],
+			cropAreas: [],
+			transfers: []
+		},
+		series: { rain_catchment_mm: { startDate: '2005-10-01', values: rain }, flow_observed_m3s: { startDate: '2005-10-01', values: flow } }
+	};
+}
+
 describe('progress', () => {
-	it('spreads the three stages over 0–1, or the one stage without validation', () => {
-		expect(totalRuns(1500, true)).toBe(4500);
-		expect(progressFraction({ stage: 'full', evaluations: 750, budget: 1500, best: 0 }, false)).toBe(0.5);
-		expect(progressFraction({ stage: 'full', evaluations: 1500, budget: 1500, best: 0 }, true)).toBeCloseTo(1 / 3, 12);
-		expect(progressFraction({ stage: 'dsst', evaluations: 1500, budget: 1500, best: 0 }, true)).toBe(1);
+	// What the engine sends: optimisation k of n, in calibrate()'s order (calibrate.test.ts pins the plan it sends).
+	const ev = (stage: CalibrationProgress['stage'], evaluations: number, optimisation: number, optimisations: number, start?: number, starts?: number): CalibrationProgress => ({
+		stage,
+		evaluations,
+		budget: 100,
+		best: 0,
+		optimisation,
+		optimisations,
+		...(start ? { start, starts } : {})
 	});
 
-	it('adds the fit without the WR2012 penalty as a last stage when the penalty is on', () => {
+	it('spreads the normal plan (full, split, dry → wet) over 0–1 in equal parts', () => {
+		expect(totalRuns(1500, true)).toBe(4500);
+		expect(progressFraction(ev('full', 50, 1, 3))).toBeCloseTo(0.5 / 3, 12);
+		expect(progressFraction(ev('full', 100, 1, 3))).toBeCloseTo(1 / 3, 12);
+		expect(progressFraction(ev('split', 50, 2, 3))).toBeCloseTo(1.5 / 3, 12);
+		expect(progressFraction(ev('dsst', 100, 3, 3))).toBe(1);
+		// With the WR2012 penalty on, the unpenalised fit is a fourth part.
 		expect(totalRuns(1500, true, true)).toBe(6000);
-		expect(totalRuns(1500, false, true)).toBe(3000);
-		expect(progressFraction({ stage: 'dsst', evaluations: 1500, budget: 1500, best: 0 }, true, true)).toBe(0.75);
-		expect(progressFraction({ stage: 'unpenalised', evaluations: 750, budget: 1500, best: 0 }, false, true)).toBe(0.75);
+		expect(progressFraction(ev('dsst', 100, 3, 4))).toBe(0.75);
+		expect(progressFraction(ev('unpenalised', 50, 4, 4))).toBeCloseTo(3.5 / 4, 12);
 		expect(STAGE_LABEL.unpenalised).toBe('Fitting again without the WR2012 penalty');
+	});
+
+	it('gives no share to a dry → wet test the engine skips (fewer than 4 water years): the split-sample test ends the bar', () => {
+		expect(progressFraction(ev('full', 100, 1, 2))).toBe(0.5);
+		expect(progressFraction(ev('split', 50, 2, 2))).toBe(0.75);
+		expect(progressFraction(ev('split', 100, 2, 2))).toBe(1);
+	});
+
+	it('gives no share to an unpenalised fit where no penalty applies (a non-headline location)', () => {
+		// Penalty on at the headline: full, split, dsst, unpenalised; at another location: full, split, dsst only.
+		expect(progressFraction(ev('dsst', 100, 3, 3))).toBe(1);
+		// Both skipped: full and split are the whole fit.
+		expect(progressFraction(ev('split', 100, 2, 2))).toBe(1);
 	});
 
 	it('weights the full fit by its starts, and says which start is running (CR-2)', () => {
 		expect(totalRuns(1500, true, false, 5)).toBe(1500 * 7);
 		expect(totalRuns(1500, true, true, 5)).toBe(1500 * 8);
-		const p = (stage: 'full' | 'split' | 'dsst' | 'unpenalised', evaluations: number, start?: number) =>
-			({ stage, evaluations, budget: 100, best: 0, ...(start ? { start, starts: 5 } : {}) }) as const;
 		// 5 starts + split + dsst = 7 equal parts.
-		expect(progressFraction(p('full', 50, 1), true, false, 5)).toBeCloseTo(0.5 / 7, 12);
-		expect(progressFraction(p('full', 100, 5), true, false, 5)).toBeCloseTo(5 / 7, 12);
-		expect(progressFraction(p('split', 50), true, false, 5)).toBeCloseTo(5.5 / 7, 12);
-		expect(progressFraction(p('dsst', 100), true, false, 5)).toBe(1);
-		expect(progressFraction(p('unpenalised', 50), false, true, 5)).toBeCloseTo(5.5 / 6, 12);
-		expect(stageText(p('full', 10, 2))).toBe('Fitting the whole record (start 2 of 5)');
-		expect(stageText(p('split', 10))).toBe('Split-sample test');
+		expect(progressFraction(ev('full', 50, 1, 7, 1, 5))).toBeCloseTo(0.5 / 7, 12);
+		expect(progressFraction(ev('full', 100, 5, 7, 5, 5))).toBeCloseTo(5 / 7, 12);
+		expect(progressFraction(ev('split', 50, 6, 7))).toBeCloseTo(5.5 / 7, 12);
+		expect(progressFraction(ev('dsst', 100, 7, 7))).toBe(1);
+		expect(stageText(ev('full', 10, 2, 7, 2, 5))).toBe('Fitting the whole record (start 2 of 5)');
+		expect(stageText(ev('split', 10, 6, 7))).toBe('Split-sample test');
 	});
 
 	it('counts the fit without the regional prior last, once per start, when asked (engine 1.120.0)', () => {
 		expect(totalRuns(1500, true, false, 1, true)).toBe(1500 * 4);
-		// 5 starts with the prior + split + dsst + unpenalised + 5 starts without it.
 		expect(totalRuns(1500, true, true, 5, true)).toBe(1500 * 13);
 		expect(totalRuns(1500, true, true, 5, false)).toBe(1500 * 8);
-		const p = (stage: 'dsst' | 'unpenalised' | 'unpriored', evaluations: number) => ({ stage, evaluations, budget: 100, best: 0 }) as const;
-		// 1 start + split + dsst + unpenalised + unpriored = 5 equal parts.
-		expect(progressFraction(p('unpenalised', 100), true, true, 1, true)).toBeCloseTo(4 / 5, 12);
-		expect(progressFraction(p('unpriored', 50), true, true, 1, true)).toBeCloseTo(4.5 / 5, 12);
-		expect(progressFraction(p('unpriored', 100), false, false, 1, true)).toBe(1);
+		// 3 full + split + dsst + unpenalised + 3 unpriored = 9 equal parts.
+		expect(progressFraction(ev('full', 50, 2, 9, 2, 3))).toBeCloseTo(1.5 / 9, 12);
+		expect(progressFraction(ev('unpenalised', 100, 6, 9))).toBeCloseTo(6 / 9, 12);
+		expect(progressFraction(ev('unpriored', 50, 7, 9, 1, 3))).toBeCloseTo(6.5 / 9, 12);
+		expect(progressFraction(ev('unpriored', 100, 9, 9, 3, 3))).toBe(1);
 		expect(STAGE_LABEL.unpriored).toBe('Fitting again without the regional prior');
-		// With 3 starts: 3 full + split + dsst + unpenalised + 3 unpriored = 9 equal parts.
-		const q = (stage: 'full' | 'unpenalised' | 'unpriored', evaluations: number, start?: number) =>
-			({ stage, evaluations, budget: 100, best: 0, ...(start ? { start, starts: 3 } : {}) }) as const;
-		expect(progressFraction(q('full', 50, 2), true, true, 3, true)).toBeCloseTo(1.5 / 9, 12);
-		expect(progressFraction(q('unpenalised', 100), true, true, 3, true)).toBeCloseTo(6 / 9, 12);
-		expect(progressFraction(q('unpriored', 50, 1), true, true, 3, true)).toBeCloseTo(6.5 / 9, 12);
-		expect(progressFraction(q('unpriored', 50, 3), true, true, 3, true)).toBeCloseTo(8.5 / 9, 12);
-		expect(progressFraction(q('unpriored', 100, 3), false, false, 3, true)).toBe(1);
-		expect(stageText(q('unpriored', 10, 2))).toBe('Fitting again without the regional prior (start 2 of 3)');
+		expect(stageText(ev('unpriored', 10, 8, 9, 2, 3))).toBe('Fitting again without the regional prior (start 2 of 3)');
+	});
+
+	it('fills the bar steadily to 1 on a real fit that skips the dry → wet test', () => {
+		const seen: number[] = [];
+		const r = calibrate(threeYearInput(), { budget: 20, onProgress: (p) => void seen.push(progressFraction(p)) });
+		expect(r.differential).toBeNull();
+		expect(r.splitSample).not.toBeNull();
+		expect(seen.every((f, i) => i === 0 || f >= seen[i - 1]!)).toBe(true);
+		expect(seen.at(-1)).toBe(1);
+	});
+
+	it('reads an event without a plan as one optimisation', () => {
+		expect(progressFraction({ stage: 'full', evaluations: 750, budget: 1500, best: 0 })).toBe(0.5);
+		expect(progressFraction({ stage: 'full', evaluations: 1500, budget: 1500, best: 0 })).toBe(1);
 	});
 
 	it('the penalty applies only when switched on and a reference is entered', () => {
@@ -397,23 +442,7 @@ describe('applyReport', () => {
 	});
 
 	it('round-trips an engine report: applied settings reproduce the fitted score', () => {
-		const days = 3 * 365;
-		const rain = Array.from({ length: days }, (_, i) => (i % 11 === 0 ? 30 : i % 4 === 0 ? 2 : 0));
-		const flow = Array.from({ length: days }, (_, i) => 0.05 + 0.4 * Math.exp(-(i % 11) / 2));
-		const node = { sortOrder: 0, pctUpstreamToDam: 0, pctRunoffToDam: 0, damCapacityM3: 0, damInitialPct: 0, damMinPct: 0, divertCapacityM3Day: 0, irrigationEfficiency: 1, returnFlowFraction: 0, damAreaFullM2: null, damAreaExponent: 0.7, damSeepagePerDay: 0 };
-		const input: ModelInput = {
-			settings: { ...defaultProjectSettings(), runoffModel: 'gr4j', apanMm: [150, 180, 200, 210, 180, 150, 100, 60, 40, 40, 60, 100] },
-			model: {
-				nodes: [
-					{ ...node, id: 'G', name: 'G', kind: 'gauge', downstreamNodeId: null, areaKm2: 0 },
-					{ ...node, id: 'F', name: 'F', kind: 'farm', downstreamNodeId: 'G', areaKm2: 20 }
-				],
-				crops: [],
-				cropAreas: [],
-				transfers: []
-			},
-			series: { rain_catchment_mm: { startDate: '2005-10-01', values: rain }, flow_observed_m3s: { startDate: '2005-10-01', values: flow } }
-		};
+		const input = threeYearInput();
 		const r = calibrate(input, { budget: 80, validate: false });
 		const applied: ModelInput = { ...input, settings: applyReport(input.settings as ReturnType<typeof defaultProjectSettings>, r) as unknown as ModelInput['settings'] };
 		expect(calibrate(applied, { budget: 1, validate: false }).before.scores.kgePrime).toBeCloseTo(r.fit.scores.kgePrime!, 12);

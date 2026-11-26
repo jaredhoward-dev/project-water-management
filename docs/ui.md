@@ -9798,8 +9798,12 @@ calibration's line points at *How the shown run fits* for NSE and PBIAS.
     fitted parameters scored against that record over its own days (model.md
     §2.10b). It costs no extra fit.
   - While it runs there is a progress bar (`role="progressbar"`) with the
-    stage and the best score so far. **Cancel** stops the worker at once and
-    discards it.
+    stage and the best score so far. The bar splits into equal parts by the
+    optimisations the engine will actually run, read from its progress events
+    (`optimisation` of `optimisations`, engine `CalibrationProgress`), so a
+    dry → wet test skipped for too few water years, or an unpenalised fit
+    where no WR2012 penalty applies, never leaves the bar to jump.
+    **Cancel** stops the worker at once and discards it.
   - The choices, the running fit and its result live in the workspace page's
     `FitSession` (`lib/calibration/fitSession.svelte.ts`), not the panel, as
     the unsaved settings do: opening another tab leaves the fit running, and
