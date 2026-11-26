@@ -3146,7 +3146,10 @@ New project dialog and the Summary's *Move to* list offer only teams where
 you're a member or admin, and copying a team project you only view makes a
 personal copy (the Copy dialog says so). On a team project, the *Move to*
 list shows only to an admin of its team; any other owner sees "Only an admin
-of <team> can move it out of the team" in its place (issue #900).
+of <team> can move it out of the team" in its place (issue #900). A team
+admin who owns it only through the team may choose Personal: the move keeps
+them as a direct owner (`project/teamMove.ts` decides who sees which
+choices).
 
 **Reset two-step** (admins, on every row below admin, beside Remove on the row's actions line;
 205_mfa_recovery, [security.md § Two-step sign-in](./security.md#two-step-sign-in) → Recovery):
