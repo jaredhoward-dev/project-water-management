@@ -253,3 +253,35 @@ describe('a B2B invoice from the staff tool (no subscription)', () => {
 		expect((f as { event: { payload: object } }).event.payload).not.toHaveProperty('invoice');
 	});
 });
+
+describe('the subscription’s price (405, issue #928)', () => {
+	const priceOfFixture = (name: string) => (normaliseStripeEvent(fixture(name)) as { event: { payload: { price?: unknown } } }).event.payload.price;
+
+	it('sums every item’s unit_amount × quantity in their one currency', () => {
+		expect(priceOfFixture('subscription-pro-priced')).toEqual({ totalMinor: 89900, currency: 'zar', discounted: false });
+		expect(priceOfFixture('subscription-team-seats')).toEqual({ totalMinor: 249900 + 2 * 49900, currency: 'zar', discounted: false });
+		expect(priceOfFixture('subscription-team-yearly')).toEqual({ totalMinor: 2499000 + 2 * 499000, currency: 'zar', discounted: false });
+	});
+
+	it('marks a coupon, in either of Stripe’s shapes', () => {
+		expect(priceOfFixture('subscription-pro-coupon')).toMatchObject({ discounted: true });
+		const e = fixture('subscription-pro-priced');
+		e.data.object.discounts = ['di_synthetic_0002'];
+		expect((normaliseStripeEvent(e) as { event: { payload: { price: unknown } } }).event.payload.price).toMatchObject({ discounted: true });
+	});
+
+	it('is unreadable (null total) for a price without unit_amount, a missing currency or items that disagree', () => {
+		const tiered = fixture('subscription-pro-priced');
+		delete tiered.data.object.items.data[0].price.unit_amount;
+		const mixed = fixture('subscription-team-seats');
+		mixed.data.object.items.data[0].price.currency = 'usd';
+		const bare = fixture('subscription-team-seats');
+		delete bare.data.object.items.data[1].price.currency;
+		for (const e of [tiered, mixed, bare])
+			expect((normaliseStripeEvent(e) as { event: { payload: { price: unknown } } }).event.payload.price).toEqual({ totalMinor: null, currency: null, discounted: false });
+	});
+
+	it('is absent when no item carries a price (the older fixtures), so nothing is checked', () => {
+		expect(priceOfFixture('subscription-updated')).toBeUndefined();
+	});
+});

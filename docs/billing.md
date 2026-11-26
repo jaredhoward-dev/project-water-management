@@ -82,7 +82,7 @@ All in `backend/migrations/323_billing.sql`; columns and RLS in
 | --- | --- |
 | `plan` | The plans (`free`, `pro`, `team`): name, monthly and annual price in ZAR cents, `limits` (a closed, CHECK-validated key set; a JSON `null` is unlimited), `features`, trial days, `active`. Written only by migrations |
 | `billing_account` | One per person or team that has needed one, and its lifetime count of projects created |
-| `subscription` | An account's plan, status, seats and period; at most one live per account. Written by the webhook (326) and the staff grant (330) |
+| `subscription` | An account's plan, status (`lapsed`: overdue past the [dunning limit](#dunning-limit), not live), seats, period, `past_due_since` and accepted `price_minor` (405); at most one live per account. Written by the webhook (326) and the staff grant (330) |
 | `billing_grant_log` | The staff grant's audit log (330): every grant, revocation and expiry ([§ Staff grants](#staff-grants)) |
 | `usage_counter` | Monthly counts per account and kind (`reports`, `packs_issued`); `month` is the first day of the month in Africa/Johannesburg |
 
@@ -496,7 +496,8 @@ count](#billing-interval-and-editor-count)). An invoice's subscription is read f
 Stripe's statuses map as follows:
 
 - `trialing`, `active`, `past_due` and `canceled` keep their names.
-- `unpaid` becomes `past_due`: still owed, not ended.
+- `unpaid` becomes `past_due`: still owed, not ended. The app's own limit
+  lapses it after 14 days ([§ Dunning limit](#dunning-limit)).
 - `incomplete_expired` becomes `expired`.
 - `incomplete` and `paused` grant nothing new, so they become
   `subscription.pending`, recorded only.
@@ -584,6 +585,78 @@ after it was received (`ORPHAN_RETRY_DAYS`, `metrics.ts` `staleOrphans`).
 The operator then cancels and refunds it in Stripe's dashboard
 ([deployment.md § Billing alarms](./deployment.md#billing-alarms)).
 
+### Dunning limit
+
+`405_billing_dunning_and_price.sql` (issue #927). Stripe's `past_due` and
+`unpaid` both arrive as `past_due`, which is live, so without a limit of the
+app's own a subscription Stripe leaves unpaid (its "mark unpaid" or "leave
+past due" setting after the retries) would keep its paid plan for ever.
+
+- `subscription.past_due_since` is when it first went `past_due` (the event's
+  `eventCreated`, else now). Later `past_due` updates keep it; any other
+  status clears it. Subscriptions already `past_due` when 405 ran count from
+  then.
+- The job tick (`app_billing_dunning_lapse`, worker only) moves one overdue
+  for longer than `DUNNING_GRACE_DAYS` (`packages/engine/src/plans.ts`, **14
+  days**, matching the downgrade grace; the operator to confirm the number)
+  to the status **`lapsed`**. It is not live, so everything that reads the
+  live subscription (entitlements, the plan page, [§ Pausing after a
+  downgrade](#pausing-after-a-downgrade)) treats the account as on Free, as
+  after a cancellation, and 341's trigger starts the 14-day downgrade grace
+  before any catchment is paused. The plan page says "Payment overdue; paid
+  features paused until it is paid".
+- `lapsed` is not ended: Stripe still holds the subscription. A further
+  `past_due` keeps it lapsed (and its clock); `active` or `trialing` (the
+  customer paid) revives it at once, with every paused catchment; a delete
+  cancels it. Deleting the account cancels it at the provider like a live
+  one (`cancelOnDelete.ts`), a B2B invoice is still refused beside it, and
+  the billing report counts it as paid.
+- Tests: `billing/dunningPrice.db.test.ts` (through the mock webhook): kept a
+  day short of the limit, lapsed past it, kept lapsed, lifted by a payment,
+  cancelled by a delete, worker only.
+
+### Price check
+
+405 too (issue #928). The plan used to come only from checkout's `plan_code`
+metadata, so a subscription edited in Stripe's dashboard (another price, a
+coupon) was trusted as that plan. The normaliser now sends the
+subscription's `price` (`provider/stripe.ts` `priceOf`): `totalMinor`, the
+items' `unit_amount` × quantity summed; `currency`; and `discounted`. Checkout
+makes its prices inline from the plan table (`price_data`), so there are no
+price ids to match; the amount, currency and interval are the check.
+
+- A live status (`trialing`, `active`, `past_due`) applies only when the
+  total is what the plan table sets for its plan, interval and seats (the
+  base price plus each seat past `seats_included` at the extra-seat price,
+  the sum 335's invoice check uses), in the plan's currency, with no
+  discount; or, for a subscription already held on the same plan and
+  interval, the total accepted before (`subscription.price_minor`), so a
+  list price raised by a later migration never strands a subscriber on the
+  old one. A seat change at an old price then needs the operator.
+- Anything else is a **`conflict`**: nothing written, a `200`, and a warn
+  line for the operator ([§ The route](#the-route)). A new subscription gets
+  no plan (the operator refunds it or grants the plan, [§ Staff
+  grants](#staff-grants)); a held one keeps its last accepted state.
+- An item whose price can't be read (no `unit_amount`: a tiered or metered
+  price; no currency; items in different currencies) sends a `null` total,
+  which never applies. An ended status (`canceled`, `expired`) applies
+  whatever its price. A payload with no `price` at all (no item carries a
+  price: the older fixtures, tests calling `app_billing_apply` directly) is
+  not checked.
+- **Coupons and discounts (decided here):** checkout offers none, so a
+  discount (`discount`, or a non-empty `discounts`) can only come from the
+  dashboard, and a subscription carrying one is a conflict, whatever its
+  size: a 100 % coupon would otherwise be free Pro. A discount the operator
+  means to give is a staff grant (or a B2B invoice at the agreed amount)
+  instead. Revisit if checkout ever takes promotion codes.
+- Fixtures: `subscription-pro-priced` (Pro monthly at the plan's price),
+  `subscription-pro-repriced` (a dashboard price), `subscription-pro-coupon`
+  (a 50 % coupon); the Team fixtures now carry their currency.
+- Tests: `billing/provider/stripe.test.ts` (`priceOf`) and
+  `billing/dunningPrice.db.test.ts`: a dashboard price, another currency and
+  a coupon refused, new or held; the plan's price applied; a price accepted
+  before kept; Team's extra seats summed; an ended status applied.
+
 ### Event order
 
 Stripe doesn't deliver events in the order it created them, so 327 orders
@@ -628,6 +701,8 @@ The fixtures are `checkout-completed`, `subscription-created` (trialing),
 `subscription-updated` (active), `subscription-past-due`,
 `subscription-deleted`, `subscription-team-seats` (Team, 5 seats as two items),
 `subscription-team-yearly` (the same, billed yearly),
+`subscription-pro-priced`, `subscription-pro-repriced` and
+`subscription-pro-coupon` ([§ Price check](#price-check)),
 `invoice-paid` and `invoice-payment-failed`.
 
 ### Tests

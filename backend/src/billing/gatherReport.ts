@@ -54,7 +54,7 @@ export async function gatherReportOn(client: pg.ClientBase, month: string | null
 			`SELECT g.created_at AS started_at,
 			        least(
 			          (SELECT min(s.created_at) FROM subscription s
-			           WHERE s.billing_account_id = g.billing_account_id AND s.provider IN ('stripe', 'mock') AND s.status IN ('active', 'past_due', 'canceled')
+			           WHERE s.billing_account_id = g.billing_account_id AND s.provider IN ('stripe', 'mock') AND s.status IN ('active', 'past_due', 'lapsed', 'canceled')
 			             AND s.created_at >= g.created_at),
 			          (SELECT min(l.created_at) FROM billing_grant_log l
 			           WHERE l.billing_account_id = g.billing_account_id AND l.action = 'grant' AND l.granted_by = 'invoice'

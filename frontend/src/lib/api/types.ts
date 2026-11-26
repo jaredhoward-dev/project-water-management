@@ -4791,7 +4791,8 @@ export interface PlanOffer extends Plan {
 	trialDays: number | null;
 }
 
-export type SubscriptionStatus = 'trialing' | 'active' | 'past_due' | 'canceled' | 'expired';
+/** `lapsed`: past_due past the app's dunning limit (405, issue #927); not live, the paid features paused until it is paid. */
+export type SubscriptionStatus = 'trialing' | 'active' | 'past_due' | 'lapsed' | 'canceled' | 'expired';
 
 export interface Subscription {
 	status: SubscriptionStatus;
