@@ -485,6 +485,9 @@ out of order:
   change, so a late answer may still be cached);
 - the Map's data step (`components/map/startDataLoad.ts`), read again after
   each change on the tab;
+- the report page (`components/report/reportLoad.ts`): changing `?run=`
+  while the previous run's report still loads never shows that run under
+  the new address (issue #859);
 - the share page's link (`routes/share`) and the evidence pack and verify
   pages' lookups.
 
