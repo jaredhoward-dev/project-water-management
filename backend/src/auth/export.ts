@@ -140,7 +140,8 @@ export const USER_FK_COVERAGE: Record<string, { section: string } | { excluded: 
 	'scenario.decided_by': { excluded: 'the project’s application decision; its assessor only' },
 	// What followed a decision (228_decision_events): the project's record; scenario.appeal_recorded is in auditEvents.
 	'decision_event.recorded_by': { excluded: 'the project’s record of an appeal on a decision; who recorded it only, and scenario.appeal_recorded is in auditEvents' },
-	'scenario.owner_user_id': { excluded: 'the project’s scenario; scenario.created is in auditEvents' },
+	// The scenarios the person owns (396): their licence applications and modelling scenarios, as metadata (never the ops).
+	'scenario.owner_user_id': { section: 'scenarios' },
 	'scenario_member.added_by': { excluded: 'people the person added to a scenario; its maker only' },
 	'assessment.created_by': { excluded: 'the project’s cumulative assessment; who asked only' },
 	'scenario_sweep.created_by': { excluded: 'the project’s scenario sweep; its maker only' },
@@ -314,18 +315,17 @@ export async function buildSubjectExport(userId: string, now = new Date()) {
 		);
 		const farms = [];
 		for (const link of links) farms.push(await farmSection(db, link));
-		// The scenarios they were added to (scenario_member): readable under RLS while they are a contributor or above,
-		// as the trigger requires to be added; a lower role hides the scenario from them, and so from this export.
-		const { rows: scenarioMemberships } = await db.query(
-			`SELECT sm.scenario_id AS "scenarioId", sm.project_id AS "projectId", p.name AS "projectName", s.name AS "scenarioName",
-				sm.added_at AS "addedAt", a.display_name AS "addedBy"
-			 FROM scenario_member sm
-			 LEFT JOIN scenario s ON s.id = sm.scenario_id
-			 LEFT JOIN project p ON p.id = sm.project_id
-			 LEFT JOIN app_user a ON a.id = sm.added_by
-			 WHERE sm.user_id = $1 ORDER BY sm.added_at, sm.scenario_id`,
-			[userId]
-		);
+		// The scenarios they were added to (scenario_member) and the ones they own (their applications, and modelling
+		// scenarios as metadata): definer readers of the caller's own rows (396), since RLS hides an applicant's own draft once
+		// their role drops below contributor or they leave the project, while the row stands.
+		const { rows: memberships } = await db.query<{ m: unknown[] }>('SELECT app_subject_scenario_memberships() AS m');
+		const scenarioMemberships = memberships[0]?.m ?? [];
+		const { rows: owned } = await db.query<{ s: unknown[] }>('SELECT app_subject_scenarios() AS s');
+		const scenarios = owned[0]?.s ?? [];
+		// That their current address had the reverse trial (342): the claim's hash and when, or null. Owner-only table, so a
+		// definer reader that hashes the caller's own canonical address (396); a claim under an earlier address isn't theirs to find.
+		const { rows: trial } = await db.query<{ c: unknown }>('SELECT app_subject_reverse_trial() AS c');
+		const reverseTrialClaim = trial[0]?.c ?? null;
 		// A pending change of address (347): own row only under RLS; never the link's hash.
 		const { rows: emailChange } = await db.query(
 			`SELECT new_email AS "newEmail", created_at AS "createdAt", expires_at AS "expiresAt" FROM email_change WHERE user_id = $1`,
@@ -462,6 +462,7 @@ export async function buildSubjectExport(userId: string, now = new Date()) {
 			authorityDelegations,
 			teamMemberships,
 			scenarioMemberships,
+			scenarios,
 			farms,
 			notes: rest.notes,
 			publicComments: participation[0]?.p ?? [],
@@ -477,6 +478,7 @@ export async function buildSubjectExport(userId: string, now = new Date()) {
 			assistantUsage,
 			assistantDays,
 			billing,
+			reverseTrialClaim,
 			twoStepSignIn,
 			twoStepSignInResets,
 			twoStepEmail,

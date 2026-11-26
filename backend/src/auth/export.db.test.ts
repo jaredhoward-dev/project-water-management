@@ -7,6 +7,9 @@ import pg from 'pg';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { anon, app, asOwner, monthly, node, signUp } from '../__tests__/helpers.js';
 import { FARMER_NOTICE_VERSION, LEGAL_VERSION } from '@water-management/engine/legal';
+import { reverseTrialHash } from '../billing/reverseTrial.js';
+import { withUser } from '../db/tx.js';
+import { canonicalEmail } from '../billing/metrics.js';
 import { APP_USER_EXCLUDED, APP_USER_EXPORTED, EXPORT_COOLDOWN_SECONDS, MEMBER_FK_COVERAGE, USER_FK_COVERAGE } from './export.js';
 
 type User = Awaited<ReturnType<typeof signUp>>;
@@ -256,15 +259,85 @@ describe('GET /auth/me/export', () => {
 		} finally {
 			await client.end();
 		}
+		const membership = { scenarioId: app1.id, projectId, projectName: 'Export catchment', scenarioName: 'Raise the Alpha weir', addedAt: expect.any(String), addedBy: 'XApplicant' };
+		const application = {
+			scenarioId: app1.id, projectId, projectName: 'Export catchment', name: 'Raise the Alpha weir', origin: 'applicant', status: 'draft',
+			outcome: null, createdAt: expect.any(String), submittedAt: null, decidedAt: null
+		};
 		const mine = await download(helper);
-		expect(mine.doc.scenarioMemberships).toEqual([
-			{ scenarioId: app1.id, projectId, projectName: 'Export catchment', scenarioName: 'Raise the Alpha weir', addedAt: expect.any(String), addedBy: 'XApplicant' }
-		]);
-		// The applicant made it (scenario.created is theirs in auditEvents); they are no member of it, so no row of the helper's.
+		expect(mine.doc.scenarioMemberships).toEqual([membership]);
+		// The helper owns no scenario.
+		expect(mine.doc.scenarios).toEqual([]);
+		// The applicant made it, so it is in their scenarios (396); they are no member of it, so no row of the helper's.
 		const theirs = await download(applicant);
 		expect(theirs.doc.scenarioMemberships).toEqual([]);
+		expect(theirs.doc.scenarios).toEqual([application]);
 		// Nor anyone else's.
-		expect((await download(farmer)).doc.scenarioMemberships).toEqual([]);
+		const farmers = await download(farmer);
+		expect(farmers.doc.scenarioMemberships).toEqual([]);
+		expect(farmers.doc.scenarios).toEqual([]);
+		expect(farmers.text).not.toContain('Raise the Alpha weir');
+		// #906: the applicant's role drops below contributor (to farmer; the enum runs farmer < contributor < viewer). RLS
+		// no longer shows them their draft (positive control: it did before), yet it stands, so the export still carries it
+		// (app_subject_scenarios, 396). The helper's share goes with the drop (049 project_member_prune_shares deletes
+		// shares the rule no longer allows), so there is nothing of theirs left to export.
+		const ownSeen = () =>
+			withUser(applicant.id, async (tx) => (await tx.query<{ n: number }>('SELECT count(*)::int AS n FROM scenario WHERE id = $1', [app1.id])).rows[0]!.n);
+		expect(await ownSeen()).toBe(1);
+		await asOwner(`UPDATE project_member SET role = 'farmer' WHERE project_id = $1 AND user_id = $2`, [projectId, applicant.id]);
+		try {
+			expect(await ownSeen()).toBe(0);
+			expect((await download(applicant)).doc.scenarios).toEqual([application]);
+			expect(await asOwner('SELECT 1 FROM scenario_member WHERE scenario_id = $1', [app1.id])).toEqual([]);
+			expect((await download(helper)).doc.scenarioMemberships).toEqual([]);
+			// Still only their own: the farmer's export is unchanged.
+			expect((await download(farmer)).doc.scenarios).toEqual([]);
+		} finally {
+			await asOwner(`UPDATE project_member SET role = 'contributor' WHERE project_id = $1 AND user_id = $2`, [projectId, applicant.id]);
+		}
+	});
+
+	it('gives the reverse-trial claim of the person’s current address (#906), and never another person’s', async () => {
+		// The farmer's claim, stored as app_reverse_trial_start writes it (the hash of the canonical address).
+		const mineHex = reverseTrialHash(farmer.email);
+		const theirsHex = reverseTrialHash(other.email);
+		await asOwner(`INSERT INTO reverse_trial_claim (email_hash, claimed_at) VALUES (decode($1, 'hex'), '2026-11-01T10:00:00Z')`, [mineHex]);
+		try {
+			const mine = await download(farmer);
+			expect(mine.doc.reverseTrialClaim).toEqual({ emailHash: mineHex, claimedAt: expect.stringMatching(/^2026-11-01T10:00:00/) });
+			// The other farmer had no trial: null, and no trace of the farmer's hash.
+			const theirs = await download(other);
+			expect(theirs.doc.reverseTrialClaim).toBeNull();
+			expect(theirs.text).not.toContain(mineHex);
+			// Positive control: once the other has a claim too, each sees only their own.
+			await asOwner(`INSERT INTO reverse_trial_claim (email_hash) VALUES (decode($1, 'hex'))`, [theirsHex]);
+			expect((await download(other)).doc.reverseTrialClaim).toEqual({ emailHash: theirsHex, claimedAt: expect.any(String) });
+			const again = await download(farmer);
+			expect(again.doc.reverseTrialClaim.emailHash).toBe(mineHex);
+			expect(again.text).not.toContain(theirsHex);
+		} finally {
+			await asOwner(`DELETE FROM reverse_trial_claim WHERE encode(email_hash, 'hex') = ANY($1)`, [[mineHex, theirsHex]]);
+		}
+	});
+
+	it('hashes the canonical address in SQL exactly as reverseTrialHash does (canonical_email, 396)', async () => {
+		const cases = [
+			'Plain@Example.com',
+			'  spaced@example.com\t',
+			'a.b.c+promo@gmail.com',
+			'A.B+x@GoogleMail.com',
+			'+leading@example.com',
+			'dots.kept+tag@example.org',
+			'two@at@example.com',
+			'@nolocal.com',
+			'no-at-sign',
+			'first.last+@gmail.com'
+		];
+		for (const email of cases) {
+			const [row] = await asOwner(`SELECT canonical_email($1) AS c, encode(sha256(convert_to(canonical_email($1), 'UTF8')), 'hex') AS h`, [email]);
+			expect(row.c, email).toBe(canonicalEmail(email));
+			expect(row.h, email).toBe(reverseTrialHash(email));
+		}
 	});
 
 	it('gives a pending change of address (the new address and when it lapses), never the link’s hash, and not to anyone else', async () => {

@@ -272,6 +272,8 @@ beforeAll(async () => {
 	}
 	const sid = (await call(applicant, 'POST', `/projects/${projectId}/scenarios`, { name: 'Raise the weir', baseRunId: runId, ops: [] })).scenario.id;
 	await call(applicant, 'POST', `/projects/${projectId}/scenarios/${sid}/submit`);
+	// A modelling scenario of the subject's own (an editor's, origin team): scenario.owner_user_id, in the export's scenarios (396).
+	await call(subject, 'POST', `/projects/${projectId}/scenarios`, { name: 'Pd own scenario', baseRunId: runId, ops: [] });
 	// Only the applicant shares an application, and the subject is an editor here, so the share the subject made is
 	// arranged as the schema owner: the foreign key's SET NULL is what's under test.
 	await asOwner('INSERT INTO scenario_member (scenario_id, project_id, user_id) VALUES ($1, $2, $3)', [sid, projectId, consultant.id]);

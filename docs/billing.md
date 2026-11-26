@@ -1055,7 +1055,8 @@ Stripe trials are `stripe`). Only a verified address qualifies.
 canonical address and when, never the address and no link to the account,
 so it outlives the account's deletion: deleting the account and signing up
 again gets no second trial (`security.md` § Personal information says what
-the record is).
+the record is). "Download my data" shows the person their current
+address's claim (`reverseTrialClaim`, 396).
 
 **At the end.** The worker's tick moves each trial past its `trial_end` to
 `expired` and logs an `expire`; the account is then Free (no live
