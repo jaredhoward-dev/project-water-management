@@ -235,12 +235,25 @@ describe('GET /auth/me/export', () => {
 		const [helper, applicant] = (await Promise.all(['XHelper', 'XApplicant'].map((n) => signUp(n)))) as [User, User];
 		for (const u of [helper, applicant]) expect((await owner.call('POST', `/projects/${projectId}/members`, { email: u.email, role: 'contributor' })).status).toBe(201);
 		const [run] = await asOwner('SELECT id FROM model_run WHERE project_id = $1 ORDER BY created_at LIMIT 1', [projectId]);
-		const [app1] = await asOwner(
-			`INSERT INTO scenario (project_id, name, base_run_id, ops_sha256, owner_user_id, origin, status)
-			 VALUES ($1, 'Raise the Alpha weir', $2, repeat('0', 64), $3, 'applicant', 'draft') RETURNING id`,
-			[projectId, run.id, applicant.id]
-		);
-		await asOwner('INSERT INTO scenario_member (scenario_id, project_id, user_id, added_by) VALUES ($1, $2, $3, $4)', [app1.id, projectId, helper.id, applicant.id]);
+		// As the schema owner, acting as the applicant (the scenario trigger wants a signed-in user).
+		const client = new pg.Client({ connectionString: process.env.TEST_MIGRATION_DATABASE_URL });
+		await client.connect();
+		let app1: { id: string };
+		try {
+			await client.query('BEGIN');
+			await client.query(`SELECT set_config('app.current_user_id', $1, true)`, [applicant.id]);
+			[app1] = (
+				await client.query<{ id: string }>(
+					`INSERT INTO scenario (project_id, name, base_run_id, ops_sha256, owner_user_id, origin, status)
+					 VALUES ($1, 'Raise the Alpha weir', $2, repeat('0', 64), $3, 'applicant', 'draft') RETURNING id`,
+					[projectId, run.id, applicant.id]
+				)
+			).rows as [{ id: string }];
+			await client.query('INSERT INTO scenario_member (scenario_id, project_id, user_id, added_by) VALUES ($1, $2, $3, $4)', [app1.id, projectId, helper.id, applicant.id]);
+			await client.query('COMMIT');
+		} finally {
+			await client.end();
+		}
 		const mine = await download(helper);
 		expect(mine.doc.scenarioMemberships).toEqual([
 			{ scenarioId: app1.id, projectId, projectName: 'Export catchment', scenarioName: 'Raise the Alpha weir', addedAt: expect.any(String), addedBy: 'XApplicant' }
