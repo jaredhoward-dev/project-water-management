@@ -36,6 +36,7 @@
 		type DroughtRestrictionRule
 	} from '@water-management/engine';
 	import NumberInput from '#lib/components/common/NumberInput.svelte';
+	import { focusListTarget, listFocusTarget, RowKeys } from '#lib/a11y/listRows.js';
 	import Fold from '#lib/components/common/Fold.svelte';
 	import { api } from '#lib/api/index.js';
 	import { confirmDialog } from '#lib/components/common/confirm.svelte.js';
@@ -142,6 +143,14 @@
 		value = on ? (lastRule ?? startingRule()) : null;
 	}
 	const rule = $derived(value ?? null);
+	// Rows keep their own keys (a11y/listRows.ts, issue #921): the dates can lose one from the middle; levels change
+	// only at the end, which RowKeys.for fits by itself. An add puts the focus in the new row, a remove on what took its place.
+	const dateKeys = { reviewDates: new RowKeys(), liftDates: new RowKeys() };
+	const levelKeys = new RowKeys();
+	const levelRowKeys = $derived(levelKeys.for(rule?.levels.length ?? 0));
+	const datesBox = (which: 'reviewDates' | 'liftDates') => document.getElementById(`${uid}-${which}`);
+	const levelsBox = () => document.querySelector<HTMLElement>(`[aria-labelledby="${uid}-levels-h"]`);
+	const addLevelButton = () => document.getElementById(`${uid}-add-level`);
 	/** The rule with one field replaced (the whole rule is what a save stores). */
 	function edit(patch: Partial<DroughtRestrictionRule>) {
 		if (!value) return;
@@ -153,13 +162,35 @@
 		list[i] = joinMonthDay(month, Math.min(day, DAYS[month - 1]!));
 		edit({ [which]: list });
 	}
+	function addDate(which: 'reviewDates' | 'liftDates') {
+		const list = withDateAdded(value?.[which] ?? []);
+		edit({ [which]: list });
+		void focusListTarget(datesBox(which), listFocusTarget({ added: true, length: list.length }));
+	}
 	function removeDate(which: 'reviewDates' | 'liftDates', i: number) {
 		const list = (value?.[which] ?? []).filter((_, k) => k !== i);
+		dateKeys[which].removed(i);
 		if (which === 'liftDates' && !list.length) {
 			const { liftDates: _gone, ...rest } = value!;
 			value = rest;
 			fromTemplate = false;
 		} else edit({ [which]: list });
+		// The next chip's ✕, else the previous one's (the last review date keeps no ✕: its day field), else Add.
+		void focusListTarget(datesBox(which), listFocusTarget({ removedAt: i, left: list.length }));
+	}
+	function addLevel() {
+		if (!value) return;
+		const levels = withLevelAdded(value.levels);
+		edit({ levels });
+		void focusListTarget(levelsBox(), listFocusTarget({ added: true, length: levels.length }), { add: addLevelButton });
+	}
+	function removeDeepestLevel() {
+		if (!value) return;
+		const levels = value.levels.slice(0, -1);
+		const t = value.ewrTrigger;
+		edit({ levels, ...(t && t.level >= value.levels.length ? { ewrTrigger: { ...t, level: value.levels.length - 1 } } : {}) });
+		// The button stays (and keeps the focus) while two levels are left; with one it goes, and Add a deeper level takes it.
+		if (levels.length <= 1) void focusListTarget(levelsBox(), { add: true }, { add: addLevelButton, fallback: () => document.getElementById(`${uid}-levels-h`) });
 	}
 	function setLevel(i: number, patch: Partial<DroughtRestrictionRule['levels'][number]>) {
 		if (value) edit({ levels: value.levels.map((l, k) => (k === i ? { ...l, ...patch } : l)) });
@@ -203,13 +234,14 @@
 		{/if}
 		{#each ['reviewDates', 'liftDates'] as const as which (which)}
 			{@const list = rule[which] ?? []}
-			<fieldset class="plain dates" data-testid="restriction-{which}" aria-describedby={at === which ? errId : undefined}>
+			{@const keys = dateKeys[which].for(list.length)}
+			<fieldset class="plain dates" id="{uid}-{which}" data-testid="restriction-{which}" aria-describedby={at === which ? errId : undefined}>
 				<legend>{which === 'reviewDates' ? 'Review dates (the level is decided)' : 'Lift dates (any restriction ends)'}</legend>
 				<div class="chips">
-					{#each list as md, i (i)}
+					{#each list as md, i (keys[i])}
 						{@const p = splitMonthDay(md)}
 						{@const kind = which === 'reviewDates' ? 'Review' : 'Lift'}
-						<span class="chip" data-testid="restriction-date">
+						<span class="chip" data-row data-testid="restriction-date">
 							<input
 								type="number"
 								min="1"
@@ -223,12 +255,12 @@
 								{#each DAYS as _, m (m)}<option value={m + 1}>{monthName(m + 1).slice(0, 3)}</option>{/each}
 							</select>
 							{#if !readonly && (which === 'liftDates' || list.length > 1)}
-								<button type="button" class="chip-x" aria-label="Remove {kind.toLowerCase()} date {i + 1}, {monthDayText(md)}" title="Remove {monthDayText(md)}" onclick={() => removeDate(which, i)}>×</button>
+								<button type="button" class="chip-x" data-remove aria-label="Remove {kind.toLowerCase()} date {i + 1}, {monthDayText(md)}" title="Remove {monthDayText(md)}" onclick={() => removeDate(which, i)}>×</button>
 							{/if}
 						</span>
 					{/each}
 					{#if !readonly && list.length < RESTRICTION_DATES_MAX}
-						<button type="button" class="btn btn-sm" onclick={() => edit({ [which]: withDateAdded(list) })}><span aria-hidden="true">{'+ '}</span>Add a {which === 'reviewDates' ? 'review' : 'lift'} date</button>
+						<button type="button" class="btn btn-sm" data-add onclick={() => addDate(which)}><span aria-hidden="true">{'+ '}</span>Add a {which === 'reviewDates' ? 'review' : 'lift'} date</button>
 					{/if}
 				</div>
 				{#if at === which}<p class="err" id={errId} data-testid="restriction-error">{error}</p>{/if}
@@ -239,8 +271,8 @@
 		<div class="levels-head">
 			<h3 class="levels-title" id="{uid}-levels-h">Levels, mildest first</h3>
 			{#if !readonly}
-				{#if rule.levels.length < RESTRICTION_LEVELS_MAX}<button type="button" class="btn btn-sm" onclick={() => edit({ levels: withLevelAdded(rule.levels) })}><span aria-hidden="true">{'+ '}</span>Add a deeper level</button>{/if}
-				{#if rule.levels.length > 1}<button type="button" class="btn btn-sm btn-ghost" onclick={() => edit({ levels: rule.levels.slice(0, -1), ...(rule.ewrTrigger && rule.ewrTrigger.level >= rule.levels.length ? { ewrTrigger: { ...rule.ewrTrigger, level: rule.levels.length - 1 } } : {}) })}>Remove the deepest level</button>{/if}
+				{#if rule.levels.length < RESTRICTION_LEVELS_MAX}<button type="button" class="btn btn-sm" id="{uid}-add-level" onclick={addLevel}><span aria-hidden="true">{'+ '}</span>Add a deeper level</button>{/if}
+				{#if rule.levels.length > 1}<button type="button" class="btn btn-sm btn-ghost" onclick={removeDeepestLevel}>Remove the deepest level</button>{/if}
 			{/if}
 		</div>
 		<p class="hint explain">
@@ -257,8 +289,8 @@
 						<span class="cell"><span>{PART_LABEL[part]}{#if floored(part)}<span class="muted">{' (floor kept)'}</span>{/if}</span></span>
 					{/each}
 				</div>
-				{#each rule.levels as l, i (i)}
-					<fieldset class="level" data-testid="restriction-level" aria-describedby={at === `level-${i}` ? errId : undefined}>
+				{#each rule.levels as l, i (levelRowKeys[i])}
+					<fieldset class="level" data-row data-testid="restriction-level" aria-describedby={at === `level-${i}` ? errId : undefined}>
 						<legend>{l.label?.trim() || `Level ${i + 1}`}</legend>
 						<div class="row cell head">
 							<label for="{uid}-l{i}-name">Name</label>

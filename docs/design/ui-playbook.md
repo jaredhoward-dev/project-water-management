@@ -1835,6 +1835,20 @@ Interaction details that bit:
   A row with no control every row has (a note: only some have Delete) takes
   the focus itself: the notes list's items carry `tabindex="-1"` and the
   selector is the item (`notes/NotesList.svelte`, `history-steps.spec.ts`).
+  An editable list whose rows have no id of their own (the period lists:
+  `common/PeriodList.svelte`, `calibration/LowFlowPeriods.svelte`,
+  `settings/RainRecordPeriods.svelte`, and the drought restriction's dates
+  and levels in `settings/DroughtRestrictionFields.svelte`) never keys its
+  `{#each}` by position:
+  `RowKeys` (`lib/a11y/listRows.ts`) keeps each row's key across adds and
+  removes, and `listFocusTarget` + `focusListTarget` put the focus in the
+  new row's first field on an add, and on a remove on the ✕ of the row in
+  its place (else the previous row's, else the list's add button), marked
+  `data-row`, `data-remove` and `data-add` (issue #921,
+  `period-list-focus.spec.ts`). A row whose ✕ is hidden (the last review
+  date) gives its first field; an add button outside the box is passed as
+  `add`; a list that can vanish (a deleted rain series with its last period)
+  passes its group's heading as `fallback`.
 - **A pick is a step in history; typing is one step; a default is none.**
   Runs replaced the history entry on a run pick while River, Units, Dams and
   Allocations added one, so Back did different things on neighbouring pages

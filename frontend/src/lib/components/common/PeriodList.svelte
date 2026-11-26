@@ -7,6 +7,8 @@
 	head row, so the buttons sit with the list they fill (a group named by the
 	head, as a fieldset by its legend; ui-playbook.md § 2).
 	calibration/LowFlowPeriods.svelte mirrors this layout with more fields.
+	Rows keep their own keys, an add puts the focus in the new row and a
+	remove on the row in its place, else the add button (a11y/listRows.ts).
 -->
 <script lang="ts">
 	import { fmtDay, localIsoDate } from '#lib/format/number.js';
@@ -14,6 +16,7 @@
 	import { exclusionsError, exclusionRange, waterYearLabel, type CalibrationExclusion } from '@water-management/engine';
 	import NumberInput from '#lib/components/common/NumberInput.svelte';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
+	import { focusListTarget, listFocusTarget, RowKeys } from '#lib/a11y/listRows.js';
 
 	let {
 		list = $bindable([]),
@@ -47,6 +50,9 @@
 	} = $props();
 
 	const uid = $props.id();
+	let box = $state<HTMLElement>();
+	const keys = new RowKeys();
+	const rowKeys = $derived(keys.for(list.length));
 
 	$effect(() => {
 		error = exclusionsError(list, noun);
@@ -61,15 +67,22 @@
 		return years.length ? Math.min(...years) - 1 : current - 1;
 	}
 
+	function append(x: CalibrationExclusion) {
+		keys.added();
+		list = [...list, x];
+		void focusListTarget(box, listFocusTarget({ added: true, length: list.length }));
+	}
 	function addYear() {
-		list = [...list, { waterYear: nextYear(), reason: '' }];
+		append({ waterYear: nextYear(), reason: '' });
 	}
 	function addRange() {
 		const y = nextYear();
-		list = [...list, { start: `${y}-10-01`, end: `${y}-12-31`, reason: '' }];
+		append({ start: `${y}-10-01`, end: `${y}-12-31`, reason: '' });
 	}
 	function remove(i: number) {
+		keys.removed(i);
 		list = list.filter((_, j) => j !== i);
+		void focusListTarget(box, listFocusTarget({ removedAt: i, left: list.length }));
 	}
 	function setYear(i: number, v: number | null) {
 		const x = list[i]!;
@@ -85,21 +98,21 @@
 	const blankReason = (x: CalibrationExclusion) => !x.reason.trim();
 </script>
 
-<div class="excl" role="group" aria-labelledby="{uid}-l" aria-describedby="{uid}-hint">
+<div class="excl" bind:this={box} role="group" aria-labelledby="{uid}-l" aria-describedby="{uid}-hint">
 	<div class="head">
 		<span class="legend"><span id="{uid}-l">{legend}</span> <HelpTip key={helpKey} label={helpLabel} /></span>
 		{#if !readonly}
 			<span class="add">
-				<button type="button" class="btn btn-sm" onclick={addYear}>{addYearLabel}</button>
-				<button type="button" class="btn btn-sm" onclick={addRange}>{addRangeLabel}</button>
+				<button type="button" class="btn btn-sm" data-add onclick={addYear}>{addYearLabel}</button>
+				<button type="button" class="btn btn-sm" data-add onclick={addRange}>{addRangeLabel}</button>
 			</span>
 		{/if}
 	</div>
 	<p class="hint explain" id="{uid}-hint">{hint}</p>
 	{#if list.length}
 		<ol class="rows">
-			{#each list as x, i (i)}
-				<li class="row">
+			{#each list as x, i (rowKeys[i])}
+				<li class="row" data-row>
 					{#if 'waterYear' in x}
 						<div class="field year">
 							<label for="{uid}-y{i}">Water year <span class="u">(starts Oct)</span></label>
@@ -130,7 +143,7 @@
 						/>
 					</div>
 					{#if !readonly}
-						<button type="button" class="btn btn-icon" aria-label="Remove {noun} {i + 1}" title="Remove" onclick={() => remove(i)}>✕</button>
+						<button type="button" class="btn btn-icon" aria-label="Remove {noun} {i + 1}" title="Remove" data-remove onclick={() => remove(i)}>✕</button>
 					{/if}
 				</li>
 			{/each}
