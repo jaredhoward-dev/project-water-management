@@ -2233,10 +2233,14 @@ only the fetcher does, so start a backfill only once both carry it.
    `rnl` starts in 1981-01, `sat` in 2000-06 (its first byMonth file; its daily files start in 1998). Stop at the month before the
    current one: the daily `monthly` runs write the newest month, and a
    backfill of the same year at the same moment would race them on that
-   year's chunks.
+   year's chunks. One execution takes at most 173 months (the plan refuses
+   more: its history must hold every month's worst-case retries, issue #896,
+   `infra/ingest_backfill.tf`), so split a longer range with `--from`/`--to`
+   (`rnl` 1981-01 to 1995-05, then 1995-06 to 2009-10, and so on) and start
+   the next once the last has ended.
 2. Start it: `aws stepfunctions start-execution --state-machine-arn <arn> --input file:///tmp/rnl-plan.json`.
-   About 550 `rnl` months take ~1.5 days (a ~40 s download and the wait per
-   month); `sat` about 1 day. One execution at a time (or one with both
+   About 550 `rnl` months (four executions) take ~1.5 days in all (a ~40 s
+   download and the wait per month); `sat` about 1 day (two). One execution at a time (or one with both
    products' months, above): the feeds wait for its whole run.
 3. If an execution fails, read the failed month's error in the execution's
    history and the `mirror-ingest` log group. After a 403, wait (and write to

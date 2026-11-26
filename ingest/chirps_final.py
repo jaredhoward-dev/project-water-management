@@ -25,8 +25,11 @@ NetCDF files for `rnl` and `sat` into the copy's finals arrays.
 
 **backfill** `{"month": "YYYY-MM"}`: the same single-file path for one named
 month, as one conditional GET of that file (a month already held with the
-same validators is a 304 and changes nothing). R2-B's Step Functions map
-calls it one month per invocation.
+same validators is a 304 and changes nothing). A file without a readable
+Last-Modified is refused (ListingError), as the daily run refuses one that
+doesn't match the listing: stored as null, the daily run would download it
+again every day (issue #896). R2-B's Step Functions map calls it one month
+per invocation.
 
 Pacing holds across invocations: the time of the last download is kept in
 `ingest-state/<product>/state.json` beside the listing's validators, and a
@@ -391,6 +394,15 @@ def run_monthly(mirror: zarrstore.Mirror, product: str, run: Run) -> dict:
         return {"listing": "read", "files": results, "pending": pending}
 
 
+def _check_backfill_response(r: polite.Response) -> None:
+    """A backfilled file must carry a readable Last-Modified, as the daily run
+    insists (it compares it with the listing's time): one stored as null
+    would never match the listing, so the daily run would download that month
+    again every day (issue #896). Refused before anything is written."""
+    if _http_minute(r.last_modified) is None:
+        raise ListingError(f"{r.url}: no readable Last-Modified ({r.last_modified!r}); refusing to store a month the daily run would re-download every day")
+
+
 def run_backfill(mirror: zarrstore.Mirror, product: str, month: str, run: Run) -> dict:
     """One named month: a conditional GET of its file, then the same ingest_file."""
     y, mo = (int(p) for p in month.split("-"))
@@ -409,7 +421,7 @@ def run_backfill(mirror: zarrstore.Mirror, product: str, month: str, run: Run) -
             run.client,
             url,
             run.workdir,
-            lambda r: None,
+            _check_backfill_response,
             lambda path, r: ingest_file(mirror, product, url, path, r.etag, r.last_modified, run.now),
             etag=held["etag"] if held else None,
             last_modified=held["lastModified"] if held else None,

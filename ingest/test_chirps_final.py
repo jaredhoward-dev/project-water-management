@@ -359,6 +359,27 @@ class Backfill(Base):
         out, _ = self.run_job({"product": "rnl", "mode": "backfill", "month": "2024-02"}, variant="changed")
         self.assertEqual(out["revision"], 2)
 
+    def test_backfill_refuses_a_file_without_last_modified(self):
+        # Issue #896: stored as null, the month would never match the listing,
+        # so the daily run would download it again every day.
+        opener = Opener(self.clock)
+        inner = opener.inner
+
+        def no_last_modified(req, timeout=None):
+            res = inner(req, timeout)
+            del res.headers["Last-Modified"]
+            return res
+
+        opener.inner = no_last_modified
+        with self.assertRaisesRegex(chirps_final.ListingError, "no readable Last-Modified"):
+            self.run_job({"product": "rnl", "mode": "backfill", "month": "2024-02"}, opener=opener)
+        self.assertEqual(opener.urls(), [FEB])
+        self.assertIsNone(self.manifest())  # nothing stored
+        self.assertEqual(len(self.metrics.published), 1)
+        # With the header back, the same month is copied with its lastModified.
+        self.run_job({"product": "rnl", "mode": "backfill", "month": "2024-02"})
+        self.assertIsNotNone(self.manifest()["files"][0]["lastModified"])
+
     def test_backfill_403_stops(self):
         opener = Opener(self.clock, fail={FEB: http_error(FEB, 403)})
         with self.assertRaises(polite.StopRun):
