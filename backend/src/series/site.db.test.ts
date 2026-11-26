@@ -164,6 +164,39 @@ describe('a flow record’s site (084_gauge_records)', () => {
 		expect(refused.body.details).toEqual([{ message: 'series flow_observed_m3s "Upper weir": its site "Farm" is not a gauge above the outlet' }]);
 	});
 
+	it('a download imports back after its sites stop being sites: a gauge made a farm, a unit given no area or made a gauge', async () => {
+		const u = await signUp('SiteChanged');
+		const q = await gaugedProject(u, 'Changed');
+		expect((await site(u, q.id, q.gaugeRecord, q.upper.id)).status).toBe(200);
+		// The farm's own rain (209), and a second farm with its own rain.
+		const other = node('Other farm', q.outlet.id);
+		expect((await u.call('PUT', `/projects/${q.id}/model`, { ...q.model, nodes: [...q.model.nodes, other] })).status).toBe(200);
+		const rain = Array.from({ length: DAYS }, (_, i) => (i % 4 === 0 ? 8 : 0));
+		for (const [name, at] of [['Farm gauge', q.farm.id], ['Other gauge', other.id]] as const) {
+			const sid = (await u.call('PUT', `/projects/${q.id}/series`, { kind: 'rain_catchment_mm', name, unit: 'mm', startDate: '2020-01-01', values: rain })).body.id as string;
+			expect((await site(u, q.id, sid, at)).status).toBe(200);
+		}
+		// The editor then saves a model where none of the three sites is one any more: the gauge is a farm,
+		// the farm has no area and the other farm is a gauge. The records keep their sites (a run warns).
+		const nodes = [q.outlet, { ...q.upper, kind: 'farm', areaKm2: 3 }, { ...q.farm, areaKm2: 0 }, { ...other, kind: 'gauge', areaKm2: 0 }];
+		expect((await u.call('PUT', `/projects/${q.id}/model`, { ...q.model, nodes })).status).toBe(200);
+		const doc = (await u.call('GET', `/projects/${q.id}/export.json`)).body as { series: { name: string; kind: string; siteNodeId?: string }[] };
+		const imported = await u.call('POST', '/projects/import', { ...doc, name: 'Changed import' });
+		expect(imported.status, JSON.stringify(imported.body)).toBe(201);
+		const iid = imported.body.project.id as string;
+		const inodes = (await u.call('GET', `/projects/${iid}/model`)).body.nodes as { id: string; name: string }[];
+		const list = await seriesList(u, iid);
+		// A unit's rain stays at its unit, area or not, as a restore puts it back (the run leaves it out and says so).
+		expect(list.find((s) => s.name === 'Farm gauge')!.siteNodeId).toBe(inodes.find((n) => n.name === 'Farm')!.id);
+		// A site that is no site any more goes as a gauge that left the model does: the flow record as the outlet's,
+		// the rain at a node that is no land unit left out (the database holds a unit's rain only at a land unit).
+		expect(list.find((s) => s.name === 'Upper weir')!.siteNodeId).toBeNull();
+		expect(list.some((s) => s.name === 'Other gauge')).toBe(false);
+		// A copy of the same project is made too.
+		const copy = await u.call('POST', `/projects/${q.id}/copy`, { name: 'Changed copy' });
+		expect(copy.status, JSON.stringify(copy.body)).toBe(201);
+	});
+
 	it('a gauge deleted from the model keeps its record apart: the outlet still reads its own, and the run warns', async () => {
 		const u = await signUp('SiteGone');
 		const q = await gaugedProject(u, 'Gone');

@@ -531,10 +531,15 @@ area-weighted CHIRPS (`rain_chirps_mm`, the from-units feeds,
   a unit feed whose unit has left the model or is no longer a farm, so the
   site check never fails a fetch with database text.
 - **Carried** by a copy, the project document and an import, moved to the
-  unit's new id; a unit rain series whose unit has left the model is **left
-  out** of a copy and of the export (with no site it would become the
-  catchment's rain). An import refuses rain sited at a gauge, a user or a farm
-  with no area. A restore puts it back at its unit, and is refused (`409
+  unit's new id; a unit rain series whose unit has left the model, or is no
+  longer a land unit (a farm the editor made a gauge), is **left out** of a
+  copy and of the export (with no site it would become the catchment's rain).
+  An import refuses rain sited at a gauge or a user; a farm with no area keeps
+  its rain, as a restore does (the run leaves it out and says so), so the
+  download of a unit whose area was later typed to 0 imports back. Likewise a
+  flow record whose gauge is no longer a gauge above the outlet (made a farm
+  or the outlet) goes in the export as the outlet's, as one whose gauge left
+  the model does, since the import refuses such a site. A restore puts it back at its unit, and is refused (`409
   site_gone`) while that node is no longer a land unit.
 - **The unit's MAP**: `node.map_mm` (1–12 000 mm, NULL = none) and
   `node.map_source` (1–600 characters, not blank), with

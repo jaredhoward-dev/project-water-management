@@ -514,8 +514,9 @@ export const projectRoutes = new Hono<AuthEnv>()
 			await saveModel(db, newId, copied);
 			// A gauge record's site (084_gauge_records) follows its gauge to the copy's id; one whose
 			// node has left the model has nothing to follow, so it keeps no site in the copy. A land unit's
-			// own rain (209) follows its unit the same way, and one whose unit has gone is left out: with no
-			// site it would become the copy's catchment rain. A rainfall station's details (239, issue #553) copy with it
+			// own rain (209) follows its unit the same way, and one whose unit has gone, or is no land unit any more (a
+			// farm made a gauge: the record keeps its site, and 209's trigger refuses rain at a node that is no farm), is
+			// left out: with no site it would become the copy's catchment rain. A rainfall station's details (239, issue #553) copy with it
 			// (only a catchment rain series with no site has them, so its site stays null).
 			const [from, to] = [[...ids.keys()], [...ids.values()]];
 			await db.query(
@@ -524,8 +525,8 @@ export const projectRoutes = new Hono<AuthEnv>()
 				 SELECT $2, t.kind, t.name, t.unit, t.start_date, t."values", t.product, t.product_version, t.day_boundary, m.new_id,
 					t.source, t.source_unit, t.source_unit_factor, t.hand_days, t.station_map_mm, t.station_map_source, t.station_lat, t.station_lon
 				 FROM time_series t LEFT JOIN unnest($3::uuid[], $4::uuid[]) AS m(old_id, new_id) ON m.old_id = t.site_node_id
-				 WHERE t.project_id = $1 AND NOT (t.site_node_id IS NOT NULL AND m.new_id IS NULL AND t.kind = ANY($5::text[]))`,
-				[srcId, newId, from, to, [...UNIT_RAIN_KINDS]]
+				 WHERE t.project_id = $1 AND NOT (t.site_node_id IS NOT NULL AND t.kind = ANY($5::text[]) AND (m.new_id IS NULL OR NOT m.new_id = ANY($6::uuid[])))`,
+				[srcId, newId, from, to, [...UNIT_RAIN_KINDS], copied.nodes.filter((n) => n.kind === 'farm').map((n) => n.id)]
 			);
 			// The series the settings name by id (the rainfall stations, issue #553; each flow record's missing periods and the
 			// kept data checks, issue #611) follow them to the copy's ids, by kind and name (one series per kind and name in a
