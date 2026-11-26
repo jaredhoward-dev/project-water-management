@@ -1653,7 +1653,7 @@ plan by hand, once it is paid, until the end of the invoiced period. It
 works with `BILLING_PROVIDER` unset.
 
 ```bash
-pnpm dev:billing:grant <email|team-id> <plan> [--until YYYY-MM-DD] --reason "…" [--replace] [--by <name>]
+pnpm dev:billing:grant <email|team-id> <plan> [--until YYYY-MM-DD] [--seats n] --reason "…" [--replace] [--by <name>]
 pnpm dev:billing:grant <email|team-id> --revoke --reason "…" [--by <name>]
 pnpm dev:billing:grant <email|team-id> --list
 ```
@@ -1686,6 +1686,17 @@ defaults to the operator's login.
   the plan page says it ends and the renewal notice never picks a grant up.
   `free` can't be granted (revoke instead), the end must be in the future and
   a reason (≤ 500 characters) is required.
+- **Seats** (374). `app_staff_grant_plan(…, replace, seats)` and `--seats`
+  give the editor seats in all; without them a grant has the plan's
+  included seats (Team 3, Pro 1). Fewer than included is refused, and more
+  only on a plan that sells extra seats (Team). A grant's seats change by a
+  new grant with `--replace`, which is what `POST /teams/:id/plan/seats`'s
+  `409 billing_grant_seats` tells a team admin to ask for. Before 374 every
+  grant was written with 1 seat (the plan page showed a granted Team as 1
+  seat, and enforced, it was held to its 3 included) and there was no way to
+  grant more; the production owner action `billing-grant` doesn't pass
+  seats yet, so a grant past the included seats is the local script's or
+  runbook 21's SQL until it does.
 - **Beside a live subscription.** A live **Stripe** subscription is refused,
   with or without `--replace`: ending it here would leave Stripe billing the
   customer for a plan we no longer show, and `app_billing_apply` never
@@ -1714,7 +1725,7 @@ defaults to the operator's login.
   note. `granted_by` (the operator's name) is visible to them too.
 
 Tests: `backend/src/billing/grant.db.test.ts` (grant and the plan page, the
-SAST end under a skewed `TZ`, expiry, a lapsed grant, Stripe refused even
+SAST end under a skewed `TZ`, a Team's seats by default and with `--seats`, expiry, a lapsed grant, Stripe refused even
 with `--replace`, mock replaced, revoke, a team's grant and who reads it,
 owner-only) and `backend/scripts/billing-grant.test.ts` (arguments).
 
