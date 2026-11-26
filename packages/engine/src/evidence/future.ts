@@ -26,6 +26,7 @@ import {
 	CLIMATE_DELTA_METHOD,
 	CLIMATE_HORIZONS,
 	CLIMATE_SSPS,
+	climateCellWeighted,
 	climateDeltaFactors,
 	climateFactorRowError,
 	heldWindowClimate,
@@ -176,8 +177,9 @@ const windowLength = (w: FutureWindow) => w.to - w.from + 1;
 /**
  * The factor table of `models` over their catchment cells: per model, SSP and
  * horizon, climateDeltaFactors on each cell's window means (heldWindowClimate:
- * over the years of each window the copy holds, counted). Throws when a
- * model holds no year of a window: there is no factor to give.
+ * over the years of each window the copy holds, counted over the cells the
+ * factors weigh: a zero-weight cell takes no part). Throws when a model's
+ * weighted cells hold no year of a window: there is no factor to give.
  */
 export function buildFutureFactorTable(models: readonly FutureModelCells[], meta: { sources: readonly FutureSourceFile[]; citation: string; licence: string }): FutureFactorTable {
 	if (!models.length) throw new Error('no climate model to work the factors out from');
@@ -189,7 +191,9 @@ export function buildFutureFactorTable(models: readonly FutureModelCells[], meta
 				const w = FUTURE_WINDOWS[horizon];
 				let by = 0;
 				let fy = 0;
-				const cells = m.cells.map((c) => {
+				// Only the cells the factors weigh (climateCellWeighted, as climateDeltaFactors): a zero-weight cell
+				// neither lowers the years counted nor, holding no year of a window, refuses the case (issue #889).
+				const cells = m.cells.filter(climateCellWeighted).map((c) => {
 					const base = heldWindowClimate(c.historical, FUTURE_WINDOWS.baseline.from, FUTURE_WINDOWS.baseline.to);
 					const fut = heldWindowClimate(c[ssp], w.from, w.to);
 					by = by ? Math.min(by, base.years) : base.years;

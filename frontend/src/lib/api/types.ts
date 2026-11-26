@@ -2803,6 +2803,10 @@ export interface FutureYieldState {
 		result: FutureYieldResult | null;
 		withheld?: string[];
 		engineVersion: string;
+		/** The catchment boundary's hash when the job read the factors; null for a result stored before 390_future_yield_boundary. */
+		boundarySha256: string | null;
+		/** That boundary against the project's now (issue #889): changed or none means the result is stale. */
+		boundary: 'same' | 'changed' | 'none' | 'unrecorded';
 		createdBy: string | null;
 		createdAt: string;
 	} | null;

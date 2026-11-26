@@ -9,7 +9,9 @@
 // and after the historical pair and each case (10–100 %), outside the
 // transaction; a cancel (284_cancel_future_jobs) stops it at the next report,
 // so no further model is read or case run, and nothing is stored. Writes one
-// future_yield row and keeps the newest FUTURE_YIELD_RESULTS_KEPT per pair.
+// future_yield row, with the hash of the boundary its cells came from
+// (390_future_yield_boundary, issue #889), and keeps the newest
+// FUTURE_YIELD_RESULTS_KEPT per pair.
 import { ENGINE_VERSION, runFutureYieldAsync, type FutureYieldResult } from '@water-management/engine';
 import { ApiError } from '../../http/errors.js';
 import { requireRole } from '../../projects/access.js';
@@ -61,9 +63,9 @@ export const futureYieldHandler = defineHandler({
 		}
 		result.warnings.push(...warnings);
 		await db.query(
-			`INSERT INTO future_yield (project_id, baseline_run_id, application_run_id, node_id, job_id, method, result, engine_version)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-			[job.projectId, pair.baselineRunId, pair.applicationRunId, pair.nodeId, job.id, result.method, JSON.stringify(result), ENGINE_VERSION]
+			`INSERT INTO future_yield (project_id, baseline_run_id, application_run_id, node_id, job_id, method, result, engine_version, boundary_sha256)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+			[job.projectId, pair.baselineRunId, pair.applicationRunId, pair.nodeId, job.id, result.method, JSON.stringify(result), ENGINE_VERSION, pair.boundarySha256]
 		);
 		await db.query(
 			`DELETE FROM future_yield WHERE id IN (

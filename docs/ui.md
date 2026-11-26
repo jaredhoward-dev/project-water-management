@@ -14959,7 +14959,11 @@ Viewer role and up; a contributor or farmer is told it needs the viewer role.
     the cases run. A cancelled job is said plainly (*The last run was
     cancelled.*, `evidence-future-cancelled`), never as a failure, and the
     Run button comes back. A reload or another tab picks the job up (the GET returns the
-    newest one). Viewers get no board, and a pack never has one: a pack
+    newest one). When the catchment boundary has been drawn again or
+    removed since the result was read over it (issue #889), the board warns
+    so (`evidence-future-boundary`) and § 8 itself carries an amber banner
+    (`evidence-future-boundary-stale`; also for a result stored before the
+    boundary was recorded). Viewers get no board, and a pack never has one: a pack
     freezes § 8 as it was drafted.
   - **Appendix A** (A.1 settings, with the declared rule; A.2 the ops with
     their class and the input diff; A.3 series and SHA-256; A.4 baseline

@@ -750,8 +750,15 @@ e2e) over the project's `catchment_boundary` (`future/cells.ts`, the 0.25°
 cells weighted by share inside × cos latitude), works the factor table out
 (`buildFutureFactorTable`) and runs every pair (about 40 runs and twice as
 many yield searches for 10 models) as the editor, under RLS, then stores
-one `future_yield` row (the newest 3 per pair are kept). The evidence report
-reads the newest row for its two runs and freezes it whole. An application
+one `future_yield` row (the newest 3 per pair are kept), with the SHA-256 of
+the catchment boundary it read the factors over (390_future_yield_boundary,
+issue #889). The evidence report reads the newest row for its two runs and
+freezes it whole. When the boundary on the map isn't that one, § 8 says so
+(`futureYield.boundary`: `changed`, drawn again since; `none`, removed since;
+`unrecorded`, a row stored before 390; absent when it is the same), as the
+draft's Run board does, and the `futureYield` check holds the pack back from
+issue on `changed` or `none` until the future yield is run again
+(`unrecorded` is printed, not held). An application
 whose own ops already assume a climate (`climate.delta`) is refused. It is
 **off** unless `FUTURE_YIELD=on` ([deployment.md § NEX-GDDP-CMIP6
 (one-off)](./deployment.md#nex-gddp-cmip6-one-off)): off, no report has § 8

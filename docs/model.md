@@ -14658,7 +14658,11 @@ rain factors rise. `verify/` mirrors the op from this section (probes
 factors from the copy's yearly monthly aggregates per 0.25° cell
 (`heldWindowClimate`: the window mean over the years the copy holds,
 counted, so the synthetic copy's one or two years a window are said, not
-hidden; `futureFactorsComplete` is false on them). `runFutureYield` then
+hidden; `futureFactorsComplete` is false on them). Only the cells the
+factors weigh are read and counted (`climateCellWeighted`, as
+`climateDeltaFactors`): a zero-weight cell neither lowers a case's count of
+years nor, holding no year of a window, refuses it (issue #889; the factors
+themselves are unchanged, since such a cell never entered them). `runFutureYield` then
 (one implementation, `futureYieldSteps`, a generator that yields after each
 case; `runFutureYieldAsync` awaits its caller between cases, so the job checks
 for a cancel and reports progress there, with the same result),

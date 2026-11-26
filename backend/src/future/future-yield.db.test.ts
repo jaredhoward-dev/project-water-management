@@ -4,7 +4,8 @@
 // backend/fixtures/mirror/cmip6/) over the catchment's 0.25° cells, the stored
 // result under RLS (a viewer reads it, positive control; a stranger and
 // another contributor don't), and the evidence report freezing it, held from
-// issue while NASA's caveat is a placeholder and the windows are partial.
+// issue while NASA's caveat is a placeholder and the windows are partial, and
+// flagged when the catchment boundary it was read over changes (issue #889).
 import { futureCaveatPending, type EvidenceReport, type FutureYieldResult } from '@water-management/engine';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -133,6 +134,8 @@ describe('§ 8 future yield', () => {
 		expect(got.body.job).toMatchObject({ id: res.body.jobId, status: 'done' });
 		const row = got.body.result;
 		expect(row).toMatchObject({ baselineRunId: baseRun, applicationRunId: appRun, nodeId: farmId, jobId: res.body.jobId, createdBy: expect.any(String) });
+		// The boundary it was read over is recorded (390_future_yield_boundary), and it is the one on the map now.
+		expect(row).toMatchObject({ boundarySha256: expect.stringMatching(/^[0-9a-f]{64}$/), boundary: 'same' });
 		const r = row.result as FutureYieldResult;
 		expect(r).toMatchObject({ version: 'future-1', method: 'delta-1', models: ['SYN-A', 'SYN-B', 'SYN-C'], fewModels: true, nodeName: 'Upper', ownedNodeIds: [farmId] });
 		expect(r.cases).toHaveLength(12);
@@ -156,6 +159,8 @@ describe('§ 8 future yield', () => {
 		const report = (await viewer.call('GET', `/projects/${projectId}/runs/${appRun}/evidence-report`)).body.report as EvidenceReport;
 		const s = report.futureYield!;
 		expect(s).toMatchObject({ status: 'ok', complete: false, models: ['SYN-A', 'SYN-B', 'SYN-C'] });
+		// The same boundary: § 8 says nothing about it, and the manifest has no boundary key.
+		expect('boundary' in s).toBe(false);
 		if (s.status === 'ok') expect(s.cases).toEqual(r.cases);
 		const check = report.checks.find((c) => c.id === 'futureYield')!;
 		expect(check).toMatchObject({ passed: false, blocksIssue: true });
@@ -273,5 +278,46 @@ describe('§ 8 future yield', () => {
 		const res = await post(owner, ran.body.run.id);
 		expect(res.status).toBe(409);
 		expect(res.body.error).toMatch(/already assumes a future climate/);
+	});
+
+	// Last: it moves and then removes the boundary the tests above read over.
+	it('flags a stored result whose boundary changed, wasn’t recorded or is gone, in the GET and the report (issue #889)', async () => {
+		vi.stubEnv('FUTURE_YIELD', 'on');
+		const report = async () => (await viewer.call('GET', `/projects/${projectId}/runs/${appRun}/evidence-report`)).body.report as EvidenceReport;
+		const check = (r: EvidenceReport) => r.checks.find((c) => c.id === 'futureYield')!;
+		const before = await get(viewer, appRun);
+		expect(before.body.result.boundary).toBe('same');
+		expect(check(await report()).detail).not.toContain('boundary');
+
+		// Drawn again: the stored factors were read over the old one.
+		const features = (await owner.call('GET', `/projects/${projectId}/map/features`)).body.features as { id: string; kind: string }[];
+		const boundary = features.find((f) => f.kind === 'catchment_boundary')!;
+		const moved = await owner.call('PATCH', `/projects/${projectId}/map/features/${boundary.id}`, { geometry: { type: 'Polygon', coordinates: [sq(21.35, -33.7, 0.1)] } });
+		expect(moved.status, JSON.stringify(moved.body)).toBe(200);
+		const after = await get(viewer, appRun);
+		expect(after.body.result).toMatchObject({ id: before.body.result.id, boundary: 'changed', boundarySha256: before.body.result.boundarySha256 });
+		const changed = await report();
+		expect(changed.futureYield).toMatchObject({ status: 'ok', boundary: 'changed' });
+		expect(check(changed)).toMatchObject({ passed: false, blocksIssue: true });
+		expect(check(changed).detail).toContain('catchment boundary has been drawn again');
+		expect(check(changed).fix).toContain('Run the future yield again');
+
+		// A result stored before 390 kept no hash: printed as unknown, not held from issue on that account.
+		await asOwner('UPDATE future_yield SET boundary_sha256 = NULL WHERE id = $1', [before.body.result.id]);
+		expect((await get(viewer, appRun)).body.result).toMatchObject({ boundary: 'unrecorded', boundarySha256: null });
+		const unrecorded = await report();
+		expect(unrecorded.futureYield).toMatchObject({ status: 'ok', boundary: 'unrecorded' });
+		expect(check(unrecorded).detail).not.toContain('boundary');
+		// The column refuses what isn't a SHA-256.
+		await expect(asOwner(`UPDATE future_yield SET boundary_sha256 = 'nope' WHERE id = $1`, [before.body.result.id])).rejects.toThrow(/check constraint/);
+		await asOwner('UPDATE future_yield SET boundary_sha256 = $2 WHERE id = $1', [before.body.result.id, before.body.result.boundarySha256]);
+
+		// Removed: nothing to read the factors over now.
+		expect((await owner.call('DELETE', `/projects/${projectId}/map/features/${boundary.id}`)).status).toBeLessThan(300);
+		expect((await get(viewer, appRun)).body.result.boundary).toBe('none');
+		const gone = await report();
+		expect(gone.futureYield).toMatchObject({ status: 'ok', boundary: 'none' });
+		expect(check(gone).detail).toContain('has since been removed');
+		expect(gone.issuable).toBe(false);
 	});
 });
