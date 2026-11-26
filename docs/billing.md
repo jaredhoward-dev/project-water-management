@@ -28,6 +28,15 @@ and `team_id` is set, each unique).
   a team project to its team's account, any other project to its creator's
   own account. New projects get it from a trigger; existing ones were
   backfilled (`323_billing`).
+- **A project leaving its team** (400_project_leaves_team_billing) bills to
+  its creator while they are still a direct owner of it; else to the person
+  taking it out (the route makes them a direct owner); else (the schema
+  owner's SQL) to its longest-standing direct owner. Leaving a team takes
+  the leaver's roles on its projects and only a team admin takes a project
+  out (#900), so before 400 a creator who had left could be billed for a
+  catchment they couldn't open, its live operations using their Free plan's
+  one live catchment. Only the moment it leaves picks the account; a later
+  change of owners moves nothing. `billing/moveOutOwner.db.test.ts`.
 - An account's live `subscription` gives its plan. **No live subscription
   means Free.** In Phase 1 no one has a subscription, so every account is on
   Free.

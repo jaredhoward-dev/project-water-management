@@ -3923,7 +3923,7 @@ never to a farmer, contributor or viewer.
   Pro R899 / R8,990 (15 catchments, 5 editors, $15 assistant); Team
   R2,499 / R24,990 (50 catchments, 3 seats, 3 packs a month, $15 a seat).
 - `project.billing_account_id` (nullable, set null, indexed): a team
-  project bills to its team's account, any other to its creator's.
+  project bills to its team's account, any other to its creator's (one leaving a team: to its creator while still a direct owner, else to the owner taking it out; 400, [billing.md § Who the plan belongs to](./billing.md#who-the-plan-belongs-to)).
   Backfilled by `billing_backfill()` (owner-only, idempotent); set on insert
   and on a move into or out of a team by `project_billing_account_set`
   (SECURITY DEFINER; it makes the account if missing and counts the project
