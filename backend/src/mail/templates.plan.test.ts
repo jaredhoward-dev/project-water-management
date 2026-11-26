@@ -3,6 +3,7 @@
 // skewed TZ (CLAUDE.md rule 7), so a date read in the machine's zone instead of SAST fails. The outbound security test
 // covers escaping.
 import { describe, expect, it } from 'vitest';
+import { PLAN_ENDED_GRACE_DAYS } from '@water-management/engine/plans';
 import { planNoticeMail } from './templates.js';
 
 const TO = 'ann@example.com';
@@ -45,5 +46,19 @@ describe('planNoticeMail', () => {
 		const grace = planNoticeMail(TO, { kind: 'grace', account: { kind: 'personal' }, pausesAt: AT, pausing: ['Bravo'], othersPausing: 1, keeps: [] }, 'af');
 		expect(grace.html).toMatch(/<html lang="af">/);
 		expect(grace.text).toContain('en nog 1 opvanggebied van die rekening');
+	});
+
+	it('takes the grace’s days from the plan figures, in every message that names them, in English and Afrikaans (#941)', () => {
+		const n = PLAN_ENDED_GRACE_DAYS;
+		const paused = (locale: string) =>
+			planNoticeMail(TO, { kind: 'paused', account: { kind: 'personal' }, pausesAt: AT, pausing: ['Kleinberg'], othersPausing: 0, keeps: [] }, locale).text;
+		const trial = (locale: string) => planNoticeMail(TO, { kind: 'trial_ending', plan: 'Pro', trialEnd: AT }, locale).text;
+		expect(paused('en')).toContain(`ended ${n} days ago`);
+		expect(paused('en')).toContain(`when the ${n} days after a paid plan ended are over`);
+		expect(trial('en')).toContain(`you have ${n} days to choose`);
+		expect(paused('af')).toContain(`het ${n} dae gelede geëindig`);
+		expect(paused('af')).toContain(`wanneer die ${n} dae ná die einde`);
+		expect(trial('af')).toContain(`het jy ${n} dae om die een te kies`);
+		for (const text of [paused('en'), paused('af'), trial('en'), trial('af')]) expect(text).not.toContain('{days}');
 	});
 });

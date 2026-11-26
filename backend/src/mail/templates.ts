@@ -5,6 +5,7 @@
 // user merely typed in.
 import { dayText } from '@water-management/engine';
 import { language } from '@water-management/engine/languages';
+import { PLAN_ENDED_GRACE_DAYS } from '@water-management/engine/plans';
 import { DEFAULT_TIME_ZONE } from '../projects/timeZone.js';
 import { LOCALES, mailT, mailLanguage, type Locale, type MailTranslator } from './i18n/index.js';
 import type { Mail, MailKind } from './transport.js';
@@ -783,7 +784,7 @@ export type PlanNoticeFacts =
 			/** The grace started (346 'grace') or the pause landed ('paused'). */
 			kind: 'grace' | 'paused';
 			account: PlanAccount;
-			/** When the grace ends and the pause lands (over_free_since + 14 days). */
+			/** When the grace ends and the pause lands (over_free_since + PLAN_ENDED_GRACE_DAYS). */
 			pausesAt: Date;
 			/** The paused (or to-be-paused) catchments the recipient can read, by name. */
 			pausing: readonly string[];
@@ -813,14 +814,14 @@ export function planNoticeMail(to: string, f: PlanNoticeFacts, locale?: string |
 	const tr = mailT(locale);
 	const action = { label: tr.t('mail.plan.action'), url: sitePage('/account/plan') };
 	if (f.kind === 'trial_ending') {
-		const v = { email: to, product: PRODUCT, plan: f.plan, date: resetWhen(f.trialEnd, locale).date };
+		const v = { email: to, product: PRODUCT, plan: f.plan, date: resetWhen(f.trialEnd, locale).date, days: PLAN_ENDED_GRACE_DAYS };
 		return render(
 			'plan_notice',
 			to,
 			tr.t('mail.plan.trial.subject', v),
 			{
 				heading: tr.t('mail.plan.trial.heading'),
-				paragraphs: [tr.t('mail.plan.trial.body', v), tr.t('mail.plan.trial.after'), tr.t('mail.plan.trial.keep', v)],
+				paragraphs: [tr.t('mail.plan.trial.body', v), tr.t('mail.plan.trial.after', v), tr.t('mail.plan.trial.keep', v)],
 				action,
 				footer: [tr.t('mail.plan.trial.why')]
 			},
@@ -828,7 +829,8 @@ export function planNoticeMail(to: string, f: PlanNoticeFacts, locale?: string |
 		);
 	}
 	const account = f.account.kind === 'team' ? tr.t('mail.plan.account.team', { team: f.account.team }) : tr.t('mail.plan.account.personal', { email: to, product: PRODUCT });
-	const v = { product: PRODUCT, account, date: resetWhen(f.pausesAt, locale).date };
+	// The grace's days from the plan figures (#941), never typed in a message.
+	const v = { product: PRODUCT, account, date: resetWhen(f.pausesAt, locale).date, days: PLAN_ENDED_GRACE_DAYS };
 	const k = f.kind;
 	return render(
 		'plan_notice',
@@ -845,7 +847,7 @@ export function planNoticeMail(to: string, f: PlanNoticeFacts, locale?: string |
 				tr.t('mail.plan.choose')
 			],
 			action,
-			footer: [tr.t(`mail.plan.${k}.why`)]
+			footer: [tr.t(`mail.plan.${k}.why`, v)]
 		},
 		tr
 	);
