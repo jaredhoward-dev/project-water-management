@@ -287,9 +287,15 @@ History (its day headings, times and the header line) read the project's
 zone through `fmtProjectStamp`/`fmtProjectWhen`/`fmtProjectDay`
 (`project/project.ts`; "today" and "yesterday" are the project's days). The
 project page provides the zone through context (`project/projectClock.ts`,
-`projectTimeZoneReader`); outside it (the cross-project Compare page) it is
-`DEFAULT_TIME_ZONE`, so a workspace screen and the run's report never name
-one run two ways near midnight. The farm view's notes
+`projectTimeZoneReader`), and "ran today", "3 days ago" (`ranAgo` in
+`overview/latestRun.ts` and `network/supplyColour.ts`) and the report job
+page's "Asked for" count and date by it too. Compare dates each run in its
+own project's zone, which `GET /compare/runs` sends with each side and
+`GET /projects` with each project (`projectZoneOf` in `compare/picker.ts`),
+so a copy in another zone reads on its own clock; the open project's zone
+(`DEFAULT_TIME_ZONE` on the standalone /compare page) stands in only when an
+older API sends none. A workspace screen and the run's report never name one
+run two ways near midnight. The farm view's notes
 write their moments through the catalogue's words ("07:42 on 19 Jan 2024",
 `fmtStampTime`). The engine's warnings write their days day first too
 (`dayText`, engine ≥ 1.100.0). Runs & results, the Summary and History use

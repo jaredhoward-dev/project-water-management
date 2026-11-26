@@ -88,7 +88,9 @@ const summary = (r: ProjectRow) => ({
 	// The project's calendar date (its time zone, 058): the list counts dataUntil's age to it, as the portfolio does.
 	today: localDate(new Date(), r.time_zone),
 	lastRunAt: r.last_run_at ? r.last_run_at.toISOString() : null,
-	publishedAt: r.published_at ? r.published_at.toISOString() : null
+	publishedAt: r.published_at ? r.published_at.toISOString() : null,
+	// Its IANA zone (058): a run picker over several projects (Compare) dates each project's runs on its own clock (issue #899).
+	timeZone: r.time_zone
 });
 // settings.autoRun, settings.outcomes, settings.outlook, settings.responsibleAuthority, settings.ewrHeadline and settings.referenceGauge aren't in the engine's defaults (they're no model inputs), so they are resolved here: clients see every field.
 // rerunQueuedFor: when the pending re-run is due (the header's "Re-run queued for 14:05"), or null.
@@ -97,7 +99,6 @@ const full = (r: ProjectRow) => ({
 	// The caller's role in the team (null outside it): only a team admin reads the team's plan
 	// (app_billing_account_readable, 323), so Compare plans opens it only for them (docs/billing.md § Who the plan belongs to).
 	team: r.team_id ? { id: r.team_id, name: r.team_name, role: r.team_role ?? null } : null,
-	timeZone: r.time_zone,
 	wuaName: r.wua_name,
 	settings: {
 		...mergeSettings(r.settings),

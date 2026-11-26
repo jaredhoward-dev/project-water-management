@@ -11,6 +11,7 @@ import { m3DayToM3s, SUPPLY_TARGET } from '#lib/components/runs/results.js';
 import { agoText, daysBetween, windowText, type DataEnd } from '#lib/format/age.js';
 import { fmtDay, fmtNum, fmtPct, fmtQty, localIsoDate } from '#lib/format/number.js';
 import { calibrationSample } from '#lib/components/calibration/sample.js';
+import { projectDay } from '#lib/components/project/project.js';
 import { ewrNotMet } from '#lib/components/ewr/notMet.js';
 import { AGO_DAYS, LOW_PCT, type DamsToday } from './damLevels';
 
@@ -49,12 +50,17 @@ export function pickRuns(runs: readonly RunMeta[] | null): RunPick | null {
 	};
 }
 
-/** "today", "yesterday", "12 days ago": how long ago a run was made, by the viewer's calendar. */
-export function ranAgo(createdAt: string, now: Date = new Date()): string {
+/**
+ * "today", "yesterday", "12 days ago": how long ago a run was made, by the
+ * project's calendar when its zone is given (issue #899: the workspace dates
+ * runs on the project's clock), else the viewer's.
+ */
+export function ranAgo(createdAt: string, now: Date = new Date(), timeZone?: string): string {
 	const t = new Date(createdAt);
 	if (Number.isNaN(t.getTime())) return '';
+	const day = (d: Date) => (timeZone ? projectDay(d.toISOString(), timeZone) : localIsoDate(d));
 	// A clock a little ahead of the server's still reads "today", not "in the future".
-	return agoText(Math.max(0, daysBetween(localIsoDate(t), localIsoDate(now))));
+	return agoText(Math.max(0, daysBetween(day(t), day(now))));
 }
 
 /** Days a run covers, both ends included (a forecast run's forecast days too: the span its header shows). */

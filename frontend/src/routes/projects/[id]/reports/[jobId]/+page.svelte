@@ -11,8 +11,7 @@
 	import { page } from '$app/state';
 	import { api, ApiError } from '#lib/api/index.js';
 	import { describeReport, isPending, type ReportState, type ReportStatus, reportsApi } from '#lib/components/report/serverPdf.js';
-	import { fmtDate } from '#lib/format/number.js';
-	import { reportRunName, reportTimeZone } from '#lib/components/report/sections.js';
+	import { reportRunName, reportStamp, reportTimeZone } from '#lib/components/report/sections.js';
 	import { pageStart } from '#lib/a11y/focusPage.js';
 	import { followRetry } from '#lib/components/common/loadState.js';
 
@@ -26,6 +25,8 @@
 	// read once; the status doesn't wait for them.
 	let projectName = $state<string | null>(null);
 	let runLabel = $state<string | null>(null);
+	/** The project's zone: when the report was asked for and its run's name are on its clock, as the report dates them (issue #899). */
+	let timeZone = $state(reportTimeZone(null));
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	let stopped = false;
 	onDestroy(() => {
@@ -51,9 +52,10 @@
 		projectName = runLabel = null;
 		const [p, runs] = await Promise.all([api.projects.get(id).catch(() => null), api.runs.list(id).catch(() => null)]);
 		projectName = p?.name ?? null;
+		timeZone = reportTimeZone(p);
 		const runId = current?.report.runId;
 		const run = runId ? runs?.find((r) => r.id === runId) : null;
-		runLabel = run ? reportRunName(run, reportTimeZone(p)) : null; // the report's own name for it, on the project's clock (issue #899)
+		runLabel = run ? reportRunName(run, timeZone) : null; // the report's own name for it, on the project's clock (issue #899)
 	}
 	$effect(() => {
 		const id = projectId;
@@ -115,7 +117,7 @@
 			</div>
 			{#if current.report.createdAt}
 				<p class="muted small">
-					Asked for {fmtDate(current.report.createdAt, true)}{current.report.scheduled ? ' by a report schedule' : ''}.
+					Asked for {reportStamp(current.report.createdAt, timeZone)}{current.report.scheduled ? ' by a report schedule' : ''}.
 					{#if isPending(jobState)}This page checks again every few seconds.{/if}
 				</p>
 			{/if}

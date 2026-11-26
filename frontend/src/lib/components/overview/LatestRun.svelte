@@ -17,6 +17,10 @@
 	import { dataEndOf } from '#lib/format/age.js';
 	import { localIsoDate } from '#lib/format/number.js';
 	import { damsEnd, damsHeadline, historyDays, ranAgo, summaryHeadlines, type DamsState } from './latestRun';
+	import { projectTimeZoneReader } from '#lib/components/project/projectClock.js';
+
+	// How long ago a run ran, by the project's calendar, as its run report dates it (issue #899).
+	const timeZone = projectTimeZoneReader();
 
 	let {
 		meta,
@@ -66,7 +70,7 @@
 	{#if evidence}
 		<p class="muted small">
 			The nominated evidence run is an older one: <a href={runHref(evidence.id)}>{name(evidence)}</a>, ran
-			{ranAgo(evidence.createdAt)}.
+			{ranAgo(evidence.createdAt, new Date(), timeZone())}.
 		</p>
 	{/if}
 	<LoadState loading={loading && !run} error={run ? null : error} {retry}>

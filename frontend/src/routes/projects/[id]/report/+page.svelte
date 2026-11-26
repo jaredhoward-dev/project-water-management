@@ -386,7 +386,7 @@
 							<p class="alert alert-warning" role="status">This run couldn't be compared with the baseline: {impactError}</p>
 						{/if}
 					{:else if s.id === 'network'}
-						{@const colouring = supplyColouring(nodes, summary, { name: runName, ago: ranAgo(run.createdAt) }, false)}
+						{@const colouring = supplyColouring(nodes, summary, { name: runName, ago: ranAgo(run.createdAt, new Date(), timeZone) }, false)}
 						<!-- The screen scrolls the usual drawing; paper gets one wrapped to the A4 width (NetworkSchematic's `paper`). -->
 						<div class="sch-screen"><NetworkSchematic {nodes} transfers={model.transfers ?? []} {colouring} /></div>
 						<div class="sch-paper"><NetworkSchematic {nodes} transfers={model.transfers ?? []} {colouring} paper /></div>

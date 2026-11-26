@@ -529,7 +529,7 @@ alongside teams, e.g. to give an outside client `viewer` access.
 | POST | `/projects/import` | a project document (`ProjectFile`); query `teamId?`, `run=1?` | `201 { project, autoRunsOff?, runId?, runError? }` (below; `autoRunsOff: "live_catchments"` when the file had automatic runs on and, with billing enforced, the account's live catchments were all in use, so the project was imported with them off: [billing.md § Live catchments (Free)](./billing.md#live-catchments-free)) | – |
 | POST | `/projects/:id/copy` | `{ name }` | `201 { project, autoRunsOff? }` (`autoRunsOff: "live_catchments"` as for an import: the copy starts with automatic runs off at Free's live limit; settings, model + series copied, the model with fresh ids in the same id order (so the copy runs exactly as the original) and each EWR rule table's `siteNodeId` moved to its node's new id, and each series' site (a gauge's record, a unit's own rain) to its node's; a unit's rain whose unit has left the model or is no longer a land unit is left out; the catchment map (GeoJSON sources and map features with new ids, each linked to the copy's node, each unit's area-from-map link, and the records of what accepted values were read over; [data-model.md § Catchment map](./data-model.md#catchment-map-152_catchment_mapsql)), but not its proposals, dam observations, waterbody matches or data feeds, which stay with the original as its history; the registered volumes the copier can read, with their import files, new ids and the copy's nodes, and the holders' names only if the copier could read them, plus the viewer-units choice ([allocations.md § Who sees what](./allocations.md#who-sees-what)); runs (and what of the allocations points at a run) and notes ([why](./data-model.md#notes-037_notessql)) not; stays in the team only if you're a member or admin of it, otherwise it's personal) | viewer |
 
-- `ProjectSummary = { id, name, description, role, team, createdAt, updatedAt, dataUntil, today, lastRunAt, publishedAt }`
+- `ProjectSummary = { id, name, description, role, team, createdAt, updatedAt, dataUntil, today, lastRunAt, publishedAt, timeZone }` (`timeZone`: the project's IANA zone, which dates its runs in a picker over several projects, issue #899)
 - `GET /projects/outcomes` (issue #17) feeds the project list's outcome
   columns and its *Needs attention* strip: one `PortfolioProject` (the
   [portfolio](#portfolio)'s row, same fields and rules) per project you can
@@ -5698,8 +5698,9 @@ matched.
 
 ```ts
 {
-  a: { project: { id, name, ewrHeadline }, run: RunMeta & { summary: RunSummary, inputs: RunInputsSnapshot }, scenario: CompareScenario | null },
+  a: { project: { id, name, ewrHeadline, timeZone }, run: RunMeta & { summary: RunSummary, inputs: RunInputsSnapshot }, scenario: CompareScenario | null },
                                 // ewrHeadline: the project's current Model settings → EWR the results are judged by (issue #444), as GET /projects/:id gives it
+                                // timeZone: that side's project's IANA zone, which dates its run on its own clock (issue #899)
   b: { … same shape … },
   comparison: RunComparison,    // compareRuns(a.run, b.run) — every delta is b − a
   changes: InputChange[],       // diffInputs(a.run.inputs, b.run.inputs, both runs' stored values of each differing series)

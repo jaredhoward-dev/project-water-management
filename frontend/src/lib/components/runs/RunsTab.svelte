@@ -615,7 +615,7 @@
 <svelte:window bind:scrollY />
 
 {#snippet headerContext()}
-	{#if loading && !runs.length}Loading runs…{:else if listFailed}Couldn’t load the runs{:else if !runs.length}No runs yet{:else}{runCount(runs.length)}{latest ? ` · newest ran ${ranAgo(latest.createdAt)}` : ''}{/if}
+	{#if loading && !runs.length}Loading runs…{:else if listFailed}Couldn’t load the runs{:else if !runs.length}No runs yet{:else}{runCount(runs.length)}{latest ? ` · newest ran ${ranAgo(latest.createdAt, new Date(), timeZone())}` : ''}{/if}
 {/snippet}
 <!-- The run form: in the section header, its main action; its status line opens the page. -->
 {#snippet runForm()}

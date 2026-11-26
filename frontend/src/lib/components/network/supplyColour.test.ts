@@ -109,4 +109,15 @@ describe('ranAgo', () => {
 			expect(ranAgo('2026-09-25T09:00:00Z', new Date('2026-09-26T09:00:00Z'))).toBe('yesterday');
 		});
 	});
+	it("counts by the project's calendar when its zone is given, whatever the viewer's (issue #899)", () => {
+		const prev = process.env.TZ;
+		try {
+			process.env.TZ = 'Pacific/Pago_Pago';
+			expect(ranAgo('2026-10-26T21:50:00Z', new Date('2026-10-26T22:30:00Z'), 'Africa/Johannesburg')).toBe('yesterday');
+			expect(ranAgo('2026-10-26T22:10:00Z', new Date('2026-10-26T22:30:00Z'), 'Africa/Johannesburg')).toBe('today');
+			expect(ranAgo('2026-10-23T22:10:00Z', new Date('2026-10-26T22:30:00Z'), 'Africa/Johannesburg')).toBe('3 days ago');
+		} finally {
+			process.env.TZ = prev;
+		}
+	});
 });

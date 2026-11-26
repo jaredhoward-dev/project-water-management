@@ -20,7 +20,7 @@
 			<button type="button" class="btn btn-sm" onclick={() => run.retry()}>Retry</button>
 		{:else if run.figures}
 			Supplied and Short: the mean a day over run “{runName(run.meta)}”, ran
-			{fmtStamp(run.meta.createdAt)} ({ranAgo(run.meta.createdAt)}); – where the run doesn't have the demand.
+			{fmtStamp(run.meta.createdAt)} ({ranAgo(run.meta.createdAt, new Date(), timeZone())}); – where the run doesn't have the demand.
 			{#if dirty}<strong>Unsaved changes aren't in it:</strong> save and run the model to see them.{/if}
 		{:else}
 			<span class="muted">Loading run “{runName(run.meta)}”'s results…</span>

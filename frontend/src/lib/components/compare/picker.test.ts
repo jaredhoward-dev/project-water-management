@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { RunMeta } from '#lib/api/types.js';
-import { compareSearch, compareTabHref, defaultPair, defaultRunFor, defaultWhatIf, formatRef, parseRef, publishedBaseline, runOptionLabel, runPickName, SCENARIO_NAME_MAX } from './picker';
+import { fmtProjectStamp } from '#lib/components/project/project.js';
+import { compareSearch, compareTabHref, defaultPair, defaultRunFor, defaultWhatIf, formatRef, parseRef, projectZoneOf, publishedBaseline, runOptionLabel, runPickName, SCENARIO_NAME_MAX } from './picker';
 
 const run = (id: string, label = ''): RunMeta => ({
 	id,
@@ -162,5 +163,37 @@ describe('runPickName / a scenario’s run in a picker', () => {
 	it('leaves a run of the model as its label (positive control)', () => {
 		expect(runPickName({ ...run('r', 'Baseline'), fromScenario: false, scenarioId: null, scenarioName: null })).toBe('Baseline');
 		expect(runPickName(run('r'))).toBe('Untitled run');
+	});
+});
+
+describe('projectZoneOf (issue #899: each compared run on its own project\'s clock)', () => {
+	const projects = [
+		{ id: 'p1', timeZone: 'Africa/Johannesburg' },
+		{ id: 'p2', timeZone: 'America/St_Johns' },
+		{ id: 'p3' }
+	];
+
+	it("reads a side's zone from the compare response, else the project list, else the fallback", () => {
+		expect(projectZoneOf({ project: { timeZone: 'America/St_Johns' } }, null, 'Africa/Johannesburg')).toBe('America/St_Johns');
+		expect(projectZoneOf({ project: {} }, null, 'Africa/Johannesburg')).toBe('Africa/Johannesburg');
+		expect(projectZoneOf(projects, 'p2', 'Africa/Johannesburg')).toBe('America/St_Johns');
+		expect(projectZoneOf(projects, 'p3', 'UTC')).toBe('UTC');
+		expect(projectZoneOf(projects, 'gone', 'UTC')).toBe('UTC');
+		expect(projectZoneOf(projects, null, 'UTC')).toBe('UTC');
+		expect(projectZoneOf(null, 'p1', 'UTC')).toBe('UTC');
+	});
+
+	it('dates two runs made at the same moment in their own projects near midnight, whatever the viewer\'s zone (skewed TZ)', () => {
+		const prev = process.env.TZ;
+		try {
+			process.env.TZ = 'Pacific/Kiritimati';
+			const at = '2026-10-26T22:30:00.000Z';
+			const a = { project: { timeZone: 'Africa/Johannesburg' } };
+			const b = { project: { timeZone: 'America/St_Johns' } };
+			expect(fmtProjectStamp(at, projectZoneOf(a, null, 'UTC'))).toBe('27 Oct 2026 00:30');
+			expect(fmtProjectStamp(at, projectZoneOf(b, null, 'UTC'))).toBe('26 Oct 2026 20:00');
+		} finally {
+			process.env.TZ = prev;
+		}
 	});
 });
