@@ -1,0 +1,20 @@
+# swot_trial.py's extra Python dependency (ingest/README.md § The SWOT lake
+# height trial, issue #625): pyshp reads LakeSP's zipped shapefiles. Never in
+# the Lambda image (ingest/Dockerfile installs requirements.txt only).
+# `ingest/dev.sh test` and CI's ingest job install it beside requirements.txt
+# so the trial's reader tests run; `ingest/dev.sh swot` installs both into
+# ingest/.venv-trial.
+#
+# Hash-pinned like requirements.txt (both files PyPI has for the version).
+# pyshp is pure Python with no dependencies. Dependabot's pip entry for
+# `/ingest` (.github/dependabot.yml) bumps this file too, and
+# dependabot-auto-merge.yml leaves `/ingest` to a human. To regenerate by
+# hand, put pyshp in a scratch file and run, holding Dependabot's 7-day
+# cooldown:
+#
+#   uv pip compile <that file> --generate-hashes --python-version 3.14 \
+#     --python-platform linux --exclude-newer <a date a week ago> \
+#     --no-header --no-annotate
+pyshp==3.1.9 \
+    --hash=sha256:7a4ac6c0898f54d09a7f75c8494c05a2ed86964010f27a8a7df9c7ecb6738569 \
+    --hash=sha256:e20febdaaef14d153f7eabfb8143edfcf61ca6d454f20ba214076dc994901db1

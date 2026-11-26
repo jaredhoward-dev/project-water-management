@@ -111,7 +111,7 @@ export const shortHash = (sha256: string) => sha256.slice(0, 12);
 /** One entry of the map's key: its words, how its swatch is drawn, its colour (from mapStyle's overlayColours), and what it is for when its name alone doesn't say. */
 export interface KeyItem {
 	label: string;
-	swatch: 'dashed' | 'area' | 'dotted' | 'line' | 'gauge' | 'dam' | 'other';
+	swatch: 'dashed' | 'area' | 'dotted' | 'line' | 'gauge' | 'dam' | 'other' | 'donor' | 'ring';
 	colour: string;
 	/** A few plain words after the name ("where your click goes; the outline follows these"). */
 	note?: string;
@@ -135,6 +135,14 @@ export function delineationLines(colours: { channels: string; riverNetwork?: str
 	];
 }
 
+/** The Prior donors layer's key entries (docs/maps.md § Prior donors), in its colour (mapStyle.ts donorColour): the target is a ring, a shape no feature uses. */
+export const DONOR_KEY = {
+	link: { label: 'link to the target' },
+	donor: { label: 'prior donor', note: 'bigger = more weight' },
+	target: { label: 'prior target', note: 'gauge or boundary centre' }
+} as const;
+const LAYER_KEY_LABELS: ReadonlySet<string> = new Set(['river network', CHANNEL_KEY_LABEL, DONOR_KEY.link.label, DONOR_KEY.donor.label, DONOR_KEY.target.label]);
+
 /**
  * The map's key, grouped as the Network's is (#326 E7): Areas, Lines,
  * Points. Colours come from `overlayColours(dark)` so the key can't drift
@@ -143,13 +151,16 @@ export function delineationLines(colours: { channels: string; riverNetwork?: str
  * network layer on, its dashed line joins the Lines; while the elevation
  * model's channels are drawn (Delineate, Sub-catchments, a delineated
  * proposal), they lead the Lines and both say what they are for
- * (delineationLines), so the two kinds of line are never a mystery.
+ * (delineationLines), so the two kinds of line are never a mystery. With
+ * the Prior donors layer on (`donors`, its colour), its link joins the Lines
+ * and its donor dot and target ring the Points.
  */
 export function keyGroups(
 	c: { boundary: string; parcel: string; water: string; other: string },
-	layers: { riverNetwork?: string | null; channels?: string | null } = {}
+	layers: { riverNetwork?: string | null; channels?: string | null; donors?: string | null } = {}
 ): { label: string; items: KeyItem[] }[] {
-	return [
+	const dn = layers.donors;
+	const groups: { label: string; items: KeyItem[] }[] = [
 		{
 			label: 'Areas',
 			items: [
@@ -178,6 +189,11 @@ export function keyGroups(
 			]
 		}
 	];
+	if (dn) {
+		groups[1]!.items.push({ label: DONOR_KEY.link.label, swatch: 'dashed', colour: dn });
+		groups[2]!.items.push({ ...DONOR_KEY.donor, swatch: 'donor', colour: dn }, { ...DONOR_KEY.target, swatch: 'ring', colour: dn });
+	}
+	return groups;
 }
 
 /** Which features a key entry stands for (group, then label), so the key lists only what the map draws. */
@@ -197,12 +213,12 @@ function keyEntryDrawn(group: string, label: string, f: MapFeature): boolean {
 /**
  * The key cut to what is on the map: each entry only while a feature it stands
  * for is drawn, a group only while it has an entry. A layer's own entry (the
- * River network's dashed line, the terrain channels) stays while the layer is
+ * River network's dashed line, the terrain channels, the prior's donors) stays while the layer is
  * on: it draws its own lines, not the project's features.
  */
 export function presentKey(groups: { label: string; items: KeyItem[] }[], features: readonly MapFeature[]): { label: string; items: KeyItem[] }[] {
 	return groups
-		.map((g) => ({ ...g, items: g.items.filter((i) => i.label === 'river network' || i.label === CHANNEL_KEY_LABEL || features.some((f) => keyEntryDrawn(g.label, i.label, f))) }))
+		.map((g) => ({ ...g, items: g.items.filter((i) => LAYER_KEY_LABELS.has(i.label) || features.some((f) => keyEntryDrawn(g.label, i.label, f))) }))
 		.filter((g) => g.items.length > 0);
 }
 

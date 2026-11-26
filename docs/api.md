@@ -741,7 +741,7 @@ alongside teams, e.g. to give an outside client `viewer` access.
   rule from the baseline run itself), so saving it moves `updatedAt`: the
   latest run shows as stale and, with automatic runs on, a re-run is queued.
   `rerunQueuedFor` is when the project's
-  pending re-run (automatic or queued through `POST /jobs`) is due, ISO, or
+  pending automatic re-run is due, ISO, or
   `null`; on `GET /projects/:id` and the other routes that answer
   `{ project }`, not on the list.
   `PATCH` validates the known fields: e.g. `simulationStart/End` and
@@ -1147,7 +1147,10 @@ alongside teams, e.g. to give an outside client `viewer` access.
   the fit), from engine 1.106.0 the optional `prior` (issue #622: `{ weight
   (0–10), bounded, ranges, provenance, penaltyAtFit, penaltyAtStart }`, the
   regional GR4J prior the fit used, checked by the engine's
-  `calibrationPriorError`, a `400` otherwise; `bounds` is then `wide`,
+  `calibrationPriorError`, a `400` otherwise; from engine 1.120.0 it may
+  carry `unpriored`, `{ params, bounds, fit, penaltyAtFit }` (the same fit
+  without the prior, when asked, so the record says what the prior cost) or
+  `null` (cancelled before it ran); `bounds` is then `wide`,
   `typical` or `prior`, the prior's box), and no others. `auto` is the server's to write
   ([§ Automated calibration](#automated-calibration) `…/apply`): a save whose
   `fitRecord` carries a new or changed `auto` is a `409`; one carrying the
@@ -4599,8 +4602,6 @@ infrastructure). The contract types are `FarmIndex` and `FarmView` in
 | GET | `/projects/:id/farm` | `FarmIndex = { project: { id, name, wuaName }, farms: { nodeId, name }[], publication: { publishedAt, restriction: { level } } \| null }`: a farmer's linked farms, every farm for viewer and above; `wuaName` is the project's (`null` = unnamed) | farmer |
 | GET | `/projects/:id/farm/:nodeId` | `FarmView = { project: { id, name, wuaName, timeZone }, today, farm: FarmProjection, context, publication, outlet30, stale, outlook, registered }` (below) | farmer |
 | GET | `/projects/:id/farm/:nodeId/export.csv?from=&to=` | The farm's own daily CSV from the published run: `date` + the farm allowlist (`demand`, `supplied`, `deficit`, `dam_storage`, `spill`, `transfer`), the export CSV's rules ([Export](#export)), shaped for a farmer (issue #124): the header is those keys (the farm view's download words them in the reader's language and, for a decimal-comma language such as Afrikaans, writes `;` between cells, [ui.md § Farmer view](./ui.md#farmer-view-farm)), every figure is rounded to whole m³, and the window is the last 365 days to `dataUntil` by default; `from` reaches further back (to the run's first day) and `to` ends it earlier (`400` outside the run, `413` past 50 MB; streamed like every CSV, [Export](#export)) | farmer |
-| GET | `/projects/:id/farm/:nodeId/series?key=&from=&to=` | `FarmSeries = { key, label, unit, startDate, values }`: one of the farm's own daily series from the published run, `key` one of the farm allowlist (`demand`, `supplied`, `deficit`, `dam_storage`, `spill`, `transfer`; any other `400`). The year to `dataUntil` by default (`from` = `to` − 364 days); `from` / `to` narrow it, clamped to the run's first day and to `dataUntil` (never into forecast days); `400` for a window outside the figures or over 3 653 days. `Cache-Control: no-store` | farmer |
-| GET | `/projects/:id/farm/:nodeId/history` | `{ publications: FarmHistoryEntry[] }`: the farm in the WUA's last 12 publications (the current one and the ones it superseded), newest first. `FarmHistoryEntry = { publishedAt, current, dataUntil, season: { from, to, demandM3, suppliedM3, fraction, shortDays }, damPct, model: { headline, band }, restriction: { level, pct } }`: the farm's own figures from each stored projection, never the even share (a catchment ratio) or the notice text | farmer |
 | GET | `/projects/:id/farm/:nodeId/map` | `FarmMap = { features: { id, kind, name, geometry, areaM2, center, credit? }[] }`: the farm's map (issue #326 A3): the parcels and dams linked to **this** farm, then the gauges, rivers and catchment boundary for orientation, never another farm's feature or an `other` one, and no node id, properties or author; `credit: 'hydrorivers'` (2026-10-02) on a river added from a HydroRIVERS reach and `credit: 'jrc-water'` (issue #523 C6) on an outline (a dam) traced from JRC Global Surface Water (its description names the source; the description itself never leaves), so the map shows that licence's credit (maps.md § Credits on the map), absent otherwise. The query names the farm, so a viewer previewing it gets what its farmer gets. `{ features: [] }` when the farm has no parcel or dam on the map (the page shows no map). No status: the page colours the land from the farm view's own band. `404` for a farm the caller can't open. `Cache-Control: no-store` | farmer |
 | GET | `/projects/:id/farm/:nodeId/dam-observed` | `FarmDamObserved = { outlines, latest: { date, wetAreaM2, source } \| null, fullAreaM2, attribution, sentinelCredit }`: the farm's dam seen from space (issue #604 R5-B, [Dams seen from space](#dams-seen-from-space)): how many of **this** farm's dams are drawn as an outline (`0`: the page shows nothing), the newest view at least 90 % clear of all of them together (summed for a composite dam; a Waterbodies polygon merged with a neighbour never counts; the comparison's own `latestClear`), `fullAreaM2` from the farm's own node (survey curve's top, `damAreaFullM2`, else the estimate from the capacity; `null` with no dam capacity) and the credit `"Digital Earth Africa, CC BY 4.0"`, with `sentinelCredit` Copernicus's for the latest view's year when it is Sentinel-2's or Sentinel-1's (else `null`, issue #624). No upstream id, match detail or feature id. Not tied to a publication. `404` for a farm the caller can't open. `Cache-Control: no-store` | farmer |
 | GET | `/projects/:id/privacy-contact` | `{ wuaName, contact: { organisation, name, email, postal } \| null }`: "Who decides about your farm's information" (POPIA s18(1)(b), 168): the project's team's name and its privacy contact ([Teams](#teams)), for every member, farmers included, through `app_project_privacy_contact` (a farmer can't read the team row); nothing else about the team. `contact` is `null` for a project without a team or a team without a contact; `wuaName` as in `FarmIndex`. `404` for a non-member | farmer |
@@ -4665,10 +4666,11 @@ infrastructure). The contract types are `FarmIndex` and `FarmView` in
   "compared with last season" names when `lastSeason` is `null` (a
   projection stored before it existed gets it from the publication's
   `catchment_view.runStart`).
-- `series` and `history` check the farm before the query, so any other
-  node answers `404` whatever the query. The farm page itself renders from
-  the projection (the 12 months, last season); these two are for a longer
-  or custom chart and for comparing publications (roadmap WP-2.6).
+- The farm page renders from the projection (the 12 months, last season).
+  The chart series and per-farm history routes WP-2.6 first built
+  (`…/farm/:nodeId/series`, `…/farm/:nodeId/history`) were removed on
+  2026-11-25: no page, script or spec called them (followups.md §
+  Housekeeping).
 
 ## Jobs
 
@@ -4678,7 +4680,6 @@ A job runs later, in the worker, as the editor who queued it.
 | Method | Path | Body | Response | Min role |
 | --- | --- | --- | --- | --- |
 | GET | `/projects/:id/jobs?status=&limit=` | – | `{ jobs: JobMeta[] }`, newest first. `status` ∈ `queued`, `running`, `done`, `failed`, `dead` (`400` otherwise); `limit` 1–200, default 50. A contributor lists only their own yield jobs (RLS, 096), which is how the Yield panel follows one on the Applicant view | viewer (a contributor: their own yield jobs) |
-| POST | `/projects/:id/jobs` | `{ kind: "rerun", label? }` | `202 { job: JobMeta, created: true }`: a model run is queued, due now. If one is already pending (queued, or failed and waiting to retry; an automatic re-run included, which may be due later) the answer is `200 { job, created: false }` with that job, and nothing new is queued. `label` as for `POST /runs` (trimmed, ≤ 200). Only `rerun` is accepted (`400`), and no other field (a client can't queue an automatic re-run) | editor |
 
 - `JobMeta = { id, kind, status, attempts, maxAttempts, runAfter, createdAt, startedAt, finishedAt, error, createdBy, progress }`.
   Never the payload, and nothing about the worker's lease. `progress`
@@ -4697,14 +4698,17 @@ A job runs later, in the worker, as the editor who queued it.
   writes nothing), or a generic `an internal error` /
   `a database error (SQLSTATE …)`.
 - A queued re-run is `POST /runs` off the request path: the same engine run,
-  the same 20-run cap, as the editor who queued it. It appears in
-  `GET /runs` once the job is `done`.
+  the same 20-run cap, as the editor whose new data queued it. It appears in
+  `GET /runs` once the job is `done`. Nothing queues one through the API:
+  `POST /projects/:id/jobs` (a manual re-run) was removed on 2026-11-25, as
+  no page, script or spec called it; a `manual` re-run queued before then
+  still runs. The jobs list's caller is the frontend's `api.jobs.list` (the
+  Yield panel follows its job through it).
 - `GET /jobs` also lists the automatic re-runs new data queues (`kind:
   'rerun'`, `runAfter` the debounced due time; WP-2.11). One pending re-run
-  per project, automatic or not.
+  per project.
 - `GET /jobs` also lists the data feeds' `feed_fetch` / `feed_ingest` jobs
-  ([§ Data feeds](#data-feeds)); they are queued by the server, never through
-  `POST /jobs`. It lists `yield` jobs too, queued through `POST /yield`
+  ([§ Data feeds](#data-feeds)); they are queued by the server. It lists `yield` jobs too, queued through `POST /yield`
   ([§ Yield](#yield)), and `sweep` jobs, queued through `POST /sweeps`
   ([§ Sweeps](#sweeps)).
 
@@ -4900,8 +4904,11 @@ and "Start from the prior".
 | POST | `/projects/:id/gr4j-prior/start` | `{ zone?: <gauge node id> \| 'outlet' \| null, dataset?: <label> }` (`'outlet'` = the outlet's location; absent or `null` = the headline's, which is what `null`, "the calibration site's own zone", started before engine 1.110.0) | `200 { params: { x1, x2, x3, x4 }, record: PriorStartRecord, revisionId }` | editor |
 
 - `dataset`: the donor set read (`{ dataset, version, source, method,
-  attribution, synthetic, donorSetSha256, donors }`), `null` with none
-  loaded; `datasets` every loaded set; `soil` the soil grid read (`{
+  attribution, synthetic, donorSetSha256, donors, looFlow }`; `looFlow` the
+  set's flow-space leave-one-out score `{ kge, kgeFit, n }`, the median KGE′
+  of the prior's p50s on each held-out donor and of the same donors' own
+  fits on the same days, or `null` when the set has none, migration 362),
+  `null` with none loaded; `datasets` every loaded set; `soil` the soil grid read (`{
   dataset, version, attribution, synthetic }`) or `null`.
 - `target`: `{ zoneNodeId (the location resolved: a gauge's node id, or
   `null` for the outlet's location or the catchment), units (its group,
@@ -4918,8 +4925,10 @@ and "Start from the prior".
   engine's `PriorProvenance` (the donor set and its SHA-256, the donors kept
   with their weights, the LOO skill, the reference load, the target), which
   a fit passes to `calibrate()` with the ranges. `donors` the kept donors
-  with their position, area, weight, distance, similarity, own KGE′ and
-  parameters. `problem` says why there is no prior to use (no donors loaded,
+  with their position, area, weight, distance, similarity, own KGE′,
+  parameters and `atBound` (the free parameters their fit left within 1 % of
+  a typical bound, with the side, `'x4:high'`; `[]` none; `null` when the
+  set didn't record it, 362). `problem` says why there is no prior to use (no donors loaded,
   no boundary, the engine's reason), else `null`. `started` the target's
   start record while its parameters still hold what it wrote, else `null`.
 - `400` for an unknown dataset, or a gauge (or the outlet) that isn't a

@@ -810,10 +810,6 @@ def unsupported(doc: dict) -> list[str]:
     """What an input uses beyond phases 1 and 2a (verify/README.md § Phase 2b)."""
     s = doc.get("settings", {}) or {}
     out = []
-    # §2.7i: the drought restriction rule (and a Priority user's fixed restriction % under it) isn't modelled; before
-    # phase 2b nothing refused it, so an input carrying one would have disagreed instead of being refused.
-    if s.get("droughtRestriction"):
-        out.append("drought restrictions")
     if s.get("chirpsQuantileMap"):
         out.append("CHIRPS quantile map")
     if s.get("rainSource"):
@@ -845,6 +841,141 @@ def unsupported(doc: dict) -> list[str]:
     if (s.get("rainStations") or {}).get("pinnedFactors"):
         out.append("pinned station pairing factors (rainStations.pinnedFactors)")
     return sorted(set(out))
+
+
+# --------------------------------------------------------------------------
+# Drought restrictions (docs/model.md §2.7i)
+# --------------------------------------------------------------------------
+
+DEMAND_PARTS = ("crops", "domestic", "municipal", "industrial", "livestock", "irrigation", "external", "other")
+
+
+def _month_day_ok(s) -> bool:
+    if not isinstance(s, str) or len(s) != 5 or s[2] != "-" or s == "02-29":
+        return False
+    try:
+        _dt.date(2001, int(s[:2]), int(s[3:]))
+    except ValueError:
+        return False
+    return True
+
+
+def _share(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+
+
+def drought_rule_breaks_table(raw) -> bool:
+    """§2.7i: a rule that breaks the field table isn't applied at all (the run warns), as against an id that
+    doesn't fit the network, which is left out. Settled from runModel (probes `drought-rule-*`)."""
+    rev = raw.get("reviewDates") or []
+    lift = raw.get("liftDates") or []
+    if not 1 <= len(rev) <= 12 or len(lift) > 12:
+        return True
+    if not all(_month_day_ok(x) for x in rev + lift) or len(set(rev)) < len(rev) or len(set(lift)) < len(lift):
+        return True
+    if set(rev) & set(lift):
+        return True
+    levels = raw.get("levels") or []
+    if not 1 <= len(levels) <= 6:
+        return True
+    prev_b, prev_c = None, {}
+    for L in levels:
+        b = L.get("belowPct")
+        if not _share(b) or not 0 < b <= 1 or (prev_b is not None and not b < prev_b):
+            return True
+        cuts = L.get("cuts") or {}
+        if any(k not in DEMAND_PARTS or not _share(v) or not 0 <= v <= 1 for k, v in cuts.items()):
+            return True
+        if any(cuts.get(k, 0.0) < v for k, v in prev_c.items()):
+            return True
+        prev_b, prev_c = b, cuts
+    basis = raw.get("basis") or "total"
+    if basis not in ("total", "dams", "own"):
+        return True
+    dams = raw.get("damNodeIds")
+    if basis == "dams":
+        if not dams or len(set(dams)) < len(dams):
+            return True
+    elif dams is not None:
+        return True
+    nodes = raw.get("nodeIds")
+    if nodes is not None and (not nodes or len(set(nodes)) < len(nodes)):
+        return True
+    return False
+
+
+def drought_rule(raw, farms: list[dict], users: list[dict], by_id: dict, cap0: dict):
+    """settings.droughtRestriction as the run reads it, or None when it isn't applied (absent, breaking its
+    table, or no unit left)."""
+    if not raw or drought_rule_breaks_table(raw):
+        return None
+    levels = []
+    for L in raw.get("levels") or []:
+        cuts = {k: float(v) for k, v in (L.get("cuts") or {}).items() if k in DEMAND_PARTS and isinstance(v, (int, float))}
+        levels.append({"belowPct": float(L["belowPct"]), "cuts": cuts})
+    farm_ids = {f["id"] for f in farms}
+    if raw.get("nodeIds") is not None:
+        units = sorted({x for x in raw["nodeIds"] if x in farm_ids})
+    else:
+        units = sorted(farm_ids)
+    if not units:
+        return None
+    basis = raw.get("basis") or "total"
+    if basis == "dams":
+        dams = sorted({x for x in raw.get("damNodeIds") or [] if x in farm_ids and cap0[x] > 0})
+    else:
+        dams = sorted(f for f in farm_ids if cap0[f] > 0)
+    pct = {}
+    for u in users:
+        v = u.get("userRestrictionPct")
+        if u.get("userPriority", "senior") != "junior" and isinstance(v, (int, float)) and v > 0:
+            pct[u["id"]] = float(v)
+    parts = sorted({p for L in levels for p, v in L["cuts"].items() if v > 0})
+    return {
+        "levels": levels, "basis": basis, "units": units, "dams": dams, "users": pct, "parts": parts,
+        "theta": levels[0]["belowPct"] if levels else 1.0,
+        "reviews": set(raw.get("reviewDates") or []), "lifts": set(raw.get("liftDates") or []),
+    }
+
+
+def _month_day(o: int) -> str:
+    d = _dt.date.fromordinal(o)
+    return f"{d.month:02d}-{d.day:02d}"
+
+
+def drought_day_kind(dr: dict, o: int, first: bool):
+    """'review', 'lift' or None (hold). A fresh run's first day reviews when the latest date before it is a review."""
+    md = _month_day(o)
+    if md in dr["lifts"]:
+        return "lift"
+    if md in dr["reviews"]:
+        return "review"
+    if first:
+        for k in range(1, 367):
+            md = _month_day(o - k)
+            if md in dr["lifts"]:
+                return None
+            if md in dr["reviews"]:
+                return "review"
+    return None
+
+
+def drought_share_level(dr: dict, ids, storage: dict, by_id: dict) -> int:
+    """The deepest level whose belowPct the share Σ Q_start ÷ Σ capacity (dams with capacity today) is below."""
+    num = den = 0.0
+    for d in sorted(ids):
+        c = by_id[d]["damCapacityM3"]
+        if c > 0:
+            num += storage[d]
+            den += c
+    if not den > 0:
+        return 0
+    share = num / den
+    lv = 0
+    for k, L in enumerate(dr["levels"]):
+        if share < L["belowPct"]:
+            lv = k + 1
+    return lv
 
 
 # --------------------------------------------------------------------------
@@ -2526,6 +2657,7 @@ def run(doc: dict) -> dict:
     # What the claims' gross-ups add for each reach's bed losses (§2.6b), by the reach's upper node.
     sen_led: dict[str, list[float]] = {}
     any_senior = False
+    sen_paths: list[tuple[str, str, float, list[str]]] = []
     for u in seniors:
         up_farms = sorted(f["id"] for f in farms if f["id"] in upstream_set[u["id"]])
         tot = 0.0
@@ -2545,13 +2677,25 @@ def run(doc: dict) -> dict:
                 k_ = by_id[k_]["downstreamNodeId"]
             for r_ in path:
                 sen_led.setdefault(r_, [0.0] * n)
-            for i in range(n):
-                v = Dn[u["id"]][i] * shares.get(fid, 0.0) / tot
-                for r_ in path:
-                    g_ = reach_gross(r_, v, wm[i])
-                    sen_led[r_][i] += g_ - v
-                    v = g_
-                sen_y[fid][i] += v
+            sen_paths.append((u["id"], fid, shares.get(fid, 0.0) / tot, path))
+
+    def senior_day(i):
+        """The day's senior claims on the farms upstream and their reaches' gross-ups, from the users' day demand
+        (a drought restriction cuts a Priority user's with its fixed %, and its claims follow, §2.7i)."""
+        for _u, fid, _r, path in sen_paths:
+            sen_y[fid][i] = 0.0
+            for r_ in path:
+                sen_led[r_][i] = 0.0
+        for uid, fid, ratio, path in sen_paths:
+            v = Dn[uid][i] * ratio
+            for r_ in path:
+                g_ = reach_gross(r_, v, wm[i])
+                sen_led[r_][i] += g_ - v
+                v = g_
+            sen_y[fid][i] += v
+
+    for i in range(n):
+        senior_day(i)
 
     # Transfer rules: dam rules (§2.6) and river off-takes (§2.6a).
     rules = []
@@ -2695,6 +2839,30 @@ def run(doc: dict) -> dict:
     river_cols = {fid: {t["key"]: {"take": [0.0] * n, "pool": [0.0] * n} for t in ts} for fid, ts in riv.items()}
     # §2.7g: the initial level x the first day's capacity.
     storage = {f["id"]: f["damInitialPct"] * f["damCapacityM3"] * (kdev[f["id"]][0] if f["id"] in kdev and n else 1.0) for f in farms}
+    # ---- drought restrictions (§2.7i) -----------------------------------
+    # The rule reads the storage the day starts with, on review days, and cuts the units' parts of demand
+    # (and a Priority user's by its fixed %); the unrestricted demand is kept for `demand` and `deficit`.
+    drule = drought_rule(settings.get("droughtRestriction"), farms, users, by_id, cap0)
+    Dn_u = {k: list(v) for k, v in Dn.items()}
+    if drule is not None:
+        F_u = {fid: list(fd[fid]["F"]) for fid in fd}
+        Dc_u = {fid: list(fd[fid]["Dc"]) for fid in fd}
+        od_u = {k: list(v) for k, v in obj_dem.items()}
+        # A dam that comes into service after the run's first day is filling until it starts a day at θ (engine >= 1.70.0).
+        dr_filling = set()
+        for fid in kdev:
+            ins = by_id[fid].get("damInServiceFrom")
+            if isinstance(ins, str) and _is_iso(ins) and n and iso_to_ord(ins) > days[0]:
+                dr_filling.add(fid)
+        dr_level = {fid: 0 for fid in drule["units"]}
+        dr_user_level = 0
+        dr_col_level = [0.0] * n
+        dr_cut_cols = {p_: [0.0] * n for p_ in drule["parts"]}
+        dr_unit_level = {fid: [0.0] * n for fid in drule["units"]}
+        dr_restricted = {fid: [0.0] * n for fid in list(drule["units"]) + list(drule["users"])}
+        diag["restriction_days"] = 0
+        diag["restriction_user_days"] = 0
+        diag["restriction_filling_days"] = 0
     on_river = {f["id"]: False for f in farms}
     sd_store = {x["id"]: 0.0 for x in nodes}
     dd_owed = {x["id"]: 0.0 for x in nodes}
@@ -2757,6 +2925,73 @@ def run(doc: dict) -> dict:
                 diag["dev_no_capacity_days"] += 1
             elif storage[fid] > c_:
                 diag["dev_shrink_spill_days"] += 1
+        if drule is not None:
+            # §2.7i: a filling dam joins at the start of the day it holds θ of the day's capacity.
+            for fid in sorted(dr_filling):
+                c_ = by_id[fid]["damCapacityM3"]
+                if c_ > 0 and storage[fid] / c_ >= drule["theta"]:
+                    dr_filling.discard(fid)
+            kind = drought_day_kind(drule, o, i == 0)
+            if kind == "lift":
+                dr_level = {fid: 0 for fid in drule["units"]}
+                dr_user_level = 0
+            elif kind == "review":
+                if dr_filling:
+                    diag["restriction_filling_days"] += 1
+
+                def lvl(ids):
+                    full = drought_share_level(drule, ids, storage, by_id)
+                    if not any(d_ in dr_filling for d_ in ids):
+                        return full
+                    return min(full, drought_share_level(drule, [d_ for d_ in ids if d_ not in dr_filling], storage, by_id))
+
+                if drule["basis"] == "own":
+                    dr_level = {fid: lvl([fid] if cap0[fid] > 0 else []) for fid in drule["units"]}
+                    dr_user_level = 0
+                else:
+                    shared = lvl(drule["dams"])
+                    dr_level = {fid: shared for fid in drule["units"]}
+                    dr_user_level = shared
+            deepest = 0
+            for fid in sorted(drule["units"]):
+                L = dr_level[fid]
+                deepest = max(deepest, L)
+                dr_unit_level[fid][i] = L
+                if L > 0:
+                    cuts = drule["levels"][L - 1]["cuts"]
+                    diag["restriction_days"] += 1
+                    c_ = cuts.get("crops", 0.0)
+                    fd[fid]["F"][i] = F_u[fid][i] * (1 - c_)
+                    fd[fid]["Dc"][i] = Dc_u[fid][i] * (1 - c_)
+                    v = fd[fid]["Dc"][i]
+                    for ob in objs[fid]:
+                        d_ = od_u[ob["id"]][i]
+                        w_ = d_ * (1 - cuts.get(ob.get("category"), 0.0))
+                        if ob["id"] in obj_B:
+                            w_ = max(w_, min(obj_B[ob["id"]], d_))
+                        obj_dem[ob["id"]][i] = w_
+                        v += w_
+                    Dn[fid][i] = v
+                    if fid in Dd:
+                        w_ = crop_share(fid, "dam") * fd[fid]["Dc"][i]
+                        for ob in objs[fid]:
+                            if ob["id"] not in on_river_obj:
+                                w_ += obj_dem[ob["id"]][i]
+                        Dd[fid][i] = w_
+                dr_restricted[fid][i] = Dn[fid][i]
+            dr_col_level[i] = deepest
+            if drule["basis"] != "own" and dr_user_level > 0:
+                for p_ in drule["parts"]:
+                    dr_cut_cols[p_][i] = drule["levels"][dr_user_level - 1]["cuts"].get(p_, 0.0)
+            # A Priority user's fixed % on the days its level cuts some part of a unit's demand.
+            u_cut = dr_user_level > 0 and any(v_ > 0 for v_ in drule["levels"][dr_user_level - 1]["cuts"].values())
+            for uid, pct in sorted(drule["users"].items()):
+                if u_cut:
+                    Dn[uid][i] = Dn_u[uid][i] * (1 - pct)
+                    diag["restriction_user_days"] += 1
+                dr_restricted[uid][i] = Dn[uid][i]
+            if u_cut and drule["users"]:
+                senior_day(i)
         if i == 0 or (_dt.date.fromordinal(o).month == 10 and _dt.date.fromordinal(o).day == 1):
             for k in bh_used:
                 bh_used[k] = [0.0] * len(bh_used[k])
@@ -3088,10 +3323,10 @@ def run(doc: dict) -> dict:
                     spend(xid, "surface", take)
                 if groom:
                     spend(xid, "groundwater", GW)
-                note_limit(lb_days, xid, wy, room, "surface", take, sroom, dem, dem - G, o, ald)
-                note_limit(lb_days, xid, wy, room, "groundwater", GW, groom, dem, dem - G, o, ald)
+                note_limit(lb_days, xid, wy, room, "surface", take, sroom, Dn_u[xid][i], Dn_u[xid][i] - G, o, ald)
+                note_limit(lb_days, xid, wy, room, "groundwater", GW, groom, Dn_u[xid][i], Dn_u[xid][i] - G, o, ald)
                 zs_out = max(0.0, zs_in - dem) if x.get("userPriority", "senior") != "junior" else zs_in
-                for key, val in (("supplied", G), ("return_flow", T), ("outflow", Uo), ("deficit", dem - G),
+                for key, val in (("supplied", G), ("return_flow", T), ("outflow", Uo), ("deficit", Dn_u[xid][i] - G),
                                  ("ewr_cumulative", z), ("groundwater_used", GW)):
                     cc[key][i] = val
                 AA[xid] = noise_short(z, Uo)
@@ -3452,8 +3687,8 @@ def run(doc: dict) -> dict:
             g_all = G + g_riv + gin
             if xid in tab:
                 g_all = min(g_all, dem_all)
-            note_limit(lb_days, xid, wy, room, "surface", G - GW + g_riv + gin + gx, sroom, dem_all, dem_all - g_all, o, ald)
-            note_limit(lb_days, xid, wy, room, "groundwater", GW + GWd, groom, dem_all, dem_all - g_all, o, ald)
+            note_limit(lb_days, xid, wy, room, "surface", G - GW + g_riv + gin + gx, sroom, Dn_u[xid][i], Dn_u[xid][i] - g_all, o, ald)
+            note_limit(lb_days, xid, wy, room, "groundwater", GW + GWd, groom, Dn_u[xid][i], Dn_u[xid][i] - g_all, o, ald)
             # Off-takes from this unit (§2.6a), by priority.
             taken = 0.0
             ots = [t for t in ot_from.get(xid, []) if rule_limit(t, o, m) > 0]
@@ -3530,7 +3765,7 @@ def run(doc: dict) -> dict:
                 ("runoff_to_dam", M), ("runoff_below_dam", N), ("diverted_to_dam", O), ("dam_area", area),
                 ("rain_on_dam", pd), ("dam_evaporation", E), ("dam_seepage", Sp), ("supplied", g_all),
                 ("interim_storage", P), ("dam_storage", Q), ("spill", R), ("below_dam_not_diverted", S),
-                ("return_flow", T), ("outflow", Uo), ("balance_residual", V), ("deficit", dem_all - g_all), ("ewr", y_ewr),
+                ("return_flow", T), ("outflow", Uo), ("balance_residual", V), ("deficit", Dn_u[xid][i] - g_all), ("ewr", y_ewr),
                 ("ewr_cumulative", z), ("ewr_shortfall", aa), ("ewr_shortfall_incremental", ab),
                 ("dam_seepage_lost", lost), ("dam_release", X), ("river_abstraction", Gr), ("groundwater_used", GW),
                 ("groundwater_to_dam", GWd), ("senior_requirement", zs), ("passed_for_senior", passed),
@@ -3571,6 +3806,18 @@ def run(doc: dict) -> dict:
     diag["cap_bound_days"] = sum(r["days"] for r in lb_days.values())
     put(None, "ewr", ewr)
     put(None, "ewr_shortfall", cat_short)
+    if drule is not None:
+        # §2.7i outputs: the level in force (under `own` the deepest any unit is at), the day's cut per part under a
+        # shared basis, each cut unit's (and Priority user's with a %) restricted demand, a unit's level under `own`.
+        put(None, "restriction_level", dr_col_level)
+        if drule["basis"] != "own":
+            for p_ in drule["parts"]:
+                put(None, f"restriction_cut@{p_}", dr_cut_cols[p_])
+        for nid, vals in dr_restricted.items():
+            put(nid, "restricted_demand", vals)
+        if drule["basis"] == "own":
+            for fid, vals in dr_unit_level.items():
+                put(fid, "restriction_level", vals)
 
     # §2.7g: the day loop is done; the nodes get their entered capacity and curve back (what follows is structural).
     for fid in kdev:
@@ -3750,8 +3997,8 @@ def run(doc: dict) -> dict:
             put(xid, "gross_demand", d["gross"])
             put(xid, "effective_rain", d["eff"])
             put(xid, "soil_water", d["soil"])
-            put(xid, "crop_requirement", d["F"])
-            put(xid, "demand", Dn[xid])
+            put(xid, "crop_requirement", F_u[xid] if drule is not None else d["F"])
+            put(xid, "demand", Dn_u[xid])
             base = names[: names.index("dam_seepage_lost") + 1]
             for k in base:
                 put(xid, k, cc[k])
@@ -3779,7 +4026,7 @@ def run(doc: dict) -> dict:
             if xid in received:
                 put(xid, "received_at_intake", received[xid])
             for ob in objs[xid]:
-                put(xid, f"object_demand@{ob['id']}", obj_dem[ob["id"]])
+                put(xid, f"object_demand@{ob['id']}", od_u[ob["id"]] if drule is not None else obj_dem[ob["id"]])
                 put(xid, f"object_supplied@{ob['id']}", obj_sup[ob["id"]])
             for t in riv.get(xid, []):
                 c_ = river_cols[xid][t["key"]]
@@ -3797,7 +4044,7 @@ def run(doc: dict) -> dict:
             if xid in binding:
                 put(xid, "ewr_binding_site", binding[xid])
         elif x["kind"] == "user":
-            put(xid, "demand", Dn[xid])
+            put(xid, "demand", Dn_u[xid])
             for k in ("inflow_upstream", "supplied", "deficit", "outflow", "return_flow", "ewr_cumulative", "ewr_shortfall"):
                 put(xid, k, cc[k])
             for k in extra:

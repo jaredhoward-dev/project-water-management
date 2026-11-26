@@ -15,7 +15,7 @@
 // compared physical similarity and spatial proximity and found combining
 // them best; the blend, the weighting and the parameter quantiles below are
 // this model's own (Oudin et al. preferred averaging the donors' simulated
-// flows, which the flow-space score still to come tests):
+// flows, which the flow-space score below tests):
 //
 //  1. Each attribute (PRIOR_ATTRIBUTES; catchment area in log space) is
 //     standardised over the donors: z = (a − mean) / sd, sd the population
@@ -45,11 +45,14 @@
 // weight), and for each parameter with spread its log error at p50 is
 // compared with that of the plain median of the others (the "no
 // information" prior): skill = 1 − Σ err² / Σ err_null². It is in parameter
-// space; a flow-space score (KGE′ of the p50 on each held-out donor) needs
-// the donors' forcing and is fit-donors.ts's to add.
+// space; the flow-space score (KGE′ of the p50 on each held-out donor) needs
+// the donors' forcing, so the offline fit computes it (backend/scripts/
+// fit-donors.ts flowLeaveOneOut) and the donor set stores it (362).
 import { canonicalJson } from '../manifest';
 import { GR4J_PARAMS, type Gr4jParams } from '../runoff/params';
 import { hashText } from '../warmstart/plain';
+import type { ScoredPeriod } from './calibrate';
+import type { FitBounds, ParamSet } from './params';
 
 /** The attributes donors are compared on (HydroATLAS's, read from BasinATLAS and converted, docs/model.md §2.10m). */
 export const PRIOR_ATTRIBUTES = ['aridity', 'mapMm', 'slopeDeg', 'clayPct', 'sandPct', 'forestPct', 'areaKm2'] as const;
@@ -603,6 +606,15 @@ export interface PriorFitResult {
 	/** priorPenalty (unweighted) at the fitted parameters and at the starting ones. */
 	penaltyAtFit: number;
 	penaltyAtStart: number;
+	/**
+	 * The same full fit without the prior (engine 1.120.0, CalibrateOptions.fitWithoutPrior),
+	 * from as many starts as the fit (the lowest loss kept), so a hydrologist sees what the
+	 * prior cost: its parameters, the box it searched (the
+	 * wide one where the fit searched the prior's), its scores over the whole record and the
+	 * prior's penalty (unweighted) at its parameters. Absent when not asked; null when the
+	 * fit was cancelled before any of its starts ran.
+	 */
+	unpriored?: { params: ParamSet; bounds: FitBounds; fit: ScoredPeriod; penaltyAtFit: number } | null;
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);

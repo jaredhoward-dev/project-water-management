@@ -143,7 +143,9 @@ Built, **off unless `BILLING_ENFORCED`** (issue #641 "Free AI allowance" and
 after the token caps (264), against the project's billing account, and
 reserves the turn's dollars beside its tokens, so the month's (and day's)
 spend plus every running turn's reservation never passes a cap, however many
-turns run at once (begins are serialised by 264's deployment lock).
+turns run at once (begins are serialised by 264's deployment lock). Since
+361 the begin reads the spend from counters (§ The counters below), not by
+summing every account's rows.
 
 | Cap | Who | Limit | Refusal (`429`, `Retry-After`) |
 | --- | --- | --- | --- |
@@ -248,9 +250,84 @@ turn still running when the status is read makes its day look cheaper (its
 message is counted at begin, its cost at the charge): an estimate, and worded
 as one. The Free pool isn't in it (not the person's allowance; its refusal
 says so). Off, a paid plan, or no billing account: `day` is null. It reads
-the person's own sums, not `assistant_dollars_spent` (which scans every pool
-account's month), since the status is read each time the panel loads and
-again after each turn.
+the person's own sums, not `assistant_dollars_spent` (which also reads the
+pool and the account's month), since the status is read each time the panel
+loads and again after each turn.
+
+### The counters
+
+`361_assistant_month_counter.sql` (docs/followups.md § Billing, "Every turn's
+begin sums the month's dollars"). Before it, `assistant_dollars_spent` summed
+the UTC month's `assistant_usage`, the SAST day's `assistant_day_usage` and
+every reservation, and checked `assistant_pool_account` once per account with
+any of them, inside the deployment-wide lock: a begin's cost grew with every
+account that used the assistant this month. Now the recorded dollars are also
+kept in counters, written by triggers on the tables they count, so every
+writer keeps them exact (the charge, the expiry sweep, the purge, a project
+deleted or moved to another account, an account deleted):
+
+- `assistant_month_counter`: per billing account and UTC month, its projects'
+  `assistant_usage.cost_usd_micros`;
+- `assistant_pool_counter`: the Free pool's per UTC month (from
+  `assistant_usage`) and per SAST day (from `assistant_day_usage`), over the
+  accounts in `assistant_pool_member`;
+- `assistant_pool_member`: the accounts whose spend is in the pool counter.
+  Membership is still decided live by `assistant_pool_account` (a Pro
+  account's month leaves the pool when it upgrades, a lapsed one's comes
+  back), so a subscription change moves the account's whole retained spend in
+  or out of the pool counter (`assistant_pool_sync`).
+
+The reservations are still summed live (the table holds only the turns in
+flight, since each begin settles the expired ones first), as are a person's
+own month (their own usage rows) and day (one row). The answer is the same as
+336's sum: one statement reads the counters and the reservations from one
+snapshot, and a charge writes its rows and the counters in one transaction.
+Each trigger takes one deployment-wide advisory lock
+(`assistant_counter_lock`, held to commit) before it touches any counter, so
+a charge and a subscription change can't miss each other's change, and no two
+writers can take the pool counter's shared rows in opposite orders and
+deadlock (per-account locks could: a charge writes the month row then the
+day's, a subscription change every retained month and day, the expiry sweep
+and the purge several accounts' rows in data order). Counter writes are
+serialised by it, as pool charges already were on the pool's two hot rows;
+each is a short transaction. 264's deployment lock is unchanged (begins
+still read, then reserve). A usage row moved to another project or month is
+counted where it lands; a trigger refuses an UPDATE that moves a day row with a
+cost to another account or day (nothing does; the pool sync re-reads those
+rows). Tests: `assistant/monthCounter.db.test.ts` (every counter equals a
+fresh sum, and the read equals 336's statement, after each path, last month
+and yesterday's SAST day included; two pool accounts writing two months in
+opposite orders both commit) and the begin's budget in
+`assistant/begin.db.perf.test.ts`.
+
+**Lock order** (364). A trigger takes the counter lock after its row is
+written, so on its own it left two deadlocks: a begin whose settle charged an
+expired reservation held the counter lock and then wrote its own usage row,
+which a charge of the same person's turn in flight held while it waited for
+the counter lock; and an account's deletion locked its `billing_account` row
+and waited for the counter lock, while a charge holding it inserted the
+account's first month counter row and waited on that row's foreign key
+lock. Every transaction that can take the counter lock now takes, in order:
+(a) the parent rows its writes reference, in a deletion's order: the person,
+then the project, then the billing account, `FOR KEY SHARE` (or exclusively
+when it deletes them); (b) the counter lock;
+(c) the counted rows (reservation, usage, day, counters). The charge locks its
+person, its project and its account, then the counter lock when it has a cost
+to count (one with no cost or no account never takes it), then its
+reservation; the settle (in a begin or the purge) locks the parents of the
+reservations expired in its lock queries' snapshot, then the counter lock,
+only when something has expired; the begin locks its own parents before the settle. The person comes first because deleting a
+person locks the `app_user` row before its trigger locks the billing account,
+so a transaction holding the account and then asking for the person would
+deadlock with it. Deleting a person
+or a team locks its billing account first (a `BEFORE DELETE` trigger), so the
+cascade order can't take the counter lock before that row; billing writers
+already lock the account `FOR UPDATE` before a subscription change. Results
+are unchanged. Tests: `assistant/lockOrder.db.test.ts` runs each deadlock's
+interleaving on two connections, watching `pg_locks`, and expects both to
+commit (each failed with `deadlock detected` before its fix: a begin's settle
+holding the account while a person's deletion holds the person was the
+fourth case).
 
 **Not built yet** ([followups.md](./followups.md#billing-issue-641)): Haiku
 on Free.
@@ -878,9 +955,12 @@ invites"; Enforcement design, "Editors per catchment / Team seats").
   trip). Nothing from a request reaches the setting. The committed dev and
   e2e env files leave it off.
 - **Confirming an address.** `markVerified` accepts the person's pending
-  invites inside a savepoint: if one would pass a Team's seats, they all stay
-  pending and the address is still confirmed. Accepting on the invitations
-  page then answers `402 plan_limit` until a team admin adds a seat
+  invites through `app_accept_invites`, which takes each invite in its own
+  subtransaction (360_accept_invites_each): one that would pass a Team's
+  seats stays pending, the others (to other teams or projects) are accepted,
+  and the address is still confirmed. Any other refusal still fails the
+  confirmation. Accepting the pending one on the invitations page (one invite
+  named, nothing caught) then answers `402 plan_limit` until a team admin adds a seat
   ([§ Changing a Team's seats](#changing-a-teams-seats)) or makes someone a
   viewer.
 - **Who sees it.** Only seat roles meet it, which a farmer never holds. The
@@ -891,10 +971,10 @@ invites"; Enforcement design, "Editors per catchment / Team seats").
 - **Tests.** `billing/teamSeats.db.test.ts` (the count and its exclusions,
   the app role refused the functions, off by default, refused on and passed
   after a seat is added, existing seat holders, a project moving in, a Free
-  team, the invite left pending, any other refusal on confirming rethrown,
+  team, the invite left pending, only the refused one of several left
+  pending and the rest accepted, any other refusal on confirming rethrown,
   a project billed to the team's account with no `team_id`, two parallel
-  grants of the last seat), `auth/email-routes.test.ts` (`isPlanLimit`
-  matches only the seat guard), `db/tx.db.test.ts` (the flag set only for
+  grants of the last seat), `db/tx.db.test.ts` (the flag set only for
   `BILLING_ENFORCED=true`) and `http/errors.test.ts` (402 with only the
   numbers).
 
@@ -1666,7 +1746,12 @@ pnpm dev:billing:invoice <email|team-id> <plan> --interval month|year --po "<PO 
   making anything the customer's invoices are searched for its
   `wm_invoice_key`: a draft is completed, an open one not yet sent is sent,
   a sent one is answered as it is (`reused`). A voided one is ignored, so a
-  wrong invoice is voided in Stripe and issued again.
+  wrong invoice is voided in Stripe and issued again. The lookup pages
+  through `GET /v1/invoices?customer=…` 100 at a time (`starting_after`,
+  until found or `has_more` is false), not Stripe's invoice search, which
+  is eventually consistent and Stripe says not to use for read-after-write.
+  Past 20 pages (2,000 invoices) it logs `stripe_invoice_lookup_too_many`
+  and refuses (`invoice_pages`) rather than risk a second invoice.
 - **The period** runs from `--from` (a SAST day; default today) for one
   month or year, through the day before the same date (31 January + 1 month
   clamps to 28 February, so through 27 February). The answer's `until` is

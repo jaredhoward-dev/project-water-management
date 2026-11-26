@@ -277,6 +277,8 @@ def random_input(seed: int, dense: bool = False) -> dict:
     add_unit_chirps_choice(random.Random(seed * 49979687 + 59), doc, dense)
     # Each unit's own A-pan (§2.3b, engine >= 1.117.0): its own stream, last, so no other draw moves.
     add_apan_units(random.Random(seed * 67867999 + 61), doc, dense)
+    # Drought restrictions (§2.7i): its own stream, after every other, so no other draw moves.
+    add_drought_restriction(random.Random(seed * 86028199 + 67), doc, start, days, dense)
     # The EWR split by each unit's natural MAR (§2.5b) is every network's from engine 1.105.0 (issue #615): no
     # setting to draw any more (add_ewr_split's stream was the last, so no other draw moves).
     return doc
@@ -1339,3 +1341,85 @@ def _window(rng, start: dt.date, days: int) -> dict:
     if span == "always" or rng.random() < 0.3:
         w["weekdays"] = sorted(rng.sample(range(1, 8), rng.randint(1, 6)))
     return w
+
+
+DROUGHT_PARTS = ["crops", "domestic", "municipal", "industrial", "livestock", "irrigation", "external", "other"]
+
+
+def add_drought_restriction(rng: random.Random, doc: dict, start: dt.date, days: int, dense: bool = False) -> None:
+    """A drought restriction rule (§2.7i, engine >= 1.54.0), from its own
+    stream so the rest of a network is unchanged: in 30 % of networks (70 %
+    dense). One to four review dates (one is the run's first day now and then,
+    or the day before it, so a fresh run decides its first day), lift dates
+    now and then; one to four levels, mildest first, at shares that the dams
+    cross (up to 1, so a dam at its full supply level is restricted), each
+    cutting a few parts at least as deep as the level above (a "watch" level
+    of all 0 % cuts sometimes); a total, dams or own basis; now and then the
+    units it cuts (one that isn't a farm too); and a fixed restriction % on
+    some Priority users (a junior one too, which ignores it). The run's
+    starting dams are drawn emptier, so the levels are reached."""
+    if rng.random() >= (0.7 if dense else 0.3):
+        return
+    m = doc["model"]
+    nodes = m["nodes"]
+    farms = [x for x in nodes if x["kind"] == "farm"]
+    dams = [x for x in farms if (x.get("damCapacityM3") or 0) > 0]
+
+    def md(d: dt.date) -> str:
+        return f"{d.month:02d}-{d.day:02d}"
+
+    pool = set()
+    for _ in range(rng.randint(1, 4)):
+        d = start + dt.timedelta(days=rng.randint(-1, min(days, 365)))
+        pool.add(md(d))
+    if rng.random() < 0.3:
+        pool.add(md(start))
+    pool.discard("02-29")
+    reviews = sorted(pool) or ["10-01"]
+    lifts = set()
+    if rng.random() < 0.5:
+        for _ in range(rng.randint(1, 2)):
+            d = start + dt.timedelta(days=rng.randint(0, min(days, 365)))
+            if md(d) not in pool and md(d) != "02-29":
+                lifts.add(md(d))
+    k = rng.randint(1, 4)
+    shares = sorted({round(rng.uniform(0.05, 1.0), 3) for _ in range(k)}, reverse=True)
+    if rng.random() < 0.2:
+        shares[0] = 1.0
+    levels = []
+    prev: dict[str, float] = {}
+    watch = rng.random() < 0.25
+    for j, b in enumerate(shares):
+        cuts = dict(prev)
+        if not (watch and j == 0):
+            for p in rng.sample(DROUGHT_PARTS, rng.randint(1, 4)):
+                cuts[p] = min(1.0, round(max(cuts.get(p, 0.0), rng.choice([0.1, 0.2, 0.3, 0.5, 1.0, round(rng.uniform(0, 1), 2)])), 3))
+        else:
+            for p in rng.sample(DROUGHT_PARTS, rng.randint(1, 3)):
+                cuts[p] = 0.0
+        prev = cuts
+        levels.append({"label": f"Level {j + 1}", "belowPct": b, "cuts": cuts})
+    rule = {"reviewDates": reviews, "levels": levels}
+    if lifts:
+        rule["liftDates"] = sorted(lifts)
+    basis = rng.choice(["total", "total", "dams", "own"])
+    if basis != "total" or rng.random() < 0.3:
+        rule["basis"] = basis
+    if basis == "dams":
+        ids = [x["id"] for x in rng.sample(dams, rng.randint(0, len(dams)))] if dams else []
+        if rng.random() < 0.2 and farms:
+            ids.append(rng.choice(farms)["id"])
+        rule["damNodeIds"] = ids
+    if rng.random() < 0.3 and farms:
+        ids = [x["id"] for x in rng.sample(farms, rng.randint(1, len(farms)))]
+        others = [x for x in nodes if x["kind"] != "farm"]
+        if others and rng.random() < 0.3:
+            ids.append(rng.choice(others)["id"])
+        rule["nodeIds"] = ids
+    doc["settings"]["droughtRestriction"] = rule
+    for x in dams:
+        if rng.random() < 0.6:
+            x["damInitialPct"] = round(rng.uniform(0, 0.6), 3)
+    for x in nodes:
+        if x["kind"] == "user" and rng.random() < 0.6:
+            x["userRestrictionPct"] = rng.choice([0.1, 0.25, 0.5, 1.0, round(rng.uniform(0.01, 1), 2)])

@@ -1145,7 +1145,9 @@ the result change?", and put back any earlier version.
   `allocation.demo_loaded/demo_removed`, 315, counts only;
   a viewer reads `allocation.created/changed/deleted` without the
   registration number and volume until an owner lets viewers read each
-  volume: the History reads every subject through `app_audit_subject`, 190),
+  volume: the History reads every subject through `app_audit_subject`, 190;
+  of a `publication.published` event of a cap or full-allocation run, that
+  reader gets no `perFarm`, 365),
   `api_key.created/revoked` (039: key id, name, prefix, scopes, allowed
   series, lifetime; never the key or its hash), `alert_rules.changed` (051:
   an editor switched alert kinds on or off or changed a threshold),
@@ -1255,7 +1257,7 @@ the result change?", and put back any earlier version.
   every non-GET route under `/projects/:id`: each either `records` (with a
   `call` that proves the revision or event is written) or is `exempt` with a
   reason. A new write route fails the inventory until it's listed. Exempt
-  today, with reasons in the table: project delete, `POST /jobs`, feed
+  today, with reasons in the table: project delete, feed
   run-now, evidence nomination (its own append-only history), uncertainty
   ensembles, `POST /reports`, the allocation import preview (writes
   nothing), notes (each is its own record), queuing or cancelling a
@@ -2528,7 +2530,15 @@ is left for PostGIS when Step 4 needs cross-catchment spatial queries).
   (nullable). Every number is double precision, so the donors read back are
   the values the SHA-256 was taken of. No flow is stored. Global reference
   data, read and written as the soil grid is (`pnpm import:gr4j-donors`,
-  kind `gr4j-donors`).
+  kind `gr4j-donors`). `362_gr4j_donor_diagnostics.sql` adds two
+  diagnostics `fit-donors.ts` computes, both nullable so earlier loads stay
+  valid, and neither in the SHA-256: on the dataset, the flow-space
+  leave-one-out score, `loo_flow_kge` (median KGE′ of the prior's p50s on
+  each held-out donor), `loo_flow_kge_fit` (median KGE′ of the same donors'
+  own fits on the same days) and `loo_flow_n` (at least 3), all set or all
+  null (a check); on the donor, `at_bound` (`text[]` of `x1:low` …
+  `x4:high`, a check holds the values: the free parameters its fit left
+  within 1 % of a typical bound; `'{}'` none, null not recorded).
 - **`evaporation_accepted`** (`181_evaporation_accepted.sql`): where an
   evaporation row accepted from the map came from. Primary key
   `(project_id, target)`, `target` `pe` (GR4J's monthly PE) or `apan` (the
@@ -3654,7 +3664,11 @@ secret kept in `infra-secrets` (see [security.md](./security.md)).
   another role keeps it and gets no link), records `member.added` and `farmer.linked` (cause `invite`),
   gives an account with no `locale` yet the `locale` of the most recently
   sent invite it accepts (050_user_locale.sql, WP-2.5; a chosen locale is
-  never overwritten), and deletes those invites. Each of those functions,
+  never overwritten), and deletes those invites. It takes each invite in its
+  own subtransaction (360_accept_invites_each): with no invite named, one
+  refused by a Team's seats (334, `plan_limit`) is rolled back alone and
+  stays pending while the rest are accepted; any other error, or any error
+  with one invite named, is raised. Each of those functions,
   and `app_my_invites` / `app_accept_invite` (109), takes an invite only
   while its `invited_by` still holds owner on the project (directly or as
   the team's admin) or admin on the team (155_invite_sender_role.sql,
@@ -3739,7 +3753,7 @@ secret kept in `infra-secrets` (see [security.md](./security.md)).
 - Goes with the account (cascade) and is in the data-subject export
   (`preferences`).
 
-### Assistant usage (262_assistant_usage.sql, 324_assistant_turn_cost.sql, 336_assistant_dollar_caps.sql, 337_assistant_sast_day.sql)
+### Assistant usage (262_assistant_usage.sql, 324_assistant_turn_cost.sql, 336_assistant_dollar_caps.sql, 337_assistant_sast_day.sql, 361_assistant_month_counter.sql)
 
 What the assistant costs, counted, and each running turn's reserved budget (issue #610; 264 added the reservations, issues #640 and #641; [api.md §
 Assistant](./api.md#assistant), [security.md §
@@ -3750,8 +3764,11 @@ page holds the conversation and sends it with each turn.
 | --- | --- |
 | `assistant_usage` | One row per person per project per UTC month: `project_id` (cascade), `user_id` (set null), `month` (the month's first day), `input_tokens` (every input token, cache reads and writes included), `output_tokens`, `messages`, `updated_at`, and since 324 `cache_read_tokens` and `cache_write_tokens` (the part of `input_tokens` read from and written to the prompt cache), `cost_usd_micros` (the priced turns' cost in micro-USD) and `unpriced_turns` (turns not in it); unique on (`project_id`, `month`, `user_id`), which covers the project key, and indexes on `user_id` and `month` |
 | `assistant_rate` | The hourly message cap: `user_id` (primary key, cascade), `window_start`, `messages`, a fixed one-hour window as `map_compute_throttle` (186); a row goes once its hour is over, at the person's next turn or the job tick |
-| `assistant_reservation` | A running turn's reserved budget (264): `id`, `project_id` (cascade), `user_id` (set null), `month` (the UTC month it began in, which it counts against and is charged to), `reserved` (weighted tokens), `created_at`, `expires_at`; indexes on `project_id`, `user_id`, `month` and `expires_at`. Deleted when the turn is charged; converted into the usage row in full once expired. Owner-only: RLS on, no policy, no grant; since 336 `reserved_usd_micros` (the dollars its budget can cost at most; NULL for an unpriced model) and `day` (the SAST day it began since 337, a UTC day before; indexed) |
+| `assistant_reservation` | A running turn's reserved budget (264; every writer takes its locks in one order since 364, and BEFORE DELETE triggers on `app_user` and `team` lock the billing account first: billing.md § Lock order): `id`, `project_id` (cascade), `user_id` (set null), `month` (the UTC month it began in, which it counts against and is charged to), `reserved` (weighted tokens), `created_at`, `expires_at`; indexes on `project_id`, `user_id`, `month` and `expires_at`. Deleted when the turn is charged; converted into the usage row in full once expired. Owner-only: RLS on, no policy, no grant; since 336 `reserved_usd_micros` (the dollars its budget can cost at most; NULL for an unpriced model) and `day` (the SAST day it began since 337, a UTC day before; indexed) |
 | `assistant_day_usage` | Each person's assistant day per billing account (336, the dollar caps; [billing.md § Assistant dollar caps](./billing.md#assistant-dollar-caps)): `billing_account_id` (cascade), `user_id` (cascade), `day` (the SAST day since 337; rows written before hold a UTC day, read as the same date), `messages` (counted at begin), `cost_usd_micros` (added at charge, or an expired reservation's dollars), `updated_at`; primary key (`billing_account_id`, `day`, `user_id`), which covers the account key, and indexes on `user_id` and `day`. A person reads their own rows (`assistant_day_usage_own`, SELECT only); only the definer functions write; purged with the usage rows (`app_purge_assistant`); in Download my data (`assistantDays`) |
+| `assistant_month_counter` | Each billing account's recorded assistant cost per UTC month (361): `billing_account_id` (cascade), `month`, `cost_usd_micros`, the sum of its projects' `assistant_usage.cost_usd_micros`; primary key (`billing_account_id`, `month`), which covers the account key, and an index on `month` (the purge). Kept by triggers on `assistant_usage` and `project`; owner-only (RLS on, no policy, no grant) |
+| `assistant_pool_counter` | The Free pool's recorded assistant cost (361): `period` (`month`: a UTC month from `assistant_usage`; `day`: a SAST day from `assistant_day_usage`), `start`, `cost_usd_micros`, over the accounts in `assistant_pool_member`; primary key (`period`, `start`). Kept by triggers; owner-only |
+| `assistant_pool_member` | The billing accounts whose spend is in `assistant_pool_counter` (361): `billing_account_id` (primary key, cascade), kept in step with `assistant_pool_account` by `assistant_pool_sync` on every subscription change; owner-only. [billing.md § The counters](./billing.md#the-counters) |
 
 - Every cap counts weighted tokens, `input + 5 × output`
   (`assistant_weighted`; assistant/config.ts `OUTPUT_TOKEN_WEIGHT`: output
@@ -5102,7 +5119,7 @@ One scheduled feed per row ([architecture.md § Data feeds](./architecture.md#da
 | `last_attempt_at`, `last_success_at`, `consecutive_failures`, `last_error` (≤ 500, sanitised), `last_data_date`, `last_value`, `last_meta` (≤ 4 KB) | Health, written only by the functions below. `last_meta.through` is the last day the latest successful fetch asked for, the fetch window's progress through days with no data (#29); `last_meta.merged` the days it wrote and `last_meta.kept` the days it left holding a value it didn't write (#30); `last_meta.finalThrough` (CHIRPS) the last day through which the series holds final values, checked by the ingest and not re-read by the next window (#69); `last_meta.filesChecked` / `recheckDaysRead` / `revisionXmin` (CHIRPS) the re-check of cached finals, § Re-checking cached finals (210); `last_meta.gapEra5l` / `gapImergLate` (the CHIRPS feed whose cells the runs read, while `settings.gapRain` asks for the product) what that fetch's fill made of it, `ok`, `not_ready` or `failed:<format\|unavailable\|refused>`, merged in after the ingest by `app_record_gap_fill` (254_feed_gap_fill_outcome; only the running feed_fetch job of that feed, queued as the caller; never an error's text) |
 | `replace_series_from` | An owner's confirmation that the feed may replace its target series, which holds another product or version (032): what it held then, `CHIRPS/2.0`, or `''` for an unrecorded one. The ingest stages the new record (`feed_stage`, below) and swaps it in whole only while the series still holds exactly that, then clears it (`app_feed_replace_done`). The swapped-in record is all the feed's days (`feed_id` / `feed_days` cover it), so its later re-reads still revise them. Setting it restarts the feed's history like a re-target; re-targeting without a new one clears it; any change to it, the target or the config (its `unit` and `boundary` marks aside, 358) discards the stage. Since 296 (`296_feed_area_replace.sql`) it may also be `area:<product/version>` (`area:` for a source with no version, `agera5_et0`): the owner confirmed re-reading the feed's whole record over its new cells, staged the same way; the swap replaces only the feed's own days (`feed_days`) and keeps a person's, with the product days (292) rebuilt from the stage ([architecture.md § Data feeds](./architecture.md#data-feeds)) |
 | `replace_config_from` | With an area confirmation only (`CHECK`; 296): the config the series' record was read over, which withdrawing the replacement (`replaceSeries: false`) puts back. `data_feed_stamp` clears it with any confirmation that isn't an area one, and `app_feed_replace_done` once the swap is in |
-| `fetch_job_id`, `fetch_start`, `fetch_end` | The newest fetch sent to the fetcher Lambda whose answer isn't applied yet, and the days it asked for (029, #31). All three or none; no foreign key (finished jobs are purged). Written only by `app_begin_feed_fetch` / `app_take_feed_fetch` |
+| `fetch_job_id`, `fetch_start`, `fetch_end` | The newest fetch sent to the fetcher Lambda whose answer isn't applied yet, and the days it asked for (029, #31). All three or none; no foreign key (finished jobs are purged). Written only by `app_begin_feed_fetch` (directly, or through `app_begin_station_fetch`, 363) / `app_take_feed_fetch` |
 
 - **RLS**: SELECT for viewers; INSERT / UPDATE / DELETE for owners, with the
   acting user equal to the signed-in user. The `data_feed_stamp` trigger runs
@@ -5235,6 +5252,11 @@ One scheduled feed per row ([architecture.md § Data feeds](./architecture.md#da
     about to send its request records itself and its window. The caller must
     be an editor running that job (a `running` `feed_fetch` of this feed, as
     the caller).
+  - `app_begin_station_fetch(feed, job, start, end, cap)` (363): a station
+    API feed's `app_begin_feed_fetch`, only while its project has fewer than
+    `cap` (1–10; the worker passes 2) other station fetches out
+    (`app_feed_fetch_out`), counted under a per-project advisory lock; false,
+    recording nothing, otherwise. Same caller check.
   - `app_take_feed_fetch(feed, job)` (029): the `feed_ingest` job claims the
     window of the fetch it answers and clears the columns in one statement
     (`FOR UPDATE`, `FOR NO KEY UPDATE` since 322, so a second ingest of the

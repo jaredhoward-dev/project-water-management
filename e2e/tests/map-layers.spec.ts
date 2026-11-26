@@ -14,7 +14,11 @@
 // grid: a toggle of its own, the year or a month, said modelled, credited
 // while drawn, and no S-pan grid toggle (removed, issue #738). The DEM
 // rivers (the terrain channels drawn outside Delineate): on by default for an
-// editor, `layers=-channels` turns them off and `layers=channels` on again. Axe
+// editor, `layers=-channels` turns them off and `layers=channels` on again.
+// Prior donors (issue #622): the regional GR4J prior's kept donors listed
+// with their weights, each row a button, keyed while drawn, off until toggled,
+// the synthetic set never credited, axe-clean at desktop and phone widths; and
+// a project with no boundary told why there are none. Axe
 // with the layers on and while measuring, light and dark.
 import { readFile } from 'node:fs/promises';
 import type { Page } from '@playwright/test';
@@ -23,6 +27,7 @@ import { seedRunnableProject } from '../support/api.ts';
 import { expect, test } from '../support/fixtures.ts';
 import { boundaryGeoJson, loadSyntheticQuaternaries, loadSyntheticRivers, openKey, openLayers, openMap, parcelsGeoJson, showTab, uploadThroughSheet } from '../support/map.ts';
 import { loadSyntheticMapGrid } from '../support/mapGrid.ts';
+import { loadSyntheticPrior } from '../support/gr4jPrior.ts';
 import { layoutSettled } from '../support/reflow.ts';
 
 const layers = (page: Page) => page.getByTestId('map-layers');
@@ -425,6 +430,54 @@ test('the DEM grid: every 10th elevation-model cell each way in view, with its e
 	await expect(layers(page).getByRole('status')).toContainText(/DEM grid points? shown\./);
 	await page.goBack();
 	await expect(page.getByTestId('map-demgrid')).toHaveCount(0);
+});
+
+test('the prior donors: off until toggled, the kept donors listed with their weights, the synthetic set not credited', async ({ page, owner }) => {
+	void owner;
+	await loadSyntheticPrior();
+	const project = await seedRunnableProject(page.request, 'Map prior donors');
+	await openMap(page, project.id);
+	// A boundary among the synthetic donors (regional-prior.spec.ts's).
+	const near = JSON.stringify({ type: 'FeatureCollection', features: [{ type: 'Feature', properties: { name: 'Catchment' }, geometry: { type: 'Polygon', coordinates: [[[21.26, -33.74], [21.44, -33.74], [21.44, -33.56], [21.26, -33.56], [21.26, -33.74]]] } }] });
+	await uploadThroughSheet(page, null, 'near.geojson', near);
+	await mapReady(page);
+
+	await openLayers(page);
+	const toggle = layers(page).getByRole('checkbox', { name: 'Prior donors' });
+	await expect(toggle).not.toBeChecked();
+	await toggle.check();
+	await expect(page).toHaveURL(/[?&]layers=donors(&|$)/);
+	await expect(page.getByTestId('map-donors-summary')).toContainText(/^7 donor basins the regional prior kept, from “synthetic” \(.+\), each joined to the catchment boundary’s centre; a bigger dot weighs more\. Invented donors, never real basins\./);
+	const rows = page.getByTestId('map-donors-list').getByRole('listitem');
+	await expect(rows).toHaveCount(7);
+	await expect(rows.first()).toHaveText(/^.+: weight \d+ %, [\d\s,.]+ km away, [\d\s,]+ km²; show it on the map$/);
+	await expect(page.getByTestId('map-donors-list').getByRole('button', { name: /; show it on the map$/ })).toHaveCount(7);
+	await expect(layers(page).getByRole('status')).toContainText('7 prior donors shown.');
+	await expect(page.locator('.maplibregl-ctrl-attrib')).not.toContainText('GRDC-Caravan');
+	await expect(page.getByTestId('map-donors-back')).toHaveAttribute('href', '?tab=calibration#set-prior');
+	await expectNoViolations(page);
+	// The Key names the layer's marks while it draws them.
+	await openKey(page);
+	const key = page.getByTestId('map-key');
+	for (const k of ['link to the target', 'prior donor', 'prior target']) await expect(key.locator(`[data-key-item="${k}"]`)).toHaveCount(1);
+	// On a phone too.
+	await page.setViewportSize({ width: 390, height: 844 });
+	await openLayers(page);
+	await expect(page.getByTestId('map-donors-summary')).toBeVisible();
+	await expectNoViolations(page);
+	await page.goBack();
+	await expect(page.getByTestId('map-donors')).toHaveCount(0);
+});
+
+test('the prior donors with no boundary: why there are none', async ({ page, owner }) => {
+	void owner;
+	await loadSyntheticPrior();
+	const project = await seedRunnableProject(page.request, 'Map prior donors, no boundary');
+	await openMap(page, project.id, '&layers=donors');
+	await openLayers(page);
+	await expect(page.getByTestId('map-donors-none')).toContainText('There is no catchment boundary on the map');
+	await expect(page.getByTestId('map-donors-list')).toHaveCount(0);
+	await expect(layers(page).getByRole('status')).toContainText('No prior donors to show.');
 });
 
 test('the DEM rivers: the terrain channels drawn outside Delineate, on by default, a toggle in the URL', async ({ page, owner }) => {

@@ -117,7 +117,7 @@ const subjectUuid = (key: string) => `CASE WHEN e.subject->>'${key}' ~* '^[0-9a-
 /** The decisions' rows, newest first, `limit` of them (null: every one), before the cursor. */
 async function decisionRows(db: Db, projectId: string, before: { ts: string; id: string } | null, limit: number | null): Promise<Row[]> {
 	const { rows } = await db.query<Row>(
-		`SELECT e.id, ${TS} AS ts, e.kind, e.actor_label AS actor, app_audit_subject(e.project_id, e.kind, e.subject) AS subject,
+		`SELECT e.id, ${TS} AS ts, e.kind, e.actor_label AS actor, app_audit_subject(e.project_id, e.kind, e.subject, e.created_at) AS subject,
 			EXISTS (SELECT 1 FROM run_publication p WHERE p.project_id = e.project_id AND p.id = ${subjectUuid('publicationId')} AND p.superseded_at IS NULL) AS current,
 			EXISTS (SELECT 1 FROM model_run r WHERE r.project_id = e.project_id AND r.id = ${subjectUuid('runId')}) AS run_kept
 		 FROM audit_event e

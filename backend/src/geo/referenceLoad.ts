@@ -597,7 +597,7 @@ export async function loadReferenceText(client: pg.ClientBase, req: LoadRequest,
 		if (got.problems.length > 50) log(`… and ${got.problems.length - 50} more skipped`);
 		if (!got.donors.length) throw new LoadError(`${req.key}: no donors`, 'empty', 'the file has no donor basin');
 		// The attribution is the recorded one: the licences decide it, not the file.
-		const meta = { dataset: req.dataset, source: req.source ?? source, version, method, engineVersion, attribution: GR4J_DONORS.attribution };
+		const meta = { dataset: req.dataset, source: req.source ?? source, version, method, engineVersion, attribution: GR4J_DONORS.attribution, looFlow: got.meta.looFlow ?? null };
 		try {
 			const written = await replaceDonorDataset(client, meta, got.donors, origin);
 			return { kind: req.kind, dataset: req.dataset, written, skipped: got.problems.length, belowOrder: 0, replaced };

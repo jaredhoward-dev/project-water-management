@@ -264,6 +264,21 @@
 		height: 0.85rem;
 		background: var(--c);
 	}
+	/* The prior's donor: a dot ringed in the halo, as the map draws it; its target: a ring, a shape no feature uses. */
+	.sw-donor {
+		width: 0.85rem;
+		height: 0.85rem;
+		border-radius: 50%;
+		background: var(--c);
+		box-shadow: 0 0 0 1.5px var(--surface);
+	}
+	.sw-ring {
+		width: 0.85rem;
+		height: 0.85rem;
+		border-radius: 50%;
+		border: 3px solid var(--c);
+		box-sizing: border-box;
+	}
 	.sw-gauge {
 		clip-path: polygon(50% 0, 100% 100%, 0 100%);
 	}

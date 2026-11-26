@@ -1,7 +1,7 @@
 // `rerun`: run the model on the project's current inputs and save the run,
 // as the editor who queued it: what POST /projects/:id/runs does, off the
 // request path. Two ways in:
-//   - `manual`: POST /projects/:id/jobs (WP-2.8), labelled as asked;
+//   - `manual`: queued by POST /projects/:id/jobs (WP-2.8) until its removal on 2026-11-25; still run, labelled as asked;
 //   - `auto`: the debounced re-run after new data (WP-2.11,
 //     series/newData.ts onSeriesDaysChanged → app_enqueue_rerun). Labelled
 //     `Auto · data to <day>`, stored with trigger 'auto', so the storage cap
@@ -41,6 +41,7 @@ import { defineHandler } from '../registry.js';
 export const RerunPayload = z
 	.object({
 		label: z.string().trim().max(200).default(''),
+		// 'manual': a person's re-run, queued by POST /jobs until its removal (2026-11-25); kept so one still queued runs.
 		trigger: z.enum(['manual', 'auto', 'forecast']).default('manual'),
 		/** What brought the new data (auto re-runs and forecast runs only). */
 		cause: z.enum(NEW_DATA_CAUSES).optional()

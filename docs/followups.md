@@ -573,7 +573,7 @@ step 5. What's done and what's open:
       box choice, the fit record's line, the evidence pack's § 3 line
       (`evidence-22`), the four sources' credits on `/data-sources`, and
       `regional-prior.spec.ts`.
-- [ ] **A flow-space leave-one-out score.** Missing: the LOO score is in
+- [x] **A flow-space leave-one-out score.** Missing: the LOO score is in
       parameter space (log error of the p50 against the plain median), and
       the panel now shows it as the prior's skill. Flow space is what the
       hydrologist judges: KGE′ of the prior's p50 run on each held-out
@@ -582,7 +582,15 @@ step 5. What's done and what's open:
       `gr4j_donor_dataset` (a new column, a forward migration); the panel
       shows both. Trigger: the first real donor fit, before the prior is
       used for a real catchment.
-- [ ] **Donors at a typical bound.** Broken (maybe): donors are fitted on
+      Done (2026-11-25, 362): `fit-donors.ts` `flowLeaveOneOut` runs each
+      held-out donor's prior p50s (regionalPrior over the others, the ranges
+      a start uses) on its own forcing and scores KGE′ beside its own fit on
+      the same days; the medians and n go in the file (`looFlow`) and on
+      `gr4j_donor_dataset` (`loo_flow_kge`, `loo_flow_kge_fit`,
+      `loo_flow_n`); the panel shows "Skill (parameters)" and "Skill (flow)"
+      (model.md §2.10m). Open for the hydrologist: what flow-space KGE′, or
+      drop from the donors' own, counts as "no skill" (no badge yet).
+- [x] **Donors at a typical bound.** Broken (maybe): donors are fitted on
       Perrin's typical bounds, so x4 of a large basin or x1 of a semi-arid
       one can stack at a bound, and the prior's p10–p90 can never leave the
       box. `fit-donors.ts` prints the count per parameter; nothing records
@@ -590,6 +598,15 @@ step 5. What's done and what's open:
       migration), then with the hydrologist either fit donors on the wide
       bounds or leave a bound-hit donor out of that parameter's quantiles.
       Trigger: the first real fit's counts.
+      Done (2026-11-25, 362): the recording. Each donor's file entry and
+      `gr4j_donor.at_bound` hold the free parameters its fit left within
+      1 % of a typical bound, with the side (`x4:high`); the fit prints the
+      count per parameter and side, and the panel says how many kept donors
+      are at one. Open question for the hydrologist, once a real fit's
+      counts are in: refit the donors on the wide bounds, or leave a
+      bound-hit donor out of that parameter's quantiles (or neither, if the
+      counts are small). Nothing decides it yet; the prior still uses every
+      donor as fitted.
 - [ ] **The prior's forcing against the target's.** Donors are fitted on
       uncorrected CHIRPS v3 finals; a target's MAP and aridity come from its
       own forcing (station or CHIRPS rain, GR4J's PE), and the donors' from
@@ -607,11 +624,13 @@ step 5. What's done and what's open:
       reference kind, and area-weight them over the boundary (and a zone's
       units, once units have polygons), as the soil grid is. Trigger: the
       operator's real donor load.
-- [ ] **The donors on the Map.** Missing: the panel lists each donor's
-      distance and position, but the Map draws none. Durable fix: a Map
-      layer of the kept donors' outlets for the target, from the GET's
-      `donors`, with their weights. Trigger: the hydrologist reviewing a
-      real prior.
+- [x] **The donors on the Map.** Done (2026-11-25): the Map tab's
+      **Prior donors** layer (`layers=donors`, off by default, linked on
+      from the Regional prior panel's donors fold) draws the kept donor
+      outlets for the panel's target (`priorZone=`) from the GET's `donors`, sized and
+      labelled by weight and joined to the target, lists them in the
+      Layers box, says why when there is no prior, and credits a real
+      GRDC-Caravan set while drawn (maps.md § Prior donors).
 - [ ] **The ensemble in the prior's box (CR-1).** Missing: after a fit in
       the prior's box the uncertainty ensemble samples Perrin's typical box
       instead, with a note (`resolveEnsembleOptions`). Durable fix: sample
@@ -624,12 +643,17 @@ step 5. What's done and what's open:
       rules option for the prior (use and weight), the server building the
       prior per case's target from the loaded donors, recorded in each case.
       Trigger: a project calibrating by rules on a short record.
-- [ ] **What the prior cost the fit.** Missing: the report gives the
+- [x] **What the prior cost the fit.** Missing: the report gives the
       penalty at the start and the fit, but not the objective with the prior
       left out, so a hydrologist can't see how much KGE′ the prior cost.
       Durable fix: an optional unpriored full fit, as `marPenalty.unpenalised`.
       Trigger: the hydrologist asking, or a fit whose penalty at the fit is
-      large.
+      large. Done (2026-11-25): `CalibrateOptions.fitWithoutPrior` (engine
+      1.120.0, off by default) fits the whole record again without the prior
+      and reports it as `prior.unpriored` with a note; Fit automatically's
+      "Also fit without the prior" box asks for it, and the result and the
+      fit record say "Without the prior: KGE′ … (… with it); the prior cost …"
+      (model.md §2.10m, ui.md § Calibration).
 - [ ] **Step 6 (optional): x1 per unit by PAWC.** Changes `runModel`, so it
       needs its own `ENGINE_VERSION`, the `verify/` mirror, an invariant
       (equal PAWC across units reproduces the shared parameters bit for
@@ -1045,7 +1069,7 @@ are #641's checklist. Open items from building it:
       HMAC under a server secret rather than a bare SHA-256 (a bare hash can be
       tested against a known address; an HMAC needs a secret kept for good, or
       the claims stop matching); operator decision.
-- [ ] **Every turn's begin sums the month's dollars.** 336's
+- [x] **Every turn's begin sums the month's dollars.** 336's
       `assistant_dollars_spent` scans the month's `assistant_usage`, today's
       `assistant_day_usage` and every reservation, and the pool calls
       `assistant_pool_account` once per account, all under the
@@ -1054,7 +1078,14 @@ are #641's checklist. Open items from building it:
       accounts grow. Durable fix: a per-month pool counter row the charge
       updates, read in O(1), not a wider lock; a `perf-db` budget on begin
       to pin it. Trigger: begin latency visible in the assistant's p95, or
-      a few hundred active Free accounts.
+      a few hundred active Free accounts. Done (2026-11-25, 361): per-account
+      month and pool month/day counters kept by triggers on the counted
+      tables, read in one statement with the reservations in flight; the
+      deployment lock unchanged, one counter lock for exactness (not
+      per-account: two writers could take the shared pool rows in opposite
+      orders and deadlock)
+      (billing.md § The counters; `monthCounter.db.test.ts`,
+      `begin.db.perf.test.ts`).
 - [x] **Webhook events apply in arrival order.** `app_billing_apply` (326)
       ignores the payload's `eventCreated`, and Stripe doesn't guarantee
       delivery order, so an older `customer.subscription.updated` arriving
@@ -1252,7 +1283,13 @@ are #641's checklist. Open items from building it:
       refusing what doesn't check out as a logged `conflict` (billing.md §
       B2B invoices). An invoice sent from Stripe's dashboard, without our
       metadata, is still granted by hand (runbook 21).
-- [ ] **One refused invite leaves all of a person's invites pending.**
+- [x] **One refused invite leaves all of a person's invites pending.**
+      Done (2026-11-25, 360): `app_accept_invites` takes each invite in its
+      own exception block (360_accept_invites_each.sql), so with no invite
+      named a `plan_limit` refusal leaves only that invite pending and the
+      rest are accepted; one invite named (the Invitations page) still
+      refuses with 402. `markVerified`'s savepoint and `isPlanLimit` went
+      with it; test in `billing/teamSeats.db.test.ts`.
       `markVerified` (`backend/src/auth/email-routes.ts`) runs
       `app_accept_invites` in one savepoint, so when one invite would pass a
       Team's seats the others (to other teams or projects) stay pending too.
@@ -1260,7 +1297,7 @@ are #641's checklist. Open items from building it:
       savepoint (or an exception block) per invite inside
       `app_accept_invites`, a forward migration, so only the refused one
       stays pending. Trigger: `BILLING_ENFORCED` turned on.
-- [ ] **`findInvoice` reads only the newest 100 invoices.** It lists a
+- [x] **`findInvoice` reads only the newest 100 invoices.** It lists a
       customer's invoices with `limit: 100` and no paging
       (`backend/src/billing/provider/stripeApi.ts`), so an older invoice made
       under the same key isn't found and a retry past Stripe's 24-hour
@@ -1268,6 +1305,12 @@ are #641's checklist. Open items from building it:
       Durable fix: page with `starting_after` until found or exhausted, or
       search by metadata (Stripe's invoice search). Trigger: a customer
       with near 100 invoices.
+      Done (2026-11-25): it pages with `starting_after` until found or
+      `has_more` is false, capped at `FIND_INVOICE_MAX_PAGES` (20 pages,
+      2,000 invoices), past which it logs `stripe_invoice_lookup_too_many`
+      and refuses with `invoice_pages` instead of making one. List paging,
+      not invoice search: search is eventually consistent and Stripe says
+      not to use it for read-after-write (docs/billing.md § B2B invoices).
 
 ## DB tests share the mail outbox (2026-10-02, PR #360)
 - [x] **Guard pending notices as db-setup.ts guards pending jobs.** The
@@ -3281,15 +3324,17 @@ Still open:
       written into §2.3a, §2.5a and §2.7g (no engine change); drought
       restrictions are now refused by `unsupported()` instead of silently
       disagreeing ([verify/README.md § What phase 2b covers so far](../verify/README.md#what-phase-2b-covers-so-far)).
-      **Left:** drought restrictions (§2.7i, with a Priority user's fixed
-      restriction %), Reserve rule tables A1–A7 (§2.9c–d), forecast mode
+      **Done (2026-11-25):** drought restrictions (§2.7i, with a Priority
+      user's fixed restriction % and a new dam's first filling; the
+      scenario-only EWR trigger and snapshot resumes stay out), agreeing
+      with `runModel`; the points the docs left open written into §2.7i.
+      **Left:** Reserve rule tables A1–A7 (§2.9c–d), forecast mode
       (§2.4f), calibration (§2.10, §2.10b), rain-source periods (§2.4e), the
       areal correction (§2.4g), CHIRPS fit ranges (§2.4b), the CHIRPS
       quantile map (CR-23), keep-dry and listed accumulations (§2.4c–d), the
       non-default data-quality limits (§2.10a), scenario ops other than
       `climate.delta`, the outlook-only settings and the pinned factors.
-      Suggested next slice: drought restrictions (the largest daily
-      behaviour left), then rain-source periods and CHIRPS fit ranges. **Trigger:** the
+      Suggested next slice: rain-source periods and CHIRPS fit ranges. **Trigger:** the
       next engine change to any of these features (its PR adds that feature
       to `verify/` first, so the change lands against an independent
       reading), #258 merging (drought restrictions), or before the first
@@ -5737,7 +5782,18 @@ the Map tab, Settings → WR2012 check → Propose from the map;
       Report 1489/1/06 the A-pan grid comes from, in `ATLAS_APAN_ATTRIBUTION`
       (backend geo/evaporationGrid.ts) and `ATLAS_APAN_STATEMENT`
       (frontend dataCredits.ts), changed together. Trigger: whoever next has
-      the report open.
+      the report open. Searched 2026-11-25 (#828): two papers that cite the
+      Atlas give it as **Section 13.2**, "A-pan equivalent reference
+      potential evaporation" (Schulze and Maharaj 2007), which fits the MAP
+      grid's Section 6.2, but no primary source could be read: the WRC site
+      search finds nothing, the Water Research Observatory's 2008 zip needs
+      an account, and the online copies are the 1997 Atlas (WRC TT 82/96,
+      numbered differently). To close it: open Section 13.2's heading in the
+      Observatory's zip (with a login) or the report's contents in the WRC
+      Knowledge Hub in a browser, then change both strings, the tests that
+      pin them (`referenceLoad.test.ts`, `mapLayers.test.ts`, the legal and
+      map-layers e2e specs) and maps.md, data-sources.md and
+      legal/map-data-licences.md.
 - [ ] **Load the Southwestern Cape MAP surface in production** (operator;
       issue #560; deployment.md § Reference datasets). The code allows it
       as dataset `WAAS-SWCape-2007`; nothing is loaded yet, so production's
@@ -7276,7 +7332,7 @@ assume, the questions for counsel); these are the actions, with triggers.
 
 ## Housekeeping
 
-- [ ] **Three routes with no client call (round 4 reports; operator
+- [x] **Three routes with no client call (round 4 reports; operator
       decision 2026-10-11, issue #90).** `POST /projects/:id/jobs`, and the
       farm `series` and `history` routes looked to have no caller in `frontend/src` (round 4 reports).
       **Durable fix:** for each, find a caller (a script, e2e, a planned
@@ -7284,6 +7340,17 @@ assume, the questions for counsel); these are the actions, with triggers.
       tests, its line in docs/api.md and its row in the route-auth inventory
       (`src/routes.test.ts`). **Trigger:** the next backend round; don't
       leave them undecided past it.
+      - [x] Done (2026-11-25): farm `series` removed. No caller in
+            `frontend/src`, `e2e/`, `scripts/` or `backend/scripts`; the
+            only external surface is `/ingest/v1` (planned-work.md § Public
+            API docs); the farm page charts its 12 months from the projection.
+      - [x] Done (2026-11-25): farm `history` removed. No caller anywhere,
+            and design/farmer-view.md §12 chose "compared with last season"
+            from `lastSeason`, not `/history`.
+      - [x] Done (2026-11-25): `POST /projects/:id/jobs` removed. No caller
+            outside backend DB tests, which now queue through `enqueueJob`;
+            not an integrator route. The `rerun` handler still runs a
+            `manual` job queued before the removal.
 - [ ] **A client navigation to a glossary topic once never committed
       (2026-10-30, seen once).** help.spec.ts › "a guide shows its diagrams
       and links into the glossary" failed once at load average ~70 (other

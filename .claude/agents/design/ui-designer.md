@@ -63,7 +63,7 @@ screen, lose nothing the old screen had, and hold up with real-sized data.
    (`pnpm gen:bundle-budget <slug> <kb> "<why>"`), never an edit of
    `BUDGET.totalCodeKb` (`scripts/guards/bundle-budget/README.md`).
 7. **Docs:** `docs/ui.md`, the help guide for the screen
-   (`frontend/src/lib/help/guides.ts`; keep `vitest run src/lib/help`
+   (`frontend/src/lib/help/guides-<group>.ts`, joined by `guides.ts`; keep `vitest run src/lib/help`
    green), and the playbook if you learned something.
 8. **Check the inventory**: every item from step 1 has a home.
 9. Commit path-scoped with a plain message; don't push.

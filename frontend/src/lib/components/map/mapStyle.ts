@@ -19,6 +19,7 @@
 import type { MapFeature, MapGeometry, MapPosition } from '#lib/api/types.js';
 import type { ProposalPiece } from './pieces';
 import type { MapGridKind } from './mapLayers';
+import { donorsData } from './priorDonors';
 
 /** Shown on the map whenever the basemap is (the Protomaps / OSM licence). */
 export const BASEMAP_ATTRIBUTION = '© Protomaps © OpenStreetMap contributors';
@@ -906,6 +907,59 @@ export function chirpsLayers(dark: boolean): Layer[] {
 	];
 }
 
+// ---------------------------------------------------------------------------
+// The regional GR4J prior's donors (docs/maps.md § Prior donors; data from
+// priorDonors.ts donorsData): a thin dashed line from the target to each kept
+// donor's outlet, the donor as a dot sized by its weight, its weight beside
+// it, and the target as a ring (a shape no feature uses). Its own source, empty while
+// the layer is off.
+// ---------------------------------------------------------------------------
+
+/**
+ * The donors' colour: an olive (light) or yellow-green (dark), apart from the selection's magenta, the boundary's
+ * brown and gold, the water blues, the parcels' green, the quaternaries' purple, the CHIRPS orange, the terrain
+ * channels' red and the proposals' teal (ΔE ≥ 25 from each, 3:1 on the basemap; mapStyle.test.ts).
+ */
+export const donorColour = (dark: boolean) => (dark ? '#c3e33a' : '#5c6b00');
+
+/** The Prior donors layer: the links under, the donors' dots and the target over; their weights as labels when there are glyphs. */
+export function donorLayers(dark: boolean, labels: boolean): { over: Layer[]; labels: Layer[] } {
+	const colour = donorColour(dark);
+	const t = labelColours(dark);
+	const src = { source: 'donors' };
+	return {
+		over: [
+			{ id: 'donors-link', type: 'line', ...src, filter: ['==', ['get', 'role'], 'link'], paint: { 'line-color': colour, 'line-width': 1.2, 'line-opacity': 0.75, 'line-dasharray': [2, 2] } },
+			{
+				id: 'donors-point',
+				type: 'circle',
+				...src,
+				filter: ['==', ['get', 'role'], 'donor'],
+				paint: { 'circle-radius': ['get', 'radius'], 'circle-color': colour, 'circle-opacity': 0.8, 'circle-stroke-color': t.halo, 'circle-stroke-width': 1.5 }
+			},
+			{
+				id: 'donors-target',
+				type: 'circle',
+				...src,
+				filter: ['==', ['get', 'role'], 'target'],
+				paint: { 'circle-radius': 6, 'circle-color': t.halo, 'circle-stroke-color': colour, 'circle-stroke-width': 3 }
+			}
+		],
+		labels: labels
+			? [
+					{
+						id: 'donors-label',
+						type: 'symbol',
+						...src,
+						filter: ['==', ['get', 'role'], 'donor'],
+						layout: { 'text-field': ['get', 'label'], 'text-font': [LABEL_FONTS.medium], 'text-size': 11, 'text-offset': [0, 1.2], 'text-anchor': 'top', 'text-padding': 2 },
+						paint: { 'text-color': t.text, 'text-halo-color': t.halo, 'text-halo-width': 1.5 }
+					}
+				]
+			: []
+	};
+}
+
 export interface StyleOptions {
 	/** The glyphs URL (absolute; glyphsUrl()): place and water names, and the quaternaries' codes. Null: no labels. */
 	glyphs?: string | null;
@@ -941,6 +995,8 @@ export interface StyleOptions {
 	chirps?: ReturnType<typeof chirpsData>;
 	/** The DEM grid's sampled cells (demGridData()); none when omitted. */
 	demGrid?: ReturnType<typeof demGridData>;
+	/** The regional prior's donors (priorDonors.ts donorsData()); none when omitted. */
+	donors?: ReturnType<typeof donorsData>;
 	/** The area fills' opacity scale, 0–1 (the Area fill slider, fillOpacity()); 1 when omitted. */
 	fillScale?: number;
 }
@@ -951,7 +1007,7 @@ export interface StyleOptions {
  * bottom up: the basemap's land, the relief (when on), the rest of the
  * basemap, the quaternary outlines, the river network, the features, the
  * units' outlines, the CHIRPS grid, the DEM grid, the A-pan grid's
- * points, the CCWR MAP's and the WAAS 2007 MAP's points, then every label (so a results fill never
+ * points, the CCWR MAP's and the WAAS 2007 MAP's points, the prior's donors, then every label (so a results fill never
  * hides a name).
  */
 export function mapStyle(tilesUrl: string | null, dark: boolean, data: ReturnType<typeof overlayData>, opts: StyleOptions = {}): Style {
@@ -963,6 +1019,7 @@ export function mapStyle(tilesUrl: string | null, dark: boolean, data: ReturnTyp
 	const cg = mapGridLayers('ccwr', dark, !!glyphs, mapGridLabelMinZoom(opts.ccwrGridCellDeg));
 	const dg = demGridLayers(dark, !!glyphs);
 	const ap = evaporationGridLayers('apan', dark, !!glyphs, mapGridLabelMinZoom(opts.apanGridCellDeg));
+	const dn = donorLayers(dark, !!glyphs);
 	const style: Style = {
 		...base,
 		sources: {
@@ -977,7 +1034,8 @@ export function mapStyle(tilesUrl: string | null, dark: boolean, data: ReturnTyp
 			ccwrgrid: { type: 'geojson', data: opts.ccwrGrid ?? mapGridData(null) },
 			apangrid: { type: 'geojson', data: opts.apanGrid ?? evaporationGridData(null) },
 			chirps: { type: 'geojson', data: opts.chirps ?? chirpsData(null) },
-			demgrid: { type: 'geojson', data: opts.demGrid ?? demGridData(null) }
+			demgrid: { type: 'geojson', data: opts.demGrid ?? demGridData(null) },
+			donors: { type: 'geojson', data: opts.donors ?? donorsData(null) }
 		},
 		layers: [
 			...base.layers,
@@ -991,6 +1049,7 @@ export function mapStyle(tilesUrl: string | null, dark: boolean, data: ReturnTyp
 			...ap.over,
 			...cg.over,
 			...mg.over,
+			...dn.over,
 			...proposalLayers(dark),
 			...(glyphs && tilesUrl ? labelLayers(dark) : []),
 			...qt.labels,
@@ -998,7 +1057,8 @@ export function mapStyle(tilesUrl: string | null, dark: boolean, data: ReturnTyp
 			...dg.labels,
 			...ap.labels,
 			...cg.labels,
-			...mg.labels
+			...mg.labels,
+			...dn.labels
 		]
 	};
 	if (opts.terrain) {

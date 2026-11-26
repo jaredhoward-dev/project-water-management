@@ -204,11 +204,14 @@ fails if the page, or anything it imports statically, reaches the import
 components or the spreadsheet code again.
 
 Help tooltips (`components/help/HelpTip.svelte`) don't import the help text
-either. The text is three modules, each its own chunk: `lib/help/tips.ts`
-(each entry's term, short text, units and field keys: 10 KB gzip),
-`lib/help/articles.ts` (the fuller text, other names, related ids and source,
-by id: 32 KB with `content.ts`, which joins them for the /help pages) and
-`lib/help/farmer.ts` (the farm view's words, whole: 2 KB). The first HelpTip
+either. The text is in modules of its own, each its own chunk:
+`lib/help/tips.ts` (each entry's term, short text, units and field keys:
+10 KB gzip), the glossary's articles (`lib/help/articles.ts` and one
+`articles-<topic>.ts` per split topic, joined by `content.ts` for the /help
+pages), the guides (one `guides-<group>.ts` per contents group, joined by
+`guides.ts`; [ui.md § Help](./ui.md) has the split) and `lib/help/farmer.ts`
+(the farm view's words, whole: 2 KB); a tip never loads the articles or the
+guides. The first HelpTip
 starts fetching the tips when its module loads, off the page's critical path,
 and every HelpTip shares them; until they arrive a tip renders nothing, as it
 does for an unknown key. A tip never loads the long text (it was one 42 KB
@@ -753,7 +756,7 @@ own idempotency; do that only if jobs start competing for connections.
 Work that shouldn't run inside a request, or can't fit the API Lambda's 30 s,
 goes through one job queue (roadmap WP-2.8; `backend/src/jobs/`,
 `016_jobs.sql`). Its consumers are `rerun` (a model run off the request
-path, `POST /projects/:id/jobs`, and the automatic re-run after new data,
+path: the automatic re-run after new data,
 [§ Automatic runs](#automatic-runs)), the data feeds' `feed_fetch` /
 `feed_ingest` ([§ Data feeds](#data-feeds)) and the server-side PDF's
 `report_render` ([§ Server-side reports](#server-side-reports)) and the
@@ -1244,7 +1247,12 @@ row names a source, where to read it and the series it merges into:
     feed’s key can’t be used: …, Replace key"). In production a station feed
     goes through the fetcher (`FEED_FETCHER=sqs`), in its own FIFO message
     group per host (`station:<host>`), never CHC's or DWS's, and takes no
-    CHC slot. The fetcher logs a refused key as `key_refused` and a key
+    CHC slot. A project has at most 2 station fetches out at once
+    (`STATION_FETCHES_PER_PROJECT`, `app_begin_station_fetch`, 363): a
+    further one goes back to the job table, its attempt given back, and asks
+    again in 30 s, so one project's slow hosts can't queue all its feeds
+    ahead of another project's ([security.md § Station API
+    feeds](./security.md#station-api-feeds), "The fetcher's capacity"). The fetcher logs a refused key as `key_refused` and a key
     problem as `credential`, with fixed labels (`lambda-fetcher.ts`
     `failureDetail`).
   - *The fixtures* (`FEED_SOURCE=fixtures`): a synthetic station API on

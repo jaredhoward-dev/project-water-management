@@ -14,6 +14,7 @@ import {
 	fmtScore,
 	intervalText,
 	marPenaltyOn,
+	priorCostLine,
 	progressFraction,
 	rankedByText,
 	SCORE_ROWS,
@@ -131,6 +132,28 @@ describe('progress', () => {
 		expect(stageText(p('split', 10))).toBe('Split-sample test');
 	});
 
+	it('counts the fit without the regional prior last, once per start, when asked (engine 1.120.0)', () => {
+		expect(totalRuns(1500, true, false, 1, true)).toBe(1500 * 4);
+		// 5 starts with the prior + split + dsst + unpenalised + 5 starts without it.
+		expect(totalRuns(1500, true, true, 5, true)).toBe(1500 * 13);
+		expect(totalRuns(1500, true, true, 5, false)).toBe(1500 * 8);
+		const p = (stage: 'dsst' | 'unpenalised' | 'unpriored', evaluations: number) => ({ stage, evaluations, budget: 100, best: 0 }) as const;
+		// 1 start + split + dsst + unpenalised + unpriored = 5 equal parts.
+		expect(progressFraction(p('unpenalised', 100), true, true, 1, true)).toBeCloseTo(4 / 5, 12);
+		expect(progressFraction(p('unpriored', 50), true, true, 1, true)).toBeCloseTo(4.5 / 5, 12);
+		expect(progressFraction(p('unpriored', 100), false, false, 1, true)).toBe(1);
+		expect(STAGE_LABEL.unpriored).toBe('Fitting again without the regional prior');
+		// With 3 starts: 3 full + split + dsst + unpenalised + 3 unpriored = 9 equal parts.
+		const q = (stage: 'full' | 'unpenalised' | 'unpriored', evaluations: number, start?: number) =>
+			({ stage, evaluations, budget: 100, best: 0, ...(start ? { start, starts: 3 } : {}) }) as const;
+		expect(progressFraction(q('full', 50, 2), true, true, 3, true)).toBeCloseTo(1.5 / 9, 12);
+		expect(progressFraction(q('unpenalised', 100), true, true, 3, true)).toBeCloseTo(6 / 9, 12);
+		expect(progressFraction(q('unpriored', 50, 1), true, true, 3, true)).toBeCloseTo(6.5 / 9, 12);
+		expect(progressFraction(q('unpriored', 50, 3), true, true, 3, true)).toBeCloseTo(8.5 / 9, 12);
+		expect(progressFraction(q('unpriored', 100, 3), false, false, 3, true)).toBe(1);
+		expect(stageText(q('unpriored', 10, 2))).toBe('Fitting again without the regional prior (start 2 of 3)');
+	});
+
 	it('the penalty applies only when switched on and a reference is entered', () => {
 		const s = defaultProjectSettings();
 		expect(marPenaltyOn(s)).toBe(false);
@@ -138,6 +161,34 @@ describe('progress', () => {
 		const reference = { quaternary: 'Z99A', areaKm2: 1, marMm3: 1, monthlyMm3: new Array(12).fill(1 / 12), periodStart: 1990, periodEnd: 2000, mapMm: null, source: 's' };
 		expect(marPenaltyOn({ wr2012: { ...s.wr2012, reference } })).toBe(false);
 		expect(marPenaltyOn({ wr2012: { ...s.wr2012, reference, calibrationPenalty: { enabled: true, weight: 1, marLowMm3: null, marHighMm3: null } } })).toBe(true);
+	});
+});
+
+describe('priorCostLine (issue #622, engine 1.120.0)', () => {
+	const r = (withIt: number | null, without: number | null | undefined, objective: 'kgePrime' | 'nseLog' = 'kgePrime') => ({
+		objective,
+		fit: { scores: { kgePrime: withIt, nseLog: withIt } as never },
+		prior: without === undefined ? {} : { unpriored: without === null ? null : { fit: { scores: { kgePrime: without, nseLog: without } as never } } }
+	});
+
+	it('says what the prior cost in the fit’s objective', () => {
+		expect(priorCostLine(r(0.8, 0.85))).toBe(`Without the prior: KGE′ ${fmtNum(0.85, 3)} (${fmtNum(0.8, 3)} with it); the prior cost ${fmtNum(0.05, 3)} of KGE′.`);
+		expect(priorCostLine(r(0.8, 0.85, 'nseLog'))).toMatch(/^Without the prior: NSE on log Q /);
+	});
+
+	it('says how much higher the fit with the prior scored, without calling it a gain; a tie to three places; unknown without a score', () => {
+		expect(priorCostLine(r(0.8, 0.788))).toBe(
+			`Without the prior: KGE′ ${fmtNum(0.788, 3)} (${fmtNum(0.8, 3)} with it); the fit with the prior scored ${fmtNum(0.012, 3)} higher, and the comparison can’t separate that from search luck.`
+		);
+		expect(priorCostLine(r(0.8, 0.8002))).toBe(`Without the prior: KGE′ ${fmtNum(0.8, 3)} (${fmtNum(0.8, 3)} with it); the two fits score the same.`);
+		expect(priorCostLine(r(0.8, 0.79))).not.toMatch(/nothing/);
+		expect(priorCostLine(r(null, 0.79))).toMatch(/what the prior cost is unknown/);
+	});
+
+	it('nothing when the fit wasn’t asked, or used no prior; a cancelled fit says it didn’t run', () => {
+		expect(priorCostLine(r(0.8, undefined))).toBeNull();
+		expect(priorCostLine({ objective: 'kgePrime', fit: { scores: { kgePrime: 0.8 } as never } })).toBeNull();
+		expect(priorCostLine(r(0.8, null))).toMatch(/didn’t run: the calibration was cancelled/);
 	});
 });
 

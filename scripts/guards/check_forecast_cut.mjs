@@ -131,7 +131,7 @@ export const INVENTORY = [
 	{ path: 'backend/src/export/daily-columns.ts', reads: 1, how: 'whole', evidence: ['forecastColumn(run.startDate, run.summary.forecast)'], in: 'backend/src/export/routes.ts', note: 'the daily CSV leads with the F column; the bulk route feeds the .xlsx, which flags it (collect.ts)' },
 	{ path: 'backend/src/export/fdc.ts', reads: 1, how: 'cut', evidence: ['return fdcPercentileTable(flows, run);'], note: 'the engine ranks the days before run.forecastFrom' },
 	{ path: 'backend/src/export/routes.ts', reads: 2, how: 'whole', evidence: ['forecastColumn(run.startDate, run.summary.forecast)', 'values[i + shift]'], in: ['backend/src/export/routes.ts', 'backend/src/export/series-columns.ts'], note: 'farms.csv with the F column; an input series’ export, the run’s columns on that series’ own days' },
-	{ path: 'backend/src/farms/view.ts', reads: 2, how: 'cut', evidence: ['cur.view.dataUntil'], note: 'never past dataUntil, the day before the forecast' },
+	{ path: 'backend/src/farms/view.ts', reads: 1, how: 'cut', evidence: ['cur.view.dataUntil'], note: 'never past dataUntil, the day before the forecast' },
 	{ path: 'backend/src/portfolio/portfolio.ts', reads: 1, how: 'never', evidence: ["r.trigger <> 'forecast'"] },
 	{ path: 'backend/src/publish/publish.ts', reads: 1, how: 'cut', evidence: ["(summary->'forecast'->>'from')::date - 1"], note: 'the projection stops at observed_until; the forecast is its own part' },
 	{ path: 'backend/src/runs/reproduce.ts', reads: 1, how: 'whole', evidence: ['FROM run_series WHERE run_id = $1'], note: 'reproducing a run compares every stored day' },
