@@ -1,6 +1,6 @@
 import type { SeriesMeta } from '@water-management/engine';
 import { describe, expect, it } from 'vitest';
-import { asksSite, productField, rowSiteMark, siteText, uploadUnitText } from './details';
+import { asksSite, productField, rowSiteMark, settleSave, siteText, uploadUnitText } from './details';
 
 const meta = (kind: string, more: Partial<SeriesMeta> = {}): SeriesMeta => ({ id: 's', kind, name: '', unit: 'm³/s', startDate: '2020-01-01', length: 1, ...more });
 const gauges = [{ id: 'g1', name: 'Middle weir' }];
@@ -56,5 +56,18 @@ describe('uploadUnitText', () => {
 		expect(uploadUnitText(meta('flow_observed_m3s', { sourceUnit: 'm³/s', sourceUnitFactor: 1 }))).toBe('m³/s');
 		expect(uploadUnitText(meta('flow_observed_m3s', { sourceUnit: 'm³/s' }))).toBe('m³/s');
 		expect(uploadUnitText(meta('flow_observed_m3s'))).toBe('Not recorded');
+	});
+});
+
+describe('settleSave', () => {
+	it('records an answer while the same series is shown, keeping the other statuses', () => {
+		const saves = { 'save-a-name': { state: 'saving' as const }, 'save-a-source': { state: 'saved' as const } };
+		expect(settleSave(saves, 'save-a-name', { state: 'saved' }, 3, 3)).toEqual({ 'save-a-name': { state: 'saved' }, 'save-a-source': { state: 'saved' } });
+		expect(settleSave(saves, 'save-a-name', { state: 'error', text: 'offline' }, 3, 3)?.['save-a-name']).toEqual({ state: 'error', text: 'offline' });
+	});
+
+	it('drops an answer once another series was picked since the save started, even after coming back (issue #932)', () => {
+		expect(settleSave({}, 'save-a-name', { state: 'saved' }, 3, 4)).toBeNull();
+		expect(settleSave({}, 'save-a-name', { state: 'error', text: 'x' }, 3, 5)).toBeNull();
 	});
 });

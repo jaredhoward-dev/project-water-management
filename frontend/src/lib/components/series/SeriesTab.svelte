@@ -74,7 +74,7 @@
 	import { defaultUnit, KIND_OPTIONS, kindLabel, seriesKindLabel } from '#lib/series/kinds.js';
 	import { CHIRPS_CHOICES, describeProvenance, feedMark, provenanceFields, rebuildingNote } from '#lib/series/provenance.js';
 	import { firstOutletSeries } from '#lib/series/pick.js';
-	import { asksSite, productField, rowSiteMark, siteText, uploadUnitText } from './details';
+	import { asksSite, productField, rowSiteMark, settleSave, siteText, uploadUnitText, type SaveStatus } from './details';
 	import { asksStation } from './station';
 	import StationFields from './StationFields.svelte';
 	import AreaRainPanel from './AreaRainPanel.svelte';
@@ -121,7 +121,7 @@
 		projectId,
 		readonly,
 		initial = null,
-		settings = null,
+		settings,
 		gauges = [],
 		nodes = [],
 		timeZone = null,
@@ -136,8 +136,9 @@
 		initial?: SeriesMeta[] | null;
 		/** Not read: "New data since the latest run" is the page's own notice (series/freshness.ts `newDataSinceRun`), on this tab as on every other. */
 		runs?: RunMeta[] | null;
-		/** The project's settings, the same object the Settings tab gets; null only before the page's own load finishes. */
-		settings?: ProjectSettings | null;
+		/** The project's settings, the same object the Settings tab gets. The page draws this tab only once the project is
+		    loaded, so they are always there: the preview read null as "No series data loaded yet." with no retry (issue #932). */
+		settings: ProjectSettings;
 		/** The model's gauge nodes above the outlet: a flow record can be attached to one (084_gauge_records, engine ≥ 1.4.0). */
 		gauges?: readonly { id: string; name: string }[];
 		/** The model's nodes: the land units the Hydrological units group lists, with their MAPs, and the catchment's MAP (issue #553). */
@@ -444,16 +445,31 @@
 	// The controls that save on change (CHIRPS product, where measured, source): each says Saving…, Saved or why
 	// not beside itself, and a failed save puts the control back to the stored value (the one-way `value=` doesn't
 	// change when the list doesn't, so Svelte would leave the unsaved choice showing).
-	let saves = $state<Record<string, { state: 'saving' | 'saved' | 'error'; text?: string }>>({});
+	let saves = $state<Record<string, SaveStatus>>({});
 	const saveId = (s: SeriesMeta, field: string) => `save-${s.id}-${field}`;
+	// Leaving a series clears the statuses: they speak of the series shown, and coming back to one showed its old
+	// "Saved" or "Not saved…" (issue #932). A save still out then lands silently (settleSave); `picks` counts the changes.
+	let picks = 0;
+	$effect(() => {
+		void selectedId;
+		untrack(() => {
+			picks++;
+			if (Object.keys(saves).length) saves = {};
+		});
+	});
 	async function saveOnChange(key: string, el: HTMLInputElement | HTMLSelectElement, stored: string, save: () => Promise<void>) {
+		const at = picks;
 		saves = { ...saves, [key]: { state: 'saving' } };
 		try {
 			await save();
-			saves = { ...saves, [key]: { state: 'saved' } };
+			saves = settleSave(saves, key, { state: 'saved' }, at, picks) ?? saves;
 		} catch (e) {
-			el.value = stored;
-			saves = { ...saves, [key]: { state: 'error', text: msg(e) } };
+			const next = settleSave(saves, key, { state: 'error', text: msg(e) }, at, picks);
+			// Put the control back only while it still shows this series: after leaving, it shows another's value.
+			if (next) {
+				el.value = stored;
+				saves = next;
+			}
 		}
 	}
 	const saveFailed = (key: string) => saves[key]?.state === 'error';
