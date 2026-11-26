@@ -4,6 +4,7 @@
 // unit-tested.
 import { LANGUAGES } from '@water-management/engine/languages';
 import type { FileFormat } from '#lib/components/common/formatHelp.js';
+import { defuse } from '#lib/spreadsheet/export/names.js';
 import type { BulkFarmerResult, BulkFarmerRow, FarmerEntry } from '#lib/api/types.js';
 
 export interface FarmOption {
@@ -107,7 +108,8 @@ export function parseFarmerCsv(text: string): ParsedFarmerCsv {
 		const cells = splitLine(l, sep);
 		const row: CsvFarmerRow = { line, email: '', farm: '' };
 		order.forEach((key, i) => {
-			if (key && cells[i] !== undefined) row[key] = cells[i]!;
+			// A leading apostrophe before = + - @ is the one inviteExampleCsv adds (defuse): read the name back without it.
+			if (key && cells[i] !== undefined) row[key] = cells[i]!.replace(/^'(?=[=+\-@])/, '');
 		});
 		if (!row.locale) delete row.locale;
 		return row;
@@ -118,8 +120,16 @@ export function parseFarmerCsv(text: string): ParsedFarmerCsv {
 	return { rows, problems };
 }
 
-/** A CSV cell, quoted when it holds a comma, a quote or a line break (parseFarmerCsv reads it back). */
-const csvCell = (v: string) => (/[",\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+/**
+ * A CSV cell: text a spreadsheet would read as a formula behind an apostrophe
+ * (defuse; docs/security.md "CSV exports defuse spreadsheet formulas": a unit's
+ * name is typed by any editor), quoted when it holds a comma, a quote or a line
+ * break. parseFarmerCsv reads it back, apostrophe dropped.
+ */
+const csvCell = (v: string) => {
+	const s = defuse(v);
+	return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+};
 
 /**
  * The invite CSV's example file (the dialog's "Expected format", issue #456):
