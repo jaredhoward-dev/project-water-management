@@ -1,5 +1,5 @@
 // View helpers for the Project page (ProjectTab.svelte, issue #17).
-import { fmtDate, zonedIsoDate } from '#lib/format/number.js';
+import { fmtDate, fmtDay, zonedIsoDate } from '#lib/format/number.js';
 
 /** The zone a project dates its downloads by when the API sends none (issue #45). */
 export const DEFAULT_TIME_ZONE = 'Africa/Johannesburg';
@@ -18,6 +18,16 @@ export function projectDay(iso: string, timeZone: string = DEFAULT_TIME_ZONE): s
 	} catch {
 		return zonedIsoDate(at, DEFAULT_TIME_ZONE);
 	}
+}
+
+/**
+ * A moment as the project's calendar day for a reader, "27 Oct 2026": a run's
+ * or a pack's date in a report (issue #860), never UTC's day (an ISO slice)
+ * or the device's.
+ */
+export function fmtProjectDay(iso: string | null | undefined, timeZone?: string): string {
+	if (!iso || Number.isNaN(new Date(iso).getTime())) return iso || '–';
+	return fmtDay(projectDay(iso, timeZone));
 }
 
 /**

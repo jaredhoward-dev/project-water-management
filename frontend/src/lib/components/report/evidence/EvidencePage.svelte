@@ -282,6 +282,7 @@
 						{signoffs}
 						signoffTarget={runId ? { kind: 'run', id: runId } : null}
 						onsignoffchange={signoffsChanged}
+						timeZone={project?.timeZone}
 					/>
 				{/snippet}
 			</Lazy>

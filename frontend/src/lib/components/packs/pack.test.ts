@@ -6,7 +6,7 @@ import { packManifestText, type PackManifest } from '@water-management/engine';
 import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Pack, PackReproductionState } from '#lib/api/index.js';
-import { checkableAccept, checkableFiles, checkFile, earlierStatementNote, errataFoundSinceNote, issueChecklist, issuedOf, lookUpCode, manifestFileName, manifestFileText, packHref, packStamp, packsByScenario, packsOfRun, packVerifyLine, packVerifyRef, reproductionNote, sha256Hex, verifyUrl } from './pack';
+import { checkableAccept, checkableFiles, checkFile, earlierStatementNote, errataFoundSinceNote, issueChecklist, issuedOf, lookUpCode, manifestFileName, manifestFileText, packHref, packStamp, packTimeZone, packsByScenario, packsOfRun, packVerifyLine, packVerifyRef, reproductionNote, sha256Hex, verifyUrl } from './pack';
 import { latestOnly } from '#lib/api/latest.js';
 
 const tz = process.env.TZ;
@@ -372,5 +372,20 @@ describe('reproductionNote', () => {
 		expect(reproductionNote(state({ status: 'failed', canRerun: true }))!.rerun).toBe('Try again');
 		expect(reproductionNote(state({ status: 'checking' }))!.rerun).toBeNull();
 		expect(reproductionNote(state({ status: 'no_bundle' }))!.text).toMatch(/without a reproduction bundle/);
+	});
+});
+
+describe('packTimeZone (issue #860)', () => {
+	const browser = () => 'Pacific/Kiritimati';
+	it("is the project's zone when the page read the project", () => {
+		expect(packTimeZone({ timeZone: 'America/St_Johns' }, false, browser)).toBe('America/St_Johns');
+		expect(packTimeZone({ timeZone: 'America/St_Johns' }, true, browser)).toBe('America/St_Johns');
+		expect(packTimeZone({}, false, browser)).toBeUndefined();
+	});
+	it("is the browser's in a render session, which reads no project and runs in the project's zone", () => {
+		expect(packTimeZone(null, true, browser)).toBe('Pacific/Kiritimati');
+	});
+	it('is the default (undefined) when a signed-in reader could not read the project', () => {
+		expect(packTimeZone(null, false, browser)).toBeUndefined();
 	});
 });

@@ -60,7 +60,7 @@
 	import PackBadge from '#lib/components/packs/PackBadge.svelte';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { latestOnly } from '#lib/api/latest.js';
-	import { errataFoundSinceNote, reproductionNote, manifestFileName, manifestFileText, packStamp, packVerifyLine, packVerifyRef } from '#lib/components/packs/pack.js';
+	import { errataFoundSinceNote, reproductionNote, manifestFileName, manifestFileText, packStamp, packTimeZone, packVerifyLine, packVerifyRef } from '#lib/components/packs/pack.js';
 	import { printedPage } from '#lib/components/report/printedPage.svelte.js';
 	import { pageStart } from '#lib/a11y/focusPage.js';
 	import { followRetry } from '#lib/components/common/loadState.js';
@@ -373,7 +373,7 @@
 		<PackActions {projectId} {pack} issue={detail.issue} manifestMatches={detail.manifestMatches} {canEdit} onchange={reload} />
 		<Lazy load={loadReport}>
 			{#snippet children(EvidenceReportView)}
-				<EvidenceReportView {report} {projectId} {stamp} {verify} frozen {signoffs} signoffTarget={{ kind: 'pack', id: pack!.id }} onsignoffchange={reload} />
+				<EvidenceReportView {report} {projectId} {stamp} {verify} frozen {signoffs} signoffTarget={{ kind: 'pack', id: pack!.id }} onsignoffchange={reload} timeZone={packTimeZone(project, !!session.user?.renderSession)} />
 			{/snippet}
 		</Lazy>
 	{/if}

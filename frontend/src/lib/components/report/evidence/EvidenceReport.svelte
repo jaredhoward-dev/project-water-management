@@ -58,6 +58,7 @@
 	import { factorText, futureRows } from './future';
 	import { sourceLabel, sourceLine } from '#lib/components/runs/demandSources.js';
 	import { FORMER_MEMBER } from '#lib/format/maker.js';
+	import { fmtProjectDay } from '#lib/components/project/project.js';
 
 	let {
 		report,
@@ -67,7 +68,8 @@
 		verify = null,
 		signoffs = null,
 		signoffTarget = null,
-		onsignoffchange
+		onsignoffchange,
+		timeZone
 	}: {
 		report: EvidenceReport;
 		projectId: string;
@@ -81,6 +83,8 @@
 		signoffs?: SignoffList | PackSignoffList | null;
 		signoffTarget?: SignoffTarget | null;
 		onsignoffchange?: (next: SignoffList['signoffs'] | null) => void;
+		/** The project's IANA zone, which run dates are the calendar day in (issue #860); undefined = the default zone. */
+		timeZone?: string;
 	} = $props();
 
 	const app = $derived(report.mode === 'application');
@@ -957,7 +961,7 @@
 						The yields are of {fy.nodeName}’s dam on the application, searched with a constant draft: the firm yield (no failure day) and the yield at {fmtNum(fy.assurance * 100)} %
 						assurance (water years with a failure day at most {fmtNum((1 - fy.assurance) * 100)} %). The applicant’s assurance is the share of water years their units’ supply met
 						the project’s annual threshold. The EWR column is the application’s change in days below the pragmatic EWR at the outlet, each case’s baseline and application
-						under the same factors. Run {fmtDate(fy.createdAt.slice(0, 10))}{fy.createdBy ? ` by ${fy.createdBy}` : ''}, engine {fy.engineVersion}, method {fy.method}.
+						under the same factors. Run {fmtProjectDay(fy.createdAt, timeZone)}{fy.createdBy ? ` by ${fy.createdBy}` : ''}, engine {fy.engineVersion}, method {fy.method}.
 					</p>
 					{#if fy.fewModels}
 						<p class="banner-amber" data-testid="evidence-future-few">
