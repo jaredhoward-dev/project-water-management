@@ -1179,8 +1179,11 @@ the result change?", and put back any earlier version.
   (`SECURITY DEFINER`, before the row goes) sets `actor_label` to
   `Deleted user` on every event they acted in, `displayName` to
   `Deleted user` in every event whose subject's `userId` is theirs, and
-  `author` in every `note.deleted` about their note; then the foreign key
-  clears `actor_user_id`. The events, kinds and times stay (the project's
+  `author` in every `note.deleted` about their note, and (383)
+  `handedFrom` in a team project's hand-over event (`handedFromId`, or for
+  older events the `member.removed` event of the same transaction), and
+  deletes every invite addressed to them, live or expired; then the
+  foreign key clears `actor_user_id`. The events, kinds and times stay (the project's
   audit trail). What every other foreign key to `app_user` does is
   classified in `catalogue.db.test.ts` (`APP_USER_ON_DELETE`: cascade or
   set null; none restricts since 138);
