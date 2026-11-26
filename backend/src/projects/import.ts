@@ -77,7 +77,9 @@ export function projectFileProblems(data: ProjectFile): string[] {
 			else if (isFlowSiteKind(s.kind)) {
 				if (site.kind !== 'gauge' || site.downstreamNodeId === null) problems.push(`${what}: its site "${site.name}" is not a gauge above the outlet`);
 			} else {
-				const problem = siteProblem(s.kind, site);
+				// Any area, as a restore puts a unit's rain back (the run leaves out a unit with none, and says so): the
+				// download of a unit whose area was later typed to 0 still holds its rain, and imports back.
+				const problem = siteProblem(s.kind, site, { anyArea: true });
 				if (problem) problems.push(`${what}: its site "${site.name}": ${problem}`);
 			}
 		}
