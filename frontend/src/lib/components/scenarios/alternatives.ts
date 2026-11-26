@@ -6,7 +6,7 @@
 // lines the fold shows are tested without the component.
 import { ALTERNATIVES_MAX } from '@water-management/engine';
 import type { AlternativeCandidate, ScenarioAlternative } from '#lib/api/index.js';
-import { fmtStamp } from '#lib/format/number.js';
+import { DEFAULT_TIME_ZONE, fmtProjectStamp } from '#lib/components/project/project.js';
 
 /** Most characters in a label (the backend's ALTERNATIVE_LABEL_MAX, 298's CHECK). */
 export const ALTERNATIVE_LABEL_MAX = 80;
@@ -40,9 +40,9 @@ export function draftProblems(d: readonly AlternativeDraft[]): string[] {
 export const draftChanged = (d: readonly AlternativeDraft[], stored: readonly ScenarioAlternative[]): boolean =>
 	JSON.stringify(cleaned(d)) !== JSON.stringify(draftOf(stored));
 
-/** A run as a pick list names it: its scenario, then its label or when it ran. */
-export const runName = (r: Pick<AlternativeCandidate, 'scenarioName' | 'runLabel' | 'runCreatedAt'>): string =>
-	`${r.scenarioName} — ${r.runLabel || `run of ${fmtStamp(r.runCreatedAt)}`}`;
+/** A run as a pick list names it: its scenario, then its label or when it ran, on the project's clock (issue #899). */
+export const runName = (r: Pick<AlternativeCandidate, 'scenarioName' | 'runLabel' | 'runCreatedAt'>, timeZone: string = DEFAULT_TIME_ZONE): string =>
+	`${r.scenarioName} — ${r.runLabel || `run of ${fmtProjectStamp(r.runCreatedAt, timeZone)}`}`;
 
 /** The one-line summary the fold shows closed. */
 export function alternativesSummary(list: readonly ScenarioAlternative[]): string {

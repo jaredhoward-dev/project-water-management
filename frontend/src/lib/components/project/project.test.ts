@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PROJECT_ANCHORS, projectAnchor, projectHref } from './links';
-import { byName, fmtProjectDay, fmtProjectStamp, foldRows, PEOPLE_SHOWN, projectContext, projectDay } from './project';
+import { byName, fmtProjectDay, fmtProjectStamp, fmtProjectWhen, foldRows, PEOPLE_SHOWN, projectContext, projectDay, runDisplayName } from './project';
+import { reportRunName } from '#lib/components/report/sections.js';
 
 describe('projectContext', () => {
 	// The created date is the viewer's calendar day (fmtDate), and no instant is
@@ -165,5 +166,45 @@ describe('fmtProjectStamp (issue #864: a time of day in the evidence report)', (
 		expect(fmtProjectStamp('2026-10-26', 'America/St_Johns')).toBe('26 Oct 2026');
 		expect(fmtProjectStamp(null)).toBe('–');
 		expect(fmtProjectStamp('not a date')).toBe('not a date');
+	});
+});
+
+describe('fmtProjectWhen (issue #899: a run\'s date in the Runs list and the run pickers)', () => {
+	it("says today and yesterday by the project's clock near midnight, not the device's (the suite runs under a skewed TZ)", () => {
+		const prev = process.env.TZ;
+		try {
+			process.env.TZ = 'Pacific/Pago_Pago'; // UTC−11: the viewer is still on 26 Oct
+			const now = new Date('2026-10-26T22:45:00Z'); // 27 Oct 00:45 in Johannesburg
+			expect(fmtProjectWhen('2026-10-26T22:30:00Z', 'Africa/Johannesburg', now)).toBe('today 00:30');
+			expect(fmtProjectWhen('2026-10-26T21:59:00Z', 'Africa/Johannesburg', now)).toBe('yesterday 23:59');
+			expect(fmtProjectWhen('2026-10-25T21:59:00Z', 'Africa/Johannesburg', now)).toBe('25 Oct 2026 23:59');
+			// West of UTC the same moments are still the 26th.
+			expect(fmtProjectWhen('2026-10-26T22:30:00Z', 'America/St_Johns', now)).toBe('today 20:00');
+		} finally {
+			process.env.TZ = prev;
+		}
+	});
+
+	it('falls back to the default zone, and leaves a missing or bare date as fmtProjectStamp does', () => {
+		const now = new Date('2026-10-26T22:45:00Z');
+		expect(fmtProjectWhen('2026-10-26T22:30:00Z', undefined, now)).toBe('today 00:30');
+		expect(fmtProjectWhen(null)).toBe('–');
+		expect(fmtProjectWhen('2026-10-26', 'Africa/Johannesburg', now)).toBe('26 Oct 2026');
+	});
+});
+
+describe('runDisplayName (issue #899: the workspace names a run as its report does)', () => {
+	it("names an unlabelled run by when it ran on the project's clock, the moment reportRunName names", () => {
+		const prev = process.env.TZ;
+		try {
+			process.env.TZ = 'America/Los_Angeles'; // the viewer's clock reads 26 Oct 15:30
+			const run = { label: '', createdAt: '2026-10-26T22:30:00.000Z' };
+			expect(runDisplayName(run, 'Africa/Johannesburg')).toBe('27 Oct 2026 00:30');
+			expect(reportRunName(run, 'Africa/Johannesburg')).toBe(`Run of ${runDisplayName(run, 'Africa/Johannesburg')}`);
+			expect(runDisplayName({ label: 'Dry year', createdAt: run.createdAt }, 'Africa/Johannesburg')).toBe('Dry year');
+			expect(runDisplayName({ label: null, createdAt: run.createdAt })).toBe('27 Oct 2026 00:30');
+		} finally {
+			process.env.TZ = prev;
+		}
 	});
 });

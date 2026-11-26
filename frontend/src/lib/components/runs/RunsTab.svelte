@@ -14,7 +14,9 @@
 	import { api, PINNED_RUNS_MAX, type Nomination, type Project, type Publication, type PublicationMeta, type Run, type RunMeta, type RunSeriesRef } from '#lib/api/index.js';
 	import DownloadMenu from '#lib/components/export/DownloadMenu.svelte';
 	import { downloads, runDownloadItems, type FarmTableItem } from '#lib/export/index.js';
-	import { fmtDay, fmtNum, fmtStamp, fmtWhen } from '#lib/format/number.js';
+	import { fmtDay, fmtNum } from '#lib/format/number.js';
+	import { fmtProjectStamp, fmtProjectWhen, runDisplayName } from '#lib/components/project/project.js';
+	import { projectTimeZoneReader } from '#lib/components/project/projectClock.js';
 	import type { ModelEditor } from '#lib/model/editor.svelte.js';
 	import { dataEnd, newDataSinceRun } from '#lib/components/series/freshness.js';
 	import { detailCache, forgetRun, runDetail } from './cache';
@@ -422,6 +424,11 @@
 		return m;
 	});
 	const drift = $derived(modelDriftWarning(runs, nominations));
+	// Run names and dates on the project's clock, as the run report (issue #899).
+	const timeZone = projectTimeZoneReader();
+	const fmtStamp = (iso: string) => fmtProjectStamp(iso, timeZone());
+	const fmtWhen = (iso: string) => fmtProjectWhen(iso, timeZone());
+	const runName = (r: Pick<RunMeta, 'label' | 'createdAt'>) => runDisplayName(r, timeZone());
 	const evidenceFmt = fmtStamp;
 	/** The run header's evidence line for the shown run, or null when it was never nominated. */
 	const shownEvidence = $derived(detail ? evidenceLine(detail.run.id, nominations, evidenceFmt) : null);
@@ -446,7 +453,7 @@
 	}
 
 	async function remove(r: RunMeta) {
-		if (!(await confirmDialog({ title: `Delete run “${r.label || fmtStamp(r.createdAt)}”?`, confirmLabel: 'Delete run', danger: true }))) return;
+		if (!(await confirmDialog({ title: `Delete run “${runName(r)}”?`, confirmLabel: 'Delete run', danger: true }))) return;
 		actionError = null;
 		try {
 			await api.runs.remove(projectId, r.id);
@@ -781,13 +788,13 @@
 										type="button"
 										class="btn btn-icon pin"
 										aria-pressed={!!r.pinned}
-										aria-label="Pin run {r.label || fmtStamp(r.createdAt)}"
+										aria-label="Pin run {runName(r)}"
 										title={r.pinned ? 'Unpin: newer runs can push it out again' : `Pin: newer runs never push it out (at most ${PINNED_RUNS_MAX} per project)`}
 										onclick={() => togglePin(r)}
 										><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M6 2h4l-.5 4 2.5 2.5v1H4v-1L6.5 6zM8 9.5V14" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" /></svg></button
 									>
 									{#if !evidenceById.has(r.id) && !r.pinned && !heldByPublication.has(r.id) && !r.citedBy?.length}
-										<button type="button" class="btn btn-icon" aria-label="Delete run {r.label || fmtStamp(r.createdAt)}" title="Delete run" onclick={() => remove(r)}>✕</button>
+										<button type="button" class="btn btn-icon" aria-label="Delete run {runName(r)}" title="Delete run" onclick={() => remove(r)}>✕</button>
 									{/if}
 								</div>
 							{/if}
@@ -949,7 +956,7 @@
 							<RunNotes {projectId} run={shownRun} canEdit={canRun} flagLevel={summary.wr2012?.flag.level ?? null} onSaved={notesSaved}>
 								{#snippet aside()}
 									<!-- The team's notes on the run (WP-2.7), at the heading's right as on every Settings panel; RunNotes' intro says how they differ. -->
-									<NotesDrawer {projectId} target={{ kind: 'run', runId: shownRun.id, label: shownRun.label || fmtStamp(shownRun.createdAt) }} />
+									<NotesDrawer {projectId} target={{ kind: 'run', runId: shownRun.id, label: runName(shownRun) }} />
 								{/snippet}
 							</RunNotes>
 						{/key}

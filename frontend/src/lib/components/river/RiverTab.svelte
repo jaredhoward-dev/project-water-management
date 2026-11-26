@@ -38,7 +38,7 @@
 	import { resolveHeadline } from '#lib/components/runs/ewrAssurance.js';
 	import { heatmapHeadlineNote, judgedByText } from '#lib/components/ewr/headline.js';
 	import { detailCache } from '#lib/components/runs/cache.js';
-	import { fmtDay, fmtWhen } from '#lib/format/number.js';
+	import { fmtDay } from '#lib/format/number.js';
 	import { landOnAnchor } from '#lib/help/anchor.js';
 	import type { ModelEditor } from '#lib/model/editor.svelte.js';
 	import UncertaintyPanel from '#lib/components/uncertainty/UncertaintyPanel.svelte';
@@ -54,6 +54,12 @@
 	import ReserveStrip from './ReserveStrip.svelte';
 	import { EWR_MONTHS_HEADING, ewrRuleText, monthsJudge, monthsMetHeading, pickRiverRun, reserveStubText, reserveYearsWords, riverKpis, riverNavGroups, scenarioRunNote, type MonthsJudge } from './river';
 	import SectionNav from '#lib/components/common/SectionNav.svelte';
+	import { fmtProjectWhen } from '#lib/components/project/project.js';
+	import { projectTimeZoneReader } from '#lib/components/project/projectClock.js';
+
+	// Run dates on the project's clock, as its run report dates them (issue #899).
+	const timeZone = projectTimeZoneReader();
+	const fmtWhen = (iso: string) => fmtProjectWhen(iso, timeZone());
 
 	// The panels every run shows (the uncertainty bands, the outcome matrix, the seasonal outlook, the
 	// water account) are in this tab's chunk: only this tab uses them, and as chunks of their own they

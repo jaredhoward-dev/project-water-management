@@ -34,11 +34,16 @@
 	import { runDetail, type RunDetail } from '#lib/components/runs/cache.js';
 	import { supplyHref } from '#lib/components/supply/links.js';
 	import { fillHeader } from '#lib/components/workspace/headerSlot.svelte.js';
-	import { fmtWhen } from '#lib/format/number.js';
 	import { landOnAnchor } from '#lib/help/anchor.js';
 	import type { ModelEditor } from '#lib/model/editor.svelte.js';
 	import LicenceImpactOutput from './LicenceImpactOutput.svelte';
 	import { isOutputAnchor, OUTPUT_ANCHORS, outputNavGroups, shareState } from './outputs';
+	import { fmtProjectWhen } from '#lib/components/project/project.js';
+	import { projectTimeZoneReader } from '#lib/components/project/projectClock.js';
+
+	// Run dates on the project's clock, as its run report dates them (issue #899).
+	const timeZone = projectTimeZoneReader();
+	const fmtWhen = (iso: string) => fmtProjectWhen(iso, timeZone());
 
 	let {
 		projectId,

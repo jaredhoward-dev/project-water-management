@@ -516,6 +516,22 @@ describe('grouping by day, under a skewed time zone', () => {
 		expect(localTime('2026-09-24T20:30:00.000000Z')).toBe('18:00');
 	});
 
+	it("dates by the project's clock when its zone is given, whatever the viewer's (issue #899)", () => {
+		process.env.TZ = 'Pacific/Pago_Pago'; // UTC−11: both entries are on 24 Sep there
+		const now = new Date('2026-09-24T22:30:00Z'); // 25 Sep 00:30 in Johannesburg
+		const entries = groupByChangeSet([
+			rev({ id: '2', changeSet: 'a', createdAt: '2026-09-24T22:10:00.000000Z' }),
+			rev({ id: '1', changeSet: 'b', createdAt: '2026-09-24T21:50:00.000000Z' })
+		]);
+		expect(groupByDay(entries, now, 'Africa/Johannesburg').map((d) => [d.label, d.day])).toEqual([
+			['Today', '2026-09-25'],
+			['Yesterday', '2026-09-24']
+		]);
+		expect(groupByDay(entries, now).map((d) => d.label)).toEqual(['Today']);
+		expect(localTime('2026-09-24T22:10:00.000000Z', 'Africa/Johannesburg')).toBe('00:10');
+		expect(whenText('2026-09-24T21:50:00.000000Z', now, 'Africa/Johannesburg')).toBe('yesterday 23:50');
+	});
+
 	it('says Today and Yesterday by the viewer’s clock', () => {
 		process.env.TZ = 'Pacific/Kiritimati';
 		const now = new Date('2026-09-25T09:00:00Z'); // 25 Sep 23:00 there

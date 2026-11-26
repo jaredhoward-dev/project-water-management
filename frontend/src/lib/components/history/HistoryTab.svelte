@@ -22,7 +22,9 @@
 	import Dialog from '#lib/components/common/Dialog.svelte';
 	import LoadState from '#lib/components/common/LoadState.svelte';
 	import ChangesList from '#lib/components/compare/ChangesList.svelte';
-	import { fmtDate, fmtDay } from '#lib/format/number.js';
+	import { fmtDay } from '#lib/format/number.js';
+	import { fmtProjectStamp } from '#lib/components/project/project.js';
+	import { projectTimeZoneReader } from '#lib/components/project/projectClock.js';
 	import type { ModelEditor } from '#lib/model/editor.svelte.js';
 	import { fillHeader } from '#lib/components/workspace/headerSlot.svelte.js';
 	import { withoutParam, withParam } from '#lib/workspace/overlays.js';
@@ -44,6 +46,9 @@
 		seriesRestore,
 		type HistoryEntry
 	} from './timeline';
+
+	// History dates every change on the project's clock, as its run report dates runs and publications (issue #899).
+	const timeZone = projectTimeZoneReader();
 
 	let {
 		projectId,
@@ -110,7 +115,7 @@
 	}
 	$effect(() => () => clearTimeout(queryTimer));
 	const entries = $derived(filterEntries(groupByChangeSet(items), query));
-	const days = $derived(groupByDay(entries));
+	const days = $derived(groupByDay(entries, new Date(), timeZone()));
 
 	const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 	let loadSeq = 0;
@@ -310,7 +315,7 @@
 		try {
 			await api.history.restoreSeries(projectId, t.seriesId, t.revisionId);
 			seriesOpen = false;
-			seriesDone = `Put back the values of ${t.what} from before the change of ${fmtDate(t.at, true)}.`;
+			seriesDone = `Put back the values of ${t.what} from before the change of ${fmtProjectStamp(t.at, timeZone())}.`;
 			await onSeriesRestored?.();
 			showNewest();
 			await load();
@@ -330,7 +335,7 @@
 
 <svelte:window bind:innerWidth={innerW} bind:innerHeight={innerH} />
 
-{#snippet headerContext()}<span>{loading && !latest ? 'Every change, with who made it and why' : historyContext(latest, since)}</span>{/snippet}
+{#snippet headerContext()}<span>{loading && !latest ? 'Every change, with who made it and why' : historyContext(latest, since, new Date(), timeZone())}</span>{/snippet}
 
 <!-- One entry's whole content: in the detail beside the list, or in the list itself in a narrow column. -->
 {#snippet entryBody(e: HistoryEntry, titled: boolean)}
@@ -415,7 +420,7 @@
 <div class="history" class:side class:fit bind:this={root} bind:clientWidth={pageW} style:--h-top="{top}px" data-testid="history">
 	{#if restored}
 		<div class="alert alert-success-ish" role="status">
-			<p>Restored the version of {fmtDate(restored.at, true)}. The model and settings are as they were then; <a href="?tab=runs">run the model again</a> to update the results.</p>
+			<p>Restored the version of {fmtProjectStamp(restored.at, timeZone())}. The model and settings are as they were then; <a href="?tab=runs">run the model again</a> to update the results.</p>
 			{#if restored.relink.length}
 				<p>Farmers aren't linked back automatically. Re-link them in the Farmers list on the <a href="?tab=project#farmers-h">Project page</a>:</p>
 				<ul>
@@ -469,7 +474,7 @@
 					{#if items.length || nodeId || kind || urlQuery}
 						Nothing matches these filters.
 					{:else}
-						No changes recorded yet. History starts from {since ? fmtDay(localDay(since)) : 'now'}.
+						No changes recorded yet. History starts from {since ? fmtDay(localDay(since, timeZone())) : 'now'}.
 					{/if}
 				</p>
 			{:else if side}
@@ -490,7 +495,7 @@
 													data-sveltekit-noscroll
 													data-sveltekit-keepfocus
 												>
-													<span class="row-meta"><time datetime={e.createdAt}>{localTime(e.createdAt)}</time>{' · '}<span class="who">{e.actor ?? 'A deleted account'}</span></span>
+													<span class="row-meta"><time datetime={e.createdAt}>{localTime(e.createdAt, timeZone())}</time>{' · '}<span class="who">{e.actor ?? 'A deleted account'}</span></span>
 													<span class="row-title">{' '}{s.title}</span>
 													{#if s.line || s.more}
 														<span class="row-line">
@@ -517,7 +522,7 @@
 								<div>
 									<h2 id="{uid}-detail-h">{entryHeading(picked)}</h2>
 									<p class="detail-meta">
-										<time datetime={picked.createdAt}>{fmtDay(localDay(picked.createdAt))} at {localTime(picked.createdAt)}</time> · by {picked.actor ?? 'a deleted account'}
+										<time datetime={picked.createdAt}>{fmtDay(localDay(picked.createdAt, timeZone()))} at {localTime(picked.createdAt, timeZone())}</time> · by {picked.actor ?? 'a deleted account'}
 									</p>
 								</div>
 								<p class="steps">
@@ -556,7 +561,7 @@
 								{#each d.entries as e (e.key)}
 									<li class="entry" data-testid="history-entry">
 										<div class="meta">
-											<time datetime={e.createdAt}>{localTime(e.createdAt)}</time>
+											<time datetime={e.createdAt}>{localTime(e.createdAt, timeZone())}</time>
 											<span class="who">{e.actor ?? 'A deleted account'}</span>
 										</div>
 										<div class="what">{@render entryBody(e, true)}</div>
@@ -580,7 +585,7 @@
 <Dialog bind:open={confirmOpen} title="Restore this version?" wide>
 	{#if target}
 		<p>
-			The model and settings go back to how they were after the change of {fmtDate(target.createdAt, true)}{target.actor ? ` by ${target.actor}` : ''}.
+			The model and settings go back to how they were after the change of {fmtProjectStamp(target.createdAt, timeZone())}{target.actor ? ` by ${target.actor}` : ''}.
 			This is saved as a new change, so it can be undone the same way.
 		</p>
 		<h3 class="small-h">What restoring changes</h3>
@@ -619,7 +624,7 @@
 <Dialog bind:open={seriesOpen} title="Restore the earlier values?">
 	{#if seriesTarget}
 		<p>
-			{seriesTarget.what[0]!.toUpperCase() + seriesTarget.what.slice(1)} goes back to the values it held before the change of {fmtDate(seriesTarget.at, true)}.
+			{seriesTarget.what[0]!.toUpperCase() + seriesTarget.what.slice(1)} goes back to the values it held before the change of {fmtProjectStamp(seriesTarget.at, timeZone())}.
 			The values it holds now are kept too, so this can be undone the same way.
 		</p>
 		<p class="muted small">Runs already made keep the data they used.</p>

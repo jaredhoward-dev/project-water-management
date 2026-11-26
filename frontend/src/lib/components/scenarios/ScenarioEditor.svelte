@@ -27,7 +27,8 @@
 	import { api, scenarioProblems, SCENARIO_STATUS_MOVES, type Run, type RunMeta, type ScenarioStatus, type ScenarioWithCheck } from '#lib/api/index.js';
 	import { session } from '#lib/auth/session.svelte.js';
 	import { detailCache } from '#lib/components/runs/cache.js';
-	import { fmtStamp } from '#lib/format/number.js';
+	import { fmtProjectStamp } from '#lib/components/project/project.js';
+	import { projectTimeZoneReader } from '#lib/components/project/projectClock.js';
 	import ExplainSwitch from '#lib/components/common/ExplainSwitch.svelte';
 	import Fold from '#lib/components/common/Fold.svelte';
 	import { explainSwitch } from '#lib/components/common/explain.svelte.js';
@@ -48,6 +49,10 @@
 	import { guardUnsaved } from '#lib/nav/unsaved.js';
 	import { leavesScenario } from './leaves';
 	import { FORMER_MEMBER } from '#lib/format/maker.js';
+
+	// Run names and dates on the project's clock, as its run report (issue #899).
+	const timeZone = projectTimeZoneReader();
+	const fmtStamp = (iso: string) => fmtProjectStamp(iso, timeZone());
 
 	// The Yield panel (WP-3.6) and its chart load only once a dam is picked.
 	const loadYield = () => import('#lib/components/yield/YieldPanel.svelte');

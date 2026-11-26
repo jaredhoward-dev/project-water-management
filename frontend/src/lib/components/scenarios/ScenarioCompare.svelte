@@ -23,8 +23,13 @@
 	import FarmDeltaTable from '#lib/components/compare/FarmDeltaTable.svelte';
 	import HeadlineDeltas from '#lib/components/compare/HeadlineDeltas.svelte';
 	import ValidationPanel from '#lib/components/liability/ValidationPanel.svelte';
-	import { fmtDate } from '#lib/format/number.js';
+	import { fmtProjectStamp } from '#lib/components/project/project.js';
+	import { projectTimeZoneReader } from '#lib/components/project/projectClock.js';
 	import { runFitEngineVersions } from '@water-management/engine';
+
+	// Run names and dates on the project's clock, as its run report (issue #899).
+	const timeZone = projectTimeZoneReader();
+	const fmtStamp = (iso: string) => fmtProjectStamp(iso, timeZone());
 
 	const loadOverlay = () => import('#lib/components/compare/CompareOverlay.svelte');
 
@@ -109,8 +114,8 @@
 		<LoadState loading={loading && !data} {error} retry={() => scenario.lastRun && load(scenario.lastRun.id, scenario.baseRunId)}>
 			{#if data}
 				<p class="sides" aria-busy={loading}>
-					A: <strong>{data.a.run.label || 'Untitled run'}</strong> (base, run {fmtDate(data.a.run.createdAt, true)}) · B:
-					<strong>{data.b.run.label || 'Untitled run'}</strong> (this scenario, run {fmtDate(data.b.run.createdAt, true)}). Every change is B − A.
+					A: <strong>{data.a.run.label || 'Untitled run'}</strong> (base, run {fmtStamp(data.a.run.createdAt)}) · B:
+					<strong>{data.b.run.label || 'Untitled run'}</strong> (this scenario, run {fmtStamp(data.b.run.createdAt)}). Every change is B − A.
 				</p>
 				{#if stale}
 					<div class="alert alert-info" role="status" data-testid="scenario-stale">

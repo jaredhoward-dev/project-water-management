@@ -98,6 +98,7 @@
 	import { firstOutletSeries } from '#lib/series/pick.js';
 	import { withoutFarm } from '#lib/components/crops/farmDrawer.js';
 	import { FieldHistoryStore, setFieldHistory } from '#lib/components/history/fieldHistory.svelte.js';
+	import { provideProjectTimeZone } from '#lib/components/project/projectClock.js';
 	import { MediaQuery } from 'svelte/reactivity';
 	import { fillPhoneTitle, fillSidebar } from '#lib/components/layout/sidebar.svelte.js';
 	import SectionHeader from '#lib/components/workspace/SectionHeader.svelte';
@@ -176,6 +177,8 @@
 	const canSeeHistory = $derived(roleIds.includes('history'));
 	const fieldHistory = $derived(canSeeHistory && projectId ? new FieldHistoryStore(projectId) : null);
 	setFieldHistory(() => fieldHistory);
+	// Run names and run and publication dates on every tab read on the project's clock, as its run report does (issue #899).
+	provideProjectTimeZone(() => project?.timeZone);
 	const LABEL = TAB_LABELS;
 	let loading = $state(true);
 	let error = $state<string | null>(null);

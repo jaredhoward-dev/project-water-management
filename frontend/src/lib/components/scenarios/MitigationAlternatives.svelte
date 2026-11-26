@@ -16,7 +16,12 @@
 	import { guardUnsaved } from '#lib/nav/unsaved.js';
 	import Fold from '#lib/components/common/Fold.svelte';
 	import { leavesScenario } from './leaves';
-	import { ALTERNATIVE_LABEL_MAX, alternativesSummary, cleaned, draftChanged, draftOf, draftProblems, runName, type AlternativeDraft } from './alternatives';
+	import { ALTERNATIVE_LABEL_MAX, alternativesSummary, cleaned, draftChanged, draftOf, draftProblems, runName as runNameIn, type AlternativeDraft } from './alternatives';
+	import { projectTimeZoneReader } from '#lib/components/project/projectClock.js';
+
+	// A run's date on the project's clock, as its run report (issue #899).
+	const timeZone = projectTimeZoneReader();
+	const runName = (r: Parameters<typeof runNameIn>[0]) => runNameIn(r, timeZone());
 
 	let {
 		projectId,

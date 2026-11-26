@@ -53,7 +53,9 @@
 	import { compareEvidenceNote } from '#lib/components/runs/evidence.js';
 	import { fillHeader } from '#lib/components/workspace/headerSlot.svelte.js';
 	import { runYears } from '#lib/components/runs/runList.js';
-	import { fmtDate, fmtWhen } from '#lib/format/number.js';
+	import { fmtDate } from '#lib/format/number.js';
+	import { fmtProjectStamp, fmtProjectWhen } from '#lib/components/project/project.js';
+	import { projectTimeZoneReader } from '#lib/components/project/projectClock.js';
 	import { runForcingOfSummary } from '@water-management/engine';
 	import { runHeadlineSettings } from '#lib/calibration/zones.js';
 
@@ -67,6 +69,10 @@
 	import ReserveYearsChart from '#lib/components/compare/ReserveYearsChart.svelte';
 	import { dailyEwrName, daysBelowTestOf } from '#lib/components/ewr/notMet.js';
 	// A scenario run's overrides (issue #18): their own chunk, fetched only when a side is a scenario run.
+	// Run dates on the open project's clock, as its run report (issue #899); the cross-project /compare page has no project, so DEFAULT_TIME_ZONE.
+	const timeZone = projectTimeZoneReader();
+	const fmtStamp = (iso: string) => fmtProjectStamp(iso, timeZone());
+	const fmtWhen = (iso: string) => fmtProjectWhen(iso, timeZone());
 	const loadOverrides = () => import('#lib/components/scenarios/ScenarioOverrides.svelte');
 	const runoffModelOf = (s: RunCompareResponse['a']) => (s.run.inputs.settings?.runoffModel as string | undefined) ?? 'legacy';
 
@@ -327,7 +333,7 @@
 
 	const sameRun = $derived(!!refA && !!refX && formatRef(refA) === formatRef(refX));
 	const describe = (s: RunCompareResponse['a']) =>
-		`${s.run.label || 'Untitled run'} · ${s.project.name} · ${fmtDate(s.run.startDate)} → ${fmtDate(s.run.endDate)} · run ${fmtDate(s.run.createdAt, true)}`;
+		`${s.run.label || 'Untitled run'} · ${s.project.name} · ${fmtDate(s.run.startDate)} → ${fmtDate(s.run.endDate)} · run ${fmtStamp(s.run.createdAt)}`;
 
 	// --- the header's context line and the cards ---------------------------------
 	const runMeta = (side: Side) => {
@@ -704,7 +710,7 @@
 						</div>
 					{/if}
 					<!-- Either side is, or was, the project's nominated evidence run (010_run_nomination). -->
-					{#each [compareEvidenceNote('A', data.a.run.evidence, (iso) => fmtDate(iso, true)), compareEvidenceNote('B', data.b.run.evidence, (iso) => fmtDate(iso, true))] as note, i (i)}
+					{#each [compareEvidenceNote('A', data.a.run.evidence, fmtStamp), compareEvidenceNote('B', data.b.run.evidence, fmtStamp)] as note, i (i)}
 						{#if note}<div class="alert alert-info" role="status" data-testid="evidence-note">{note}</div>{/if}
 					{/each}
 					{#if data.a.run.legacy || data.b.run.legacy}
