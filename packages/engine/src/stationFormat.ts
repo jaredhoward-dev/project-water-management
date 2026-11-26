@@ -46,7 +46,7 @@ export interface StationFormat {
 	skipLines?: number;
 	/** CSV: whether the first line read is a header (default true); without one, columns are 1-based numbers. */
 	headerRow?: boolean;
-	/** Numbers written with a decimal comma (1,5). CSV with ',' as the delimiter can't have one. */
+	/** Numbers written with a decimal comma (1,5); a dot is then a thousands separator only in whole groups (1.234,5), and 1.5 is refused. CSV with ',' as the delimiter can't have one. */
 	decimalComma?: boolean;
 	/** The time field (JSON path within a record) or CSV column (header name, or 1-based number). */
 	time: string;
@@ -260,6 +260,9 @@ function parseValue(raw: unknown, missing: ReadonlySet<string>, decimalComma: bo
 	if (typeof raw !== 'string') return undefined;
 	const s = raw.trim();
 	if (missing.has(s.toLowerCase())) return null;
+	// Under a decimal comma a dot is a thousands separator only where it groups whole thousands (1.234,5): a lone
+	// decimal point (1.5, 0.254) is refused, never read with its dot dropped as 15 or 254 mm.
+	if (decimalComma && s.includes('.') && !/^[+-]?[1-9]\d{0,2}(\.\d{3})+(,\d*)?$/.test(s)) return undefined;
 	const t = decimalComma ? s.replace(/\./g, '').replace(',', '.') : s;
 	return /^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/.test(t) ? Number(t) : undefined;
 }
