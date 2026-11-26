@@ -22,6 +22,7 @@ import { readJson } from '../http/body.js';
 import { ApiError } from '../http/errors.js';
 import { logEvent } from '../logging/logEvent.js';
 import { UUID } from '../projects/access.js';
+import { billingEnforced } from './enforced.js';
 import { accountPlan, listPlans, myAccountId, teamAccountId } from './entitlements.js';
 import type { PublicPlan } from './entitlements.js';
 import { BILLING_INTERVALS, BillingGrantSeatsError, BillingUnavailableError, billingProvider, checkoutPlanOf, MAX_CHECKOUT_SEATS, PURCHASABLE, type CheckoutPlan, type LiveSubscription, type ReturnUrls } from './provider.js';
@@ -70,7 +71,7 @@ interface AccountState {
 	customerRef: string | null;
 	plan: AccountPlanJson;
 }
-type AccountPlanJson = { plan?: { code?: string; name?: string; limits?: { seats_included?: unknown } }; subscription?: (Omit<LiveSubscription, 'planCode'> & { status: string }) | null };
+type AccountPlanJson = { plan?: { code?: string; name?: string; limits?: { seats_included?: unknown } }; team?: { editorCount?: number } | null; subscription?: (Omit<LiveSubscription, 'planCode'> & { status: string }) | null };
 
 /** The account's kind, plan and customer, read as the caller; null when they may not (app_account_plan's own check). */
 async function accountState(db: Db, accountId: string | null): Promise<AccountState | null> {
@@ -199,6 +200,11 @@ async function changeSeats(c: Context<AuthEnv>, teamId: string) {
 	if (plan.extraSeatMonthlyMinor === null && plan.extraSeatAnnualMinor === null) throw new ApiError(400, `the ${plan.name} plan sells no extra seats`);
 	if (body.seats < plan.seatsIncluded) throw new ApiError(400, `the ${plan.name} plan includes ${plan.seatsIncluded} seats; choose at least that many`);
 	if (body.seats === sub.seats) throw new ApiError(400, `the team already has ${sub.seats} seats`);
+	// Fewer seats than the editors in use: the seat guard (334) never takes a seat from someone holding one, so without
+	// this a team could buy seats, fill them and drop back while keeping every editor. Enforced only; shadow mode counts.
+	const editors = state.plan.team?.editorCount;
+	if (billingEnforced() && typeof editors === 'number' && body.seats < editors)
+		throw ApiError.coded(409, 'seats_below_editors', `this team has ${editors} editors: make some of them viewers before going below ${editors} seats`, { seats: body.seats, editors });
 	await provider.changeSeats({
 		accountId: state.id,
 		externalRef: ref.externalRef,

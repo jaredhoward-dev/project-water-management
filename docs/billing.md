@@ -28,6 +28,15 @@ and `team_id` is set, each unique).
   a team project to its team's account, any other project to its creator's
   own account. New projects get it from a trigger; existing ones were
   backfilled (`323_billing`).
+- **A project leaving its team** (400_project_leaves_team_billing) bills to
+  its creator while they are still a direct owner of it; else to the person
+  taking it out (the route makes them a direct owner); else (the schema
+  owner's SQL) to its longest-standing direct owner. Leaving a team takes
+  the leaver's roles on its projects and only a team admin takes a project
+  out (#900), so before 400 a creator who had left could be billed for a
+  catchment they couldn't open, its live operations using their Free plan's
+  one live catchment. Only the moment it leaves picks the account; a later
+  change of owners moves nothing. `billing/moveOutOwner.db.test.ts`.
 - An account's live `subscription` gives its plan. **No live subscription
   means Free.** In Phase 1 no one has a subscription, so every account is on
   Free.
@@ -827,6 +836,15 @@ seats* control ([ui.md § Plan and usage](./ui.md#plan-and-usage)):
 4. **The seats.** A whole number from the plan's included seats to 50
    (`MAX_CHECKOUT_SEATS`), different from the current count; `400`
    otherwise, and for any other field.
+   With `BILLING_ENFORCED` on, never fewer than the team's editors in use
+   (`team.editorCount`, `app_team_seats_in_use`): `409 seats_below_editors`
+   with `{ seats, editors }`, before any provider call. The seat guard
+   (§ Team seats) never takes a seat from someone already holding one, so
+   without this a team could buy seats, fill them and drop back to the
+   included 3 while keeping every editor. Make some editors viewers first.
+   Off (shadow mode) it is counted, never refused. The count is read before
+   the provider call, so an editor added in that moment can still leave the
+   team one over; the seat guard then refuses the next new editor.
 5. **The provider** changes the subscription, outside any transaction. The
    route writes **no seats**: the provider's `customer.subscription.updated`
    brings them back through the webhook and `app_billing_apply`, as
@@ -974,7 +992,9 @@ invites"; Enforcement design, "Editors per catchment / Team seats").
   the Invitations page (`/account/invitations`), a translated page, words it
   from its code, so `plan_limit` is in `ERROR_CODES` with words in
   `frontend/src/lib/i18n/apiError.ts` (English and Afrikaans).
-- **Tests.** `billing/teamSeats.db.test.ts` (the count and its exclusions,
+- **Tests.** `billing/seats.db.test.ts` (a reduction below the editors in
+  use refused only when enforced, down to them passing),
+  `billing/teamSeats.db.test.ts` (the count and its exclusions,
   the app role refused the functions, off by default, refused on and passed
   after a seat is added, existing seat holders, a project moving in, a Free
   team, the invite left pending, only the refused one of several left

@@ -82,3 +82,35 @@ describe('333: app_billing_live_subscription_ref', () => {
 		expect(await ref(stranger, own)).toBeNull();
 	});
 });
+
+// Fewer seats than the team's editors in use (docs/billing.md § Changing a Team's seats, step 4): with billing
+// enforced the reduction is refused before any provider call, since the seat guard (334) never takes a seat from
+// someone already holding one, so a team could otherwise buy many seats, fill them and drop back to 3 while keeping
+// every editor. Off (shadow mode), it passes. Positive control: down to the editors in use passes.
+describe('POST /teams/:id/plan/seats below the editors in use', () => {
+	it('is refused with billing enforced, passes down to the editors in use, and passes off', async () => {
+		const [owner, ...others] = (await Promise.all(['SbAdmin', 'SbOne', 'SbTwo', 'SbThree'].map((n) => signUp(n)))) as User[];
+		const team = (await owner!.call('POST', '/teams', { name: `Seats below WUA ${crypto.randomUUID().slice(0, 8)}` })).body.team.id as string;
+		const start = await owner!.call('POST', `/teams/${team}/plan/checkout`, { plan: 'team', interval: 'month', seats: 5 });
+		expect(start.status).toBe(200);
+		expect((await formPost(`${local(start.body.url)}&outcome=pays`)).status).toBe(303);
+		for (const u of others) expect((await owner!.call('POST', `/teams/${team}/members`, { email: u.email, role: 'member' })).status).toBe(201);
+		const plan = (await owner!.call('GET', `/teams/${team}/plan`)).body;
+		expect(plan.subscription).toMatchObject({ seats: 5 });
+		expect(plan.team.editorCount).toBe(4);
+
+		vi.stubEnv('BILLING_ENFORCED', 'true');
+		const refused = await owner!.call('POST', `/teams/${team}/plan/seats`, { seats: 3 });
+		expect(refused.status).toBe(409);
+		expect(refused.body).toMatchObject({ code: 'seats_below_editors', params: { seats: 3, editors: 4 } });
+		expect((await owner!.call('GET', `/teams/${team}/plan`)).body.subscription).toMatchObject({ seats: 5 });
+		// Positive control: down to the editors in use.
+		expect((await owner!.call('POST', `/teams/${team}/plan/seats`, { seats: 4 })).status).toBe(200);
+		expect((await owner!.call('GET', `/teams/${team}/plan`)).body.subscription).toMatchObject({ seats: 4 });
+
+		// Off (shadow mode): counted, never refused.
+		vi.stubEnv('BILLING_ENFORCED', '');
+		expect((await owner!.call('POST', `/teams/${team}/plan/seats`, { seats: 3 })).status).toBe(200);
+		expect((await owner!.call('GET', `/teams/${team}/plan`)).body.subscription).toMatchObject({ seats: 3 });
+	});
+});
