@@ -1,7 +1,7 @@
 // The Map's delineation (issue #326 B-delineate; docs/design/delineation.md,
 // docs/ui.md § Map): what the sheet says about a proposal, pure so it is
 // tested without a browser.
-import type { DelineationProposal, DelineationRequest, DelineationState } from '#lib/api/types.js';
+import type { DelineationProposal, DelineationRequest, DelineationState, LargerChannel } from '#lib/api/types.js';
 import { fmtNum } from '#lib/format/number.js';
 
 /** The proposal waiting for a decision, if any (at most one: a new one supersedes it). */
@@ -39,6 +39,43 @@ export function waitingText(r: DelineationRequest): string {
 /** The sentence for a background delineation that failed (its job died). */
 export const failedText = (r: DelineationRequest) =>
 	`The background delineation failed${r.error && r.error !== 'cancelled' ? `: ${r.error.replace(/\.$/, '')}` : ''}. Try again, or draw or import the boundary.`;
+
+/** A refusal beside a much larger terrain channel: the sentence, the channel, and the point that was asked for. */
+export interface LargerOffer {
+	message: string;
+	channel: LargerChannel;
+	asked: [number, number];
+}
+
+/**
+ * What the sheet shows for a background delineation that came to nothing, as the request's own answer would have
+ * been: a refusal beside a much larger channel is the offer to use it, any other refusal or a failure the error.
+ * Null for one that proposed, is still waiting, or was superseded. The sheet uses it when the answer comes in, and
+ * when it is reopened from the Map's notice about it (issue #938).
+ */
+export function outcomeShown(r: DelineationRequest): { error: string | null; larger: LargerOffer | null } | null {
+	if (r.status === 'refused' && r.refusal) {
+		if (r.refusal.reason === 'larger_channel' && r.refusal.larger) return { error: null, larger: { message: r.refusal.message, channel: r.refusal.larger, asked: r.click } };
+		return { error: r.refusal.message, larger: null };
+	}
+	if (r.status === 'failed') return { error: failedText(r), larger: null };
+	return null;
+}
+
+/**
+ * The Map's notice for a background delineation that finished while its sheet was closed (issue #938): what came of it,
+ * and the label of the link that reopens the sheet. Null while the worker still has it, or once a newer click
+ * superseded it (that click is the one waited for).
+ */
+export function backgroundOutcome(r: DelineationRequest): { text: string; label: string } | null {
+	if (r.status === 'proposed') {
+		const area = r.proposal ? ` (${fmtNum(r.proposal.areaM2 / 1e6, 2)} km²)` : '';
+		return { text: `The background delineation is done: the catchment${area} is drawn dashed on the map, waiting for your decision.`, label: 'Review it' };
+	}
+	if (r.status === 'refused') return { text: `The background delineation found no catchment: ${r.refusal?.message ?? 'the point was refused.'}`, label: 'Delineate again' };
+	if (r.status === 'failed') return { text: failedText(r), label: 'Delineate again' };
+	return null;
+}
 
 /** The Copernicus licence's notice for adapted data (Art. 6(b)), plain text: a delineated polygon is adapted DEM data. */
 export const COPERNICUS_NOTICE =

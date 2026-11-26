@@ -10,7 +10,7 @@
 	answer holds places, listed or picked at once, their credit (GeoNames, CC BY
 	4.0) shows under the box, linking to the Data sources page. The state is
 	mapSearchState.svelte.ts.
-	Escape closes the list, and a pick puts the focus back in the box (the
+	Escape closes the list, and so does emptying the box (its clear button ×, issue #938); a pick puts the focus back in the box (the
 	button it was on goes with the list). Nothing is saved, nothing is drawn: the view moves.
 -->
 <script lang="ts">
@@ -74,6 +74,7 @@
 			placeholder="Find a town, farm, river, gauge, dam or quaternary"
 			bind:value={q}
 			bind:this={input}
+			oninput={(e) => s.edited(e.currentTarget.value)}
 			aria-describedby="{uid}-said"
 			data-testid="map-search-input"
 		/>

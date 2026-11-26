@@ -75,7 +75,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { PUBLIC_CHANNELS_URL, PUBLIC_TERRAIN_URL, PUBLIC_TILES_GLYPHS_URL, PUBLIC_TILES_URL } from '$app/env/public';
-	import { api, type DamTraceProposal, type DamTraceState, type MinOccurrence, type DelineationState, type MapFeature, type MapFeatureList, type Role, type RunMeta, type StartState } from '#lib/api/index.js';
+	import { api, type DamTraceProposal, type DamTraceState, type MinOccurrence, type DelineationRequest, type DelineationState, type MapFeature, type MapFeatureList, type Role, type RunMeta, type StartState } from '#lib/api/index.js';
 	import { confirmDialog } from '#lib/components/common/confirm.svelte.js';
 	import Dialog from '#lib/components/common/Dialog.svelte';
 	import Lazy from '#lib/components/common/Lazy.svelte';
@@ -113,7 +113,8 @@
 	import { ClickDivider, clickShape } from './clickPieces.svelte';
 	import { ChannelLayer } from './channelLayer.svelte';
 	import { openChannelArchive, staticChannels } from './channelArchive';
-	import { openProposal } from './delineation';
+	import { afterPollError, backgroundOutcome, isWaiting, openProposal, outcomeShown, POLL_MS } from './delineation';
+	import { ApiError } from '#lib/api/client.js';
 	import { openDivide, openStart, type StartDraft } from './startFlow';
 	import type { DivideChoice, DivideDraft } from './divideFlow';
 	import { emptyPlacement } from './placement';
@@ -173,7 +174,7 @@
 	let error = $state<string | null>(null);
 	let notice = $state<string | null>(null);
 	/** The step a notice offers (the accept toast's Divide the model or Start from the map), shown only while that notice is the one up. */
-	let noticeNext = $state<{ text: string; step: BoundaryNextStep } | null>(null);
+	let noticeNext = $state<{ text: string; step: Pick<BoundaryNextStep, 'label'> & { sheet: BoundaryNextStep['sheet'] | 'delineate' } } | null>(null);
 	/** The notice that changed the model, while it shows: it ends with a link to Runs & results, where Run model is. */
 	let runNotice = $state<string | null>(null);
 
@@ -391,10 +392,68 @@
 			delineateAt = null;
 			delineateMinKm2 = null;
 			delineateStep = 'decide';
-			if (delineateWasOpen) void untrack(focusAfterDelineate);
+			if (delineateWasOpen) {
+				void untrack(focusAfterDelineate);
+				// A delineation the sheet left with the background worker: the map watches it (issue #938). Nothing to ask the
+				// server for: the sheet said which (Accept and Reject reload the state themselves, and leave none waiting).
+				untrack(() => {
+					const w = sheetWaiting;
+					sheetWaiting = null;
+					delineateOutcome = null;
+					delineateFromNotice = false;
+					if (w && isWaiting(w) && delineation) delineation = { ...delineation, request: w };
+				});
+			}
 		}
 		delineateWasOpen = delineateSheet.open;
 	});
+	/**
+	 * A background delineation still running when its sheet closed (issue #938): the map asks about it every POLL_MS
+	 * while the sheet stays closed (the open sheet asks for itself), and when it finishes, the toast (a live region)
+	 * says what came of it, with a link that opens the sheet again.
+	 */
+	/** What the open sheet has left with the background worker, as it last said (its `onwaiting`). */
+	let sheetWaiting: DelineationRequest | null = null;
+	/** A background delineation that came to nothing with the sheet closed: the notice's link shows it in the sheet again. */
+	let delineateOutcome = $state<DelineationRequest | null>(null);
+	/** The sheet was opened by that notice's own link, not by another opener (an older proposal's Review it): only then is the outcome shown. */
+	let delineateFromNotice = $state(false);
+	const backgroundRequest = $derived(!delineateSheet.open && delineation?.request && isWaiting(delineation.request) ? delineation.request : null);
+	let backgroundFailures = 0;
+	$effect(() => {
+		const r = backgroundRequest;
+		if (!r) return;
+		const timer = setTimeout(() => void untrack(() => pollBackground(r.id)), POLL_MS);
+		return () => clearTimeout(timer);
+	});
+	async function pollBackground(id: string) {
+		let r: DelineationRequest;
+		try {
+			r = (await api.delineation.request(projectId, id)).request;
+		} catch (err) {
+			if (delineateSheet.open || delineation?.request?.id !== id) return;
+			backgroundFailures++;
+			const again = afterPollError(backgroundFailures, err instanceof ApiError ? err.status : undefined) === 'retry';
+			if (!again) backgroundFailures = 0;
+			// A new object asks again in POLL_MS; given up, the request is dropped from the map's copy (the sheet still finds it).
+			delineation = { ...delineation, request: again ? { ...delineation.request } : null };
+			return;
+		}
+		backgroundFailures = 0;
+		// The sheet opened meanwhile: it asks, and says what came of it, itself.
+		if (delineateSheet.open || !delineation || delineation.request?.id !== id) return;
+		if (isWaiting(r)) {
+			delineation = { ...delineation, request: r };
+			return;
+		}
+		const out = backgroundOutcome(r);
+		await loadDelineation();
+		if (!out || delineateSheet.open) return;
+		notice = out.text;
+		noticeNext = { text: out.text, step: { sheet: 'delineate', label: out.label } };
+		// A refusal (beside a larger channel: its offer) or a failure is shown again when the link opens the sheet.
+		delineateOutcome = outcomeShown(r) ? r : null;
+	}
 	/**
 	 * The sheet closed. Its opener (the draw bar's Delineate…, the Review it link) is
 	 * usually gone by then, so the dialog had nothing to hand focus back to: the
@@ -1566,7 +1625,7 @@
 			<p class="toast" data-testid="map-notice">
 				<span>{notice}{#if notice === runNotice}{' '}<a href="?tab=runs">Run the model</a> to see its effect.{/if}</span>
 				{#if noticeNext && noticeNext.text === notice}
-					<a class="btn btn-sm btn-ghost toast-next" href={withParam(page.url, noticeNext.step.sheet, '1')} data-testid="map-notice-next">{noticeNext.step.label}</a>
+					<a class="btn btn-sm btn-ghost toast-next" href={withParam(page.url, noticeNext.step.sheet, '1')} onclick={() => (delineateFromNotice = noticeNext?.step.sheet === 'delineate')} data-testid="map-notice-next">{noticeNext.step.label}</a>
 				{/if}
 				<button type="button" class="btn btn-sm btn-ghost" onclick={() => (notice = null)}>Dismiss</button>
 			</p>
@@ -1857,6 +1916,8 @@
 					onaccepted={delineationAccepted}
 					onrejected={delineationRejected}
 					onsubcatchments={delineation?.available ? () => subcatchmentsFromSheet() : null}
+					outcome={delineateFromNotice ? delineateOutcome : null}
+					onwaiting={(r) => (sheetWaiting = r)}
 				/>
 					{/snippet}
 				</Lazy>
