@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '#lib/api/client.js';
-import { cardOnFailure, classify, farmHref, farmReturn, farmReturnPage, pickNode, wordsHref, worstFirst } from './load';
+import { cardOnFailure, classify, farmHref, farmReturn, farmReturnPage, pickNode, savedForPublication, wordsHref, worstFirst } from './load';
 
 describe('what a failed request means', () => {
 	it('403 and 404 mean access removed; 0 means no signal; the rest a failure', () => {
@@ -146,5 +146,23 @@ describe('cardOnFailure keeps when the saved copy was saved', () => {
 		const next = cardOnFailure(new ApiError(500, 'x'), () => entry);
 		expect(next).toEqual({ drop: false, withheld: false, view: entry });
 		expect(next.drop === false && !next.withheld && next.view?.savedAt).toBe(1_700_000_000_000);
+	});
+});
+
+describe('savedForPublication (/farm: a saved copy from an older publication, #942)', () => {
+	const entry = (publishedAt: string) => ({ view: { publication: { publishedAt } }, savedAt: 1, usedAt: 2 });
+	it('keeps a copy of the publication the catchment has now', () => {
+		const e = entry('2026-11-01T08:00:00Z');
+		expect(savedForPublication(e, { publishedAt: '2026-11-01T08:00:00Z' })).toBe(e);
+	});
+	it('drops a copy of an older (or any other) publication, which describes a superseded decision', () => {
+		expect(savedForPublication(entry('2026-10-01T08:00:00Z'), { publishedAt: '2026-11-01T08:00:00Z' })).toBeNull();
+	});
+	it('shows no copy when the catchment has no publication now, or there is no copy', () => {
+		expect(savedForPublication(entry('2026-11-01T08:00:00Z'), null)).toBeNull();
+		expect(savedForPublication(null, { publishedAt: '2026-11-01T08:00:00Z' })).toBeNull();
+	});
+	it('drops a copy whose publication has the same day but a later republish time', () => {
+		expect(savedForPublication(entry('2026-11-01T08:00:00Z'), { publishedAt: '2026-11-01T09:30:00Z' })).toBeNull();
 	});
 });

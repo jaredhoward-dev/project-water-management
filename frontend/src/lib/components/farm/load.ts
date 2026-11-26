@@ -44,6 +44,18 @@ export function cardOnFailure<V>(e: unknown, saved: () => V | null): CardFailure
 }
 
 /**
+ * A saved copy is shown on a /farm card only when it is of the publication the
+ * catchment has now (issue #942): a copy from an older one describes a
+ * superseded decision (another notice, another restriction level beside the
+ * card's current level word), so the card shows none and says its figures
+ * couldn't be had instead. Publications are told apart by `publishedAt`, which
+ * a republish always moves. No current publication: no copy.
+ */
+export function savedForPublication<E extends { view: { publication: { publishedAt: string } } }>(saved: E | null, current: { publishedAt: string } | null): E | null {
+	return saved && current && saved.view.publication.publishedAt === current.publishedAt ? saved : null;
+}
+
+/**
  * The farm to show: the one asked for (?node=) if the index lists it, else
  * the one shown last on this phone, else the first. null when the asked-for
  * farm isn't in the list (it's no longer this user's) or there are none.

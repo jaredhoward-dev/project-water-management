@@ -19,7 +19,7 @@
 	import { t } from '#lib/i18n/locale.svelte.js';
 	import { ApiError } from '#lib/api/client.js';
 	import { errorText } from '#lib/i18n/apiError.js';
-	import { cardOnFailure, classify, farmHref, worstFirst } from '#lib/components/farm/load.js';
+	import { cardOnFailure, classify, farmHref, savedForPublication, worstFirst } from '#lib/components/farm/load.js';
 	import { clearSaved, readSaved } from '#lib/components/farm/savedCopy.js';
 
 	interface Row {
@@ -99,7 +99,8 @@
 					try {
 						view = await api.farm.view(row.projectId, row.nodeId);
 					} catch (e) {
-						const next = cardOnFailure(e, () => (user ? readSaved(user, row.projectId, row.nodeId) : null));
+						// A copy from an older publication than the list's is not shown (savedForPublication, #942).
+						const next = cardOnFailure(e, () => (user ? savedForPublication(readSaved(user, row.projectId, row.nodeId), row.publication) : null));
 						if (next.drop) {
 							clearSaved(row.projectId, row.nodeId);
 							if (gen === generation && rows) rows = rows.filter((r) => r.projectId !== row.projectId || r.nodeId !== row.nodeId);

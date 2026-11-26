@@ -18,4 +18,22 @@ How to write the Afrikaans:
 - The farm pages use plain words, not a modeller’s; `docs/design/farmer-view.md` §5.1 lists the words to use and the ones to avoid.
 - Numbers, dates and units are formatted by the app; don’t translate them.
 
-0 strings: 0 on the site, 0 in emails, 0 in the glossary.
+2 strings: 2 on the site, 0 in emails, 0 in the glossary.
+
+## The site (farm pages, sign-in pages, account)
+
+### farm
+
+The farm view (a farmer’s own farm, on a phone). The app calls the farm a “hydrological unit” everywhere a farmer reads it (the client’s choice, issue #90 Q6): keep the one Afrikaans term for it throughout. Otherwise plain words for farmers; see docs/design/farmer-view.md §5.1 for the words to use and to avoid.
+
+| Id | English | Context | Afrikaans |
+| --- | --- | --- | --- |
+| `8719b563` | Who decides? |  |  |
+
+### share
+
+The shared catchment view: a page anyone with a share link can open without signing in (a catchment forum, a municipality). The catchment’s result only, never a farm’s. It also uses the farm view’s notice card and level words.
+
+| Id | English | Context | Afrikaans |
+| --- | --- | --- | --- |
+| `9fb5d67d` | Go to the home page |  |  |

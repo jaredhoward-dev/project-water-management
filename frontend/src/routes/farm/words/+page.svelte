@@ -59,7 +59,8 @@
 		const sub = farmReturnPage(from);
 		if (sub === 'dam') return t('Your dam');
 		if (sub === 'why') return t('Why?');
-		if (sub === 'who-decides') return t('Who decides about your hydrological unit’s information');
+		// The page's full title wraps to two or three lines in the header (#942): the back link names it short.
+		if (sub === 'who-decides') return t('Who decides?');
 		if (sub === 'alerts') return t('Alert emails');
 		if (sub === 'invitations') return t('Invitations', {}, 'page title');
 		if (sub === 'account') return t('Account');
