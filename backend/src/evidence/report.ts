@@ -31,6 +31,7 @@ import {
 	type MemberResult,
 	type ModelInput,
 	type PairedMember,
+	type PairedRerun,
 	type ResolvedEnsembleOptions,
 	type RunInputsSnapshot,
 	type RunSummary,
@@ -201,7 +202,8 @@ async function loadEnsembles(
 	});
 	const baseline = base.map((r) => toInput(r, r.status === 'complete' ? (r.summary as EnsembleSummary) : null, null));
 	if (!applicationRunId) return { baseline, paired: [] };
-	const { rows: pairedRows } = await db.query<EnsembleRow & { result: { header: EnsembleHeader; members: PairedMember[] } | null }>(
+	// `rerun`: the baseline's kept sets on the engine the pairs ran on, when the baseline was stored on another (issue #897).
+	const { rows: pairedRows } = await db.query<EnsembleRow & { result: { header: EnsembleHeader; members: PairedMember[]; rerun?: PairedRerun } | null }>(
 		`SELECT ${ENSEMBLE_COLUMNS}, u.result FROM run_uncertainty u LEFT JOIN app_user au ON au.id = u.created_by
 		 WHERE u.project_id = $1 AND u.run_id = $2 AND u.baseline_id = ANY($3::uuid[]) ORDER BY u.created_at DESC, u.id`,
 		[projectId, applicationRunId, base.map((r) => r.id)]

@@ -27,6 +27,7 @@ import type {
 	OpClass,
 	OutlookExcluded,
 	PairedMember,
+	PairedRerun,
 	PairedSummary,
 	ProjectModel,
 	ProjectSettings,
@@ -998,7 +999,7 @@ export interface Ensemble {
 export interface EnsembleDetail extends Ensemble {
 	result:
 		| { engineVersion: string; header: EnsembleHeader; members: MemberResult[]; coverage: RecordCoverage[] }
-		| { engineVersion: string; header: EnsembleHeader; members: PairedMember[] }
+		| { engineVersion: string; header: EnsembleHeader; members: PairedMember[]; rerun?: PairedRerun }
 		| null;
 }
 

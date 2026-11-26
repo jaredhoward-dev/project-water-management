@@ -11,7 +11,7 @@
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { followRetry } from '#lib/components/common/loadState.js';
 	import { onDestroy } from 'svelte';
-	import { diffEnsembleOptions, type EnsembleSummary, type PairedResult, type PairedSummary } from '@water-management/engine';
+	import { diffEnsembleOptions, pairedNeedsRerun, type EnsembleSummary, type PairedResult, type PairedSummary } from '@water-management/engine';
 	import { api, type Ensemble, type EnsembleDetail } from '#lib/api/index.js';
 	import { FitCancelled, startEnsemble, type EnsembleHandle } from '#lib/calibration/runner.js';
 	import { fmtNum } from '#lib/format/number.js';
@@ -78,13 +78,22 @@
 		try {
 			const { ensemble } = await api.uncertainty.start(projectB, runB, { baselineId: bandA.id });
 			listB = [ensemble, ...listB];
-			const [base, input] = await Promise.all([api.uncertainty.get(projectA, runA, bandA.id), api.uncertainty.runInput(projectB, runB)]);
+			// A baseline stored on another engine: its kept sets are re-run on A's inputs too, so both sides are this engine's (issue #897).
+			const rerun = pairedNeedsRerun(bandA);
+			const [base, input, baselineInput] = await Promise.all([
+				api.uncertainty.get(projectA, runA, bandA.id),
+				api.uncertainty.runInput(projectB, runB),
+				rerun ? api.uncertainty.runInput(projectA, runA) : undefined
+			]);
 			const r = base.result as Extract<EnsembleDetail['result'], { coverage: unknown }>;
-			progress = { done: 0, total: bandA.accepted ?? 0 };
+			progress = { done: 0, total: (rerun ? 2 : 1) * (bandA.accepted ?? 0) };
 			// bandA is reactive state: post the worker a plain copy (a proxy can't be cloned).
-			handle = startEnsemble({ kind: 'paired', input, baseline: { options: $state.snapshot(bandA.options), header: r.header, members: r.members } }, (p) => (progress = p));
+			handle = startEnsemble(
+				{ kind: 'paired', input, baseline: { options: $state.snapshot(bandA.options), header: r.header, members: r.members, engineVersion: bandA.engineVersion }, baselineInput },
+				(p) => (progress = p)
+			);
 			const result = await handle.result;
-			await api.uncertainty.complete(projectB, runB, ensemble.id, { members: result.members });
+			await api.uncertainty.complete(projectB, runB, ensemble.id, { members: result.members, ...(result.rerun ? { rerun: { members: result.rerun.members } } : {}) });
 		} catch (err) {
 			if (!(err instanceof FitCancelled)) actionError = msg(err);
 		} finally {
