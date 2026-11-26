@@ -71,7 +71,8 @@ export async function leaveTeamProjects(db: Db, teamId: string, team: string, us
 /**
  * Give a team admin direct ownership of the project: the removing admin, else the team's longest-standing other admin.
  * An admin holding a farmer row here comes last: that row is about their own farm, and raising it changes its meaning
- * (only when every other admin holds one too).
+ * (only when every other admin holds one too). The event names the leaver as `handedFrom` with their id beside it
+ * (`handedFromId`), so deleting their account can put "Deleted user" in its place (383_erase_handover_and_invites).
  */
 async function handOwnership(db: Db, teamId: string, projectId: string, leaver: string, remover: string | null, leaverName: string): Promise<string> {
 	const { rows } = await db.query<{ user_id: string; display_name: string; role: string | null }>(
@@ -88,10 +89,10 @@ async function handOwnership(db: Db, teamId: string, projectId: string, leaver: 
 	if (!to) throw new Error('leaveTeamProjects: the team has no other admin to hand the project to');
 	if (to.role === null) {
 		await db.query(`INSERT INTO project_member (project_id, user_id, role) VALUES ($1, $2, 'owner')`, [projectId, to.user_id]);
-		await recordAudit(db, projectId, 'member.added', { userId: to.user_id, displayName: to.display_name, role: 'owner', handedFrom: leaverName });
+		await recordAudit(db, projectId, 'member.added', { userId: to.user_id, displayName: to.display_name, role: 'owner', handedFrom: leaverName, handedFromId: leaver });
 	} else {
 		await db.query(`UPDATE project_member SET role = 'owner' WHERE project_id = $1 AND user_id = $2`, [projectId, to.user_id]);
-		await recordAudit(db, projectId, 'member.role', { userId: to.user_id, displayName: to.display_name, from: to.role, to: 'owner', handedFrom: leaverName });
+		await recordAudit(db, projectId, 'member.role', { userId: to.user_id, displayName: to.display_name, from: to.role, to: 'owner', handedFrom: leaverName, handedFromId: leaver });
 	}
 	return to.user_id;
 }
