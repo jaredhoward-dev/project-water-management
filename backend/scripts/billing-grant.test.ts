@@ -52,7 +52,7 @@ describe('parseArgs', () => {
 		expect(parseArgs(['a@example.com', 'pro', '--reason', 'x', '--force'], 'op')).toMatch(/unknown option --force/);
 		expect(parseArgs(['a@example.com', '--revoke', '--list'], 'op')).toMatch(/one of/);
 		expect(parseArgs(['a@example.com', 'pro', '--revoke', '--reason', 'x'], 'op')).toMatch(/unexpected argument pro/);
-		expect(parseArgs(['a@example.com', '--revoke', '--replace', '--reason', 'x'], 'op')).toMatch(/no --until or --replace/);
+		expect(parseArgs(['a@example.com', '--revoke', '--replace', '--reason', 'x'], 'op')).toMatch(/no --until, --seats or --replace/);
 		expect(parseArgs(['a@example.com', '--list', '--reason', 'x'], 'op')).toMatch(/--list takes only/);
 		expect(parseArgs(['a@example.com', 'pro', '--reason', 'x'], '')).toMatch(/--by/);
 	});
