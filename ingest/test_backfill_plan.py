@@ -5,6 +5,7 @@
 
 import io
 import json
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -69,6 +70,35 @@ class Plan(unittest.TestCase):
                 backfill_plan.plan("rnl", "1981-04")
         finally:
             backfill_plan.MAX_ITEMS = old
+
+    def test_the_cap_holds_the_worst_case_history(self):
+        # Issue #896: every month using every retry, plus the execution's own events.
+        self.assertEqual(backfill_plan.worst_case_events_per_month(), 9 + 3 * (3 + 5 + 30 + 3 + 4))  # 144
+        self.assertEqual(backfill_plan.FIXED_EVENTS, 24)
+        self.assertEqual(backfill_plan.MAX_ITEMS, 173)
+        worst = backfill_plan.FIXED_EVENTS + backfill_plan.MAX_ITEMS * backfill_plan.worst_case_events_per_month()
+        self.assertLessEqual(worst, backfill_plan.HISTORY_LIMIT)
+        self.assertGreater(worst + backfill_plan.worst_case_events_per_month(), backfill_plan.HISTORY_LIMIT)  # one more month wouldn't fit
+        self.assertEqual(len(backfill_plan.plan("rnl", "1995-05")), 173)  # 1981-01..1995-05 is exactly the cap
+        with self.assertRaisesRegex(backfill_plan.PlanError, "split the range"):
+            backfill_plan.plan("rnl", "1995-06")
+
+    def test_retry_budget_matches_the_state_machine(self):
+        tf = Path(__file__).resolve().parent.parent / "infra" / "ingest_backfill.tf"
+        if not tf.is_file():
+            self.skipTest("infra/ is not beside ingest/")
+        text = tf.read_text()
+        states = text.split("Next = \"Pace\"")[0]  # the Ingest task's Retry list ends at its Next
+        ingest = states[states.index("Ingest = {"):]
+        rules = re.findall(r"ErrorEquals\s*=\s*(\[[^\]]*\]|local\.ingest_backfill_lambda_errors)[^}]*?MaxAttempts\s*=\s*(\d+)", ingest)
+        found = {("Lambda" if e.startswith("local.") else json.loads(e)[0]): int(n) for e, n in rules}
+        self.assertEqual(found, backfill_plan.INGEST_RETRIES)
+        release = text[text.index("ReleaseHold = {"):]
+        release = release[: release.index("Outcome = {")]
+        self.assertEqual([int(n) for n in re.findall(r"MaxAttempts\s*=\s*(\d+)", release)], [backfill_plan.RELEASE_HOLD_RETRIES])
+        # The per-month events assume the item processor is Ingest then Pace, nothing else.
+        processor = text[text.index("ItemProcessor = {"):text.index("Catch = [{")]
+        self.assertEqual(re.findall(r"^\s{12}(\w+) = \{$", processor, re.M), ["Ingest", "Pace"])
 
     def test_matches_manifest_file_month(self):
         # The pattern is duplicated to keep this script stdlib-only; it must agree with manifest.py's.
