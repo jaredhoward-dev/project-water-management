@@ -1,7 +1,7 @@
 import { band, type Band, type ResolvedEnsembleOptions } from '@water-management/engine';
 import { describe, expect, it } from 'vitest';
 import type { Ensemble } from '#lib/api/index.js';
-import { abandonedText, bandCells, coverageText, fdcChart, historyRows, isPaired, pct, pointsBelowEwr, rangeText, rejectedText, shownEnsemble, sig, withheldNote } from './bands';
+import { abandonedText, bandCells, coverageText, fdcChart, historyRows, isPaired, pct, pointsBelowEwr, rangeText, rejectedText, reproducedText, shownEnsemble, sig, withheldNote } from './bands';
 
 const gated: Band = { n: 5, p5: null, p50: null, p95: null, min: 1, max: 9 };
 const b = band(Array.from({ length: 40 }, (_, i) => i + 1));
@@ -150,5 +150,21 @@ describe('the monthly flow-duration chart', () => {
 		const zero = fdcChart([bands[0]!, bands[1]!, band(Array.from({ length: 30 }, () => 0))], pts, 0, 520, 240);
 		expect(zero.ewrY).toBeNull();
 		expect(zero.band).not.toMatch(/NaN|Infinity/);
+	});
+});
+
+describe('the Reproduce verdict', () => {
+	it('says it reproduced, and lists the first differences when it did not on the same engine', () => {
+		expect(reproducedText({ ok: true, lines: [] }, 31, '1.40.0', '1.40.0')).toBe('Reproduced: the same 31 members, verdicts, outputs and coverage.');
+		expect(reproducedText({ ok: false, lines: ['a', 'b', 'c', 'd'] }, 31, '1.40.0', '1.40.0')).toBe('Does not reproduce: a; b; c');
+	});
+
+	it('blames the engine, not the stored members, when the ensemble was stored on another engine than this browser runs', () => {
+		// An engine bump changes members' outputs: "Does not reproduce" alone reads as a tampered ensemble.
+		const t = reproducedText({ ok: false, lines: ['member 0 metrics.marOutflowMm3: 1 ≠ 2'] }, 31, '1.39.0', '1.40.0');
+		expect(t).toMatch(/^Does not reproduce on this browser’s engine 1\.40\.0: the ensemble was stored on engine 1\.39\.0/);
+		expect(t).toContain('member 0 metrics.marOutflowMm3: 1 ≠ 2');
+		// Control: an exact reproduction on another engine is still a reproduction.
+		expect(reproducedText({ ok: true, lines: [] }, 31, '1.39.0', '1.40.0')).toMatch(/^Reproduced/);
 	});
 });

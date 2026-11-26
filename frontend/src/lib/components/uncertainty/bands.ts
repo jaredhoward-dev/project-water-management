@@ -171,3 +171,16 @@ export function fdcChart(points: readonly Band[], exceedance: readonly number[],
 export function pointsBelowEwr(points: readonly Band[], ewr: number): number {
 	return points.filter((b) => b.p50 !== null && b.p50 < ewr).length;
 }
+
+/**
+ * The Reproduce verdict. A stored ensemble is re-run on this browser's engine;
+ * one stored on another engine may differ because the engine changed, not
+ * because its members were forged, and the verdict says so.
+ */
+export function reproducedText(r: { ok: boolean; lines: readonly string[] }, members: number, storedEngine: string, browserEngine: string): string {
+	if (r.ok) return `Reproduced: the same ${fmtNum(members)} members, verdicts, outputs and coverage.`;
+	const first = r.lines.slice(0, 3).join('; ');
+	return storedEngine === browserEngine
+		? `Does not reproduce: ${first}`
+		: `Does not reproduce on this browser’s engine ${browserEngine}: the ensemble was stored on engine ${storedEngine}, and the differences may be the engine’s changes; start a new ensemble to band the run on this engine. First differences: ${first}`;
+}

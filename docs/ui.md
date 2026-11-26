@@ -11860,7 +11860,9 @@ read it before.
   An ensemble run on a newer engine than the run says so. **Reproduce in
   this browser** re-runs the stored ensemble from its seed and options and
   reports "Reproduced: the same … members, verdicts, outputs and coverage" or
-  the first differences. Below, **Every ensemble of this run** lists each one
+  the first differences; it runs this web build's engine, so for an ensemble
+  stored on another engine it says the differences may be the engine's
+  changes, not forged members (`reproducedText`). Below, **Every ensemble of this run** lists each one
   ever started, newest first (who, when, stored or "started, never stored",
   seed, sets, kept), each with how its rule differs from the shown one, and a
   line counts the starts never stored. With no ensemble yet the panel is
