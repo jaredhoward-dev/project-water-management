@@ -9807,15 +9807,25 @@ calibration's line points at *How the shown run fits* for NSE and PBIAS.
   `calibrate()` builds its optimisations from; `fit.ts` `planRuns`), with the
   fit without the WR2012 penalty at the headline's step only, and the dry
   → wet test only at a step whose record has 4 qualifying water years: the
-  panel fetches the model input once when it opens and reads each step's
+  panel reads the model input when it opens and each step's
   count with the engine's `qualifyingWaterYears` (the years the test
   ranks; `fit.ts` `stepWaterYears`), with the form and network as they
-  stand, a moment after the last edit; until then, or where a step can't
-  be set up yet, the test is counted (issues #865, #894). The automated
+  stand, 300 ms after the last edit; until then, or where a step can't
+  be set up yet, the test is counted (issues #865, #894). That recompute
+  takes about 63 ms (median of 9) on a V1-sized synthetic project (16 000
+  days, 13 nodes, one step; Node 24 on the dev laptop, 2026-11-26), about
+  one `prepareCalibration` per step, so it runs on the main thread. The automated
   calibration's "*n* model runs in all" plans each rule case the same way,
   one step at the headline (`autoFit.ts` `autoRunsTotal`, its years from
   the engine's `ruleCaseWaterYears`, the rules' flagged-year exclusions
-  out). The button is on the
+  out; about 115 ms on the same project, once per load). Both panels
+  share one load of the model input per project and revision (its
+  `updatedAt`; `lib/calibration/modelInput.ts`, issue #913); **Fit** loads
+  it afresh, since a feed can add days without moving `updatedAt`, and
+  the estimates then read that one, as does the rules panel after the
+  rules are saved. The server's own estimate, which refuses rules that
+  would run too long, counts each case the same way
+  (`planAutoCalibration`'s `caseEvaluations`). The button is on the
   first screen of the section at 1440×900 (`fit-panel-layout.spec.ts`). The
   seed's, starts' and second record's explanations are under the page's
   *Explain each setting* switch. It takes
@@ -9827,8 +9837,9 @@ calibration's line points at *How the shown run fits* for NSE and PBIAS.
   **starts** (default 5, 1–10: separate searches of the whole record from
   their own seeds, the best kept; model.md §2.10b), which parameters to fit
   (GR4J X2 only when exchange is on), and whether to validate. Validation
-  runs the split-sample and dry → wet tests: two more fits. The run count is
-  budget × (starts + 2 with validation + 1 with the WR2012 penalty), and the
+  runs the split-sample and dry → wet tests: two more fits (one on a record
+  under 4 qualifying water years, which skips the dry → wet test). The run count is
+  budget × (starts + 2 with validation, or + 1 on such a record, + 1 with the WR2012 penalty), and the
   progress line names the start. The fit always leaves out the stored
   exclusions; the result line gives the bounds, the seed, the starts and the
   number of excluded periods. With more than one start a **Starts** table

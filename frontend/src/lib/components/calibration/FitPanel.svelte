@@ -34,6 +34,7 @@
 	import { apanDailyOfValues, chirpsSourceOfInput, et0DailyOfValues } from '#lib/series/provenance.js';
 	import { fitScoredThrough } from '@water-management/engine';
 	import { api } from '#lib/api/index.js';
+	import { calibrationModelInput } from '#lib/calibration/modelInputShared.js';
 	import {
 		benchmarkColumns,
 		benchmarkRows,
@@ -79,6 +80,7 @@
 
 	let {
 		projectId,
+		revision,
 		x2Open,
 		settings,
 		model,
@@ -93,6 +95,8 @@
 		penaltyFields
 	}: {
 		projectId: string;
+		/** The project's revision as loaded (its updatedAt): the model input is loaded once per project and revision (issue #913). */
+		revision: string;
 		x2Open: boolean;
 		/** The Settings form as it stands (unsaved edits included). */
 		settings: () => ProjectSettings;
@@ -183,15 +187,17 @@
 	const planned = $derived(nodes.length ? fitPlanOf(settings(), nodes) : null);
 	// A ticked outlet with no record yet (a new project is created with the outlet ticked): its step can't be scored.
 	// Each location's qualifying water years (issue #894), so the estimate leaves out a dry → wet test a short record
-	// skips: the model input as the server would run it, fetched once when the panel opens (Fit fetches it afresh), read
+	// skips: the model input as the server would run it, loaded once per project and revision and shared with the
+	// automated calibration panel (lib/calibration/modelInput.ts; Fit loads it afresh and the estimate then reads that), read
 	// with the form and the network as they stand by the engine's own rule, a moment after the last edit. Until then,
 	// or where the engine can't set a step up yet, the test is counted.
 	let serverInput = $state.raw<ModelInput | null>(null);
 	$effect(() => {
-		void projectId;
+		const id = projectId;
+		const rev = revision;
 		if (readonly || !hasObserved) return;
 		let live = true;
-		api.runs.modelInput(projectId).then(
+		calibrationModelInput.get(id, rev).then(
 			(got) => {
 				if (live) serverInput = got;
 			},
@@ -263,7 +269,8 @@
 		const priors: Record<string, CalibrationPrior> = {};
 		void session.start(
 			async () => {
-				server = await api.runs.modelInput(projectId);
+				server = await calibrationModelInput.refresh(projectId, revision);
+				serverInput = server;
 				const form = settings();
 				input = fitInput(server, form, model?.());
 				// Refuses no location ticked, a group with no unit draining through it, or a borrowing cycle (engine
