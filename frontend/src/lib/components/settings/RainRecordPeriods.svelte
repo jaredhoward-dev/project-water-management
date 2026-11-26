@@ -12,12 +12,16 @@
 	common/PeriodList.svelte's layout without a reason (the setting keeps
 	none). Bind `value` (the whole rainStations setting, kept tidy by
 	flowGeneration tidyStations); `error` is set while a list is invalid.
+	Rows keep their own keys (one RowKeys a record), an add puts the focus in
+	the new row and a remove on the row in its place, else the record's add
+	button (a11y/listRows.ts).
 -->
 <script lang="ts">
 	import type { RainStationSettings } from '@water-management/engine';
 	import DayInput from '#lib/components/common/DayInput.svelte';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { localIsoDate } from '#lib/format/number.js';
+	import { focusListTarget, listFocusTarget, RowKeys } from '#lib/a11y/listRows.js';
 	import { unreliableError, withUnlisted, withUnreliable, type RecordOption } from './recordPeriods';
 
 	let {
@@ -36,6 +40,11 @@
 	const uid = $props.id();
 	const shown = $derived(records ? withUnlisted(records, value?.unreliable) : []);
 	const listOf = (id: string): [string, string][] => value?.unreliable?.[id] ?? [];
+	// One set of row keys a record, made on first use (never reactive state: the keys are read while rendering).
+	const rowKeys = new Map<string, RowKeys>();
+	const keysOf = (id: string) => rowKeys.get(id) ?? rowKeys.set(id, new RowKeys()).get(id)!;
+	// The record's own box (its rows and its add button), for the focus after an add or remove.
+	const boxOf = (id: string) => document.querySelector<HTMLElement>(`[data-testid="rain-record"][data-series="${CSS.escape(id)}"]`);
 
 	$effect(() => {
 		for (const r of shown) {
@@ -57,10 +66,16 @@
 		const [py, pm] = m === 1 ? [y - 1, 12] : [y, m - 1];
 		const mm = String(pm).padStart(2, '0');
 		const last = new Date(Date.UTC(py, pm, 0)).getUTCDate();
+		keysOf(id).added();
 		write(id, [...list, [`${py}-${mm}-01`, `${py}-${mm}-${String(last).padStart(2, '0')}`]]);
+		void focusListTarget(boxOf(id), listFocusTarget({ added: true, length: listOf(id).length }));
 	}
 	const set = (id: string, i: number, at: 0 | 1, v: string) => write(id, listOf(id).map((p, j) => (j === i ? ((at === 0 ? [v, p[1]] : [p[0], v]) as [string, string]) : p)));
-	const remove = (id: string, i: number) => write(id, listOf(id).filter((_, j) => j !== i));
+	function remove(id: string, i: number) {
+		keysOf(id).removed(i);
+		write(id, listOf(id).filter((_, j) => j !== i));
+		void focusListTarget(boxOf(id), listFocusTarget({ removedAt: i, left: listOf(id).length }));
+	}
 </script>
 
 <div class="rr" id="fld-rain-unreliable" role="group" aria-labelledby="{uid}-l" aria-describedby="{uid}-hint" data-testid="rain-record-periods">
@@ -79,15 +94,16 @@
 		<ul class="records">
 			{#each shown as r (r.id)}
 				{@const list = listOf(r.id)}
+				{@const keys = keysOf(r.id).for(list.length)}
 				<li class="record" data-testid="rain-record" data-series={r.id}>
 					<div class="head">
 						<span class="name" id="{uid}-n-{r.id}">{r.label}</span>
-						{#if !readonly}<button type="button" class="btn btn-sm" aria-describedby="{uid}-n-{r.id}" onclick={() => add(r.id)}>Mark a period unreliable</button>{/if}
+						{#if !readonly}<button type="button" class="btn btn-sm" aria-describedby="{uid}-n-{r.id}" data-add onclick={() => add(r.id)}>Mark a period unreliable</button>{/if}
 					</div>
 					{#if list.length}
 						<ol class="rows" aria-labelledby="{uid}-n-{r.id}">
-							{#each list as p, i (i)}
-								<li class="row">
+							{#each list as p, i (keys[i])}
+								<li class="row" data-row>
 									<div class="field">
 										<label for="{uid}-{r.id}-s{i}">From</label>
 										<DayInput id="{uid}-{r.id}-s{i}" {readonly} value={p[0]} onchange={(v) => set(r.id, i, 0, v)} />
@@ -97,7 +113,7 @@
 										<DayInput id="{uid}-{r.id}-e{i}" {readonly} value={p[1]} onchange={(v) => set(r.id, i, 1, v)} />
 									</div>
 									{#if !readonly}
-										<button type="button" class="btn btn-icon" aria-label="Remove unreliable period {i + 1} of {r.label}" title="Remove" onclick={() => remove(r.id, i)}>✕</button>
+										<button type="button" class="btn btn-icon" aria-label="Remove unreliable period {i + 1} of {r.label}" title="Remove" data-remove onclick={() => remove(r.id, i)}>✕</button>
 									{/if}
 								</li>
 							{/each}
