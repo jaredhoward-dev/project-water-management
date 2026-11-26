@@ -1818,8 +1818,9 @@ against its owner, and a farmer's mail naming a neighbour's farm.
     catchment. A digest is bounded too: at most 20 alerts written out
     (`DIGEST_MAX_LINES`, the newest), then "…and N more" with a link to the
     app, all marked sent with it; and at most 200 lines a person are claimed
-    for one digest (`app_alert_claim_digest`), older ones skipped as over the
-    limit, so a flapping rule can't build a huge email or a backlog. The cap is applied when a delivery is claimed, one person at
+    for one digest run (`app_alert_claim_digest`), shared by turns across
+    their catchments (371) and the rest skipped as over the limit (each
+    catchment's digest says how many of its own were), so a flapping rule can't build a huge email or a backlog. The cap is applied when a delivery is claimed, one person at
     a time under an advisory lock, so two workers can't both send the sixth.
     This bounds what any source can send a person, a hostile editor
     flapping thresholds included (their edits are in the audit log).

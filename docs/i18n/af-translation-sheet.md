@@ -18,4 +18,15 @@ How to write the Afrikaans:
 - The farm pages use plain words, not a modeller’s; `docs/design/farmer-view.md` §5.1 lists the words to use and the ones to avoid.
 - Numbers, dates and units are formatted by the app; don’t translate them.
 
-0 strings: 0 on the site, 0 in emails, 0 in the glossary.
+2 strings: 0 on the site, 2 in emails, 0 in the glossary.
+
+## Emails
+
+### mail.alert.digest
+
+Alert emails: the daily summary (06:00), listing several alerts in one email.
+
+| Id | English | Context | Afrikaans |
+| --- | --- | --- | --- |
+| `mail.alert.digest.leftOut.one` | {n} older alert for this catchment was left out of this summary, because one day’s summaries list at most {limit} alerts across all your catchments. Open the catchment to see it. | Keep: {limit}, {n} |  |
+| `mail.alert.digest.leftOut.other` | {n} older alerts for this catchment were left out of this summary, because one day’s summaries list at most {limit} alerts across all your catchments. Open the catchment to see them. | Keep: {limit}, {n} |  |

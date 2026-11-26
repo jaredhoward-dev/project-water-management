@@ -595,6 +595,8 @@ describe('the digest’s size limit', () => {
 		const mails = mailsTo(u);
 		expect(mails).toHaveLength(1);
 		expect(mails[0]!.text).toContain(`…and ${DIGEST_CLAIM_LINES - DIGEST_MAX_LINES} more alerts.`);
+		// The 30 skipped are said, not silently lost (#869).
+		expect(mails[0]!.text).toContain('30 older alerts for this catchment were left out of this summary');
 		expect(await statuses(u)).toEqual([
 			{ status: 'sent', reason: null, n: DIGEST_CLAIM_LINES },
 			{ status: 'skipped', reason: 'over the digest limit', n: 30 }
@@ -607,6 +609,51 @@ describe('the digest’s size limit', () => {
 		expect(ok).toBe(true);
 		await sendAlerts({ now: tomorrow() });
 		expect(mailsTo(u)).toHaveLength(1);
+		await reset();
+	});
+
+	it('never drops a quiet catchment for a busy one: each gets its fair share of the 200, and each says how many it left out (#869)', async () => {
+		await reset();
+		// A second catchment the same person edits, with a farm of its own.
+		const { id: quietId } = await makeProject(owner, 'Alerts quiet');
+		const [{ id: quietFarm }] = await asOwner(`SELECT id FROM node WHERE project_id = $1 AND name = 'Farm One'`, [quietId]);
+		// Busy: 230 lines in Alerts, the newest. Quiet: 5 lines, older than every busy one.
+		const u = await queueDigest(230);
+		expect((await owner.call('POST', `/projects/${quietId}/members`, { email: u.email, role: 'editor' })).status).toBe(201);
+		const [rule] = await asOwner(`INSERT INTO alert_rule (project_id, kind, node_id, threshold) VALUES ($1, 'dam_below', $2, 0.5) RETURNING id`, [quietId, quietFarm]);
+		await asOwner(
+			`WITH e AS (
+				INSERT INTO alert_event (rule_id, project_id, state, value, detail)
+				SELECT $1, $2, 'cleared', 0.2, jsonb_build_object('source', 'latest', 'pct', 0.2, 'date', '2023-02-01', 'i', i) FROM generate_series(1, 5) i
+				RETURNING id, (detail->>'i')::int AS i
+			)
+			INSERT INTO alert_delivery (event_id, user_id, project_id, mode, status, created_at)
+			SELECT e.id, $3, $2, 'daily_digest', 'digest', now() - make_interval(hours => 300 - e.i) FROM e`,
+			[rule.id, quietId, u.id]
+		);
+		await sendAlerts({ now: tomorrow() });
+		const mails = mailsTo(u);
+		const quiet = mails.filter((m) => m.subject.includes('Alerts quiet'));
+		const busy = mails.filter((m) => !m.subject.includes('Alerts quiet'));
+		// Before #869 the busy catchment's newest 200 took the whole limit: the quiet one's 5 were skipped, no email.
+		expect(quiet).toHaveLength(1);
+		expect(quiet[0]!.text.match(/Dam low on Farm One:/g)).toHaveLength(5);
+		expect(quiet[0]!.text).not.toContain('left out');
+		// The busy one fills the rest (195), and says it left 35 out.
+		expect(busy).toHaveLength(1);
+		expect(busy[0]!.text).toContain(`…and ${DIGEST_CLAIM_LINES - 5 - DIGEST_MAX_LINES} more alerts.`);
+		expect(busy[0]!.text).toContain('35 older alerts for this catchment were left out of this summary');
+		const byProject = await asOwner(
+			`SELECT project_id = $2 AS quiet, status, count(*)::int AS n FROM alert_delivery WHERE user_id = $1 GROUP BY 1, 2 ORDER BY 1, 2`,
+			[u.id, quietId]
+		);
+		expect(byProject).toEqual([
+			{ quiet: false, status: 'sent', n: DIGEST_CLAIM_LINES - 5 },
+			{ quiet: false, status: 'skipped', n: 35 },
+			{ quiet: true, status: 'sent', n: 5 }
+		]);
+		await asOwner('DELETE FROM alert_delivery WHERE user_id = $1', [u.id]);
+		await reset(quietId);
 		await reset();
 	});
 });

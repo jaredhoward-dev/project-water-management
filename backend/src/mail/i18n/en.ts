@@ -109,6 +109,9 @@ export const en = {
 	// Counted (tr.tn): `.one` for 1 in English, `.other` otherwise; a language adds the forms its plural rules need.
 	'mail.alert.digest.more.one': '…and {more} more alert. Open the catchment to see it.',
 	'mail.alert.digest.more.other': '…and {more} more alerts. Open the catchment to see them all.',
+	// #869: the person's lines across all catchments are capped ({limit}); a busy catchment's oldest are dropped, and its summary says how many.
+	'mail.alert.digest.leftOut.one': '{n} older alert for this catchment was left out of this summary, because one day’s summaries list at most {limit} alerts across all your catchments. Open the catchment to see it.',
+	'mail.alert.digest.leftOut.other': '{n} older alerts for this catchment were left out of this summary, because one day’s summaries list at most {limit} alerts across all your catchments. Open the catchment to see them.',
 	'mail.alert.digest.why': 'You get this daily summary because you chose daily alerts for {project}, or had more than {cap} alert emails in a day.',
 	'mail.alert.digest.unsubscribe': 'Stop all alert emails for this catchment',
 
