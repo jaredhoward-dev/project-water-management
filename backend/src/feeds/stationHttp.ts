@@ -18,7 +18,12 @@
 // - an answer not read (a redirect, a refusal, an error status) destroyed,
 //   never drained, so an endless body costs nothing;
 // - a total deadline, a size cap counted while reading, no compression, and
-//   the person's own header names and values validated before they are sent.
+//   the person's own header names and values validated before they are sent;
+// - a host that answers HTTP 429 or 503 is asked nothing more for its
+//   Retry-After (60 s without one, at most 15 minutes: http.ts THROTTLE_*),
+//   by any station feed in this process (STATION_THROTTLED), as the CHC and
+//   DWS client does: several feeds' stations often sit on one provider's API,
+//   and a warm fetcher Lambda runs their fetches one after another.
 //
 // Error messages are ours. They never quote a body, the URL's query (it may
 // hold the key) or the key itself (docs/security.md § Data feeds).
@@ -30,7 +35,7 @@ import { request as httpsRequest, type RequestOptions } from 'node:https';
 import type { IncomingMessage } from 'node:http';
 import type { LookupFunction } from 'node:net';
 import { FeedFormatError, FeedKeyRefusedError, FeedThrottledError, FeedUnavailableError } from './errors.js';
-import { assertLiveFeedRequestsAllowed, retryAfterSeconds, userAgent } from './http.js';
+import { assertLiveFeedRequestsAllowed, retryAfterSeconds, THROTTLE_DEFAULT_SECONDS, THROTTLE_MAX_SECONDS, userAgent } from './http.js';
 import { addressAllowed, headerProblem, urlProblem } from './stationUrl.js';
 
 export { addressAllowed, headerProblem, MAX_HEADERS, urlProblem } from './stationUrl.js';
@@ -41,6 +46,14 @@ export const STATION_MAX_BYTES = 8 * 1024 * 1024;
 export const MAX_HOPS = 3;
 
 export class StationAddressError extends FeedUnavailableError {}
+
+/** Per host, until when (epoch ms) no station request asks it, after a 429 or 503. */
+export type StationThrottle = Map<string, { until: number; status: 429 | 503 }>;
+/**
+ * Shared by every live station client in one process, so a warm fetcher Lambda keeps a host's Retry-After across
+ * feeds and invocations. Apart from http.ts's CHC/DWS map: the hosts never overlap (stationUrl.ts OWN_UPSTREAM_HOSTS).
+ */
+const STATION_THROTTLED: StationThrottle = new Map();
 
 /**
  * The fixed texts of the client's unavailable failures, each with the short label the fetcher logs as its detail
@@ -131,8 +144,18 @@ async function readCapped(res: IncomingMessage, max: number): Promise<string> {
  * The live client. `requester` and `lookup` are injectable for tests; production passes neither. Each call is
  * one exchange (at most MAX_HOPS redirects, all same-origin) under one deadline.
  */
-export function stationHttp(opts: { requester?: Requester; lookup?: LookupFunction; contact?: string; maxBytes?: number; timeoutMs?: number } = {}): StationHttp {
+export function stationHttp(
+	opts: { requester?: Requester; lookup?: LookupFunction; contact?: string; maxBytes?: number; timeoutMs?: number; throttle?: StationThrottle } = {}
+): StationHttp {
 	assertLiveFeedRequestsAllowed();
+	const throttle = opts.throttle ?? STATION_THROTTLED;
+	const paused = (host: string) => {
+		const p = throttle.get(host);
+		if (!p) return;
+		const left = p.until - Date.now();
+		if (left > 0) throw new FeedThrottledError(p.status, Math.ceil(left / 1000));
+		throttle.delete(host);
+	};
 	const requester = opts.requester ?? nodeRequester(opts.lookup ?? guardedLookup());
 	const agent = userAgent(opts.contact);
 	const max = opts.maxBytes ?? STATION_MAX_BYTES;
@@ -150,6 +173,7 @@ export function stationHttp(opts: { requester?: Requester; lookup?: LookupFuncti
 			for (let hop = 0; ; hop++) {
 				const problem = urlProblem(target);
 				if (problem) throw new StationAddressError(problem);
+				paused(target.host);
 				let res: IncomingMessage;
 				try {
 					res = await requester(target, { method: 'GET', headers: { ...req.headers, 'user-agent': agent, 'accept-encoding': 'identity', accept: 'application/json, text/csv, text/plain;q=0.9, */*;q=0.5' } }, signal);
@@ -182,7 +206,10 @@ export function stationHttp(opts: { requester?: Requester; lookup?: LookupFuncti
 				if (status === 429 || status === 503) {
 					res.destroy();
 					const h = res.headers['retry-after'];
-					throw new FeedThrottledError(status, retryAfterSeconds(Array.isArray(h) ? h[0]! : (h ?? null)));
+					const after = retryAfterSeconds(Array.isArray(h) ? h[0]! : (h ?? null));
+					const pause = Math.min(THROTTLE_MAX_SECONDS, after ?? THROTTLE_DEFAULT_SECONDS);
+					if (pause > 0) throttle.set(target.host, { until: Date.now() + pause * 1000, status });
+					throw new FeedThrottledError(status, after);
 				}
 				if (status !== 200) {
 					res.destroy();

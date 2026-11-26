@@ -3,6 +3,7 @@ import type { IncomingMessage } from 'node:http';
 import type { RequestOptions } from 'node:https';
 import { describe, expect, it } from 'vitest';
 import { feedErrorMessage, FeedFormatError, FeedKeyRefusedError, FeedThrottledError, FeedUnavailableError } from './errors.js';
+import { THROTTLE_DEFAULT_SECONDS, THROTTLE_MAX_SECONDS } from './http.js';
 import { guardedLookup, MAX_HOPS, type Requester, safeUrl, StationAddressError, stationHttp, STATION_FAILURES } from './stationHttp.js';
 
 const KEY = 'sk_test_abcdefghijklmnop';
@@ -27,7 +28,7 @@ function fake(route: (url: URL, n: number) => IncomingMessage | Error) {
 	return { requester, calls };
 }
 
-const get = (requester: Requester, url: string, headers: Record<string, string> = {}, opts: { maxBytes?: number } = {}) => stationHttp({ requester, ...opts }).get({ url, headers });
+const get = (requester: Requester, url: string, headers: Record<string, string> = {}, opts: { maxBytes?: number } = {}) => stationHttp({ requester, throttle: new Map(), ...opts }).get({ url, headers });
 
 describe('stationHttp: what it refuses before asking', () => {
 	const never = fake(() => new Error('must not be asked'));
@@ -162,5 +163,35 @@ describe('stationHttp: answers', () => {
 describe('safeUrl', () => {
 	it('keeps scheme, host and path, never the query', () => {
 		expect(safeUrl(new URL(`https://api.example.com/v1/rain?token=${KEY}`))).toBe('https://api.example.com/v1/rain');
+	});
+});
+
+describe('stationHttp: a host that asked us to wait', () => {
+	it('asks a host that answered 429 nothing more for its Retry-After, from any client sharing the pause', async () => {
+		const throttle = new Map();
+		const f = fake(() => res(429, { 'retry-after': '120' }));
+		const first = await stationHttp({ requester: f.requester, throttle }).get({ url: 'https://api.example.com/a', headers: {} }).catch((e) => e);
+		expect(first).toBeInstanceOf(FeedThrottledError);
+		expect(first.retryAfterSeconds).toBe(120);
+		// Another feed (its own client, another station) on the same host, in the same process: refused without asking.
+		const second = await stationHttp({ requester: f.requester, throttle }).get({ url: 'https://api.example.com/b?station=2', headers: {} }).catch((e) => e);
+		expect(second).toBeInstanceOf(FeedThrottledError);
+		expect(second.retryAfterSeconds).toBeGreaterThan(0);
+		expect(second.retryAfterSeconds).toBeLessThanOrEqual(120);
+		expect(f.calls).toHaveLength(1);
+		// Another host is not held back.
+		const other = fake(() => res(200, {}, 'ok'));
+		await expect(stationHttp({ requester: other.requester, throttle }).get({ url: 'https://other.example.org/x', headers: {} })).resolves.toMatchObject({ text: 'ok' });
+	});
+
+	it('pauses a 503 without Retry-After for the default, and never past the cap', async () => {
+		const throttle = new Map<string, { until: number }>();
+		await stationHttp({ requester: fake(() => res(503)).requester, throttle }).get({ url: 'https://a.example.com/x', headers: {} }).catch(() => {});
+		await stationHttp({ requester: fake(() => res(429, { 'retry-after': '86400' })).requester, throttle }).get({ url: 'https://b.example.com/x', headers: {} }).catch(() => {});
+		const left = (h: string) => (throttle.get(h)!.until - Date.now()) / 1000;
+		expect(left('a.example.com')).toBeGreaterThan(THROTTLE_DEFAULT_SECONDS - 5);
+		expect(left('a.example.com')).toBeLessThanOrEqual(THROTTLE_DEFAULT_SECONDS);
+		expect(left('b.example.com')).toBeLessThanOrEqual(THROTTLE_MAX_SECONDS);
+		expect(left('b.example.com')).toBeGreaterThan(THROTTLE_MAX_SECONDS - 5);
 	});
 });
