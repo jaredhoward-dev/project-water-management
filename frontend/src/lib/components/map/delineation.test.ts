@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { DelineationProposal, DelineationRequest } from '#lib/api/types.js';
-import { afterPollError, backgroundOutcome, COPERNICUS_NOTICE, datasetNotice, failedText, POLL_GIVE_UP, isWaiting, openProposal, panFacts, proposalFacts, provenanceFacts, waitingText } from './delineation';
+import type { DelineationProposal, DelineationRequest, LargerChannel } from '#lib/api/types.js';
+import { afterPollError, backgroundOutcome, outcomeShown, COPERNICUS_NOTICE, datasetNotice, failedText, POLL_GIVE_UP, isWaiting, openProposal, panFacts, proposalFacts, provenanceFacts, waitingText } from './delineation';
 
 const proposal = (over: Partial<DelineationProposal> = {}): DelineationProposal => ({
 	id: 'p1',
@@ -101,6 +101,18 @@ describe('a delineation the background worker has', () => {
 		finishedAt: null,
 		...over
 	});
+	it('shows a background refusal beside a larger channel as its offer, any other refusal or a failure as the error (#938)', () => {
+		const channel: LargerChannel = { at: [20.7428741, -33.4938799], km2: 410, distanceM: 380, pointKm2: 2 };
+		const larger = request({ status: 'refused', click: [20.746994, -33.4938799], refusal: { reason: 'larger_channel', message: 'A much larger terrain channel runs 380 m west of your point.', larger: channel } });
+		expect(outcomeShown(larger)).toEqual({ error: null, larger: { message: 'A much larger terrain channel runs 380 m west of your point.', channel, asked: [20.746994, -33.4938799] } });
+		// A larger_channel refusal without its channel is shown as an error.
+		expect(outcomeShown(request({ status: 'refused', refusal: { reason: 'larger_channel', message: 'Larger.' } }))).toEqual({ error: 'Larger.', larger: null });
+		expect(outcomeShown(request({ status: 'refused', refusal: { reason: 'no_channel', message: 'No channel.' } }))).toEqual({ error: 'No channel.', larger: null });
+		const failed = request({ status: 'failed', error: 'cancelled' });
+		expect(outcomeShown(failed)).toEqual({ error: failedText(failed), larger: null });
+		for (const status of ['queued', 'running', 'proposed', 'superseded'] as const) expect(outcomeShown(request({ status })), status).toBeNull();
+	});
+
 	it('says what a background delineation that finished with the sheet closed came to, and offers the sheet back (#938)', () => {
 		expect(backgroundOutcome(request({ status: 'proposed', proposal: proposal() }))).toEqual({
 			text: 'The background delineation is done: the catchment (547.19 km²) is drawn dashed on the map, waiting for your decision.',

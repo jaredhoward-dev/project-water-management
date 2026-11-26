@@ -113,7 +113,7 @@
 	import { ClickDivider, clickShape } from './clickPieces.svelte';
 	import { ChannelLayer } from './channelLayer.svelte';
 	import { openChannelArchive, staticChannels } from './channelArchive';
-	import { afterPollError, backgroundOutcome, isWaiting, openProposal, POLL_MS } from './delineation';
+	import { afterPollError, backgroundOutcome, isWaiting, openProposal, outcomeShown, POLL_MS } from './delineation';
 	import { ApiError } from '#lib/api/client.js';
 	import { openDivide, openStart, type StartDraft } from './startFlow';
 	import type { DivideChoice, DivideDraft } from './divideFlow';
@@ -394,8 +394,14 @@
 			delineateStep = 'decide';
 			if (delineateWasOpen) {
 				void untrack(focusAfterDelineate);
-				// A delineation the sheet left with the background worker is in the reloaded state, so the map watches it (issue #938).
-				void untrack(loadDelineation);
+				// A delineation the sheet left with the background worker: the map watches it (issue #938). Nothing to ask the
+				// server for: the sheet said which (Accept and Reject reload the state themselves, and leave none waiting).
+				untrack(() => {
+					const w = sheetWaiting;
+					sheetWaiting = null;
+					delineateOutcome = null;
+					if (w && isWaiting(w) && delineation) delineation = { ...delineation, request: w };
+				});
 			}
 		}
 		delineateWasOpen = delineateSheet.open;
@@ -405,6 +411,10 @@
 	 * while the sheet stays closed (the open sheet asks for itself), and when it finishes, the toast (a live region)
 	 * says what came of it, with a link that opens the sheet again.
 	 */
+	/** What the open sheet has left with the background worker, as it last said (its `onwaiting`). */
+	let sheetWaiting: DelineationRequest | null = null;
+	/** A background delineation that came to nothing with the sheet closed: the notice's link shows it in the sheet again. */
+	let delineateOutcome = $state<DelineationRequest | null>(null);
 	const backgroundRequest = $derived(!delineateSheet.open && delineation?.request && isWaiting(delineation.request) ? delineation.request : null);
 	let backgroundFailures = 0;
 	$effect(() => {
@@ -438,6 +448,8 @@
 		if (!out || delineateSheet.open) return;
 		notice = out.text;
 		noticeNext = { text: out.text, step: { sheet: 'delineate', label: out.label } };
+		// A refusal (beside a larger channel: its offer) or a failure is shown again when the link opens the sheet.
+		delineateOutcome = outcomeShown(r) ? r : null;
 	}
 	/**
 	 * The sheet closed. Its opener (the draw bar's Delineate…, the Review it link) is
@@ -1901,6 +1913,8 @@
 					onaccepted={delineationAccepted}
 					onrejected={delineationRejected}
 					onsubcatchments={delineation?.available ? () => subcatchmentsFromSheet() : null}
+					outcome={delineateStep === 'decide' && noticeNext?.step.sheet === 'delineate' && noticeNext.text === notice ? delineateOutcome : null}
+					onwaiting={(r) => (sheetWaiting = r)}
 				/>
 					{/snippet}
 				</Lazy>

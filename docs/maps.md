@@ -1789,7 +1789,11 @@ to a point on a river. The design, the method and its accuracy are in
   (every 2 s while the sheet stays closed) and, once it is done, says what
   came of it in its notice, a live region: the proposal is waiting (**Review
   it**), or the refusal or failure with **Delineate again**, either link
-  opening the sheet (`delineation.ts` `backgroundOutcome`, issue #938). **A large catchment, over about 100 km across: work it out
+  opening the sheet (`delineation.ts` `backgroundOutcome`, issue #938);
+  reopened from it, the sheet shows the refusal as the request would have,
+  a much larger channel's **Use that channel** offer included
+  (`outcomeShown`). The sheet hands the Map what it left waiting, so
+  closing it asks the server nothing. **A large catchment, over about 100 km across: work it out
   in the background** sends a point straight there. One per editor at a
   time: a new click in the same catchment replaces a waiting one, and one
   running, or waiting in another catchment, is refused (429). Locally the

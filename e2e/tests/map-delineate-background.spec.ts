@@ -18,7 +18,7 @@
 import type { Page } from '@playwright/test';
 import { expectNoViolations } from '../support/a11y.ts';
 import { seedRunnableProject } from '../support/api.ts';
-import { FIXTURE_OUTLET } from '../support/dem.ts';
+import { FIXTURE_OFF_CHANNEL, FIXTURE_OUTLET } from '../support/dem.ts';
 import { expect, test } from '../support/fixtures.ts';
 import { runJobsTick } from '../support/jobs.ts';
 import { openMap } from '../support/map.ts';
@@ -89,6 +89,40 @@ test('a background delineation that finishes with its sheet closed is announced,
 	const r = sheet(page, 'The delineated catchment');
 	await expect(r).toBeVisible();
 	await expect(r.getByTestId('delineate-fact-area')).toHaveText(/^5[34]\d\.\d\d km²$/);
+});
+
+test('a background refusal beside a larger channel, finished with the sheet closed, keeps its offer when the notice reopens the sheet (#938)', async ({ page, owner }) => {
+	void owner;
+	const project = await seedRunnableProject(page.request, 'Delineate beside a larger channel, sheet closed');
+	await openMap(page, project.id);
+	await page.getByTestId('map-tools').getByRole('button', { name: 'Delineate', exact: true }).click();
+	await page.getByTestId('map-enter-coordinates').click();
+	const s = sheet(page);
+	await expect(s).toBeVisible();
+	await s.getByLabel('Latitude').fill(String(FIXTURE_OFF_CHANNEL[1]));
+	await s.getByLabel('Longitude').fill(String(FIXTURE_OFF_CHANNEL[0]));
+	await s.getByTestId('delineate-background').check();
+	await s.getByTestId('delineate-submit').click();
+	await expect(s.getByTestId('delineate-waiting')).toHaveAttribute('data-status', 'queued');
+	await s.getByRole('button', { name: 'Close', exact: true }).click();
+	await expect(page.getByRole('dialog')).toHaveCount(0);
+
+	await runJobsTick({ projects: [project.id], schedule: false });
+	const notice = page.getByTestId('map-notice');
+	await expect(notice).toContainText(/^The background delineation found no catchment: A much larger terrain channel runs \d+ m west of your point/);
+	await notice.getByTestId('map-notice-next').click();
+	// The sheet shows the refusal as the request's own answer would have: the offer, at the point that was asked.
+	const again = sheet(page);
+	const offer = again.getByTestId('delineate-larger');
+	await expect(offer).toContainText(/^A much larger terrain channel runs \d+ m west of your point/);
+	await expect(again.getByTestId('delineate-error')).toHaveCount(0);
+	expect(Number(await again.getByLabel('Latitude').inputValue())).toBeCloseTo(FIXTURE_OFF_CHANNEL[1], 5);
+	await expectNoViolations(page);
+	await offer.getByTestId('delineate-use-larger').click();
+	const r = sheet(page, 'The delineated catchment');
+	await expect(r).toBeVisible();
+	// The valley above the mid gauge, hundreds of km² (as map-delineate.spec.ts's Use that channel).
+	await expect(r.getByTestId('delineate-fact-area')).toHaveText(/^[34]\d\d\.\d\d km²$/);
 });
 
 test('Enter coordinates pressed while the map loads: the map drawing doesn’t move it, and the release opens the sheet', async ({ page, owner }) => {

@@ -21,12 +21,11 @@
 	import Dialog from '#lib/components/common/Dialog.svelte';
 	import type { MapPosition } from '#lib/api/types.js';
 	import { ApiError } from '#lib/api/client.js';
-	import { afterPollError, CAVEATS, datasetNotice, failedText, FROM_LABEL, isWaiting, openProposal, POLL_MS, proposalFacts, provenanceFacts, waitingText } from './delineation';
+	import { afterPollError, CAVEATS, datasetNotice, FROM_LABEL, isWaiting, type LargerOffer, openProposal, outcomeShown, POLL_MS, proposalFacts, provenanceFacts, waitingText } from './delineation';
 	import { unitInsideBoundary } from './unitHint';
 	import { parseDegrees, positionText } from './mapData';
 	import { largerChannelOf } from './largerChannel';
 	import { fmtNum } from '#lib/format/number.js';
-	import type { LargerChannel } from '#lib/api/index.js';
 
 	let {
 		open = $bindable(false),
@@ -39,7 +38,9 @@
 		onproposed,
 		onaccepted,
 		onrejected,
-		onsubcatchments = null
+		onsubcatchments = null,
+		outcome = null,
+		onwaiting
 	}: {
 		open?: boolean;
 		projectId: string;
@@ -58,6 +59,10 @@
 		onrejected: () => Promise<void> | void;
 		/** Switch Delineate to Sub-catchments, one per click (with an elevation model); null: not offered. */
 		onsubcatchments?: (() => Promise<void> | void) | null;
+		/** A background delineation that came to nothing while the sheet was closed (the Map's notice reopened it): shown as its answer would have been. */
+		outcome?: DelineationRequest | null;
+		/** The delineation the background worker has, or null: the Map watches it once the sheet closes (issue #938). */
+		onwaiting?: (r: DelineationRequest | null) => void;
 	} = $props();
 
 	const uid = $props.id();
@@ -70,7 +75,7 @@
 	let waiting = $state<DelineationRequest | null>(info.request && isWaiting(info.request) ? info.request : null);
 	// Seeded once from the caller: Delineate asks, Review it decides; a delineation still in the background is shown where it was asked.
 	// svelte-ignore state_referenced_locally
-	let asking = $state(step === 'ask' || !openProposal(info) || !!waiting);
+	let asking = $state(step === 'ask' || !openProposal(info) || !!waiting || !!(outcome && outcomeShown(outcome)));
 	/** The body's first element: its dialog's title takes the focus when the step changes (the focused control went with the old step). */
 	let bodyEl: HTMLElement | undefined = $state();
 	async function focusTitle() {
@@ -86,24 +91,31 @@
 	}
 	const deg = (v: number) => String(Math.round(v * 1e7) / 1e7);
 	// svelte-ignore state_referenced_locally
-	let latText = $state(at ? deg(at[1]) : '');
+	let latText = $state(at ? deg(at[1]) : outcome ? deg(outcome.click[1]) : '');
 	// svelte-ignore state_referenced_locally
-	let lonText = $state(at ? deg(at[0]) : '');
+	let lonText = $state(at ? deg(at[0]) : outcome ? deg(outcome.click[0]) : '');
 	// svelte-ignore state_referenced_locally
 	let showCoords = $state(!at);
-	let from = $state<DelineationProposal['from']>('outlet');
+	// svelte-ignore state_referenced_locally
+	let from = $state<DelineationProposal['from']>(outcome?.from ?? 'outlet');
 	/** Send it straight to the background worker: a catchment the editor knows is large (over about 100 km across). */
 	let background = $state(false);
 	const lat = $derived(parseDegrees(latText, 'lat'));
 	const lon = $derived(parseDegrees(lonText, 'lon'));
 	let tried = $state(false);
 	let busy = $state<null | 'propose' | 'boundary' | 'other' | 'reject'>(null);
-	let error = $state<string | null>(null);
+	// svelte-ignore state_referenced_locally
+	const seeded = outcome ? outcomeShown(outcome) : null;
+	let error = $state<string | null>(seeded?.error ?? null);
 	let replace = $state(false);
 	const notice = $derived(datasetNotice(info.dataset));
 
 	/** A refusal beside a much larger terrain channel: the sentence, the channel, and the point that was asked for. */
-	let larger = $state<{ message: string; channel: LargerChannel; asked: [number, number] } | null>(null);
+	let larger = $state<LargerOffer | null>(seeded?.larger ?? null);
+	// The Map watches what the worker has once the sheet closes, without asking the server again.
+	$effect(() => {
+		onwaiting?.(waiting);
+	});
 	async function propose(e: SubmitEvent) {
 		e.preventDefault();
 		tried = true;
@@ -191,12 +203,13 @@
 			replace = false;
 			await onproposed(r.proposal);
 			setAsking(false);
-		} else if (r.status === 'refused' && r.refusal) {
-			from = r.from;
-			if (r.refusal.reason === 'larger_channel' && r.refusal.larger) larger = { message: r.refusal.message, channel: r.refusal.larger, asked: r.click };
-			else error = r.refusal.message;
-		} else if (r.status === 'failed') {
-			error = failedText(r);
+		} else {
+			const shown = outcomeShown(r);
+			if (shown) {
+				if (r.status === 'refused') from = r.from;
+				error = shown.error;
+				larger = shown.larger;
+			}
 		}
 		// Superseded: a newer click has it, and is the one waited for.
 	}
