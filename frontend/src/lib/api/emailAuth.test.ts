@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ApiError, createApi } from './client';
 import { isPublicPath } from '../auth/session.svelte';
-import { displayNameProblem, emailAuthApi, linkToken, passwordProblem } from './emailAuth';
+import { displayNameProblem, emailAuthApi, linkToken, passwordProblem, passwordProblemField } from './emailAuth';
 
 function mockFetch(status: number, body?: unknown) {
 	return vi.fn(
@@ -121,6 +121,23 @@ describe('passwordProblem', () => {
 		expect(passwordProblem('x'.repeat(201), 'x'.repeat(201))).toBe('Use at most 200 characters.');
 		expect(passwordProblem('longenough', 'longenougH')).toBe('The two passwords don’t match.');
 		expect(passwordProblem('longenough', 'longenough')).toBeNull();
+	});
+});
+
+describe('passwordProblemField (the field the page marks invalid and focuses)', () => {
+	it('names the field each problem is about, and none when there is no problem', () => {
+		expect(passwordProblemField('short', 'short')).toBe('password');
+		expect(passwordProblemField('x'.repeat(201), 'x'.repeat(201))).toBe('password');
+		// A length problem wins over a mismatch, as passwordProblem's message does.
+		expect(passwordProblemField('short', 'other')).toBe('password');
+		expect(passwordProblemField('longenough', 'longenougH')).toBe('confirm');
+		expect(passwordProblemField('longenough', 'longenough')).toBeNull();
+	});
+
+	it('agrees with passwordProblem on whether there is a problem', () => {
+		for (const [a, b] of [['short', 'short'], ['longenough', 'x'], ['longenough', 'longenough'], ['x'.repeat(201), '']]) {
+			expect(passwordProblemField(a, b) === null, `${a}/${b}`).toBe(passwordProblem(a, b) === null);
+		}
 	});
 });
 
