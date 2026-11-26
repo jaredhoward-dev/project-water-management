@@ -3327,6 +3327,18 @@ In short:
   (`frontend/src/lib/spreadsheet/paste/grid.ts` `csvCell`): names go through
   the same `defuse` and RFC 4180 quoting, numbers are written as numbers, and
   pasting the file back drops the apostrophe again before matching a name.
+  The Invite farmers dialog's example CSV (`project/farmers.ts`
+  `inviteExampleCsv`, the project's own unit names) defuses the same way, and
+  `parseFarmerCsv` drops the apostrophe when it reads the file back.
+- **A CSV's raw `#` first line keeps typed text to one cell.** A `#` line is
+  written raw, not as a quoted cell (a quoted cell wouldn't start with `#`), so
+  its commas still split it into cells. Whatever a user typed in it (a unit's
+  name, a run's label) has its `%`, commas, quotes and control characters
+  percent-encoded first, so a name like `x,=HYPERLINK(…)` can't open a cell of
+  its own that a spreadsheet runs: the server's provenance lines
+  (`export/csv.ts` `provenanceValue`), the grouped series CSV
+  (`series/groupedCsv.ts` `commentLine`) and the observed actual ET CSV
+  (`crops/etObserved.ts` `etCsv`). Each has a unit test with such a name.
 - **The `.xlsx` workbook treats names the same way.** It is built in the
   browser from the same API data (`frontend/src/lib/spreadsheet/export/`):
   the summary sheets are the summary CSV's cells, already defused; names the
