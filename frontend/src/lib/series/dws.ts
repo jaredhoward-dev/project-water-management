@@ -25,12 +25,45 @@ export interface DwsImport {
 	column?: string;
 	/** The unit that block states for the values, when it names m³/s (DWS flow); absent otherwise. The form sets its Unit to it. */
 	unit?: 'm³/s';
+	/**
+	 * What that block says the values are, when there is one: a flow (it states m³/s), or `unstated`
+	 * (no flow unit), which the form imports as a flow only once the person confirms (dwsFlowCheck).
+	 * A level or a volume never gets here: parseDwsExport refuses it.
+	 */
+	quantity?: 'flow' | 'unstated';
 }
 
 const NO_READING = /^(na|nan|null|-)$/i;
 const VALUE_SPEC = /^\s*POS\.\s*10\s*-\s*18\s*=\s*/i;
 /** A stated unit of m³/s (the automatic feed's own check, backend feeds/sources/dws.ts M3S). */
 const M3S = /cubic met(re|er)s?\s*(\/|per)\s*s(ec(ond)?)?\b|\bm(3|³)\s*\/\s*s\b|\bcumecs\b/i;
+// A water level or a volume, as HyData's format blocks word them: a primary (point) export's
+// "POS. 27-35 = Corrected level in m", a monthly export's "Monthly volumes in million cubic metres"
+// (both as DWS prints them; the daily wording for a reservoir isn't known here, so these are
+// matched loosely). Neither is a rain, a flow or an evaporation, the only kinds a series can be.
+const LEVEL = /\b(water\s+|surface\s+|dam\s+|gauge\s+)?(level|stage|height)\b/i;
+const VOLUME = /\b(volumes?|storage|stored|capacity)\b|million\s+cubic\s+met(re|er)s?|\b(m|h)m(3|³)(?!\w)|\bcubic\s+met(re|er)s?\b(?!\s*(\/|per))/i;
+
+/** Which unit a level or volume column is in, for the refusal ("in m", "in million m³"); undefined when the block doesn't say. */
+function levelOrVolume(column: string): { what: 'level' | 'volume'; unit?: string } | null {
+	if (M3S.test(column)) return null;
+	if (VOLUME.test(column)) {
+		const unit = /million\s+cubic|\b(m|h)m(3|³)(?!\w)/i.test(column) ? 'million m³' : /cubic\s+met|\bm(3|³)(?!\w)/i.test(column) ? 'm³' : undefined;
+		return { what: 'volume', unit };
+	}
+	if (LEVEL.test(column)) return { what: 'level', unit: /\bin\s+m(et(re|er)s?)?\b|\(m\)/i.test(column) ? 'm' : undefined };
+	return null;
+}
+
+/**
+ * Whether an upload of this DWS export as `kind` needs the person to confirm it first: a flow kind
+ * from an export whose format block states no flow unit (it could be a level or a volume worded
+ * in a way not recognised here, issue #909). The message says why; null when nothing to confirm.
+ */
+export function dwsFlowCheck(dws: DwsImport | undefined, kind: string): string | null {
+	if (!dws || dws.quantity !== 'unstated' || !kind.endsWith('_m3s')) return null;
+	return `The file's format block says its values are "${dws.column}", with no flow unit (m³/s), so they may be a dam's level or volume rather than a flow.`;
+}
 
 /**
  * Whether a file is a DWS-style table rather than a CSV: it has a DATE … QUAL
@@ -90,7 +123,18 @@ export function parseDwsExport(text: string): ParsedSeries {
 		if (gap === 'code') info.gapCodes[row.quality!] = (info.gapCodes[row.quality!] ?? 0) + 1;
 	}
 	if (byDay.size === 0 && /no data for this period/i.test(clean)) throw new CsvError('the DWS export says "No data for this period": it holds no days');
-	if (column) info.column = column;
-	if (column && M3S.test(column)) info.unit = 'm³/s';
+	if (column) {
+		info.column = column;
+		const lv = levelOrVolume(column);
+		if (lv) {
+			throw new CsvError(
+				`this DWS export holds a ${lv.what === 'level' ? 'water level' : 'volume'}${lv.unit ? ` (${lv.unit})` : ''}, not a flow, rain or evaporation: its format block says "${column}". Export the station's daily flow (m³/s) instead`
+			);
+		}
+		if (M3S.test(column)) {
+			info.unit = 'm³/s';
+			info.quantity = 'flow';
+		} else info.quantity = 'unstated';
+	}
 	return { ...denseDays(byDay), dateOrder: 'iso', dateOrderAssumed: false, dws: info };
 }

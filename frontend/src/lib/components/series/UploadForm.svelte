@@ -16,6 +16,7 @@
 	import { fmtDay, fmtNum, fmtReading } from '#lib/format/number.js';
 	import { CsvError, subDailyAggregate, type ParsedSeries } from '#lib/series/csv.js';
 	import { parseSeriesFile } from '#lib/series/file.js';
+	import { dwsFlowCheck } from '#lib/series/dws.js';
 	import { parsePastedSeries } from '#lib/series/paste.js';
 	import { defaultUnit, KIND_OPTIONS, kindLabel } from '#lib/series/kinds.js';
 	import { holeBefore, mergePreview, type Daily } from './coverage';
@@ -101,6 +102,8 @@
 	// The overwrite the person was asked about (its `sig`); null while not asking.
 	let confirmSig = $state<string | null>(null);
 	let confirmEl: HTMLElement | undefined = $state();
+	// A DWS export whose format block states no flow unit, imported as a flow (issue #909): ticked by hand, per file.
+	let flowConfirmed = $state(false);
 	const CHANGES_SHOWN = 100;
 
 	$effect(() => {
@@ -146,6 +149,7 @@
 	// A new station: its details go with the series it creates. Days for an existing series of that name are added to it as for catchment rain.
 	const newStation = $derived(station && !target);
 	const stationIssue = $derived(newStation ? stationProblem(name, stationIn) : null);
+	const flowCheck = $derived(dwsFlowCheck(parsed?.dws, kind));
 	const stationErr = (f: StationField) => (stationIssue?.field === f && (stationLeft[f] || parsed !== null) ? stationIssue.message : null);
 	const leave = (f: StationField) => (stationLeft = { ...stationLeft, [f]: true });
 	const kindOptions = $derived(
@@ -185,7 +189,7 @@
 		return target && mode === 'merge' ? `${verb} and merge` : target ? `${verb} and replace` : verb;
 	});
 	const submitDisabled = $derived(
-		asking ? uploading : !parsed || uploading || !unit.trim() || halfLabel || !!stationIssue || (!!target && mode === 'merge' && !preview)
+		asking ? uploading : !parsed || uploading || !unit.trim() || halfLabel || !!stationIssue || (!!flowCheck && !flowConfirmed) || (!!target && mode === 'merge' && !preview)
 	);
 	$effect(() => {
 		submit = { label: submitLabel, disabled: submitDisabled, confirming: asking, uploading, input };
@@ -262,6 +266,7 @@
 		error = null;
 		guessed = null;
 		subDailyText = null;
+		flowConfirmed = false;
 		parseSeq++;
 		fileName = name;
 	}
@@ -739,6 +744,17 @@
 						{/if}
 					</dd>
 				</div>
+				{#if flowCheck}
+					<div class="wide">
+						<dt>Not said to be a flow</dt>
+						<dd data-testid="dws-flow-check">
+							<span class="warn-text">{flowCheck}</span>
+							<label class="flow-confirm"
+								><input type="checkbox" bind:checked={flowConfirmed} data-testid="dws-flow-confirm" /> These values are daily flows in {unit}</label
+							>
+						</dd>
+					</div>
+				{/if}
 				<div class="wide">
 					<dt>Quality codes</dt>
 					<dd data-testid="dws-quality">{qualityList(d.quality) || 'none given'}</dd>
@@ -952,6 +968,12 @@
 	}
 	form > .btn-primary {
 		margin-top: 0.75rem;
+	}
+	.flow-confirm {
+		display: flex;
+		gap: 0.4rem;
+		align-items: center;
+		margin-top: 0.35rem;
 	}
 	.confirm {
 		margin-top: 0.75rem;
