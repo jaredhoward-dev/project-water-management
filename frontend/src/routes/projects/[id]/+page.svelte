@@ -45,7 +45,8 @@
 <script lang="ts">
 	import { apanInputOf } from '#lib/model/systems.js';
 	import { untrack } from 'svelte';
-	import { afterNavigate, goto } from '$app/navigation';
+	import { afterNavigate } from '$app/navigation';
+	import { confirmLeave, guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { trackClose } from '#lib/nav/closeNav.js';
 	import { resolve } from '$app/paths';
 	import { basePath } from '#lib/nav/base.js';
@@ -400,7 +401,7 @@
 		untrack(() => {
 			stopField();
 			stopField = landOnField(f);
-			void goto(withoutParam(page.url, 'field'), { replace: true, reset: false });
+			void guardedGoto(withoutParam(page.url, 'field'), { replace: true, reset: false });
 		});
 	});
 	$effect(() => () => stopField());
@@ -414,7 +415,7 @@
 			if (canEdit) openAddData();
 			const to = new URL(withoutParam(page.url, 'add'), page.url.href);
 			if (canEdit && !addsData(tab)) to.searchParams.set('tab', 'series');
-			void goto(`${to.pathname}${to.search}${to.hash}`, { replace: true, reset: false });
+			void guardedGoto(`${to.pathname}${to.search}${to.hash}`, { replace: true, reset: false });
 		});
 	});
 	const carriesFiles = (e: DragEvent) => !!e.dataTransfer && [...e.dataTransfer.types].includes('Files');
@@ -464,7 +465,7 @@
 		if (project && r.meta.rerunQueuedFor !== undefined) project = { ...project, rerunQueuedFor: r.meta.rerunQueuedFor };
 		await loadLists();
 		// On the Data tab the upload is charted, as picking its row would (`series=`).
-		if (tab === 'series') void goto(withParam(page.url, 'series', r.meta.id), { replace: true, reset: false });
+		if (tab === 'series') void guardedGoto(withParam(page.url, 'series', r.meta.id), { replace: true, reset: false });
 		const what = r.meta.name || kindLabel(r.meta.kind);
 		banner = {
 			text: r.added || r.changed ? `${r.message.replace(/\.$/, '')}.` : `No new days for “${what}”: the file matched what is stored.`,
@@ -489,7 +490,7 @@
 			const r = created.run;
 			setRuns(withCreatedRun(runs ?? [], created));
 			banner = null;
-			await goto(here ? `?tab=calibration&run=${r.id}#cal-fit` : onWarnings ? `?tab=warnings&run=${r.id}#warn-run` : `?tab=runs&run=${r.id}`, { reset: false });
+			await guardedGoto(here ? `?tab=calibration&run=${r.id}#cal-fit` : onWarnings ? `?tab=warnings&run=${r.id}#warn-run` : `?tab=runs&run=${r.id}`, { reset: false });
 			if (onWarnings) landOnAnchor('warn-run');
 			// A goto the page makes itself lands nowhere (nav/anchorLandingEnv.svelte.ts), so land on the part, focused.
 			if (here && tab === 'calibration') landOnAnchor('cal-fit');
@@ -615,7 +616,7 @@
 					return;
 				}
 				if (here?.role === 'farmer') {
-					await goto(resolve(`farm/${encodeURIComponent(projectId)}`), { replace: true });
+					await guardedGoto(resolve(`farm/${encodeURIComponent(projectId)}`), { replace: true });
 					return;
 				}
 				if (here?.role === 'contributor') {
@@ -784,7 +785,7 @@
 				const href = saveProblems[0]!.href;
 				// A number field on this page: focus it; anything else is another page or sheet.
 				if (show && href.startsWith('#')) document.getElementById(href.slice(1))?.focus();
-				else if (show) await goto(href, { reset: false });
+				else if (show) await guardedGoto(href, { reset: false });
 				return false;
 			}
 			const ok = await confirmDialog({
@@ -814,8 +815,11 @@
 		drawerOpen = !!drawerFarm;
 	});
 	$effect(() => {
-		if (!drawerOpen && untrack(() => drawerFarm)) goto(withoutFarm(page.url), { replace: true, reset: false });
+		if (!drawerOpen && untrack(() => drawerFarm)) void guardedGoto(withoutFarm(page.url), { replace: true, reset: false });
 	});
+	// Its closes ask the leave guard first, as the grid modal's and the node sheet's do: Stay keeps it
+	// open, rather than shutting it over a URL the guard kept naming it (issue #931).
+	const confirmDrawerClose = () => confirmLeave(withoutFarm(page.url));
 
 	// --- the grid modal: open while the URL names a grid, closed the same way --
 	// A tab's own grid (TAB_GRIDS: the Map's `grid=map-features`) is the tab's to open and close.
@@ -829,13 +833,14 @@
 	$effect(() => {
 		if (!gridOpen && untrack(() => gridParam) && !isTabGridId(untrack(() => gridParam)) && !untrack(() => movedGridHref(page.url))) {
 			// The modal shuts before the URL follows: a link to a grid waits for the drop (lib/nav/closeNav.ts).
-			void trackClose(goto(withoutParam(page.url, 'grid'), { replace: true, reset: false }));
+			void trackClose(guardedGoto(withoutParam(page.url, 'grid'), { replace: true, reset: false }));
 		}
 	});
+	const confirmGridClose = () => confirmLeave(withoutParam(page.url, 'grid'));
 	// A grid that left the modal: its old link goes where the grid is now (grid=demand → Crops & demand's table, issue #174).
 	$effect(() => {
 		const moved = movedGridHref(page.url);
-		if (moved) void goto(moved, { replace: true, reset: false });
+		if (moved) void guardedGoto(moved, { replace: true, reset: false });
 	});
 
 	// Selecting a tab keeps the scroll and adds a history entry so Back works. The tabs that show
@@ -909,14 +914,14 @@
 			const id = await createProposalScenario(projectId, p, p.apply, (pid, body) => api.scenarios.create(pid, body));
 			assistantOpen = false;
 			scenariosKey++;
-			await goto(`?tab=scenarios&scenario=${encodeURIComponent(id)}`, { reset: false });
+			await guardedGoto(`?tab=scenarios&scenario=${encodeURIComponent(id)}`, { reset: false });
 			return;
 		}
 		settings.applyPatch(p.apply.patch);
 		appliedReason = `Assistant suggestion: ${p.title}`;
 		saveReason = appliedReason;
 		assistantOpen = false;
-		if (tab !== 'settings') await goto('?tab=settings', { reset: false });
+		if (tab !== 'settings') await guardedGoto('?tab=settings', { reset: false });
 	}
 	/** Bumped when a scenario is made from here, so a Scenarios tab already open lists it. */
 	let scenariosKey = $state(0);
@@ -963,7 +968,7 @@
 	}
 
 	async function onLeftProject() {
-		await goto(resolve(''));
+		await guardedGoto(resolve(''));
 	}
 
 	// Start the open tab's chunk alongside the project fetch; warm the others
@@ -1009,7 +1014,7 @@
 		if (!step) return;
 		e.preventDefault();
 		const next = strip[(strip.indexOf(id) + step + strip.length) % strip.length]!;
-		goto(tabHref(next), { reset: false }).then(() => document.getElementById(`tab-${next}`)?.focus());
+		guardedGoto(tabHref(next), { reset: false }).then(() => document.getElementById(`tab-${next}`)?.focus());
 	}
 </script>
 
@@ -1022,7 +1027,7 @@
 					<a
 						id="tab-{id}"
 						href={tabHref(id)}
-						data-sveltekit-noscroll
+						data-sveltekit-reset="false"
 						aria-current={tab === id ? 'page' : undefined}
 						onkeydown={(e) => tabKeydown(e, id)}
 						onclick={followTab}
@@ -1468,6 +1473,7 @@
 					{#snippet children(FarmCropsDrawer)}
 						<FarmCropsDrawer
 							bind:open={drawerOpen}
+							beforeclose={confirmDrawerClose}
 							{editor}
 							settings={project!.settings}
 							nodeId={drawerFarm}
@@ -1485,6 +1491,7 @@
 					{#snippet children(GridModal)}
 						<GridModal
 							bind:open={gridOpen}
+							beforeclose={confirmGridClose}
 							grid={openGrid}
 							{editor}
 							settings={project!.settings}

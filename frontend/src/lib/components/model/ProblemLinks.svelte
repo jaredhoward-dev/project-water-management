@@ -41,7 +41,7 @@
 	<div class="problems" {id}>
 		<span class="lead">{lead}</span>
 		<ul>
-			{#each shown as p, i (i)}<li><a href={p.href} data-sveltekit-noscroll onclick={(e) => follow(e, p.href)}>{p.message}</a></li>{/each}
+			{#each shown as p, i (i)}<li><a href={p.href} data-sveltekit-reset="false" onclick={(e) => follow(e, p.href)}>{p.message}</a></li>{/each}
 			{#if problems.length > max}
 				<li><button type="button" class="more" aria-expanded={all} onclick={() => (all = !all)}>{all ? 'Show fewer' : `and ${problems.length - max} more`}</button></li>
 			{/if}

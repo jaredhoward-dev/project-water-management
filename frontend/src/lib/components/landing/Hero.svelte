@@ -1,7 +1,7 @@
 <!-- i18n-section: landing.hero -->
 <script lang="ts">
 	import { resolve } from '$app/paths';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { APP_NAME } from '#lib/brand.js';
 	import { t } from '#lib/i18n/locale.svelte.js';
 	import Diorama from './Diorama.svelte';
@@ -18,7 +18,7 @@
 		const start = (document as Document & { startViewTransition?: (update: () => Promise<void>) => unknown }).startViewTransition;
 		if (!start || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 		e.preventDefault();
-		start.call(document, () => goto(resolve('login')));
+		start.call(document, () => guardedGoto(resolve('login')));
 	}
 
 	// The diorama loops for as long as it is on screen, so the visitor can stop

@@ -6,7 +6,7 @@
 	// failed, or Free's live limit started it with automatic runs off): then
 	// the card says it, with the way in (opensStraightAway).
 	import { onDestroy } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { resolve } from '$app/paths';
 	import { basePath } from '#lib/nav/base.js';
 	import { api } from '#lib/api/index.js';
@@ -36,7 +36,7 @@
 			const r = await startFromExample((file, opts) => api.projects.importProject(file, opts));
 			if (!r.ok) failure = r;
 			else if (!opensStraightAway(r)) held = r;
-			else if (!gone) await goto(`${basePath()}${r.path}`);
+			else if (!gone) await guardedGoto(`${basePath()}${r.path}`);
 		} finally {
 			starting = false;
 		}

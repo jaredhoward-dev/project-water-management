@@ -12,7 +12,7 @@
 	import DayInput from '#lib/components/common/DayInput.svelte';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { fmtDay } from '#lib/format/number.js';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { page } from '$app/state';
 	import { api, type Run, type RunSeriesRef } from '#lib/api/index.js';
 	import CurtailmentTable from '#lib/components/curtailment/CurtailmentTable.svelte';
@@ -153,7 +153,7 @@
 		if (v) url.searchParams.set(WINDOW_PARAM, v);
 		else url.searchParams.delete(WINDOW_PARAM);
 		if (url.search === page.url.search) return;
-		goto(url, { reset: false });
+		guardedGoto(url, { reset: false });
 	}
 	function pickPreset(p: WindowPreset) {
 		if (p !== 'custom') return pick({ preset: p });

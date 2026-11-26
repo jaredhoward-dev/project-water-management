@@ -1448,9 +1448,17 @@ Interaction details that bit:
   the arrow keys between the links keep it on the link); an in-page menu
   link (`SectionNav`) and a loaded `#anchor` focus the section's heading
   (`tabindex="-1"`, no scroll; `anchorHeading`/`focusHeading`,
-  `help/anchor.ts`). Not `data-sveltekit-keepfocus` on a link that changes
+  `help/anchor.ts`). Not `data-sveltekit-reset="false"` on a link that changes
   the page: Tab would start again from the sidebar. Test it with
   `toBeFocused()`.
+- **A link that keeps the scroll and focus (an in-page pick, a sheet opener)
+  carries `data-sveltekit-reset="false"`**, on it or an element above it.
+  SvelteKit 3 replaced the old `noscroll` and `keepfocus` link options with
+  it and ignores the old names (a dev warning only), so a link with one
+  silently jumped to the top (issue #931); `lib/nav/leaveGuard.test.ts`
+  fails on either old name in `frontend/src`. `data-sveltekit-replacestate`
+  replaces the history entry. The leave guard reads both on a click, so a
+  link it stopped is followed again the same way.
 - **Motion that runs longer than 5 s needs a way to stop it** (WCAG 2.2.2);
   reduced motion doesn't count. The landing hero has a pause toggle; the
   sign-in panel's decoration simply stops after 4.8 s. Never animate text a

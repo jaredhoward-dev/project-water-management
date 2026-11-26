@@ -13,7 +13,8 @@
 // click. A close is over when its navigation settles, when any navigation completes
 // (installCloseNav's afterNavigate), or after FAILSAFE_MS at the latest, so nothing can stick.
 import { tick } from 'svelte';
-import { afterNavigate, goto } from '$app/navigation';
+import { afterNavigate } from '$app/navigation';
+import { guardedGoto, linkOptions } from '#lib/nav/leaveGuard.js';
 
 /** The longest an open waits for a close: a fail-safe for a navigation that never settles, not a wait anything relies on. */
 export const FAILSAFE_MS = 2000;
@@ -110,8 +111,9 @@ export function openAfterClose(also?: (e: MouseEvent) => void) {
 		const a = e.currentTarget;
 		if (!current || !followsInApp(e, a, location.origin)) return;
 		e.preventDefault();
-		// As SvelteKit follows the link: `data-sveltekit-noscroll` keeps the scroll and focus (reset: false).
-		const reset = a.closest('[data-sveltekit-noscroll]') === null;
-		void closeSettled().then(() => goto(a.href, { reset }));
+		// As SvelteKit follows the link: `data-sveltekit-reset="false"` on it or above it keeps the scroll
+		// and focus, and `data-sveltekit-replacestate` replaces (leaveGuard.ts linkOptions).
+		const opts = { reset: true, ...linkOptions(a) };
+		void closeSettled().then(() => guardedGoto(a.href, opts));
 	};
 }

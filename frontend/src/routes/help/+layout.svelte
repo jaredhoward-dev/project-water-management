@@ -7,7 +7,7 @@
 	// it: a long list made it scroll). On phones they fold behind a "Help
 	// contents" button.
 	import type { Snippet } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { MediaQuery } from 'svelte/reactivity';
@@ -26,7 +26,7 @@
 	function search() {
 		const v = q.trim();
 		if (!v && !onSearch) return;
-		goto(v ? resolve(`help/search?q=${encodeURIComponent(v)}`) : resolve('help'), {
+		guardedGoto(v ? resolve(`help/search?q=${encodeURIComponent(v)}`) : resolve('help'), {
 			replace: onSearch,
 			reset: false
 		});

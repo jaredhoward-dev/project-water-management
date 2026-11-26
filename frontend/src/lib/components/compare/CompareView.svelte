@@ -21,7 +21,7 @@
 	// the model again or from the Scenarios tab, which the empty state names.
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { onMount, tick, untrack, type Snippet } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { resolve } from '$app/paths';
 	import { api, ApiError, type ProjectSummary, type RunCompareResponse, type RunMeta } from '#lib/api/index.js';
 	import { projectsLoader } from '#lib/components/projects/listLoad.js';
@@ -206,7 +206,7 @@
 	});
 
 	function navigate(a: RunRef | null, b: RunRef | null, c: RunRef | null, replace = false) {
-		return goto(hrefFor(a, b, c), { replace: replace, reset: false });
+		return guardedGoto(hrefFor(a, b, c), { replace: replace, reset: false });
 	}
 	/** The current runs with one replaced. */
 	function withRun(side: Side, ref: RunRef | null): [RunRef | null, RunRef | null, RunRef | null] {

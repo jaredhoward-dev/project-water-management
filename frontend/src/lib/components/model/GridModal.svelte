@@ -20,6 +20,7 @@
 
 	let {
 		open = $bindable(false),
+		beforeclose,
 		grid,
 		editor,
 		settings,
@@ -31,6 +32,8 @@
 		apanDaily = false
 	}: {
 		open?: boolean;
+		/** Asked before any close (Done, Close, Esc, the ✕); false keeps it open (the page's leave guard, issue #931). */
+		beforeclose?: () => boolean | Promise<boolean>;
 		grid: GridId;
 		editor: ModelEditor;
 		settings: ProjectSettings;
@@ -45,12 +48,15 @@
 		/** The project has a daily A-pan series (the demand preview says it shows the monthly means, issue #173). */
 		apanDaily?: boolean;
 	} = $props();
+	async function close() {
+		if (!beforeclose || (await beforeclose())) open = false;
+	}
 
 	const CROP_SECTION = { 'crop-factors': 'factors', 'planted-areas': 'areas' } as const;
 	const area = $derived(grid === 'nodes' || grid === 'demands' ? 'network' : grid === 'transfers' ? 'transfers' : 'crops');
 </script>
 
-<Dialog bind:open title={GRIDS[grid]} full keepInputs>
+<Dialog bind:open {beforeclose} title={GRIDS[grid]} full keepInputs>
 	<div class="grid-body" class:readonly data-grid={grid}>
 		<IssueList issues={editor.issues} {area} />
 		{#if grid === 'nodes'}
@@ -68,9 +74,9 @@
 
 	{#snippet actions()}
 		{#if readonly}
-			<button type="button" class="btn" onclick={() => (open = false)}>Close</button>
+			<button type="button" class="btn" onclick={close}>Close</button>
 		{:else}
-			<ModelSaveRow {editor} {onsave} ondone={() => (open = false)} bind:reason listed={area} />
+			<ModelSaveRow {editor} {onsave} ondone={close} bind:reason listed={area} />
 		{/if}
 	{/snippet}
 </Dialog>

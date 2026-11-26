@@ -8,7 +8,7 @@
 	// Beside the cards, what a team is and what each role may do.
 	import { onMount } from 'svelte';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { resolve } from '$app/paths';
 	import { cleanName, workspaceNameProblem } from '#lib/format/visibleName.js';
 	import { api, roleLabel, roleTitle, type Portfolio, type Team } from '#lib/api/index.js';
@@ -72,7 +72,7 @@
 		try {
 			const t = await api.teams.create(cleanName(name));
 			createOpen = false;
-			await goto(resolve(`teams/${t.id}`));
+			await guardedGoto(resolve(`teams/${t.id}`));
 		} catch (err) {
 			createError = msg(err);
 		} finally {

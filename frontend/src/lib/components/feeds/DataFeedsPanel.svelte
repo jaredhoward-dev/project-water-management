@@ -18,7 +18,7 @@
 	import { confirmDialog } from '#lib/components/common/confirm.svelte.js';
 	import { onMount, tick, untrack } from 'svelte';
 	import { page } from '$app/state';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { feedCardClosedHref } from '#lib/nav/tabUrl.js';
 	import { api } from '#lib/api/index.js';
 	import { fmtNum } from '#lib/format/number.js';
@@ -322,7 +322,7 @@
 		adding = false;
 		// Closing the card removes the link's ?rain= / ?feed= (issue #933, lib/nav/tabUrl.ts): in place, so a reload
 		// or a shared link doesn't reopen the proposal that was closed.
-		if (page.url.searchParams.has('rain') || page.url.searchParams.has('feed')) void goto(feedCardClosedHref(page.url), { replace: true, reset: false });
+		if (page.url.searchParams.has('rain') || page.url.searchParams.has('feed')) void guardedGoto(feedCardClosedHref(page.url), { replace: true, reset: false });
 		await tick();
 		attachButton?.focus();
 	}

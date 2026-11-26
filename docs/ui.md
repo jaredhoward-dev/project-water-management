@@ -1290,7 +1290,21 @@ naming what is unsaved and where the link goes: "You have unsaved changes
 (`lib/nav/destination.ts` names the sidebar's pages, a section as "the
 Network page", another scenario or project). **Stay** (focused first, and
 Esc) keeps everything; **Leave without saving** makes the navigation again,
-let through once; Back and Forward are retaken the same way. A tab change
+let through once, with the options it was first made with (issue #931:
+every `goto` in the app goes through the guard's `guardedGoto`, which notes
+them, and a link's `data-sveltekit-replacestate` and `data-sveltekit-reset`
+are read on its click, so a replacing step such as the node sheet's ‹ ›
+replaces again and Back doesn't return to what it left; only
+`lib/nav/leaveGuard.ts` imports SvelteKit's `goto`, which
+`leaveGuard.test.ts` checks); Back and Forward
+are retaken the same way. A URL-backed sheet (the node sheet's `edit=`, the
+grid modal's `grid=`, the farm drawer's `farm=`) asks before it shuts:
+Done, Close, Esc and the ✕ put the same question (`confirmLeave`, the
+Dialog's `beforeclose`), so **Stay** keeps it open with the URL still
+naming it, and **Leave without saving** shuts it and drops the parameter in
+place. Removing a node from its own sheet asks the same after the remove
+question; Stay removes nothing. On the Network, a `node=` naming no node in the model (removed, or a
+stale link) is replaced out of the URL. A tab change
 within the project keeps the page's own edits and doesn't ask. Only closing
 the tab or reloading shows the browser's own "Leave site?" box, which no
 page can restyle.

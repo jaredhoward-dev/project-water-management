@@ -1,7 +1,7 @@
 <!-- i18n-section: reset -->
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { api, ApiError } from '#lib/api/index.js';
@@ -20,7 +20,7 @@
 	// history or get copied along with the URL.
 	const token = linkToken(page.url);
 	onMount(() => {
-		if (page.url.searchParams.has('token')) void goto(resolve('reset-password'), { replace: true, reset: false });
+		if (page.url.searchParams.has('token')) void guardedGoto(resolve('reset-password'), { replace: true, reset: false });
 	});
 
 	let password = $state('');

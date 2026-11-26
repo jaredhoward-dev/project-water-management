@@ -18,7 +18,7 @@
 -->
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { fitRecordCaveats, fitRecordStatus, type ApanDailyFingerprint, type ProjectSettings, type SeriesMeta, type SeriesOrigin, type SeriesProvenance } from '@water-management/engine';
 	import type { Project, Role, RunMeta } from '#lib/api/types.js';
 	import type { FitSession } from '#lib/calibration/fitSession.svelte.js';
@@ -183,7 +183,7 @@
 			page: 'calibration',
 			land: (id) =>
 				isCalPart(id) && body ? landOnAnchor(id, body) : isCalibrationAnchor(id) ? landOnAnchor(id) : isModelQualityAnchor(id) || isCalSubsection(id) ? landResults?.(id) : undefined,
-			forward: (to) => void goto(to, { replace: true, reset: false })
+			forward: (to) => void guardedGoto(to, { replace: true, reset: false })
 		})
 	);
 </script>

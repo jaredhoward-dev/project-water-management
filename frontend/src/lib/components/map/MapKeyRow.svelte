@@ -14,7 +14,7 @@
 -->
 <script lang="ts">
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { page } from '$app/state';
 	import type { KeyItem } from './mapList';
 	import { ewrLine, legendRows, MEASURE_PARAM, noRunLine, RUN_PARAM, runCaption, runOption, unlinkedAreas, viewLabel, viewOptions, viewParam, type MapView } from './mapResults';
@@ -39,7 +39,7 @@
 
 	const uid = $props.id();
 	const loadZoneKey = () => import('./MapZoneKey.svelte');
-	const go = (href: string) => goto(href, { reset: false });
+	const go = (href: string) => guardedGoto(href, { reset: false });
 	function pickView(view: MapView) {
 		const v = viewParam(view);
 		const q = new URLSearchParams(page.url.search);
