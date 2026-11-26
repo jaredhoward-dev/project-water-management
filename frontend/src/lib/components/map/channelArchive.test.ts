@@ -41,11 +41,12 @@ describe('the DEM rivers’ static source', () => {
 					if (a.lines.length) withLines++;
 				}
 			}
-		// Positive control: real lines came from the file, and the route answered only the tiles off the synthetic DEM.
+		// Positive control: real lines came from the file, which holds every tile of its range (each meets the synthetic DEM's
+		// data, those straddling its edge too: issue #874), so the route answered none.
 		expect(withLines).toBeGreaterThan(0);
-		expect(load.counts.archive).toBe(16);
-		expect(load.counts.route).toBe(fallback.mock.calls.length);
-		expect(load.counts.archive + load.counts.route).toBe((tiles[2] - tiles[0] + 1) * (tiles[3] - tiles[1] + 1));
+		expect(load.counts.archive).toBe((tiles[2] - tiles[0] + 1) * (tiles[3] - tiles[1] + 1));
+		expect(load.counts.route).toBe(0);
+		expect(fallback).not.toHaveBeenCalled();
 	});
 
 	it('asks the route for a tile the archive lacks', async () => {

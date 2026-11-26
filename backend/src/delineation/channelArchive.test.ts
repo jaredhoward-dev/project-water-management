@@ -14,7 +14,7 @@ import { buildChannelArchive, CHANNEL_ARCHIVE_FORMAT, channelArchiveZxy, tileRan
 import { channelTile, CHANNEL_FLOOR_KM2, CHANNEL_WINDOW } from './channels.js';
 import { DelineationRefused } from './delineate.js';
 import { openDem } from './dem.js';
-import { FIXTURE_FILE } from './fixture.js';
+import { FIXTURE_FILE, widerEast } from './fixture.js';
 import { PmtilesReader, type ByteSource } from './pmtiles.js';
 
 const memory =
@@ -53,7 +53,9 @@ describe('the precomputed channels', () => {
 		expect(header).toMatchObject({ tileType: 0, tileCompression: 2 });
 		expect(tiles.size).toBe(built);
 		expect(built).toBeGreaterThan(4);
-		expect(skipped).toBeGreaterThan(0);
+		// Every tile in the range meets the fixture's data, which has no holes: none is left to the route, not even those that
+		// straddle its edge with their centre past it (issue #874; they were refused, so the Map drew no channels there).
+		expect(skipped).toBe(0);
 		const [i0, j0, i1, j1] = meta.tiles;
 		const route = dem();
 		let withLines = 0;
@@ -72,6 +74,13 @@ describe('the precomputed channels', () => {
 			}
 		// Positive control: the valley's tiles carry channels, so the equality is over real lines.
 		expect(withLines).toBeGreaterThan(0);
+	});
+
+	it('leaves the tiles wholly past the data to the route (they refuse no data), and builds those straddling its edge', { timeout: 60_000 }, async () => {
+		const plain = await buildChannelArchive(dem());
+		const holed = await buildChannelArchive(widerEast(dem()));
+		expect(holed.skipped).toBeGreaterThan(0);
+		expect(holed.built).toBe(plain.built);
 	});
 
 	it('is what the committed fixture holds (rerun `pnpm gen:channels-fixture` after changing the channels or the terrain)', { timeout: 60_000 }, async () => {

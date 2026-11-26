@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest';
 import { parseTile } from './channelRoutes.js';
 import { channelTile, CHANNEL_FLOOR_KM2, CHANNEL_TILE_DEG, tileBounds, traceChannels, withSea } from './channels.js';
 import { openDem } from './dem.js';
-import { DelineationRefused } from './delineate.js';
-import { DAM_CELL, fixtureLonLat } from './fixture.js';
+import { DelineationRefused, toPx } from './delineate.js';
+import { DAM_CELL, FIXTURE_ZOOM, fixtureLonLat, widerEast } from './fixture.js';
 import { accumulate, OUT } from './flow.js';
 
 // D8 codes (flow.ts DX/DY): 0 east, 2 south, 4 west.
@@ -115,6 +115,19 @@ describe('channelTile (synthetic DEM)', () => {
 		const far = await channelTile(dem, tile, { window: 1024, minKm2: 1 });
 		expect(far.lines.length).toBeLessThan(t.lines.length);
 		for (const l of far.lines) expect(l.km2).toBeGreaterThanOrEqual(1 - 0.005);
+	});
+
+	it('draws a tile whose centre has no DEM tile from the part that has data (issue #874)', async () => {
+		// The DEM's bounds run two tiles past its data; this channel tile straddles the data's east edge, its centre past it.
+		const holed = widerEast(dem);
+		const [, , de] = (await dem.info()).bounds;
+		const edge: [number, number] = [Math.floor(de / CHANNEL_TILE_DEG), tile[1]];
+		const [w, s, e, n] = tileBounds(edge);
+		expect(w < de && (w + e) / 2 > de).toBe(true);
+		const [px, py] = toPx((w + e) / 2, (s + n) / 2, 2 ** FIXTURE_ZOOM);
+		expect(await holed.tile(FIXTURE_ZOOM, Math.floor(px), Math.floor(py))).toBeNull();
+		const t = await channelTile(holed, edge, { window: 1024 });
+		expect(t.bounds).toEqual([w, s, e, n]);
 	});
 
 	it('refuses a tile outside the DEM', async () => {
