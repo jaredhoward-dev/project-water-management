@@ -54,6 +54,7 @@ export * from './rain';
 export * from './rainSourcePeriods';
 export * from './gapRain';
 export * from './rainThreshold';
+export * from './recordedRain';
 export * from './evaporation/fao56Table5';
 export * from './evaporation/apanDaily';
 export * from './evaporation/apanUnits';

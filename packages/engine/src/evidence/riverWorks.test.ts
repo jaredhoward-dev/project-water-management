@@ -97,8 +97,8 @@ describe('nodeRiverWorks', () => {
 		expect(nodeRiverWorks(node({ pctUpstreamToDam: 0.5 }), { cropAreas: [], demandObjects: [] })).toEqual([]);
 		expect(nodeRiverWorks(node({ pctUpstreamToDam: 0.5 }), { cropAreas: [], demandObjects: [object({ enabled: false })] })).toEqual([]);
 		expect(nodeRiverWorks(node({ pctUpstreamToDam: 0.5 }), { cropAreas: [], demandObjects: [object()] })).toHaveLength(1);
-		// A dam there all run: the split is the on-channel dam catching its inflow, not a take.
-		expect(nodeRiverWorks(node({ pctUpstreamToDam: 1, damCapacityM3: 1e4 }), crops)).toEqual([]);
+		// A dam there all run: the split is the on-channel dam catching its inflow, bounded by the dam (issue #831), never noDam.
+		expect(nodeRiverWorks(node({ pctUpstreamToDam: 1, damCapacityM3: 1e4 }), crops)).toEqual([{ kind: 'dam', id: 'F', name: 'Farm', bounded: true, protectsEwr: false }]);
 	});
 
 	it('river first or trigger with no dam takes the routed river past its pump: both takes, the routed one unbounded; run of river routes nothing', () => {
@@ -112,20 +112,43 @@ describe('nodeRiverWorks', () => {
 	it('reads the dam over the run (§2.7g): one not in service from the start, or silted empty by the end, leaves days with no dam', () => {
 		const win = { startDate: '2000-10-01', endDate: '2010-09-30' };
 		const dam = { pctUpstreamToDam: 0.5, damCapacityM3: 1e5, divertCapacityM3Day: 200 };
-		expect(nodeRiverWorks(node(dam), crops, win).map((x) => x.kind)).toEqual(['divert']);
-		// A dam on the river takes no River to dam (engine ≥ 1.68.0), so it lists none.
-		expect(nodeRiverWorks(node({ ...dam, pctUpstreamToDam: 1 }), crops, win).map((x) => x.kind)).toEqual([]);
+		// The dam catches its upstream share on the days it is there (issue #831).
+		expect(nodeRiverWorks(node(dam), crops, win).map((x) => x.kind)).toEqual(['divert', 'dam']);
+		// A dam on the river takes no River to dam (engine ≥ 1.68.0): only its catch.
+		expect(nodeRiverWorks(node({ ...dam, pctUpstreamToDam: 1 }), crops, win).map((x) => x.kind)).toEqual(['dam']);
 		const later = nodeRiverWorks(node({ ...dam, damInServiceFrom: '2005-01-01' }), crops, win);
-		expect(later.map((x) => `${x.kind}:${x.bounded}`)).toEqual(['divert:true', 'noDam:false']);
-		expect(later[1]!.someDays).toBe(true);
+		expect(later.map((x) => `${x.kind}:${x.bounded}`)).toEqual(['divert:true', 'dam:true', 'noDam:false']);
+		expect(later[2]!.someDays).toBe(true);
 		// In service before the run: there throughout.
-		expect(nodeRiverWorks(node({ ...dam, damInServiceFrom: '1990-01-01' }), crops, win).map((x) => x.kind)).toEqual(['divert']);
-		// In service after the run ends: no dam at all in it, so no River to dam into it either.
+		expect(nodeRiverWorks(node({ ...dam, damInServiceFrom: '1990-01-01' }), crops, win).map((x) => x.kind)).toEqual(['divert', 'dam']);
+		// In service after the run ends: no dam at all in it, so no River to dam into it, and nothing caught, either.
 		expect(nodeRiverWorks(node({ ...dam, damInServiceFrom: '2020-01-01' }), crops, win).map((x) => x.kind)).toEqual(['noDam']);
 		// Silted empty before the run ends (20 % a year from a 2000 survey).
-		expect(nodeRiverWorks(node({ ...dam, damSurveyDate: '2000-10-01', damSedimentPctPerYear: 0.2 }), crops, win).map((x) => x.kind)).toEqual(['divert', 'noDam']);
+		expect(nodeRiverWorks(node({ ...dam, damSurveyDate: '2000-10-01', damSedimentPctPerYear: 0.2 }), crops, win).map((x) => x.kind)).toEqual(['divert', 'dam', 'noDam']);
 		// Without a window a dam counts as there throughout.
-		expect(nodeRiverWorks(node({ ...dam, damInServiceFrom: '2005-01-01' }), crops).map((x) => x.kind)).toEqual(['divert']);
+		expect(nodeRiverWorks(node({ ...dam, damInServiceFrom: '2005-01-01' }), crops).map((x) => x.kind)).toEqual(['divert', 'dam']);
+	});
+
+	it('a dam on the river catches its upstream share (issue #831): bounded by the dam, with or without demand; only a full pass-inflow release keeps the EWR', () => {
+		const dam = { pctUpstreamToDam: 1, damCapacityM3: 1e5 };
+		const none = { cropAreas: [], demandObjects: [] };
+		// What it catches leaves the river whether or not the unit irrigates.
+		expect(nodeRiverWorks(node(dam), none)).toEqual([{ kind: 'dam', id: 'F', name: 'Farm', bounded: true, protectsEwr: false }]);
+		expect(nodeRiverWorks(node({ ...dam, pctUpstreamToDam: 0.3 }), none).map((x) => x.kind)).toEqual(['dam']);
+		// Positive control: a pass-inflow release up to the EWR, or amounts above 0 in every month, gives the catch back.
+		expect(nodeRiverWorks(node({ ...dam, damReleaseRule: 'passInflow', damReleaseM3Day: null }), none)).toEqual([{ kind: 'dam', id: 'F', name: 'Farm', bounded: true, protectsEwr: true }]);
+		expect(nodeRiverWorks(node({ ...dam, damReleaseRule: 'passInflow', damReleaseM3Day: new Array(12).fill(300) }), none)[0]!.protectsEwr).toBe(true);
+		// One dry month, a fixed release (stops at dead storage, doesn't follow the EWR) or a hands-off flow (binds abstractions, §2.7h) is not.
+		expect(nodeRiverWorks(node({ ...dam, damReleaseRule: 'passInflow', damReleaseM3Day: [0, ...new Array(11).fill(300)] }), none)[0]!.protectsEwr).toBe(false);
+		expect(nodeRiverWorks(node({ ...dam, damReleaseRule: 'fixed', damReleaseM3Day: new Array(12).fill(300) }), none)[0]!.protectsEwr).toBe(false);
+		expect(nodeRiverWorks(node({ ...dam, handsOffEwr: true }), none)[0]!.protectsEwr).toBe(false);
+		// The release is capped by the dam's outlet (§2.7 Releases): an outlet of 0 releases nothing, and a set outlet can fall short of the target.
+		expect(nodeRiverWorks(node({ ...dam, damReleaseRule: 'passInflow', damReleaseM3Day: null, damOutletCapacityM3Day: 0 }), none)[0]!.protectsEwr).toBe(false);
+		expect(nodeRiverWorks(node({ ...dam, damReleaseRule: 'passInflow', damReleaseM3Day: null, damOutletCapacityM3Day: 5000 }), none)[0]!.protectsEwr).toBe(false);
+		// Off the river (no upstream share), under run of river (no split), or with no dam: it catches no river flow.
+		expect(nodeRiverWorks(node({ ...dam, pctUpstreamToDam: 0, pctRunoffToDam: 1 }), none)).toEqual([]);
+		expect(nodeRiverWorks(node({ ...dam, supplyRule: 'runOfRiver', pumpCapacityM3Day: 0 }), none)).toEqual([]);
+		expect(nodeRiverWorks(node({ pctUpstreamToDam: 1 }), none)).toEqual([]);
 	});
 
 	it('takes nothing in a run that ends before its abstraction starts (§2.7g)', () => {
@@ -134,6 +157,10 @@ describe('nodeRiverWorks', () => {
 		expect(nodeRiverWorks(node({ supplyRule: 'riverFirst', abstractionFrom: '2008-01-01' }), crops, win)).toHaveLength(1);
 		const user = node({ kind: 'user', userDemandM3Day: new Array(12).fill(50), abstractionFrom: '2012-01-01' });
 		expect(nodeRiverWorks(user, crops, win)).toEqual([]);
+		// Its dam still fills from the river (§2.7g sets only demand to 0): the dam's catch alone is judged.
+		const late = node({ supplyRule: 'riverFirst', abstractionFrom: '2012-01-01', pctUpstreamToDam: 1, damCapacityM3: 1e4, divertCapacityM3Day: 50 });
+		expect(nodeRiverWorks(late, crops, win)).toEqual([{ kind: 'dam', id: 'F', name: 'Farm', bounded: true, protectsEwr: false }]);
+		expect(nodeRiverWorks({ ...late, damReleaseRule: 'passInflow', damReleaseM3Day: null }, crops, win)).toEqual([{ kind: 'dam', id: 'F', name: 'Farm', bounded: true, protectsEwr: true }]);
 	});
 
 	it('keeps the EWR: the EWR kept, or a hands-off flow above 0 in every month it takes; one dry month, or a value the run reads as 0, isn’t', () => {

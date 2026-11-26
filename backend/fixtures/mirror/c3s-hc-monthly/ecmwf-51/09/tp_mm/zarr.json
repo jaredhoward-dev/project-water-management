@@ -1,0 +1,70 @@
+{
+  "zarr_format": 3,
+  "node_type": "array",
+  "shape": [
+    24,
+    3,
+    7,
+    29,
+    32
+  ],
+  "data_type": "float32",
+  "chunk_grid": {
+    "name": "regular",
+    "configuration": {
+      "chunk_shape": [
+        24,
+        3,
+        7,
+        29,
+        32
+      ]
+    }
+  },
+  "chunk_key_encoding": {
+    "name": "default",
+    "configuration": {
+      "separator": "/"
+    }
+  },
+  "codecs": [
+    {
+      "name": "bytes",
+      "configuration": {
+        "endian": "little"
+      }
+    },
+    {
+      "name": "gzip",
+      "configuration": {
+        "level": 6
+      }
+    }
+  ],
+  "fill_value": "NaN",
+  "dimension_names": [
+    "year",
+    "member",
+    "lead_month",
+    "lat",
+    "lon"
+  ],
+  "attributes": {
+    "units": "mm/month",
+    "long_name": "calendar-month precipitation totals of the daily hindcast (lead month 0: the init month of the hindcast year)",
+    "leadMonths": 7,
+    "region": {
+      "w": 9.5,
+      "s": -36.5,
+      "e": 41.5,
+      "n": -7.5
+    },
+    "grid": {
+      "origin": {
+        "lat": -36,
+        "lon": 10
+      },
+      "step": 1
+    }
+  }
+}

@@ -130,14 +130,15 @@ describe('the showcase application (Raise the Vleiplaas dam)', () => {
 		expect(at(handsOff)).toEqual(at(raised));
 	});
 
-	it('passes the evidence report’s river checks: all proposals, no river take of its own to judge, none uncapped', () => {
+	it('passes the evidence report’s river checks: all proposals, its raised dam on the river the one take to judge and protected by its release (#831), none uncapped', () => {
 		const ops = showcaseApplication(ex.model).ops;
 		const base = inputOf(ex);
 		const after = applyScenario(base, ops).input.model;
 		const window = { startDate: '2010-01-01', endDate: '2024-12-31' };
 		const classified = classifyScenario(base, ops, [middle()]);
 		expect(classified).toEqual(ops.map(() => 'proposal'));
-		expect(proposedRiverWorks(ops, classified, base.model, after, window)).toEqual([]);
+		// The raised dam catches the river (issue #831): judged as a take, and its pass-inflow release keeps the EWR.
+		expect(proposedRiverWorks(ops, classified, base.model, after, window)).toEqual([expect.objectContaining({ kind: 'dam', name: 'Vleiplaas', bounded: true, protectsEwr: true })]);
 		expect([...unboundedRiverWorks(base.model, window), ...unboundedRiverWorks(after, window)]).toEqual([]);
 	});
 });

@@ -1530,11 +1530,22 @@ same way on every screen:
 
 ## Header: data freshness and "Add data"
 
-- **Rain up to 14 Jun 2026 (12 days ago)**: the latest end of the
-  **recorded rain** (catchment or CHIRPS, `isRecordedRain`), which is what a
-  run is driven by. A forecast runs into the future and observed flow only
-  scores a run, so neither counts: either would read "up to date" while the
-  rain lags. With no recorded rain it reads "No recorded rain yet". Click it
+- **Rain up to 14 Jun 2026 (12 days ago)**: the **latest rain day**, the
+  last day with a value in the catchment's **recorded rain**: gauge rain
+  (`rain_catchment_mm`) or CHIRPS (`rain_chirps_mm`) with no site. That is
+  what a run is driven by. A forecast runs into the future and observed flow
+  only scores a run, so neither counts: either would read "up to date" while
+  the rain lags. A land unit's own rain series (a series given to a farm
+  unit, 209_unit_rain_series) doesn't count either: it covers one unit, not
+  the catchment. Trailing blank days ("no reading") are no data, and a series
+  with no value at all adds nothing. One rule decides it everywhere: the
+  engine's `latestRainDay` (`packages/engine/src/recordedRain.ts`), which the
+  header, the Data tab and the Overview call, and whose SQL form
+  (`backend/src/series/lastDay.ts` `recordedRainUntilSql`, the same kinds
+  and the same no-site test) gives the project list's and the portfolio's
+  `dataUntil`, so the header and the list never name different days (issue
+  #832, a DB test in `series/unitRain.db.test.ts` checks both agree). With no
+  recorded rain it reads "No recorded rain yet". Click it
   for every series' end date. It turns amber when the recorded rain is more
   than 7 days old (`STALE_DAYS`, [Data age and stale wording](#data-age-and-stale-wording)). Ages count
   calendar days up to **the project's** date (its time zone,
@@ -4378,7 +4389,11 @@ background `yield` job ([api.md § Yield](./api.md#yield), [model.md §2.13](./m
   the scenario's now says "Worked out before the scenario's latest changes:
   work it out again." (one from before 320: "Worked out before the scenario
   was last changed, possibly on other changes …" when it predates the
-  scenario's last change; `staleNote`).
+  scenario's last change; `staleNote`). It records the scenario's base run
+  too (367): a rebase keeps the ops and their hash, so a result worked out
+  on the old base run says "Worked out on another base run than the
+  scenario has now: work it out again." (one from before 367 is judged by
+  its ops alone).
 - **Preview** (a dashed box, "Not stored"; issue #73, WP-3.6 through
   WP-1.17's preview worker): the firm yield for the pattern and assurance
   picked, worked out at once in the browser, off the main thread
@@ -6983,15 +6998,29 @@ with a mean annual total in its row like a rain series; a file whose name or
 header says evap, A-pan or A pan is guessed as that kind, and a newer daily
 A-pan record counts as new data since the last run. It replaces the monthly
 A-pan means on the days it covers ([model.md §2.3a](./model.md#23a-daily-a-pan-evaporation-engine--0380-issue-45)). A CSV with several timed readings a day (an automatic
-station's hourly log) is not refused: the form asks how to add it up into
+station's hourly log) is not refused: the form asks how to make it into
 days, **08:00 to 08:00, booked to the day it starts** (the default, the
-manual-gauge day) or **midnight to midnight**, and its summary says how many
-readings, how many a day and how many days are short of that. Each
+manual-gauge day) or **midnight to midnight**. A depth (rain, evaporation: mm
+in the interval) is added up into its day; a flow (m³/s, l/s: a rate) is
+averaged over the readings the day has, by the kind's flow-or-depth split in
+the engine's `units.ts` (issue #829: adding an hourly m³/s log up made its day
+24 × too large, a 15-minute one 96 ×). The form reads the file again when the
+kind changes. Readings a whole day holds is 1 440 minutes over the file's
+most common interval (24 for hourly, 96 for 15-minute). A first or last day
+the file covers only in part (a logger started or stopped partway through
+the window) is left out, not stored as a short total or a part-day average,
+and the summary names it; a file with no whole day is refused. An edge day is
+judged by the span its readings cover, not their count (issue #840): it is
+part-way when the logger's interval would have put a reading inside the day
+before its first or after its last, so a missed reading inside the first or
+last day keeps the day and counts it among those short of whole. The summary
+says how many readings, how many a day, the days left out and how many kept
+days are short of whole. Each
 timestamp closes its interval. A time is HH:MM (seconds optional) or a
 12-hour time with its AM/PM (7:00 PM is 19:00, 12:00 AM midnight); a time
 followed by anything else (a zone, `Z`) is refused, not trimmed. The series records the choice
 (`dayBoundary`), shown as *08:00–08:00 days, added up from sub-daily
-readings* on its row, and a merge of the
+readings* on its row (*averaged from* for a flow), and a merge of the
 other window into it is refused ([model.md §2.4e](./model.md#24e-rain-source-periods-engine--0300-issue-40-b)).
 The table's breakpoints are container queries on the page's column
 (`@container data-page`), not the viewport, since the sidebar takes 240 px.
@@ -14306,7 +14335,9 @@ March") is kept against what it is about.
 
 `/projects/:id/report?run=<runId>` (`routes/projects/[id]/report/+page.svelte`,
 WP-2.15 Phase A, issue #19): a meeting-ready catchment report of one run, for
-anyone who can view the project. Without `?run=` it reports the latest run. It
+anyone who can view the project. Without `?run=` it reports the latest run of the model
+(never a newer scenario or forecast run, unless the project has no other;
+`runs/scenarioRun.ts latestModelRun`, the run a scheduled PDF prints). It
 reads the project, the run with its settings and model snapshot (one
 exception: the lede and headline cards follow the project's current Model
 settings → EWR the results are judged by, `settings.ewrHeadline`, issue #444, which runs don't

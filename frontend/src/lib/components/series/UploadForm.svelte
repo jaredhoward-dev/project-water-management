@@ -14,7 +14,7 @@
 	import { api } from '#lib/api/index.js';
 	import LineChart from '#lib/components/charts/LineChart.svelte';
 	import { fmtDay, fmtNum, fmtReading } from '#lib/format/number.js';
-	import { CsvError, type ParsedSeries } from '#lib/series/csv.js';
+	import { CsvError, subDailyAggregate, type ParsedSeries } from '#lib/series/csv.js';
 	import { parseSeriesFile } from '#lib/series/file.js';
 	import { parsePastedSeries } from '#lib/series/paste.js';
 	import { defaultUnit, KIND_OPTIONS, kindLabel } from '#lib/series/kinds.js';
@@ -140,6 +140,8 @@
 	// One of the free pair filled and not the other: the server refuses a half label, so the form asks for both or neither.
 	const halfLabel = $derived(askFree && !freeProvenanceFields(freeProduct, freeVersion) && !!(freeProduct.trim() || freeVersion.trim()));
 	const boundaryFields = $derived(subDailyText !== null ? { dayBoundary } : {});
+	// A flow's readings are averaged into a day, a depth's added up (issue #829).
+	const aggregate = $derived(subDailyAggregate(kind));
 	const namesForKind = $derived(station ? stationNames(list) : list.filter((s) => s.kind === kind).map((s) => s.name));
 	// A new station: its details go with the series it creates. Days for an existing series of that name are added to it as for catchment rain.
 	const newStation = $derived(station && !target);
@@ -247,6 +249,8 @@
 		const same = list.filter((s) => s.kind === k);
 		if (same.length === 1) name = same[0]!.name;
 		else if (!same.some((s) => s.name === name.trim())) name = '';
+		// A flow averages its readings, a depth adds them up: a sub-daily file is read again for the new kind.
+		if (subDailyText !== null) reparseSubDaily();
 	}
 
 	const fileText = latestFileText();
@@ -271,7 +275,7 @@
 				// Several timed readings a day: add them up into days, in the window picked below.
 				if (!(err instanceof CsvError) || !err.subDaily) throw err;
 				subDailyText = text;
-				parsed = parse(text, { dayBoundary });
+				parsed = parse(text, { dayBoundary, aggregate: subDailyAggregate(kind) });
 			}
 			const g = guessSeries(label, headerLine(text), list);
 			if (g && !kindTouched) {
@@ -328,10 +332,15 @@
 
 	function onBoundary(b: DayBoundary) {
 		dayBoundary = b;
+		if (subDailyText !== null) reparseSubDaily();
+	}
+
+	/** The sub-daily text read again in the window and with the aggregate the form now says. */
+	function reparseSubDaily() {
 		if (subDailyText === null) return;
 		parseSeq++;
 		try {
-			parsed = (input === 'paste' ? parsePastedSeries : parseSeriesFile)(subDailyText, { dayBoundary: b });
+			parsed = (input === 'paste' ? parsePastedSeries : parseSeriesFile)(subDailyText, { dayBoundary, aggregate: subDailyAggregate(kind) });
 			parseError = null;
 		} catch (err) {
 			parsed = null;
@@ -626,7 +635,7 @@
 	{/if}
 	{#if subDailyText !== null}
 		<fieldset class="mode" data-testid="day-boundary">
-			<legend>This file has several readings a day. Add them up into days from <HelpTip key="day-boundary" /></legend>
+			<legend>This file has several readings a day. Make them into days from <HelpTip key="day-boundary" /></legend>
 			<label
 				><input type="radio" name="{idPrefix}-boundary" value="08:00" checked={dayBoundary === '08:00'} onchange={() => onBoundary('08:00')} /> 08:00 to 08:00,
 				booked to the day it starts (the manual-gauge day)</label
@@ -636,7 +645,9 @@
 				midnight</label
 			>
 			<span class="hint muted"
-				>Each timestamp is taken as the end of its interval, so a reading at 08:00 closes the day before. The series records the choice, and a rain-source
+				>Each timestamp is taken as the end of its interval, so a reading at 08:00 closes the day before. {aggregate === 'mean'
+					? 'A flow is a rate, so its readings are averaged over the day.'
+					: 'Rain and evaporation are depths, so their readings are added up.'} A first or last day the file covers only in part is left out. The series records the choice, and a rain-source
 				period (Settings → Rain gaps → Flagged rain → Rain source periods) compares like with like.</span
 			>
 		</fieldset>
@@ -681,11 +692,20 @@
 			<div><dt>With values</dt><dd>{fmtNum(parsed.rowCount)}</dd></div>
 			<div><dt>Gaps</dt><dd>{fmtNum(parsed.missingCount)}</dd></div>
 			{#if parsed.subDaily}
+				{@const sd = parsed.subDaily}
 				<div class="wide">
-					<dt>Added up from</dt>
+					<dt>{sd.aggregate === 'mean' ? 'Averaged from' : 'Added up from'}</dt>
 					<dd data-testid="sub-daily-summary">
-						{fmtNum(parsed.subDaily.readings)} readings, {fmtNum(parsed.subDaily.readingsPerDay)} a day, {parsed.subDaily.dayBoundary}–{parsed.subDaily.dayBoundary}{#if parsed.subDaily.incompleteDays}
-							<span class="warn-text">; {fmtNum(parsed.subDaily.incompleteDays)} days have fewer readings, so their totals may be short</span>{/if}
+						{fmtNum(sd.readings)} readings, {fmtNum(sd.readingsPerDay)} a day, {sd.dayBoundary}–{sd.dayBoundary}{#if sd.partialEdges}
+							<span class="warn-text" data-testid="sub-daily-partial"
+								>; left out as only partly recorded: {[sd.partialEdges.first, sd.partialEdges.last]
+									.filter((d) => d !== undefined)
+									.map((d) => fmtDay(d))
+									.join(' and ')}</span
+							>{/if}{#if sd.incompleteDays}
+							<span class="warn-text"
+								>; {fmtNum(sd.incompleteDays)} days have fewer readings, so {sd.aggregate === 'mean' ? 'their averages lean on the hours recorded' : 'their totals may be short'}</span
+							>{/if}
 					</dd>
 				</div>
 			{/if}

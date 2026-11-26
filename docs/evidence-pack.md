@@ -257,14 +257,16 @@ issued on it.
   dam transfer into it removed, its registered volume set or removed, an
   off-take added or changed) name the river
   abstractions to judge, as the application ran them: a river pump, River
-  to dam, a dam-less unit's take, an off-take, an other water user. Each
+  to dam, a dam-less unit's take, a dam on the river (what it catches,
+  below), an off-take, an other water user. Each
   must leave the EWR, or a set flow, in the river in **every month it can
   take**: the EWR kept (`handsOffEwr`), or a hands-off flow above 0 in each
   of those months (all twelve for a pump, the months River to dam runs for
   River to dam). A farm's binds its pump and River to dam (model.md §2.7h),
   an off-take's (one value for every month) its own take (§2.6a), and a
   pass-inflow dam release counts for the river pump, which keeps the
-  release's target (§2.7e). An other water user can't keep one in the
+  release's target (§2.7e), and is the only protection for a dam on the
+  river. An other water user can't keep one in the
   model, so the fix says to model the new take as a unit that pumps from
   the river. Under the NWA the Reserve comes first and a new licence
   normally carries a hands-off condition.
@@ -286,11 +288,35 @@ both for licensing; this is built on that recommendation):
   since a licence for the unit would carry the condition; a pump on a unit
   with no demand takes nothing and isn't named.
 
-Not covered: water an on-channel dam catches (the upstream-to-dam share into
-a dam that is there) isn't an abstraction a hands-off flow binds (model.md
-§2.7h); passing inflow through a dam is a release rule. A borehole's stream
-depletion is a lagged share of what it pumps (§2.7d), bounded by the
-borehole's own capacity.
+- *A dam on the river is judged by its release* (issue #831, engine ≥ 1.121.0;
+  engine-audit.md DR1–DR2). What a dam
+  catches of the river (its share of the upstream flow above 0, on the days
+  it is there, under any rule but run of river) is water the river below
+  loses, so `protectsEwr` treats it as a take of the application's own
+  unit (any op on the unit names it, as above: a bigger crop area means
+  more refill from the river), with or without demand, and even when the
+  unit's abstraction starts after the run (§2.7g sets only demand to 0). A hands-off flow doesn't bind it (model.md §2.7h: it binds
+  the unit's abstractions, not its dam's catch), so only a **pass-inflow
+  release** keeps the EWR below it: up to the EWR required at the node, or
+  amounts above 0 in every month (model.md §2.7 Releases), with no outlet
+  cap: the outlet caps the release, so an outlet of 0 releases nothing and a
+  set one can fall short on a high-flow day. A fixed release
+  doesn't count: it stops at dead storage and doesn't follow the EWR, so on
+  a dry day the dam can still hold back the Reserve. The fix says to give
+  the dam the Pass inflow rule, or take it off the river (its upstream
+  share to 0 %). It is bounded by the dam, so `pumpCapacity` doesn't name
+  it. Treating the catch as a take, rather than refusing an on-river dam
+  outright, follows the model: pass inflow is the compensation-flow licence
+  condition the engine already runs, and the dam's catch is what that
+  condition gives back. The dam's own runoff share isn't counted (an
+  off-channel dam's catchment, not the river's flow); pending the
+  hydrologist with the rest of this list.
+  No erratum: packs on engine ≤ 1.120.0 left the dam's catch out as a
+  documented scope limit ("Not covered" in this list), not a departure from
+  the documented method, so a pack issued then is as its method said.
+
+Not covered: a borehole's stream depletion is a lagged share of what it
+pumps (§2.7d), bounded by the borehole's own capacity.
 
 A pack drafted before `evidence-10` lists neither check in its frozen report,
 and its stored manifest still hashes to its recorded hash (nothing rebuilds
@@ -943,7 +969,8 @@ application:
   column doesn't compare like with like), or that ran on another engine
   than the application. Neither stops issue.
 - **Errata**: the alternatives' engines reach B.1's errata, and a pack's
-  "errata found since" check reads their runs too.
+  "errata found since" check reads their runs too, on the pack's page, at
+  issue and on verify (368_verify_alternative_errata).
 
 The alternatives are the scenario's as it cites them now, which is the
 submitted list once it is submitted (frozen like the ops,
@@ -1432,9 +1459,11 @@ the pack prints:
 - `methodology` `{ version, sha256 }`;
 - `errata` `[{ id, summary }]`, as the manifest recorded them;
 - `errataFoundSince` `[{ id, summary }]`: errata that apply now to the
-  engine of either run (or, for a `fit` erratum, of the automatic fit its
-  parameters came from) and that the manifest didn't record, found since
-  the pack was drafted (132). The current list
+  engine of either run or of a mitigation alternative's run the manifest
+  cites (368; page 1 prints their figures, [§ Mitigation
+  alternatives](#mitigation-alternatives)), or, for a `fit` erratum, of the
+  automatic fit its parameters came from, and that the manifest didn't
+  record, found since the pack was drafted (132). The current list
   ([engine-errata.md](./engine-errata.md), `errataFor`) over the runs'
   engines, less the recorded ids, in the list's order. The manifest, its
   hash and `errata` never change: an erratum added to engine-errata.md
@@ -1468,8 +1497,9 @@ withdrawal shows at once.
 
 The lookup is `app_verify_pack(code)`, a `SECURITY DEFINER` function that
 builds that object, plus `runs` (132: each run's `engine_version` and its
-fit's engine, `inputs.settings.fitRecord.engineVersion`, read from
-`model_run`), which never leaves the API: the route maps the object field by
+fits' engines, read from `model_run`; 368: the cited alternatives' runs after
+the pack's two, an alternative's run that is gone by the engine the manifest
+names, as the pack's own page counts them), which never leaves the API: the route maps the object field by
 field (`toVerify`, backend/src/share/links.ts, the same mapping as a pack's
 share link) and turns `runs` into `errataFoundSince`
 (backend/src/evidence/errata.ts), and adds `shortCode`. The errata list is

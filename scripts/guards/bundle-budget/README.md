@@ -1694,4 +1694,10 @@ ceilings still append here.
             286.6 KB, the worker 144.0 → 147.4 KB, the PMTiles reader
             unchanged (7.3 KB); nothing else landed in the map's chunks.
             Measured 434 → 443 KB locally (CI 443), headroom ~7 KB.
+2026-11-26  mapKb 450 → 460 KB (Dependabot #856, maplibre-gl 6.18.0 →
+            6.19.0, folded into the 2026-11-26 consolidated PR). The package's
+            own files, gzip: maplibre-gl.mjs 296.6 → 299.2 KB (+2.5), the
+            worker 147.5 → 157.6 KB (+10.1), shared and CSS unchanged;
+            nothing else landed in the map's chunks. Measured 446 → 458 KB
+            locally (origin/main 446), headroom ~2 KB.
 ```

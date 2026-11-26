@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { withMonthlyRates } from './network/transferRates';
 import {
+	fmtChange,
 	compareRuns,
+	fmtValue,
 	describeCalendarMonths,
 	describeFitRecord,
 	diffInputs,
@@ -1147,7 +1149,7 @@ describe('diffInputs', () => {
 		expect(texts(a, b)).toEqual([
 			'Effective rain fraction: 0.65 → 0.7',
 			'Simulation start: first day with rain → 2005-10-01',
-			'A-pan evaporation: changed in 12 months',
+			'A-pan evaporation: changed in 12 months: total 0 → 1\u202f800 mm (+1\u202f800), most in Oct 0 → 150 mm',
 			'Pragmatic EWR: Oct 0 → 100 m³/day',
 			'Hi/lo MAP split: 0.5/0.5 → 0.7/0.3',
 			'Calibration peak flow coefficient a: 0.1 → 0.11',
@@ -2134,5 +2136,51 @@ describe('diffInputs: one record’s missing periods and the kept data checks (i
 		c.settings.warningsKept = [{ id: 'run:rain.chirps.corrected:abc123', note: 'Edited note' }];
 		expect(texts(b, c)).toEqual(['Kept warnings: 1 warning no longer kept']);
 		expect(new Map(settingsChangePaths()).get('Kept warnings')).toBe('warningsKept');
+	});
+});
+
+describe('diffInputs: the size of a change (issue #830)', () => {
+	const ewr = (row: number[]) => snapshot({ settings: { ...defaultProjectSettings(), ewrPragmaticM3PerDay: row } as never });
+	const line = (a: RunInputsSnapshot, b: RunInputsSnapshot) => texts(a, b).find((t) => t.startsWith('Pragmatic EWR'));
+
+	it('states the total and the month that moved most when four or more months change, so zeroing reads apart from halving', () => {
+		const before = ewr([100, 100, 100, 100, 200, 200, 200, 200, 100, 100, 100, 100]);
+		const zeroed = line(before, ewr(new Array(12).fill(0)));
+		const halved = line(before, ewr([50, 50, 50, 50, 100, 100, 100, 100, 50, 50, 50, 50]));
+		expect(zeroed).toBe('Pragmatic EWR: changed in 12 months: total 1 600 → 0 m³/day (−1 600), most in Feb 200 → 0 m³/day');
+		expect(halved).toBe('Pragmatic EWR: changed in 12 months: total 1 600 → 800 m³/day (−800), most in Feb 200 → 100 m³/day');
+	});
+
+	it('signs a rise, and a change that moves water between months without changing the total reads (0)', () => {
+		const before = ewr(new Array(12).fill(10));
+		expect(line(before, ewr([20, 20, 20, 20, 10, 10, 10, 10, 10, 10, 10, 10]))).toBe('Pragmatic EWR: changed in 4 months: total 120 → 160 m³/day (+40), most in Oct 10 → 20 m³/day');
+		expect(line(before, ewr([20, 20, 0, 0, 10, 10, 10, 10, 10, 10, 10, 10]))).toBe('Pragmatic EWR: changed in 4 months: total 120 → 120 m³/day (0), most in Oct 10 → 20 m³/day');
+	});
+
+	it('keeps listing three or fewer months with their values', () => {
+		expect(line(ewr(new Array(12).fill(10)), ewr([0, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10]))).toBe('Pragmatic EWR: Oct 10 → 0 m³/day');
+	});
+
+	it('never renders a changed number the same on both sides', () => {
+		const a = snapshot();
+		const b = structuredClone(a);
+		a.model.nodes.find((n) => n.name === 'Rooikloof')!.damCapacityM3 = 400_000;
+		b.model.nodes.find((n) => n.name === 'Rooikloof')!.damCapacityM3 = 400_000.4;
+		expect(texts(a, b)).toEqual(['Rooikloof: dam capacity 400 000 m³ → 400 000.4 m³']);
+		// A percentage: 2 decimals of a per cent first, then as many more as it takes.
+		const c = structuredClone(a);
+		c.model.nodes.find((n) => n.name === 'Rooikloof')!.irrigationEfficiency = 0.8;
+		const d = structuredClone(c);
+		d.model.nodes.find((n) => n.name === 'Rooikloof')!.irrigationEfficiency = 0.800001;
+		expect(texts(c, d)).toEqual(['Rooikloof: irrigation efficiency 80% → 80.0001%']);
+	});
+
+	it('fmtChange adds decimals only when the rounded values read the same', () => {
+		const f = (v: unknown, extra = 0) => fmtValue(v, extra);
+		expect(fmtChange(f, 1, 2)).toBe('1 → 2');
+		expect(fmtChange(f, 1, 1.4)).toBe('1 → 1.4');
+		expect(fmtChange(f, 0.123456, 0.123457)).toBe('0.123456 → 0.123457');
+		expect(fmtChange(f, null, 0)).toBe('none → 0');
+		expect(fmtChange((v) => String(v), 'a', 'a')).toBe('a → a');
 	});
 });

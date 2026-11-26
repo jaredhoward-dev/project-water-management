@@ -96,6 +96,22 @@ describe('ecmwfForecastFromMirror', () => {
 		expect(r2.meta.calibration).toBe(NOT_CALIBRATED);
 	});
 
+	it('applies the area-means group where the file has one, else the per-cell group (issue #835)', async () => {
+		const area = { ...QM.groups[0]!, id: 'D1-SON-area', basis: 'area' as const, block: 5, pairs: [[0, 0], [10, 8], [20, 18]] as [number, number][] };
+		expect(EcmwfQm.safeParse({ ...QM, groups: [QM.groups[0]!, area] }).success).toBe(true);
+		// Area group listed after the cell group still wins.
+		const both = await ecmwfForecastFromMirror(config, '2026-10-27', fakeReader([2, 8], '2026-10-27', { ...QM, groups: [QM.groups[0]!, area] }));
+		expect(both.values[0]).toBe(4); // 5 mm → 4 mm through the area pairs, not 3 through the cell pairs
+		expect(both.meta.calibration).toBe('quantile-mapped 2027-03-01T10:00:00Z');
+		// An area group for other months: the cell group applies, as before.
+		const djfArea = { ...area, months: [12, 1, 2] };
+		const fallback = await ecmwfForecastFromMirror(config, '2026-10-27', fakeReader([2, 8], '2026-10-27', { ...QM, groups: [djfArea, QM.groups[0]!] }));
+		expect(fallback.values[0]).toBe(3);
+		// An explicit per-cell basis reads like an absent one; an unknown basis is refused.
+		expect(EcmwfQm.safeParse({ ...QM, groups: [{ ...QM.groups[0]!, basis: 'cell' }] }).success).toBe(true);
+		expect(EcmwfQm.safeParse({ ...QM, groups: [{ ...area, basis: 'station' }] }).success).toBe(false);
+	});
+
 	it('refuses a cell outside the region before anything is read', async () => {
 		let read = false;
 		const spy: EcmwfReader = async (c, t) => ((read = true), fakeReader([1], t)(c, t));

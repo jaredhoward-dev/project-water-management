@@ -173,7 +173,10 @@ const QmGroup = z
 		region: z.object({ w: z.number(), s: z.number(), e: z.number(), n: z.number() }).strict(),
 		months: z.array(z.number().int().min(1).max(12)).min(1).max(12),
 		samples: z.number().int().nonnegative(),
-		pairs: z.array(Pair).min(2).max(1000)
+		pairs: z.array(Pair).min(2).max(1000),
+		// Issue #835: fitted on area means (blocks of `block` × `block` 0.1° cells, 0 the region whole); absent, per cell (every file before it).
+		basis: z.enum(['cell', 'area']).optional(),
+		block: z.number().int().min(0).max(310).optional()
 	})
 	.strict()
 	.refine((g) => g.pairs.every((p, i) => i === 0 || (p[0] > g.pairs[i - 1]![0] && p[1] >= g.pairs[i - 1]![1])), 'pairs must increase');
@@ -202,9 +205,16 @@ export async function readEcmwfQm(store: MirrorStore): Promise<EcmwfQm | null> {
 	return r.data;
 }
 
-/** The group a point and month fall in: the first whose region holds the point and whose months hold the month. */
+/**
+ * The group a point and month fall in: the first whose region holds the
+ * point and whose months hold the month, an area-means group (`basis:
+ * 'area'`, fitted on what a feed maps, issue #835) before a per-cell one, so
+ * a file without area groups applies its per-cell groups as it always did.
+ * ingest/ecmwf_qm_fit.py group_for keeps the same rule.
+ */
 export function qmGroupFor(qm: EcmwfQm, lat: number, lon: number, month: number): EcmwfQm['groups'][number] | null {
-	return qm.groups.find((g) => lat >= g.region.s && lat <= g.region.n && lon >= g.region.w && lon <= g.region.e && g.months.includes(month)) ?? null;
+	const holds = (g: EcmwfQm['groups'][number]) => lat >= g.region.s && lat <= g.region.n && lon >= g.region.w && lon <= g.region.e && g.months.includes(month);
+	return qm.groups.find((g) => g.basis === 'area' && holds(g)) ?? qm.groups.find((g) => g.basis !== 'area' && holds(g)) ?? null;
 }
 
 /**

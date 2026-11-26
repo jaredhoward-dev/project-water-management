@@ -12,7 +12,9 @@
 // What it holds (C3S_FIXTURE): two systems' forecasts from the 2018-09 init
 // (both issued in September), ECMWF's alone from 2018-10 (issued on the 6th,
 // so an outlook deciding on 1 October can't use it), and the hindcasts of
-// both init months, 1993–2016. The cells are 33–35° S, 20–22° E, so a
+// both init months, 1993–2016, and ECMWF's hindcasts' monthly totals
+// (`c3s-hc-monthly/ecmwf-51/<MM>`, issue #837; the Met Office's are left out,
+// so the bridge reads one system each way). The cells are 33–35° S, 20–22° E, so a
 // catchment drawn round 33.7° S, 21.3° E (the DB and e2e tests' boundary)
 // averages over the cell centred at 34° S, 21° E; every other cell is NaN.
 import type { AbsolutePath } from '@zarrita/storage';
@@ -20,7 +22,8 @@ import * as zarr from 'zarrita';
 import { CODECS } from '../src/mirror/arrays.js';
 import { gridOf, regionSize, SEASONAL_REGION } from '../src/mirror/grid.js';
 import { manifestHash } from '../src/mirror/manifest.js';
-import { C3S_LEAD_DAYS } from '../src/outlooks/c3s.js';
+import { toEpochDay } from '@water-management/engine/calendar';
+import { C3S_LEAD_DAYS, C3S_LEAD_MONTHS } from '../src/outlooks/c3s.js';
 import type { MirrorStore } from '../src/mirror/store.js';
 
 /** Every system ingest/c3srequest.py SYSTEMS lists, in its order: a forecast group has a slot for each. */
@@ -44,6 +47,8 @@ export const C3S_FIXTURE = {
 	inits: { '2018-09': ['ecmwf-51', 'ukmo-604'], '2018-10': ['ecmwf-51'] } as Record<string, string[]>,
 	/** Each system's hindcast init months. */
 	hindcasts: { 'ecmwf-51': ['09', '10'], 'ukmo-604': ['09'] } as Record<string, string[]>,
+	/** The systems whose hindcasts' monthly totals are held too (`c3s-hc-monthly`). */
+	hindcastMonthly: ['ecmwf-51'] as readonly string[],
 	hindcastYears: Array.from({ length: 24 }, (_, i) => 1993 + i),
 	/** The cells written: rows y0… (36° S is row 0) and columns x0… (10° E is column 0). */
 	block: { y0: 1, x0: 10, h: 3, w: 3 },
@@ -106,6 +111,30 @@ async function writeMember(arr: zarr.Array<'float32', MirrorStore>, outer: numbe
 	await zarr.set(arr, [outer, member, null, null, null], { data, shape: [C3S_LEAD_DAYS, rows, cols], stride: [rows * cols, cols, 1] });
 }
 
+/** A hindcast's monthly totals (years, member, lead_month, lat, lon), as ingest/c3s_seasonal.py monthly_totals sums them: each year's own calendar, float64 sums of the float32 days, stored as float32. */
+function monthlySlab(system: string, years: readonly number[], members: number, mm: string): Float32Array {
+	const { y0, x0, h, w } = C3S_FIXTURE.block;
+	const out = new Float32Array(years.length * members * C3S_LEAD_MONTHS * rows * cols).fill(Number.NaN);
+	const month = Number(mm) - 1;
+	const start = (year: number, k: number) => toEpochDay(`${year + Math.floor((month + k) / 12)}-${String(((month + k) % 12) + 1).padStart(2, '0')}-01`);
+	for (const [yi, year] of years.entries()) {
+		for (let m = 0; m < members; m++) {
+			for (let k = 0; k < C3S_LEAD_MONTHS; k++) {
+				const a = start(year, k) - start(year, 0);
+				const b = start(year, k + 1) - start(year, 0);
+				for (let i = 0; i < h; i++) {
+					for (let j = 0; j < w; j++) {
+						let sum = 0;
+						for (let d = a; d < b; d++) sum += Math.fround(c3sFixtureValue(system, year, m, d, i, j));
+						out[((((yi * members + m) * C3S_LEAD_MONTHS + k) * rows + y0 + i) * cols) + x0 + j] = sum;
+					}
+				}
+			}
+		}
+	}
+	return out;
+}
+
 /** A request's manifest, as ingest/c3s_seasonal.py ingest_request writes it. */
 async function manifest(store: MirrorStore, product: string, url: string, slabs: Float32Array[], years: { first: number; last: number }) {
 	const days = slabs.flatMap((s) => Array.from({ length: C3S_LEAD_DAYS }, (_, d) => s.subarray(d * rows * cols, (d + 1) * rows * cols)));
@@ -127,6 +156,7 @@ async function manifest(store: MirrorStore, product: string, url: string, slabs:
 export async function writeC3sFixture(store: MirrorStore): Promise<void> {
 	await group(store, 'c3s');
 	await group(store, 'c3s-hc');
+	await group(store, 'c3s-hc-monthly');
 	for (const [init, held] of Object.entries(C3S_FIXTURE.inits)) {
 		const product = `c3s/${init}`;
 		const year = Number(init.slice(0, 4));
@@ -168,6 +198,29 @@ export async function writeC3sFixture(store: MirrorStore): Promise<void> {
 				}
 			}
 			await manifest(store, product, `cds://seasonal-original-single-levels/total_precipitation/${system}/hindcast/${mm}`, slabs, { first: years[0]!, last: years.at(-1)! });
+			if (!C3S_FIXTURE.hindcastMonthly.includes(system)) continue;
+			// Its monthly totals, one chunk (issue #837).
+			const mp = `c3s-hc-monthly/${system}/${mm}`;
+			if (!(await store.get(`/c3s-hc-monthly/${system}/zarr.json` as AbsolutePath))) await group(store, `c3s-hc-monthly/${system}`);
+			await group(store, mp, { ...common([system]), system, initMonth: Number(mm), years, members: n, leadMonths: C3S_LEAD_MONTHS, leadDays: C3S_LEAD_DAYS });
+			const shape = [years.length, n, C3S_LEAD_MONTHS, rows, cols];
+			const marr = await zarr.create(zarr.root(store).resolve(`${mp}/tp_mm`), {
+				shape,
+				chunkShape: shape,
+				dtype: 'float32',
+				fillValue: Number.NaN,
+				codecs: CODECS,
+				dimensionNames: ['year', 'member', 'lead_month', 'lat', 'lon'],
+				attributes: {
+					units: 'mm/month',
+					long_name: 'calendar-month precipitation totals of the daily hindcast (lead month 0: the init month of the hindcast year)',
+					leadMonths: C3S_LEAD_MONTHS,
+					region: { ...SEASONAL_REGION },
+					grid: gridOf(SEASONAL_REGION, 1)
+				}
+			});
+			const strides = [n * C3S_LEAD_MONTHS * rows * cols, C3S_LEAD_MONTHS * rows * cols, rows * cols, cols, 1];
+			await zarr.set(marr, [null, null, null, null, null], { data: monthlySlab(system, years, n, mm), shape, stride: strides });
 		}
 	}
 	const index = { inits: Object.fromEntries(Object.entries(C3S_FIXTURE.inits).sort(([a], [b]) => (a < b ? 1 : -1))), hindcasts: C3S_FIXTURE.hindcasts };

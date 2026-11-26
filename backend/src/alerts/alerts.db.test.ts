@@ -675,6 +675,41 @@ describe('the restriction notice', () => {
 	});
 });
 
+describe('a notice under no restriction', () => {
+	it('mails the words of a notice with no restriction, the first one too, and says "lifted" only when a restriction ends', async () => {
+		await reset();
+		const pub = (await owner.call('GET', `/projects/${projectId}/publication`)).body.current;
+		const patch = (restriction: Record<string, unknown>) => editor.call('PATCH', `/projects/${projectId}/publication/${pub.id}`, { restriction });
+		expect((await patch({ level: 'none', pct: null, notice: {} })).status).toBe(200);
+		expect((await rules(editor, [{ kind: 'restriction_published', threshold: 0, enabled: true }])).status).toBe(200);
+		await tick();
+		const f0 = mailsTo(farmer).length;
+		// The catchment's first notice, with no restriction: its words go out.
+		expect((await patch({ level: 'none', pct: null, notice: { en: 'Pumps off on Tuesday for maintenance.' } })).status).toBe(200);
+		await tick();
+		expect(mailsTo(farmer).length).toBe(f0 + 1);
+		expect(mailsTo(farmer).at(-1)!.subject).toBe('New restriction notice — Alerts');
+		expect(mailsTo(farmer).at(-1)!.text).toContain('Pumps off on Tuesday for maintenance.');
+		// A restriction, then its lift (positive control for "lifted").
+		expect((await patch({ level: 'restricted', pct: 10, notice: {} })).status).toBe(200);
+		await tick();
+		expect((await patch({ level: 'none', pct: null, notice: {} })).status).toBe(200);
+		await tick();
+		expect(mailsTo(farmer).length).toBe(f0 + 3);
+		expect(mailsTo(farmer).at(-1)!.subject).toBe('Restriction lifted — Alerts');
+		// New words while nothing is restricted: a notice with its words, not a second "Restriction lifted".
+		expect((await patch({ level: 'none', pct: null, notice: { en: 'Thank you for saving water.' } })).status).toBe(200);
+		await tick();
+		expect(mailsTo(farmer).length).toBe(f0 + 4);
+		const last = mailsTo(farmer).at(-1)!;
+		expect(last.subject).toBe('New restriction notice — Alerts');
+		expect(last.text).toContain('Thank you for saving water.');
+		expect((await patch({ level: 'none', pct: null, notice: {} })).status).toBe(200);
+		await tick();
+		await reset();
+	});
+});
+
 describe('after an automatic run', () => {
 	it('the auto re-run queues an alert check, which runs in the same tick (positive control: none while alerts are off)', async () => {
 		const { id: pid } = await makeProject(owner, 'Alerts auto');

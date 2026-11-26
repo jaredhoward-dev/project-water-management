@@ -86,7 +86,8 @@ describe('isDwsExport / parseSeriesFile', () => {
 		const csv = 'date,value\n2021-10-01,1.5\n2021-10-03,\n2021-10-04,2\n';
 		expect(parseSeriesFile(csv)).toEqual(parseSeriesCsv(csv));
 		expect(parseSeriesFile(csv).dws).toBeUndefined();
-		const hourly = 'time,rain\n2020-01-05 09:00,1\n2020-01-05 10:00,2\n';
-		expect(parseSeriesFile(hourly, { dayBoundary: '08:00' })).toEqual(parseSeriesCsv(hourly, { dayBoundary: '08:00' }));
+		// A whole 08:00 day of hourly readings (09:00 on the 5th to 08:00 on the 6th).
+		const hourly = ['time,rain', ...Array.from({ length: 24 }, (_, h) => `${new Date(Date.UTC(2020, 0, 5, 9 + h)).toISOString().slice(0, 16).replace('T', ' ')},1`)].join('\n');
+		expect(parseSeriesFile(hourly, { dayBoundary: '08:00', aggregate: 'sum' })).toEqual(parseSeriesCsv(hourly, { dayBoundary: '08:00', aggregate: 'sum' }));
 	});
 });

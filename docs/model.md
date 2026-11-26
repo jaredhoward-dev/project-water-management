@@ -1830,10 +1830,10 @@ CHIRPS alone) flags "Forcing changed since fit".
 distribution month by month, but a storm it puts on the wrong day stays
 there. With no overlap, a product runs raw. IMERG never fills a day inside
 the record, even one CHIRPS and ERA5-Land both lack. The uncertainty
-ensemble (§2.10e) varies CHIRPS only: its CHIRPS-only members run with
-`gapRain: null` (`uncertainty/ensemble.ts`), so for a project that fills
-from ERA5-Land or IMERG Late the bands don't cover the uncertainty in those
-products or their corrections ([followups.md § The rain data copy](./followups.md#the-rain-data-copy-issue-604)).
+ensemble (§2.10e) varies each product the run reads as a rain source of
+its own (issue #834, engine ≥ 1.121.0), but IMERG Late's 30-day copy is too short for its
+member, which needs 99 % of the run's days, so the bands still leave out
+IMERG Late's uncertainty.
 
 ### 2.4c Zero-rain runs treated as missing
 
@@ -2338,8 +2338,10 @@ recorded before 0.30.0 ran with none). Settings → Rain gaps → Flagged rain �
 **Sub-daily imports and the day boundary.** Manual gauges are read at 08:00
 and the reading is booked to the previous day; an automatic station reports
 midnight to midnight, so a storm straddling midnight lands a day apart in
-the two. A CSV with several timed readings a day is added up into days in
-the window the uploader picks: **08:00 to 08:00, booked to the day it
+the two. A CSV with several timed readings a day is made into days in
+the window the uploader picks (a depth added up, a flow averaged, since a
+flow reading is a rate; a first or last day the file covers only in part
+is left out; issue #829): **08:00 to 08:00, booked to the day it
 starts** (the default, the manual-gauge day), or midnight to midnight. Each
 timestamp is taken to close its interval, so a reading stamped exactly
 08:00 belongs to the day before. The series records the choice
@@ -6829,7 +6831,9 @@ one keeps `passed_for_senior` meaning what it did.
   on-channel dam catching its own inflow, not an abstraction a hands-off
   condition applies to. Passing inflow through an on-channel dam is a
   release rule (§2.7a, pass inflow), which the pump already leaves in the
-  river. Out of scope here.
+  river. Out of scope here; the evidence pack's `protectsEwr` check judges
+  an applicant's dam on the river by that release (evidence-pack.md § What
+  stops issue on the river, issue #831).
 - *Without a dam it cuts K, M and O.* On a farm with no dam today (capacity
   0: none entered, or one not in service yet or filled with sediment,
   §2.7g), what the split and River to dam send "into the dam" is irrigated
@@ -10300,10 +10304,33 @@ it never changes a run's results.
     correction and map then off, the run window pinned; under per-unit rain
     each land unit keeps the base run's rule, MAP ratio and CHIRPS level,
     pinned, as §2.4h says, engine ≥ 1.95.0, ER-30). The spread between them is the rain-data uncertainty
-    the record can't settle. Only CHIRPS is varied: those members run with
-    `gapRain: null`, so a project filling gaps from ERA5-Land or IMERG Late
-    (§2.4b, *Gap-filling product*) gets no band for those products or their
-    corrections (followups.md § The rain data copy).
+    the record can't settle.
+
+    **Each gap-filling product the run reads** (`settings.gapRain`, §2.4b
+    *Gap-filling product*; issue #834, engine ≥ 1.121.0) is a rain source of its own:
+    `era5l` when the setting reads ERA5-Land (`'era5l'` or
+    `'chirpsThenEra5l'`), `imerg_late` with `imergLate`. Its members run
+    on that product alone on every day, corrected by its own fit as the
+    run corrects the days it fills (ERA5-Land also through its wet-day
+    threshold and quantile map; IMERG Late by each version's fit, the
+    newest version with the day), put in CHIRPS' place with the station
+    rain dropped and everything else as the CHIRPS-only member above
+    (correction, map and `gapRain` off, the window pinned, each land
+    unit's own CHIRPS, rule and factors pinned as the base run's: §2.4b
+    leaves a unit's own CHIRPS out of the gap fill). The rain sources
+    are split evenly: with CHIRPS and ERA5-Land both available, a third
+    of the members each. A product needs the same ≥ 99 % cover of the run
+    as CHIRPS, and the station rain beside it; without it the product is
+    left out with a note ("ERA5-Land alone is not one of the rain
+    sources: …"). IMERG Late's copy holds 30 days, so its member is
+    almost always left out that way. No product is read under a
+    catchment rainfall station (§2.4i ignores `gapRain` there), and a
+    project without `settings.gapRain` (or with the default written
+    out) gets the same options, sample and bands as before, to the bit
+    (no product source is offered, so the sample is the same). Each member's `rain`
+    (`recorded`, `chirps`, `era5l`, `imerg_late`) names its source in the
+    result and in what `run_uncertainty` stores, and `rainSources` in the
+    options lists the sources sampled.
   - **Observed record**, when both a gauge and a logger record have at least
     30 scored days: half the members are judged against each. A record that
     measures a different river belongs in
@@ -14286,7 +14313,9 @@ data mirror's 1° daily arrays (`c3s/<YYYY-MM>/tp_mm`,
   month, every year held (1993–2016); the engine fits on the years whose
   months the record holds wholly before the decision date (step 1).
 - *The run*: one call after the ESP members and the trigger table, at the
-  **full demand** (no level's ops), on the outlook's kept analogue years, on
+  **full demand** (no level's ops), on the outlook's kept analogue years
+  (none kept, as when every listed year is outside the record: the forecast
+  part is off, `noAnalogues`, never run on the record's every year), on
   the drought restriction rule's review dates, else the outlook's own review
   date, else the engine's default. Its own ESP members run from the same
   snapshot, so nothing stored for the ESP changes: an outlook of method `c3s`

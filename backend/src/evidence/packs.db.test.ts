@@ -1409,6 +1409,27 @@ describe.skipIf(!minio)('an application pack with a mitigation alternative (bund
 			const { reproduction } = (await editor.call('GET', packPath(p.id))).body;
 			expect(reproduction.status, JSON.stringify(reproduction.checks.filter((c: { ok: boolean }) => !c.ok))).toBe('reproduced');
 			expect(reproduction.checks.map((c: { id: string }) => c.id)).toEqual(expect.arrayContaining(['alternative:1', 'reproduce:alternative:1']));
+
+			// An erratum found after issue that applies to the alternative's engine alone (page 1 prints its figures,
+			// evidence-26): the pack's page lists it as found since, and so does verify, which an authority reads (368).
+			const altRunId = altRun.body.run.id as string;
+			const [{ engine_version: altEngine }] = await asOwner('SELECT engine_version FROM model_run WHERE id = $1', [altRunId]);
+			const ALT_ONLY: Erratum = { id: 'ER-995', keyedOn: 'run', firstAffected: '0.0.1', fixedIn: '0.0.3', severity: 'High', appliesWhen: 'Always', summary: 'An alternative’s engine bug', source: 'test' };
+			await asOwner(`UPDATE model_run SET engine_version = '0.0.2' WHERE id = $1`, [altRunId]);
+			errataList.push(ALT_ONLY);
+			try {
+				// Positive control: neither of the pack's own runs is on an affected engine; the pack's page finds it through the alternative.
+				// (The engine's real errata for that old engine come with it.)
+				const onPage = (await editor.call('GET', packPath(p.id))).body.errataFoundSince;
+				expect(onPage).toContainEqual({ id: 'ER-995', summary: 'An alternative’s engine bug' });
+				const verified = await anon('GET', `/verify/${p.shortCode}`);
+				expect(verified.status).toBe(200);
+				expect(verified.body.pack.errataFoundSince).toEqual(onPage);
+				expect(Object.keys(verified.body.pack)).not.toContain('runs');
+			} finally {
+				errataList.splice(errataList.indexOf(ALT_ONLY), 1);
+				await asOwner('UPDATE model_run SET engine_version = $2 WHERE id = $1', [altRunId, altEngine]);
+			}
 		} finally {
 			vi.unstubAllEnvs();
 			sent.length = 0;

@@ -1804,7 +1804,7 @@ against its owner, and a farmer's mail naming a neighbour's farm.
 - **Rate limits, in layers.**
   - *Once per crossing.* A rule has at most one firing event (a partial
     unique index), and it re-arms only after the value recovers past the
-    threshold **plus a margin** (dam level + 5 points; other kinds in
+    threshold **plus a margin** (dam level + 5 points, or a full dam past 95 %; other kinds in
     [api.md § Alerts](./api.md#alerts)), so a figure hovering at the line
     sends one mail, not one a day (`alerts/rules.ts`, `rules.test.ts`).
     A cleared event never fires again (`alert_event_guard`).

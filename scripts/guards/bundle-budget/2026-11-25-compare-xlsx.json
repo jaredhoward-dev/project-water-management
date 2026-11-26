@@ -1,0 +1,4 @@
+{
+	"addKb": 7,
+	"why": "Comparison .xlsx download (issue #843): the OOXML writer + zip as a lazy chunk loaded on the first click (6.1 KB gzip) and the button's handler in the compare chunk; measured 2545 KB without the change, 2552 KB with it. The branch base was already 2 KB over before this change."
+}

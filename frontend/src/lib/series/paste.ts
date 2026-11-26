@@ -3,15 +3,14 @@
 // Expected format note, the date and decimal rules and the overwrite preview
 // are the upload's own. A block copied from a spreadsheet arrives
 // tab-separated, which the CSV reader takes as it is.
-import type { DayBoundary } from '@water-management/engine';
-import { CsvError, type ParsedSeries } from './csv';
+import { CsvError, type ParseOptions, type ParsedSeries } from './csv';
 import { parseSeriesFile } from './file';
 
 /** The most text the box reads: 60 000 rows of a date and a value, with room for a header and long numbers. */
 export const MAX_PASTE_CHARS = 4_000_000;
 
 /** What was pasted, read as a series; a CsvError says why not (an empty box too). */
-export function parsePastedSeries(text: string, opts: { dayBoundary?: DayBoundary } = {}): ParsedSeries {
+export function parsePastedSeries(text: string, opts: ParseOptions = {}): ParsedSeries {
 	if (text.length > MAX_PASTE_CHARS) throw new CsvError('that is more than the box takes; upload it as a file instead');
 	if (!text.trim()) throw new CsvError('paste rows of a date and a value, one day a row');
 	return parseSeriesFile(text, opts);

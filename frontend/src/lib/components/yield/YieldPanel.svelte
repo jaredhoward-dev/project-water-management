@@ -84,7 +84,7 @@
 		/** The node has a dam (capacity > 0) as the page knows it; the model the job runs on (GET …/yield/options) decides once read. */
 		hasDam: boolean;
 		/** With scenarioId: its ops hash and last change, so a stored yield worked out on earlier changes says so. */
-		scenarioState?: { opsSha256: string; updatedAt: string } | null;
+		scenarioState?: { opsSha256: string; updatedAt: string; baseRunId?: string } | null;
 		/** In a scenario the user may change: open its Add a change on this unit's field (no dam: its capacity; no inflow: its runoff to dam). */
 		onsetfield?: ((field: 'damCapacityM3' | 'pctRunoffToDam') => void) | null;
 	} = $props();

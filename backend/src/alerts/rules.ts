@@ -7,7 +7,7 @@
 // figure hovering at the line sends one mail, not one a day:
 //
 //   kind                   value                                fires when        re-arms when
-//   dam_below              the farm's dam, ÷ capacity           < t               ≥ t + 5 points
+//   dam_below              the farm's dam, ÷ capacity           < t               ≥ t + 5 points (full, past 95 %)
 //   ewr_forecast_fail      forecast days the outlet EWR fails   ≥ t               ≤ max(0, t − 2)
 //   data_stale (per feed)  days the feed is past its usual delay > t               < t
 //   data_stale (per series) days since an ingest-key series'     > t               < t
@@ -47,7 +47,7 @@ export const DEFAULT_THRESHOLDS: Readonly<Record<AlertKind, number>> = Object.fr
 export const SERIES_STALE_ALERT_DAYS = 2;
 export const SERIES_USUAL_DELAY_DAYS = 1;
 
-/** dam_below re-arms this far above its threshold (a fraction: 5 percentage points). */
+/** dam_below re-arms this far above its threshold (a fraction: 5 percentage points), or at a full dam when that is past 1. */
 export const DAM_MARGIN = 0.05;
 
 /** Each kind's threshold as an editor may set it (the 051 CHECK, as a schema). */
@@ -79,7 +79,8 @@ export function fires(kind: AlertKind, threshold: number, value: number): boolea
 export function recovered(kind: AlertKind, threshold: number, value: number): boolean {
 	switch (kind) {
 		case 'dam_below':
-			return value >= threshold + DAM_MARGIN;
+			// A dam is 0–1 full: past 95 % the margin would sit above a full dam, so a full dam re-arms it.
+			return value >= Math.min(threshold + DAM_MARGIN, 1);
 		case 'ewr_forecast_fail':
 			return value <= Math.max(0, threshold - 2);
 		case 'data_stale':

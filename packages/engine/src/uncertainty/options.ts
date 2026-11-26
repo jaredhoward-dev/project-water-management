@@ -12,12 +12,18 @@ import { MIN_BAND_MEMBERS } from './bands';
 export const ENSEMBLE_METHODS = ['lhs'] as const;
 export type EnsembleMethod = (typeof ENSEMBLE_METHODS)[number];
 
-/** 'recorded': the project's rain as a run uses it (station rain, CHIRPS where it is blank). 'chirps': bias-corrected CHIRPS on every day. */
-export const RAIN_SOURCES = ['recorded', 'chirps'] as const;
+/**
+ * 'recorded': the project's rain as a run uses it (station rain, the gap fill where it is blank). 'chirps': bias-corrected
+ * CHIRPS on every day. 'era5l' and 'imerg_late' (issue #834): a gap-filling product the run reads (settings.gapRain,
+ * docs/model.md §2.4b) on every day, corrected by its own fit, offered only when the run reads it.
+ */
+export const RAIN_SOURCES = ['recorded', 'chirps', 'era5l', 'imerg_late'] as const;
 export type RainSource = (typeof RAIN_SOURCES)[number];
 export const RAIN_SOURCE_LABELS: Record<RainSource, string> = {
 	recorded: 'Station rain, CHIRPS infill (as the run)',
-	chirps: 'CHIRPS only (bias-corrected)'
+	chirps: 'CHIRPS only (bias-corrected)',
+	era5l: 'ERA5-Land only (bias-corrected and quantile-mapped)',
+	imerg_late: 'IMERG Late only (bias-corrected)'
 };
 
 export const RECORD_LABELS: Record<CalibrationFlowKind, string> = {
@@ -101,7 +107,7 @@ export const ENSEMBLE_MEMBERS_MAX = 1000;
 export const PAN_OFFSET_MAX = 0.3;
 /** The FAO-56 range of Class A pan coefficients: a shifted month stays inside it (or at the project's own value, if that is outside). */
 export const PAN_SHIFT_RANGE: readonly [number, number] = [0.35, 0.85];
-/** Share of run days CHIRPS must cover for the CHIRPS-only rain source. */
+/** Share of run days CHIRPS (or a gap-filling product) must cover for its rain-source member. */
 export const CHIRPS_ONLY_MIN_COVERAGE = 0.99;
 export const COVERAGE_WARNING = 0.7;
 /** Exceedance % of the monthly flow-duration curves. */

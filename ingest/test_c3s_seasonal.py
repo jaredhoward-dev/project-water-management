@@ -366,6 +366,66 @@ class Hindcast(Base):
         self.assertEqual(len(c3.read_index(self.mirror)["hindcasts"]), 9)
 
 
+class HindcastMonthly(Base):
+    """`c3s-hc-monthly/<system>/<MM>` (issue #837): each hindcast's calendar-month totals per cell, one chunk."""
+
+    def test_month_spans_follow_each_years_own_calendar_and_seven_months_always_fit(self):
+        self.assertEqual(c3.month_spans(2016, 2)[:2], [(0, 29), (29, 60)])
+        self.assertEqual(c3.month_spans(2017, 2)[:2], [(0, 28), (28, 59)])
+        # July to January is the longest seven months: exactly the lead axis.
+        self.assertEqual(c3.month_spans(2018, 7)[-1][1], c3.LEAD_DAYS)
+        for year in (1993, 2000, 2016):
+            for month in range(1, 13):
+                self.assertLessEqual(c3.month_spans(year, month)[-1][1], c3.LEAD_DAYS)
+
+    def test_monthly_totals_sum_whole_months_and_a_nan_day_spoils_its_month(self):
+        v = np.ones((2, 1, c3.LEAD_DAYS, grid.C3S.rows, grid.C3S.cols), dtype=np.float32)
+        v[1, 0, 40, 3, 4] = np.nan
+        got = c3.monthly_totals([2016, 2017], 1, 2, lambda i: v[i])
+        self.assertEqual(got.shape, (2, 1, c3.LEAD_MONTHS, grid.C3S.rows, grid.C3S.cols))
+        self.assertEqual(got.dtype, np.float32)
+        self.assertEqual(got[0, 0, :, 0, 0].tolist(), [29, 31, 30, 31, 30, 31, 31])
+        self.assertEqual(got[1, 0, :, 0, 0].tolist(), [28, 31, 30, 31, 30, 31, 31])
+        self.assertTrue(np.isnan(got[1, 0, 1, 3, 4]))
+        self.assertEqual(got[1, 0, 0, 3, 4], 28)
+
+    def collect(self, leads=35):
+        cds = fakecds.FakeC3sCds(today=TODAY, leads=leads, years=[1996, 1997])
+        self.call(cds, mode="backfill", month="02", system="ncep-2")
+        self.call(cds)
+
+    def test_a_collected_hindcast_writes_its_monthly_totals_in_one_chunk(self):
+        self.collect()
+        _, daily = open_array(self.root, "c3s-hc/ncep-2/02")
+        g, arr = open_array(self.root, "c3s-hc-monthly/ncep-2/02")
+        self.assertEqual(tuple(arr.metadata.dimension_names), ("year", "member", "lead_month", "lat", "lon"))
+        self.assertEqual(arr.shape, (2, daily.shape[1], c3.LEAD_MONTHS, 29, 32))
+        self.assertEqual(arr.chunks, arr.shape)
+        self.assertEqual((g.attrs["years"], g.attrs["members"], g.attrs["initMonth"], g.attrs["leadMonths"]), ([1996, 1997], daily.shape[1], 2, 7))
+        self.assertEqual(g.attrs["credit"], c3.CREDIT)
+        self.assertEqual(arr.metadata.attributes["units"], "mm/month")
+        d = np.asarray(daily[:], dtype=np.float64)
+        m = np.asarray(arr[:])
+        # 1996's February is 29 days, 1997's 28; 35 leads hold no whole March, so every later month is NaN.
+        np.testing.assert_allclose(m[0, :, 0], d[0, :, :29].sum(axis=1), rtol=1e-6)
+        np.testing.assert_allclose(m[1, :, 0], d[1, :, :28].sum(axis=1), rtol=1e-6)
+        self.assertTrue(np.isnan(m[:, :, 1:]).all())
+
+    def test_a_hindcast_held_without_them_has_them_derived_from_the_copy(self):
+        import shutil
+
+        self.collect()
+        _, arr = open_array(self.root, "c3s-hc-monthly/ncep-2/02")
+        want = np.asarray(arr[:])
+        shutil.rmtree(self.root / "c3s-hc-monthly" / "ncep-2" / "02")
+        self.assertFalse(c3.has_monthly(self.mirror, "ncep-2", "02"))
+        r = self.call(fakecds.FakeC3sCds(today=TODAY, leads=35, years=[1996, 1997]))
+        self.assertEqual(r["derived"], ["hc/ncep-2/02"])
+        _, again = open_array(self.root, "c3s-hc-monthly/ncep-2/02")
+        np.testing.assert_array_equal(np.asarray(again[:]), want)
+        self.assertEqual(self.call(fakecds.FakeC3sCds(today=TODAY, leads=35, years=[1996, 1997]))["derived"], [])
+
+
 class Manifests(unittest.TestCase):
     def good(self, product, url):
         m = manifest.new(product)

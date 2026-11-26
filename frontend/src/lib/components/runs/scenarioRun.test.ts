@@ -7,7 +7,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { isScenarioRun, runScenario } from './scenarioRun';
+import { isScenarioRun, latestModelRun, runScenario } from './scenarioRun';
 
 describe('isScenarioRun', () => {
 	it('is the API’s fromScenario: true for a live or orphaned scenario run, false for a run of the model', () => {
@@ -65,5 +65,17 @@ describe('no run is classified by its scenarioId', () => {
 					.flatMap((line, i) => (line.match(RUN_SCENARIO_ID) ? [`${relative(SRC, f)}:${i + 1}: ${line.trim()}`] : []))
 			);
 		expect(hits).toEqual([]);
+	});
+});
+
+describe('latestModelRun', () => {
+	it('is the newest run of the model, never a newer scenario or forecast run; the newest of any when that is all there is', () => {
+		const scenario = { id: 's', fromScenario: true, trigger: 'manual' as const };
+		const forecast = { id: 'f', fromScenario: false, trigger: 'forecast' as const };
+		const model = { id: 'm', fromScenario: false, trigger: 'auto' as const };
+		expect(latestModelRun([scenario, forecast, model])).toBe(model);
+		expect(latestModelRun([model, scenario])).toBe(model);
+		expect(latestModelRun([scenario, forecast])).toBe(scenario);
+		expect(latestModelRun([])).toBeNull();
 	});
 });

@@ -20,7 +20,9 @@
 // copy holds `ecmwf/qm.json` (ingest/ecmwf_qm_fit.py, an offline fit by the
 // operator), each day's value is mapped through the pairs of the group whose
 // region holds the feed's centre and whose months hold that day's month
-// (ingest/ecmwf.ts applyQm), and meta.calibration names the fit
+// (ingest/ecmwf.ts qmGroupFor, applyQm): a group fitted on area means
+// (`basis: 'area'`, what this feed maps, issue #835) when the file has one,
+// else the per-cell group, and meta.calibration names the fit
 // (`quantile-mapped <fittedAt>`). With no fit, or no group for the place and
 // season, the value is the model's own and meta.calibration is
 // `not yet calibrated`, which the feeds panel shows.

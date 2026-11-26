@@ -65,6 +65,7 @@
 	import { noticeLanguages, restrictionSummary } from '#lib/components/runs/publication.js';
 	import { disclaimerSection, forecastNote, isReportReady, readFirst, reportCharts, reportSections } from '#lib/components/report/sections.js';
 	import { cachedSeries } from '#lib/components/runs/cache.js';
+	import { latestModelRun } from '#lib/components/runs/scenarioRun.js';
 	import EwrAssurancePanel from '#lib/components/runs/EwrAssurancePanel.svelte';
 	import { CATCHMENT_FLOW_KEYS, EWR_RULE_CAPTION, EWR_RULE_KEY, ewrChartCaption, ewrChartSeries, hydrographSeries, observedCaption, observedSources, type CatchmentFlows, type ObservedSources } from '#lib/components/runs/flowSeries.js';
 	import { toDisplayUnit } from '#lib/components/runs/results.js';
@@ -133,7 +134,8 @@
 			]);
 			project = p;
 			series = sl;
-			const runId = want ?? list?.[0]?.id;
+			// Without ?run=, the latest run of the model (never a newer scenario or forecast run), as the server's PDF and schedules print.
+			const runId = want ?? (list ? latestModelRun(list)?.id : undefined);
 			if (!runId) {
 				status = 'no-runs';
 				return;
