@@ -6,7 +6,9 @@
 // the same file records its file and stores the recorded attribution; the
 // table refuses a basin that is no donor; signed-in users read the set (the
 // positive control), a session with no user reads none, water_app never
-// writes it.
+// writes it. The diagnostics of 362 (the set's flow-space leave-one-out score,
+// each donor's at-bound record) load and read back, null when the file has
+// none, and the table refuses a partial score or an unknown bound.
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { regionalPrior } from '@water-management/engine';
@@ -15,7 +17,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { loadSyntheticDonors, parseDonorsArgs, readDonorsFile, SYNTHETIC_DONORS_FILE } from '../../scripts/import-gr4j-donors.js';
 import { asOwner, signUp } from '../__tests__/helpers.js';
 import { withoutUser, withUser } from '../db/tx.js';
-import { donorDatasets, donorSetSha256, GR4J_DONORS, readDonors, SYNTHETIC_DONOR_DATASET, toEngineDonor } from './gr4jDonors.js';
+import { donorDatasets, donorSetSha256, GR4J_DONORS, readDonors, replaceDonorDataset, SYNTHETIC_DONOR_DATASET, toEngineDonor, type AtBound, type DonorRecord } from './gr4jDonors.js';
 import { loadReferenceText, parseLoadRequest, readReferenceText } from './referenceLoad.js';
 
 const URL_ = () => process.env.TEST_MIGRATION_DATABASE_URL!;
@@ -40,6 +42,30 @@ describe('the synthetic donors', () => {
 		expect(await loadSyntheticDonors(URL_())).toBe(14);
 		const [d] = await withUser(user.id, (db) => donorDatasets(db).then((all) => all.filter((x) => x.dataset === SYNTHETIC_DONOR_DATASET)));
 		expect(d).toMatchObject({ donors: 14, engineVersion: '1.106.0', synthetic: true, donorSetSha256: donorSetSha256(FILE.donors) });
+		// 362: the file's invented flow-space score is stored on the set.
+		expect(d!.looFlow).toEqual({ kge: 0.58, kgeFit: 0.74, n: 14 });
+		expect(FILE.donors.every((x) => Array.isArray(x.atBound))).toBe(true);
+	});
+
+	it('a set whose file has no 362 diagnostics loads with them null, and at-bound sides read back sorted', async () => {
+		const OLD = 'test-donors-old';
+		const sides: (AtBound[] | null)[] = [null, ['x4:low', 'x1:high'], []];
+		const donors: DonorRecord[] = FILE.donors.slice(0, 3).map((x, i) => ({ ...x, atBound: sides[i]! }));
+		const client = new pg.Client({ connectionString: URL_() });
+		await client.connect();
+		try {
+			await replaceDonorDataset(client, { ...FILE.meta, dataset: OLD, looFlow: null }, donors);
+		} finally {
+			await client.end();
+		}
+		try {
+			const [d] = await withUser(user.id, (db) => donorDatasets(db).then((all) => all.filter((x) => x.dataset === OLD)));
+			expect(d!.looFlow).toBeNull();
+			const back = await withUser(user.id, (db) => readDonors(db, OLD));
+			expect(back.map((x) => x.atBound)).toEqual([null, ['x4:low', 'x1:high'], []]);
+		} finally {
+			await asOwner('DELETE FROM gr4j_donor_dataset WHERE dataset = $1', [OLD]);
+		}
 	});
 
 	it('read back exactly as loaded, so the hash can be taken again from the table', async () => {
@@ -103,6 +129,14 @@ describe('the table', () => {
 			);
 		await expect(row(5, 10)).rejects.toThrow(/check constraint/);
 		await expect(row(1, 7.9)).rejects.toThrow(/check constraint/);
+	});
+
+	it('refuses an unknown at-bound value and a partial flow-space score (362)', async () => {
+		await expect(
+			asOwner(`INSERT INTO gr4j_donor (dataset, basin_id, lon, lat, area_km2, dor_pct, flow_years, x1, x2, x3, x4, kge_fit, at_bound) VALUES ('synthetic', 'SYN-BAD', 21, -33, 100, 0, 10, 300, 0, 90, 1.7, 0.7, '{x5:high}')`)
+		).rejects.toThrow(/check constraint/);
+		await expect(asOwner(`UPDATE gr4j_donor_dataset SET loo_flow_n = NULL WHERE dataset = 'synthetic'`)).rejects.toThrow(/check constraint/);
+		await expect(asOwner(`UPDATE gr4j_donor_dataset SET loo_flow_kge = 1.5 WHERE dataset = 'synthetic'`)).rejects.toThrow(/check constraint/);
 	});
 
 	it('a signed-in user reads it, a session with no user reads none, and water_app never writes it', async () => {

@@ -4335,8 +4335,13 @@ copy's S3 URL with your SSO profile, or a local copy of it. The steps:
    under 5 % regulation, whose fit reaches KGE′ 0.5 (`--min-kge`). Each is calibrated with the engine's own
    `calibrate()` (KGE′, the typical bounds, x2 fixed, the split-sample
    test). Every basin it refuses is printed with its reason, and so is how
-   many donors ended at a typical bound, per parameter. Expect a few
-   hundred basins, each a few seconds to a minute.
+   many donors ended at a typical bound, per parameter and side (each
+   donor records its own, `atBound`). After the fits it scores the prior in
+   flow space by leave-one-out (each donor's prior p50s run on its own
+   forcing, KGE′ beside its own fit; one more model run per donor, model.md
+   §2.10m) and prints each donor's pair and the medians the file keeps
+   (`looFlow`). Expect a few hundred basins, each a few seconds to a
+   minute.
 4. Look at it locally: `pnpm import:gr4j-donors donors-d1.json.gz --dataset Caravan-D1-2026`.
 5. Keep the zip under `originals/gr4j-donors/`, then upload and load:
 

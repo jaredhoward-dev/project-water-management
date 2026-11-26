@@ -53,7 +53,7 @@ export function readDonorsFile(args: DonorsArgs): { meta: DonorSetMeta; donors: 
 		const { source, version, method, engineVersion } = got.meta;
 		if (!source || !version || !method || !engineVersion) throw new Error('the file names no source, version, method or engineVersion (fit-donors.ts writes them)');
 		return {
-			meta: { dataset: args.dataset, source, version, method, engineVersion, attribution: got.meta.attribution ?? GR4J_DONORS.attribution },
+			meta: { dataset: args.dataset, source, version, method, engineVersion, attribution: got.meta.attribution ?? GR4J_DONORS.attribution, looFlow: got.meta.looFlow ?? null },
 			donors: got.donors,
 			skipped: got.problems
 		};

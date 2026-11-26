@@ -1,5 +1,5 @@
 {
- "_comment": "SYNTHETIC test data, invented for this repository: no real basin, gauge, flow or parameter. 14 invented donor basins (ids SYN-01 … SYN-14) scattered over the Western Cape around the seeded examples, with invented HydroATLAS-style attributes and GR4J parameters. The rule: PAWC = 60 + 14 (k − 1) mm for SYN-k, and x1 = 1.9 × PAWC × e^ε with a fixed small ε per donor (so the soil x1 relation is fitted with skill); x2 = 0; the other values are invented in fixed patterns. Every donor meets the criteria (≥ 8 years of flow, regulation under 5 %).",
+ "_comment": "SYNTHETIC test data, invented for this repository: no real basin, gauge, flow or parameter. 14 invented donor basins (ids SYN-01 … SYN-14) scattered over the Western Cape around the seeded examples, with invented HydroATLAS-style attributes and GR4J parameters. The rule: PAWC = 60 + 14 (k − 1) mm for SYN-k, and x1 = 1.9 × PAWC × e^ε with a fixed small ε per donor (so the soil x1 relation is fitted with skill); x2 = 0; the other values are invented in fixed patterns. Every donor meets the criteria (≥ 8 years of flow, regulation under 5 %). The flow-space leave-one-out score (looFlow) is invented too, not computed (there is no flow); each donor's atBound is what fit-donors.ts would record from its parameters (none is at a typical bound).",
  "kind": "gr4j-donors",
  "source": "Synthetic donor basins (this repository; invented, not GRDC-Caravan or HydroATLAS)",
  "version": "synthetic 1",
@@ -30,7 +30,8 @@
     "x4": 1.2
    },
    "kgeFit": 0.62,
-   "kgeValidation": null
+   "kgeValidation": null,
+   "atBound": []
   },
   {
    "id": "SYN-02",
@@ -55,7 +56,8 @@
     "x4": 1.9
    },
    "kgeFit": 0.64,
-   "kgeValidation": 0.52
+   "kgeValidation": 0.52,
+   "atBound": []
   },
   {
    "id": "SYN-03",
@@ -80,7 +82,8 @@
     "x4": 1.2
    },
    "kgeFit": 0.66,
-   "kgeValidation": 0.54
+   "kgeValidation": 0.54,
+   "atBound": []
   },
   {
    "id": "SYN-04",
@@ -105,7 +108,8 @@
     "x4": 1.9
    },
    "kgeFit": 0.68,
-   "kgeValidation": 0.56
+   "kgeValidation": 0.56,
+   "atBound": []
   },
   {
    "id": "SYN-05",
@@ -130,7 +134,8 @@
     "x4": 1.2
    },
    "kgeFit": 0.7,
-   "kgeValidation": null
+   "kgeValidation": null,
+   "atBound": []
   },
   {
    "id": "SYN-06",
@@ -155,7 +160,8 @@
     "x4": 1.9
    },
    "kgeFit": 0.72,
-   "kgeValidation": 0.6
+   "kgeValidation": 0.6,
+   "atBound": []
   },
   {
    "id": "SYN-07",
@@ -180,7 +186,8 @@
     "x4": 1.2
    },
    "kgeFit": 0.74,
-   "kgeValidation": 0.62
+   "kgeValidation": 0.62,
+   "atBound": []
   },
   {
    "id": "SYN-08",
@@ -205,7 +212,8 @@
     "x4": 1.9
    },
    "kgeFit": 0.76,
-   "kgeValidation": 0.64
+   "kgeValidation": 0.64,
+   "atBound": []
   },
   {
    "id": "SYN-09",
@@ -230,7 +238,8 @@
     "x4": 1.2
    },
    "kgeFit": 0.78,
-   "kgeValidation": null
+   "kgeValidation": null,
+   "atBound": []
   },
   {
    "id": "SYN-10",
@@ -255,7 +264,8 @@
     "x4": 1.9
    },
    "kgeFit": 0.8,
-   "kgeValidation": 0.68
+   "kgeValidation": 0.68,
+   "atBound": []
   },
   {
    "id": "SYN-11",
@@ -280,7 +290,8 @@
     "x4": 1.2
    },
    "kgeFit": 0.82,
-   "kgeValidation": 0.7
+   "kgeValidation": 0.7,
+   "atBound": []
   },
   {
    "id": "SYN-12",
@@ -305,7 +316,8 @@
     "x4": 1.9
    },
    "kgeFit": 0.84,
-   "kgeValidation": 0.5
+   "kgeValidation": 0.5,
+   "atBound": []
   },
   {
    "id": "SYN-13",
@@ -330,7 +342,8 @@
     "x4": 1.2
    },
    "kgeFit": 0.86,
-   "kgeValidation": null
+   "kgeValidation": null,
+   "atBound": []
   },
   {
    "id": "SYN-14",
@@ -355,7 +368,13 @@
     "x4": 1.9
    },
    "kgeFit": 0.62,
-   "kgeValidation": 0.54
+   "kgeValidation": 0.54,
+   "atBound": []
   }
- ]
+ ],
+ "looFlow": {
+  "kge": 0.58,
+  "kgeFit": 0.74,
+  "n": 14
+ }
 }

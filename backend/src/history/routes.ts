@@ -154,8 +154,10 @@ const TS = `to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z
  * events in one order (created_at, then type, then id, all descending).
  * Items of one change set share created_at (one transaction's now()), so
  * they come out together. Each event's subject is read as the reader may see
- * it (app_audit_subject, 190): an allocation event without the registration
- * number or volume for a viewer who can't read the allocations themselves.
+ * it (app_audit_subject, 190, 365): for a viewer who can't read the
+ * allocations themselves, an allocation event without the registration
+ * number or volume, and a publication of a cap or full-allocation run
+ * without its per-farm figures.
  */
 async function historyPage(db: Db, projectId: string, q: z.infer<typeof HistoryQuery>) {
 	const kind = q.kind ?? null;
@@ -172,7 +174,7 @@ async function historyPage(db: Db, projectId: string, q: z.infer<typeof HistoryQ
 					WHERE NOT EXISTS (SELECT 1 FROM unnest($10::text[]) w WHERE strpos(lower(c->>'text'), w) = 0)))
 			UNION ALL
 			SELECT 'event', e.id, ${TS.replace('created_at', 'e.created_at')}, e.created_at, e.change_set,
-				e.actor_label, e.kind, NULL, NULL, app_audit_subject(e.project_id, e.kind, e.subject), NULL, NULL
+				e.actor_label, e.kind, NULL, NULL, app_audit_subject(e.project_id, e.kind, e.subject, e.created_at), NULL, NULL
 			FROM audit_event e
 			WHERE $3 AND e.project_id = $1 AND ($4::uuid IS NULL OR e.subject->>'nodeId' = $4::text)
 				AND ($5::text IS NULL OR e.kind = $5 OR e.kind LIKE $5 || '.%')

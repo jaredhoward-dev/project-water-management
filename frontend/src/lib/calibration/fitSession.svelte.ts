@@ -50,6 +50,8 @@ export class FitSession {
 	priorUse = $state<PriorUse>('off');
 	/** The prior's penalty weight (engine DEFAULT_PRIOR_WEIGHT unless changed). */
 	priorWeight = $state<number | null>(DEFAULT_PRIOR_WEIGHT);
+	/** Also fit without the prior, to show what it cost (engine 1.120.0): one more optimisation per start. */
+	priorCost = $state(false);
 	budget = $state<number | null>(1500);
 	validate = $state(true);
 	// Shown and recorded: the same seed, inputs and engine version reproduce the fit.
@@ -72,6 +74,8 @@ export class FitSession {
 	/** The running fit's starts and validation, for its progress bar. */
 	runStarts = $state(1);
 	runValidate = $state(true);
+	/** Whether the running fit also fits without the regional prior (engine 1.120.0), for its progress bar. */
+	runPriorCost = $state(false);
 	/** The shown report has been written into the form. */
 	applied = $state(false);
 	ran: FitRan | null = null;
@@ -162,6 +166,7 @@ export class FitSession {
 		this.bounds = 'wide';
 		this.priorUse = 'off';
 		this.priorWeight = DEFAULT_PRIOR_WEIGHT;
+		this.priorCost = false;
 		this.budget = 1500;
 		this.validate = true;
 		this.seed = 1;
@@ -188,6 +193,8 @@ export class FitSession {
 		this.bounds = p.bounds;
 		this.priorUse = p.use;
 		if (p.weight !== null) this.priorWeight = p.weight;
+		// And whether it also fitted without the prior (engine 1.120.0), so a re-fit shows the cost again.
+		this.priorCost = p.use !== 'off' && record.prior?.unpriored !== undefined;
 		this.budget = record.budget;
 		this.starts = record.starts ?? 1;
 		this.seed = record.seed;

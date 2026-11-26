@@ -116,6 +116,7 @@
 		fillOpacity,
 		type ChirpsCellData
 	} from './mapStyle';
+	import { donorsData, type DonorView } from './priorDonors';
 	import type { MapGeometry, MapPosition } from '#lib/api/types.js';
 	import { attachDrawing } from './draw/attachDrawing';
 	import type { Draft } from './draw/draft.svelte';
@@ -164,6 +165,7 @@
 		apanGrid = null,
 		chirps = null,
 		demGrid = null,
+		donors = null,
 		fillScale = 1
 	}: {
 		features: MapFeature[];
@@ -241,6 +243,8 @@
 		chirps?: readonly ChirpsCellData[] | null;
 		/** The DEM grid layer's sampled cells, each labelled with its elevation; null or empty: none. */
 		demGrid?: readonly DemGridPointData[] | null;
+		/** The Prior donors layer's donors and target (priorDonorLayer.svelte.ts view); null: none. A GRDC-Caravan set is credited while drawn. */
+		donors?: DonorView | null;
 		/** The area fills' opacity, 0–1 (the Layers box's Area fill slider): parcels, dams and results colours, never the outlines. */
 		fillScale?: number;
 	} = $props();
@@ -427,6 +431,7 @@
 	const syncApanGrid = () => setSource('apangrid', () => evaporationGridData(apanGrid?.points, apanGrid?.month ?? null));
 	const syncChirps = () => setSource('chirps', () => chirpsData(chirps));
 	const syncDemGrid = () => setSource('demgrid', () => demGridData(demGrid));
+	const syncDonors = () => setSource('donors', () => donorsData(donors));
 
 	function syncOverlay() {
 		if (!map || status !== 'ready') return;
@@ -441,9 +446,15 @@
 	// Each licensed source's credit shows while its data is drawn: HydroRIVERS while the layer draws its reaches
 	// (`riversCredit`) or a river added from one is drawn, JRC Global Surface Water while a traced dam is, the
 	// Southwestern Cape MAP surface and the Lynch (2004) grid while a MAP grid layer draws their points, the WRC
-	// Atlas's A-pan grid while it draws its points.
+	// Atlas's A-pan grid while it draws its points, GRDC-Caravan while the Prior donors layer draws a real donor set.
 	const credited = $derived(
-		mapCredits(features, riversCredit, [waasGrid?.attribution ?? null, ccwrGrid?.attribution ?? null], [apanGrid?.attribution ?? null])
+		mapCredits(
+			features,
+			riversCredit,
+			[waasGrid?.attribution ?? null, ccwrGrid?.attribution ?? null],
+			[apanGrid?.attribution ?? null],
+			donors?.kind === 'donors' && donors.credited
+		)
 	);
 	const ALL_CREDITS = Object.keys(MAP_CREDIT_TEXT) as MapCredit[];
 	const creditEntries = (ids: readonly MapCredit[]) => ids.map((id) => ({ id, html: creditLink(resolve('data-sources'), id, MAP_CREDIT_TEXT[id]) }));
@@ -506,6 +517,7 @@
 						apanGridCellDeg: apanGrid?.cellDeg ?? null,
 						chirps: chirpsData(chirps),
 						demGrid: demGridData(demGrid),
+						donors: donorsData(donors),
 						fillScale
 					});
 				const style = styleNow();
@@ -714,6 +726,11 @@
 		void demGrid;
 		void status;
 		syncDemGrid();
+	});
+	$effect(() => {
+		void donors;
+		void status;
+		syncDonors();
 	});
 
 	// The Area fill slider: the fill layer's opacity set in place (a restyle would re-send every source).

@@ -6,16 +6,19 @@
 // donor set's credit. "Start from the prior" asks first, then saves the
 // medians as one settings revision naming the donors; the form takes them and
 // the panel says they are started. A viewer reads it but can't start it, and a
-// project with no boundary is told to draw one. The tables are read, never the
-// map. Invented data only.
+// project with no boundary is told to draw one. Its Map link draws the same
+// target's donors (the catchment's, or a calibration zone's, `priorZone=`), and
+// the map's link back opens the panel on that target; Back returns to the map.
+// The tables and the Layers box's list are read, never the map's pixels.
+// Invented data only.
 import type { Page } from '@playwright/test';
 import { expectNoViolations } from '../support/a11y.ts';
-import { addMember, createProject, putModel, putSeries, sampleModel, seedRunnableProject, syntheticRain, updateSettings } from '../support/api.ts';
+import { addMember, createProject, node, putModel, putSeries, sampleModel, seedRunnableProject, syntheticFlow, syntheticRain, updateSettings } from '../support/api.ts';
 import { answerConfirm } from '../support/confirm.ts';
 import { API_URL, WEB_URL } from '../support/env.ts';
 import { expect, test } from '../support/fixtures.ts';
 import { loadSyntheticPrior } from '../support/gr4jPrior.ts';
-import { box } from '../support/map.ts';
+import { box, openKey, openLayers } from '../support/map.ts';
 import { anySaveBar, openFold } from '../support/settings.ts';
 import { expectNoSidewaysScroll } from '../support/reflow.ts';
 
@@ -52,7 +55,12 @@ test('an editor starts an ungauged project’s GR4J from the regional prior; His
 	const project = await ungauged(page, 'Regional prior');
 	await openPanel(page, project.id);
 	await expect(panel(page).getByTestId('prior-synthetic')).toContainText('Synthetic test data.');
-	await expect(panel(page).getByTestId('prior-skill')).toContainText(/^Skill: \d\.\d\d \(leave-one-out over 14 donors\)$/);
+	await expect(panel(page).getByTestId('prior-skill')).toContainText(/^Skill \(parameters\): \d\.\d\d \(leave-one-out over 14 donors\)$/);
+	// The synthetic set's invented flow-space score, and its donors' at-bound record (none at a bound), 362.
+	await expect(panel(page).getByTestId('prior-flow-skill')).toHaveText(
+		'Skill (flow): KGE′ 0.58 from the prior’s medians on each held-out donor, against 0.74 from their own fits (medians over 14 donors)'
+	);
+	await expect(panel(page).getByTestId('prior-at-bound')).toHaveText('None of the 7 donors kept ended at a typical bound.');
 	await expect(panel(page).getByTestId('prior-no-skill')).toHaveCount(0);
 	const ranges = panel(page).getByTestId('prior-ranges');
 	await expect(ranges.getByRole('row')).toHaveCount(5);
@@ -60,7 +68,7 @@ test('an editor starts an ungauged project’s GR4J from the regional prior; His
 	await expect(ranges.getByRole('rowheader').first()).toContainText('from soil water capacity');
 	await expect(panel(page)).toContainText('7 of 14 donors from “synthetic” (invented donors)');
 	await expect(panel(page)).toContainText('distance from the catchment boundary’s centre');
-	await panel(page).getByText('The 7 donors').click();
+	await panel(page).getByText('The 7 donors', { exact: true }).click();
 	await expect(panel(page).getByTestId('prior-donors').getByRole('row')).toHaveCount(8);
 	await expect(panel(page).getByTestId('prior-credits')).toContainText('Synthetic test data (this repository) ');
 	// Fit automatically has no record to fit to here: the prior is the start.
@@ -100,6 +108,84 @@ test('an editor starts an ungauged project’s GR4J from the regional prior; His
 	await expectNoSidewaysScroll(v);
 });
 
+test('the Map link draws the catchment’s donors, and the map’s link comes back to the panel; Back returns to the map', async ({ page, owner }) => {
+	void owner;
+	const project = await ungauged(page, 'Regional prior map link');
+	await openPanel(page, project.id);
+	await panel(page).getByText('The 7 donors', { exact: true }).click();
+	const link = panel(page).getByTestId('prior-map-link');
+	await expect(link).toHaveText('Show the donors on the Map');
+	await expect(link).toHaveAttribute('href', '?tab=map&layers=donors');
+	await link.click();
+	await expect(page).toHaveURL(/\?tab=map&layers=donors$/);
+	await expect(page.locator('.map-page[data-ready]')).toBeVisible();
+	await openLayers(page);
+	await expect(page.getByTestId('map-layer-donors')).toBeChecked();
+	await expect(page.getByTestId('map-donors-summary')).toContainText(/^7 donor basins the regional prior kept, from “synthetic”/);
+	await expect(page.getByTestId('map-donors-list').getByRole('button')).toHaveCount(7);
+	await openKey(page);
+	await expect(page.getByTestId('map-key').locator('[data-key-item="prior donor"]')).toHaveCount(1);
+	await openLayers(page);
+	await page.getByTestId('map-donors-back').click();
+	await expect(page).toHaveURL(/\?tab=calibration#set-prior$/);
+	await expect(panel(page).getByTestId('prior-body')).toHaveAttribute('data-ready', 'true');
+	await page.goBack();
+	await expect(page).toHaveURL(/\?tab=map&layers=donors$/);
+	await openLayers(page);
+	await expect(page.getByTestId('map-donors-summary')).toBeVisible();
+});
+
+test('under calibration zones, the Map link carries the zone picked in For, and the map’s link back opens For on it', async ({ page, owner }) => {
+	void owner;
+	const project = await createProject(page.request, 'Regional prior zone link');
+	const quiet = { pctRunoffToDam: 0, damInitialPct: 0, damMinPct: 0 };
+	const outlet = node('Outflow gauge', 'gauge', null, 1, quiet);
+	const weir = node('Middle weir', 'gauge', outlet.id, 2, { areaKm2: 0, ...quiet });
+	const top = node('Top farm', 'farm', weir.id, 3, { areaKm2: 12, ...quiet });
+	const low = node('Low farm', 'farm', outlet.id, 4, { areaKm2: 8, ...quiet });
+	await putModel(page.request, project.id, { nodes: [outlet, weir, top, low], crops: [], cropAreas: [], transfers: [] });
+	// A calibration location's gauge needs its own observed flow record (checkCalibrationSite), so attach one to the weir.
+	await putSeries(page.request, project.id, { kind: 'flow_observed_m3s', name: 'Weir record', unit: 'm³/s', startDate: '2019-10-01', values: syntheticFlow(731) });
+	const series = (await (await page.request.get(`${API_URL}/projects/${project.id}/series`)).json()).series as { id: string; name: string }[];
+	const attach = await page.request.patch(`${API_URL}/projects/${project.id}/series/${series.find((s) => s.name === 'Weir record')!.id}`, { data: { siteNodeId: weir.id } });
+	expect(attach.status(), await attach.text()).toBe(200);
+	await updateSettings(page.request, project.id, {
+		runoffModel: 'gr4j',
+		apanMm: [150, 180, 220, 230, 190, 160, 110, 80, 60, 60, 80, 110],
+		calibrationZones: [{ nodeId: weir.id, enabled: true, calibrationStart: '2019-10-01', calibrationEnd: '2021-09-30', calibrationFlowKind: null, calibrationExclusions: [], qualityFlags: null, gr4j: null, fitRecord: null }]
+	});
+	await putSeries(page.request, project.id, { kind: 'rain_catchment_mm', unit: 'mm', startDate: '2019-10-01', values: syntheticRain(731) });
+	const made = await page.request.post(`${API_URL}/projects/${project.id}/map/features`, {
+		data: { kind: 'catchment_boundary', name: 'Catchment', geometry: { type: 'Polygon', coordinates: [box(21.26, -33.74, 0.18)] } }
+	});
+	expect(made.status(), await made.text()).toBe(201);
+
+	await openPanel(page, project.id);
+	// The outlet's own zone first: the link names it.
+	await panel(page).getByText(/^The \d+ donors$/).click();
+	await expect(panel(page).getByTestId('prior-map-link')).toHaveAttribute('href', '?tab=map&layers=donors&priorZone=outlet');
+	await panel(page).getByTestId('prior-zone').selectOption({ label: 'The zone at Middle weir' });
+	await expect(panel(page).getByTestId('prior-ranges').locator('caption')).toHaveText('Parameter ranges for the zone at Middle weir');
+	const link = panel(page).getByTestId('prior-map-link');
+	await expect(link).toHaveText('Show the zone at Middle weir’s donors on the Map');
+	await expect(link).toHaveAttribute('href', `?tab=map&layers=donors&priorZone=${weir.id}`);
+	await link.click();
+	await expect(page).toHaveURL(new RegExp(`\\?tab=map&layers=donors&priorZone=${weir.id}$`));
+	await openLayers(page);
+	await expect(page.getByTestId('map-donors-summary')).toContainText(/^\d+ donor basins? the regional prior kept for the zone at Middle weir, from “synthetic”/);
+	const back = page.getByTestId('map-donors-back');
+	await expect(back).toHaveAttribute('href', `?tab=calibration&priorZone=${weir.id}#set-prior`);
+	await back.click();
+	await expect(page).toHaveURL(new RegExp(`\\?tab=calibration&priorZone=${weir.id}#set-prior$`));
+	await expect(panel(page).getByTestId('prior-body')).toHaveAttribute('data-ready', 'true');
+	await expect(panel(page).getByTestId('prior-zone').locator('option:checked')).toHaveText('The zone at Middle weir');
+	await expect(panel(page).getByTestId('prior-ranges').locator('caption')).toHaveText('Parameter ranges for the zone at Middle weir');
+	await page.goBack();
+	await expect(page).toHaveURL(new RegExp(`priorZone=${weir.id}$`));
+	await openLayers(page);
+	await expect(page.getByTestId('map-donors-summary')).toContainText('for the zone at Middle weir');
+});
+
 test('a project with no boundary is told to draw one', async ({ page, owner }) => {
 	void owner;
 	const project = await ungauged(page, 'Regional prior, no boundary', false);
@@ -126,12 +212,18 @@ test('Fit automatically uses the prior as a penalty and its box, and the fit rec
 	await fit.getByLabel('Model runs per fit').fill('50');
 	await fit.getByLabel('Starts').fill('1');
 	await fit.getByRole('checkbox', { name: /^Validate/ }).uncheck();
+	// Also fit without the prior, so the result and the record say what it cost (issue #622).
+	await fit.getByTestId('fit-prior-cost-choice').getByRole('checkbox').check();
 	await fit.getByRole('button', { name: 'Fit automatically', exact: true }).click();
 	await expect(fit.getByText(/Regional prior \(p10–p90\) bounds · seed 1/)).toBeVisible();
+	await expect(fit.getByTestId('fit-prior-cost')).toHaveText(
+		/^Without the prior: KGE′ [−-]?[\d.]+ \([−-]?[\d.]+ with it\); (the prior cost [\d.]+ of KGE′|the fit with the prior scored [\d.]+ higher, and the comparison can’t separate that from search luck|the two fits score the same)\.$/
+	);
 	await expect(fit.getByText(/The fit used the regional GR4J prior from 7 donor basins of 14 \(synthetic, invented donors\): a penalty of weight 0\.1 pulled the parameters toward its medians, and the search kept to its p10–p90 box\./)).toBeVisible();
 	await fit.getByRole('button', { name: 'Apply to form' }).click();
 	const record = page.getByRole('region', { name: /^Fit record of these parameters/ });
 	await expect(record.getByTestId('fit-prior')).toContainText(/Regional prior: penalty weight 0\.10, searched its p10–p90 box; 7 of 14 donors from “synthetic” \(invented donors\), SHA-256 [0-9a-f]{12}…/);
+	await expect(record.getByTestId('fit-record-prior-cost')).toHaveText(/^ ?Without the prior: KGE′ [−-]?[\d.]+ \([−-]?[\d.]+ with it\); /);
 });
 
 test('with no position for the donors, Fit automatically offers only Off, and a prior chosen before goes back to Off', async ({ page, owner }) => {

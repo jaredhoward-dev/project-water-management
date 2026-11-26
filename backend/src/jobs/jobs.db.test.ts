@@ -13,6 +13,8 @@ import { claimJobs, enqueueJob, finishJob, nextJobDueSeconds } from './queue.js'
 import { defineHandler, type HandlerRegistry } from './registry.js';
 import { handlers } from './handlers/index.js';
 import { runJob, runTick } from './runner.js';
+import { RERUN_DEDUPE_KEY } from './handlers/rerun.js';
+import { wakeWorker } from './wake.js';
 import { z } from 'zod';
 
 type User = Awaited<ReturnType<typeof signUp>>;
@@ -54,6 +56,9 @@ const jobRow = async (id: string) =>
 
 /** Enqueue as `u` (an editor) straight through the queue API. */
 const enqueue = (u: User, o: Parameters<typeof enqueueJob>[1]) => withUser(u.id, (db) => enqueueJob(db, o));
+/** A person's re-run, queued as the user (one pending per project): what the removed POST /jobs did, and how a `manual` job already in the queue looks. */
+const queueRerun = (u: User, projectId: string, label?: string) =>
+	enqueue(u, { projectId, kind: 'rerun', payload: label === undefined ? {} : { label }, dedupeKey: RERUN_DEDUPE_KEY });
 
 /** Make a job due now (tests can't wait out a backoff). */
 const makeDue = (id: string) => asOwner(`UPDATE job SET run_after = now() - interval '1 second' WHERE id = $1`, [id]);
@@ -112,37 +117,32 @@ describe('job table RLS', () => {
 	});
 });
 
-describe('GET / POST /projects/:id/jobs', () => {
-	it('queues a re-run (editor), lists it for viewers without payload or lease, 404s strangers', async () => {
+describe('GET /projects/:id/jobs', () => {
+	it('lists a queued re-run for viewers without payload or lease, 404s strangers; nothing is queued through the API', async () => {
 		const owner = await signUp('ApiOwner');
 		const viewer = await signUp('ApiViewer');
 		const stranger = await signUp('ApiStranger');
 		const pid = await project(owner);
 		await member(owner, pid, viewer, 'viewer');
 
-		const res = await owner.call('POST', `/projects/${pid}/jobs`, { kind: 'rerun', label: 'Nightly' });
-		expect(res.status).toBe(202);
-		expect(res.body).toMatchObject({ created: true, job: { kind: 'rerun', status: 'queued', attempts: 0, maxAttempts: 5, createdBy: 'ApiOwner', error: null } });
+		const queued = await queueRerun(owner, pid, 'Nightly');
+		expect(queued).toMatchObject({ created: true, job: { kind: 'rerun', status: 'queued', attempts: 0, maxAttempts: 5, createdBy: 'ApiOwner', error: null } });
 		// One pending re-run per project.
-		const again = await owner.call('POST', `/projects/${pid}/jobs`, { kind: 'rerun', label: 'Again' });
-		expect(again.status).toBe(200);
-		expect(again.body).toMatchObject({ created: false, job: { id: res.body.job.id } });
+		const again = await queueRerun(owner, pid, 'Again');
+		expect(again).toMatchObject({ created: false, job: { id: queued.job.id } });
 
 		const list = await viewer.call('GET', `/projects/${pid}/jobs`);
 		expect(list.status).toBe(200);
-		expect(list.body.jobs.map((j: { id: string }) => j.id)).toEqual([res.body.job.id]);
+		expect(list.body.jobs.map((j: { id: string }) => j.id)).toEqual([queued.job.id]);
 		expect(Object.keys(list.body.jobs[0]).sort()).toEqual(
 			['attempts', 'createdAt', 'createdBy', 'error', 'finishedAt', 'id', 'kind', 'maxAttempts', 'progress', 'runAfter', 'startedAt', 'status'].sort()
 		);
 		expect((await viewer.call('GET', `/projects/${pid}/jobs?status=done`)).body.jobs).toEqual([]);
 		expect((await viewer.call('GET', `/projects/${pid}/jobs?status=bogus`)).status).toBe(400);
-
-		expect((await viewer.call('POST', `/projects/${pid}/jobs`, { kind: 'rerun' })).status).toBe(403);
 		expect((await stranger.call('GET', `/projects/${pid}/jobs`)).status).toBe(404);
-		expect((await stranger.call('POST', `/projects/${pid}/jobs`, { kind: 'rerun' })).status).toBe(404);
-		// Only re-runs are queued through the API.
-		expect((await owner.call('POST', `/projects/${pid}/jobs`, { kind: 'feed_fetch' })).status).toBe(400);
-		expect((await owner.call('POST', `/projects/${pid}/jobs`, { kind: 'rerun', payload: {} })).status).toBe(400);
+		// POST /jobs was removed (2026-11-25, no caller): an editor can't queue anything through it.
+		expect((await owner.call('POST', `/projects/${pid}/jobs`, { kind: 'rerun', label: 'x' })).status).toBe(404);
+		expect((await asOwner('SELECT count(*)::int AS n FROM job WHERE project_id = $1', [pid]))[0].n).toBe(1);
 		await asOwner('DELETE FROM job WHERE project_id = $1', [pid]);
 	});
 });
@@ -151,7 +151,7 @@ describe('the rerun consumer', () => {
 	it('runs the model as the editor who queued it, in a tick', async () => {
 		const u = await signUp('Rerunner');
 		const pid = await runnable(u);
-		const { body } = await u.call('POST', `/projects/${pid}/jobs`, { kind: 'rerun', label: 'Queued run' });
+		const body = await queueRerun(u, pid, 'Queued run');
 		expect((await u.call('GET', `/projects/${pid}/runs`)).body.runs).toEqual([]);
 
 		const tick = await runTick();
@@ -164,11 +164,13 @@ describe('the rerun consumer', () => {
 		expect(job.finishedAt).not.toBeNull();
 	});
 
-	it('with JOB_TRANSPORT=memory the run exists when the request returns', async () => {
+	it('with JOB_TRANSPORT=memory the run exists once wakeWorker returns', async () => {
 		vi.stubEnv('JOB_TRANSPORT', 'memory');
 		const u = await signUp('Inline');
 		const pid = await runnable(u);
-		expect((await u.call('POST', `/projects/${pid}/jobs`, { kind: 'rerun', label: 'Inline' })).status).toBe(202);
+		const { job, created } = await queueRerun(u, pid, 'Inline');
+		expect(created).toBe(true);
+		await wakeWorker(job.id);
 		expect((await u.call('GET', `/projects/${pid}/runs`)).body.runs.map((r: { label: string }) => r.label)).toEqual(['Inline']);
 	});
 
@@ -179,11 +181,11 @@ describe('the rerun consumer', () => {
 		await member(owner, pid, editor, 'editor');
 
 		// Positive control: while an editor, their queued run runs.
-		await editor.call('POST', `/projects/${pid}/jobs`, { kind: 'rerun', label: 'as editor' });
+		await queueRerun(editor, pid, 'as editor');
 		await runTick();
 		expect((await owner.call('GET', `/projects/${pid}/runs`)).body.runs.map((r: { label: string }) => r.label)).toEqual(['as editor']);
 
-		const { body } = await editor.call('POST', `/projects/${pid}/jobs`, { kind: 'rerun', label: 'after demotion' });
+		const body = await queueRerun(editor, pid, 'after demotion');
 		expect((await owner.call('PATCH', `/projects/${pid}/members/${editor.id}`, { role: 'viewer' })).status).toBe(200);
 		await runTick();
 		expect((await owner.call('GET', `/projects/${pid}/runs`)).body.runs.map((r: { label: string }) => r.label)).toEqual(['as editor']);
@@ -192,7 +194,7 @@ describe('the rerun consumer', () => {
 
 		// Removed from the project entirely: the same.
 		await owner.call('PATCH', `/projects/${pid}/members/${editor.id}`, { role: 'editor' });
-		const { body: gone } = await editor.call('POST', `/projects/${pid}/jobs`, { kind: 'rerun', label: 'after removal' });
+		const gone = await queueRerun(editor, pid, 'after removal');
 		expect((await owner.call('DELETE', `/projects/${pid}/members/${editor.id}`)).status).toBeLessThan(300);
 		await runTick();
 		expect((await jobRow(gone.job.id)).status).toBe('dead');
@@ -203,7 +205,7 @@ describe('the rerun consumer', () => {
 		const u = await signUp('NoPanJob');
 		const pid = await runnable(u);
 		expect((await u.call('PATCH', `/projects/${pid}`, { settings: { apanMm: monthly(0) } })).status).toBe(200);
-		const { body } = await u.call('POST', `/projects/${pid}/jobs`, { kind: 'rerun' });
+		const body = await queueRerun(u, pid);
 		await runTick();
 		const row = await jobRow(body.job.id);
 		expect(row.status).toBe('dead');

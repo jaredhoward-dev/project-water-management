@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { MapFeature, MapFeatureKind, MapNodeArea } from '#lib/api/types.js';
 import { areaSourceOf, areaSourceText, boundaryNextStep, delineationLines, featureForNode, groupFeatures, headerLine, inListOrder, keyGroups, pickedFeature, presentKey, shortHash } from './mapList';
-import { channelColour, overlayColours, riverNetworkColour } from './mapStyle';
+import { channelColour, donorColour, overlayColours, riverNetworkColour } from './mapStyle';
 
 const ring = [
 	[0, 0],
@@ -123,6 +123,16 @@ describe('presentKey', () => {
 			'Lines: terrain channels, river network, river'
 		]);
 		expect(labels(presentKey(keyGroups(c, { channels: channelColour(false) }), []))).toEqual(['Lines: terrain channels']);
+	});	it('keys the Prior donors layer while it is on: its link, the donor dot and the target ring, in its colour, with nothing of the project’s drawn', () => {
+		const dn = donorColour(false);
+		const groups = presentKey(keyGroups(c, { donors: dn }), [f('G', 'gauge', null)]);
+		expect(labels(groups)).toEqual(['Lines: link to the target', 'Points: gauge, prior donor, prior target']);
+		const items = groups.flatMap((g) => g.items);
+		expect(items.find((i) => i.label === 'prior donor')).toEqual({ label: 'prior donor', note: 'bigger = more weight', swatch: 'donor', colour: dn });
+		expect(items.find((i) => i.label === 'prior target')).toEqual({ label: 'prior target', note: 'gauge or boundary centre', swatch: 'ring', colour: dn });
+		expect(items.find((i) => i.label === 'link to the target')).toMatchObject({ swatch: 'dashed', colour: dn });
+		// Off: none of it.
+		expect(keyGroups(c).flatMap((g) => g.items).some((i) => i.colour === dn)).toBe(false);
 	});
 });
 

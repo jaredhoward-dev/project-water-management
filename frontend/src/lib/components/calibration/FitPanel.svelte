@@ -46,6 +46,7 @@
 		fitRecordFor,
 		marPenaltyOn,
 		objectiveName,
+		priorCostLine,
 		progressFraction,
 		rankedByText,
 		SCORE_ROWS,
@@ -141,7 +142,9 @@
 	const free = $derived(params.filter((p) => session.picked[p.key]).map((p) => p.key));
 	// The WR2012 MAR penalty (its fields beside the choices, penaltyFields) adds a fit without it, for comparison.
 	const penalty = $derived(marPenaltyOn(settings()));
-	const runs = $derived(totalRuns(session.budget ?? 0, session.validate, penalty, startsOk ? session.starts! : 1));
+	// The fit without the regional prior, when asked (engine 1.120.0): one more optimisation per start, so the report says what the prior cost.
+	const priorCostOn = $derived(session.priorUse !== 'off' && session.priorCost);
+	const runs = $derived(totalRuns(session.budget ?? 0, session.validate, penalty, startsOk ? session.starts! : 1, priorCostOn));
 	// The regional prior (issue #622): a penalty, the search box or both; its weight only matters with the penalty.
 	const priorProblem = $derived(priorWeightError(session.priorUse, session.priorWeight));
 	const priorBox = $derived(session.priorUse === 'bounds' || session.priorUse === 'both');
@@ -194,7 +197,7 @@
 	// A stepwise fit (issue #555): each step is one fit's fraction of the whole.
 	const stepOf = $derived(session.stepProgress);
 	const pct = $derived(
-		progress ? Math.round((100 * ((stepOf ? stepOf.step - 1 : 0) + progressFraction(progress, session.runValidate, penalty, session.runStarts))) / (stepOf?.steps ?? 1)) : 0
+		progress ? Math.round((100 * ((stepOf ? stepOf.step - 1 : 0) + progressFraction(progress, session.runValidate, penalty, session.runStarts, session.runPriorCost))) / (stepOf?.steps ?? 1)) : 0
 	);
 	const steps = $derived(session.steps && session.steps.length > 1 ? stepRows(session.steps, nodes) : null);
 	// The headline's step, shown in full below the steps (the last of a one-step fit).
@@ -204,6 +207,7 @@
 	function start() {
 		const { budget, seed, starts, objective, validate, priorUse, priorWeight } = session;
 		const bounds = fitBoundsOf(priorUse, session.bounds);
+		const fitWithoutPrior = priorCostOn;
 		if (!canStart || budget === null || seed === null || starts === null) return;
 		const validationRecord = chosenRecord;
 		let server: Awaited<ReturnType<typeof api.runs.modelInput>>;
@@ -248,8 +252,9 @@
 			() => {
 				session.runStarts = starts;
 				session.runValidate = validate;
+				session.runPriorCost = fitWithoutPrior;
 				const f = free;
-				const req = { input, model: 'gr4j' as const, objective, bounds, budget, free: f, validate, seed, starts, validationRecord: validationRecord ?? undefined };
+				const req = { input, model: 'gr4j' as const, objective, bounds, budget, free: f, validate, seed, starts, validationRecord: validationRecord ?? undefined, ...(fitWithoutPrior ? { fitWithoutPrior } : {}) };
 				return startStepwiseFit(
 					req,
 					plan,
@@ -371,6 +376,12 @@
 					<label for="{uid}-prior-w">Penalty weight</label>
 					<NumberInput id="{uid}-prior-w" min={0.01} max={PRIOR_MAX_WEIGHT} step={0.05} bind:value={session.priorWeight} disabled={status === 'running'} aria-describedby="{uid}-prior-w-h" aria-invalid={priorProblem ? 'true' : undefined} />
 					<span class="hint" class:explain={!priorProblem} id="{uid}-prior-w-h">{priorProblem ?? 'In score units: at 0.1, a parameter at its p10 or p90 costs about 0.08 of KGE′. Provisional default 0.1.'}</span>
+				{/if}
+				{#if session.priorUse !== 'off' && priorNo === null}
+					<label class="check" data-testid="fit-prior-cost-choice">
+						<input type="checkbox" bind:checked={session.priorCost} disabled={status === 'running'} />
+						Also fit without the prior, to show what it cost (one more fit per start)
+					</label>
 				{/if}
 			</div>
 		</div>
@@ -625,6 +636,10 @@
 				<Wr2012FitTable periods={wr2012FitPeriods(report)} />
 				{#if report.marPenalty}
 					<MarPenaltyResult {report} penalty={report.marPenalty} {paramLabel} />
+				{/if}
+				{#if report.prior?.unpriored !== undefined}
+					<!-- Issue #622: the same fit without the regional prior, when asked, so its cost in the objective shows. -->
+					<p class="small" data-testid="fit-prior-cost">{priorCostLine(report)}</p>
 				{/if}
 				{#if report.dayQuality}
 					<!-- Calibration research CR-22: the per-day quality flags of the fitted record and its rain. -->

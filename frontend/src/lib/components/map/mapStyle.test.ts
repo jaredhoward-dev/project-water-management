@@ -64,12 +64,15 @@ import {
 	chirpsData,
 	chirpsColour,
 	chirpsLayers,
+	donorColour,
+	donorLayers,
 	demGridData,
 	demGridLayers,
 	DEM_RAMP,
 	AREA_FILL_LAYER,
 	fillOpacity
 } from './mapStyle';
+import { donorsData } from './priorDonors';
 
 /** Relative luminance and contrast ratio (WCAG 2.2). */
 function lum(hex: string): number {
@@ -201,7 +204,7 @@ describe('overlay', () => {
 			const s = mapStyle('http://localhost:9002/tiles/x.pmtiles', dark, data);
 			expect(s.sources.features).toEqual({ type: 'geojson', data });
 			expect(s.sources.basemap).toBeDefined();
-			expect(s.layers.map((l) => l.id)).toEqual([...basemapStyle('x', dark).layers.map((l) => l.id), 'qt-fill', 'qt-line', 'rn-hit', 'rn-line', 'rn-picked-casing', 'rn-picked', 'dem-channels', ...overlayLayers(dark).map((l) => l.id), 'units-casing', 'units-line', 'chirps-cell', 'chirps-point', 'demgrid-point', 'apangrid-point', 'ccwrgrid-point', 'mapgrid-point', ...proposalLayers(dark).map((l) => l.id)]);
+			expect(s.layers.map((l) => l.id)).toEqual([...basemapStyle('x', dark).layers.map((l) => l.id), 'qt-fill', 'qt-line', 'rn-hit', 'rn-line', 'rn-picked-casing', 'rn-picked', 'dem-channels', ...overlayLayers(dark).map((l) => l.id), 'units-casing', 'units-line', 'chirps-cell', 'chirps-point', 'demgrid-point', 'apangrid-point', 'ccwrgrid-point', 'mapgrid-point', 'donors-link', 'donors-point', 'donors-target', ...proposalLayers(dark).map((l) => l.id)]);
 			expect(s.layers[0]!.paint).toEqual({ 'background-color': basemapColours(dark).bg });
 		}
 		expect(mapStyle(null, false, data).sources).toEqual({
@@ -215,7 +218,8 @@ describe('overlay', () => {
 			ccwrgrid: { type: 'geojson', data: mapGridData(null) },
 			apangrid: { type: 'geojson', data: evaporationGridData(null) },
 			chirps: { type: 'geojson', data: chirpsData(null) },
-			demgrid: { type: 'geojson', data: demGridData(null) }
+			demgrid: { type: 'geojson', data: demGridData(null) },
+			donors: { type: 'geojson', data: donorsData(null) }
 		});
 	});
 
@@ -286,7 +290,7 @@ describe('labels (#326 A6): self-hosted glyphs, none without a glyphs URL', () =
 
 	it('with glyphs but no tiles, labels only the quaternaries, the units and the grids (there are no place names to draw)', () => {
 		const s = mapStyle(null, false, data, { glyphs });
-		expect(s.layers.filter((l) => l.type === 'symbol').map((l) => l.id)).toEqual(['qt-label', 'units-label', 'demgrid-label', 'apangrid-label', 'ccwrgrid-label', 'mapgrid-label']);
+		expect(s.layers.filter((l) => l.type === 'symbol').map((l) => l.id)).toEqual(['qt-label', 'units-label', 'demgrid-label', 'apangrid-label', 'ccwrgrid-label', 'mapgrid-label', 'donors-label']);
 		// Without glyphs: no text anywhere, the points and outlines still drawn.
 		const bare = mapStyle(null, false, data);
 		expect(bare.layers.filter((l) => l.type === 'symbol')).toEqual([]);
@@ -763,6 +767,23 @@ describe('hydrological units, the MAP grid and the CHIRPS grid (docs/maps.md)', 
 			}
 		}
 		expect(chirpsLayers(false).map((l) => l.id)).toEqual(['chirps-cell', 'chirps-point']);
+	});
+});
+
+describe('the prior’s donors (docs/maps.md § Prior donors)', () => {
+	it('sizes each donor’s dot by its weight, labels it when there are glyphs, and stands out from the land (3:1) apart from the other overlays', () => {
+		const { over, labels } = donorLayers(false, true);
+		expect(over.map((l) => l.id)).toEqual(['donors-link', 'donors-point', 'donors-target']);
+		expect(over[1]!.paint).toMatchObject({ 'circle-radius': ['get', 'radius'] });
+		expect(labels.map((l) => l.id)).toEqual(['donors-label']);
+		expect(donorLayers(false, false).labels).toEqual([]);
+		for (const dark of [false, true]) {
+			const b = basemapColours(dark);
+			for (const g of [b.bg, b.earth, b.water, b.green]) expect(contrast(donorColour(dark), g), `donors on ${g}`).toBeGreaterThanOrEqual(3);
+			const c = overlayColours(dark);
+			for (const s of [c.boundary, c.parcel, c.water, c.other, c.selected, quaternaryColour(dark), riverNetworkColour(dark), chirpsColour(dark), channelColour(dark), proposalColour(dark)])
+				expect(deltaE(donorColour(dark), s), `donors vs ${s}, ${dark ? 'dark' : 'light'}`).toBeGreaterThanOrEqual(25);
+		}
 	});
 });
 

@@ -2462,7 +2462,8 @@ In short:
   ([§ API keys](#api-keys)). `job_enqueue` still stamps any signed-in enqueuer
   and refuses a plain insert with no user; only a definer function
   (`current_user` ≠ `session_user`) may name the acting user. A client can't
-  queue an auto re-run (`POST /jobs` takes a label only), and an auto run
+  queue a re-run at all (no route does; `POST /jobs` was removed on
+  2026-11-25), and an auto run
   never publishes itself unless the project opted in to "if no new
   warnings", never for the first publication.
 - **The evidence report is a viewer read, and adds nothing a viewer can't
@@ -3491,11 +3492,26 @@ fetches use, nor the headroom of the scheduled passes (which a throttle
 would drop). A station fetch never falls back to the shared queue: with no
 station queue the job fails at once. What is still shared is the station
 side itself: every project's station feeds share those 2 executions, one
-fetch per host at a time, so one project's slow hosts (each fetch up to
-2 minutes) can delay **other projects' station feeds**, never by more than
-the backlog drains at 2 fetches at a time; the station queue's age alarm
-(over an hour) pages a backlog. Per-project fairness on the station side
-isn't built.
+fetch per host at a time. **Each project's share is bounded**
+(363_station_feed_fairness): a project has at most 2 station fetches out at
+once (`jobs/handlers/feed-fetch.ts` `STATION_FETCHES_PER_PROJECT`; sent to
+the station queue, answer not yet applied). A station `feed_fetch` job
+records its fetch only through `app_begin_station_fetch`, which counts the
+project's other station fetches out (`app_feed_fetch_out`) under a
+per-project advisory lock; without a place it records and sends nothing and
+goes back to the job table, its attempt given back (`JobRelease`), asking
+again in `STATION_TURN_WAIT_SECONDS` (30 s). Every path that queues a fetch
+(the schedule, Run now, a backfill's next window) goes through it. So
+however many feeds on slow hosts one project has, another project's feed
+waits behind at most 2 of each project's fetches (each up to 2 minutes, 2
+at a time), and a project alone still uses both executions and drains its
+own fetches as their answers come back. A lost answer holds its place no
+longer than a day (`app_feed_fetch_out`'s limit). The bound is per project,
+not per owner (accepted): someone with many projects gets each project's
+share, so an owner's total is 2 fetches out per project they own with
+station feeds. The station queue's age
+alarm (over an hour) still pages a backlog. Guard:
+`jobs/handlers/feed-fetch.station-fairness.db.test.ts`.
 
 ### Import reports
 
@@ -3575,6 +3591,17 @@ database:
   each volume (`app_audit_subject`, 190, the History's one read of an
   event's subject), and the data-subject export leaves both out of every
   allocation event (they are the registered user's, not the exporter's).
+  The same reader gets a `publication.published` event (the season decision
+  log, `publish/decision.ts`) of a cap or full-allocation run without its
+  per-farm figures (`perFarm`; the farm count stays): they are worked out
+  from each farm's volume (issue #523 finding I). The run is told by its
+  stored mode while it is kept; once the run cap has trimmed it, an event
+  from before 213 (or of unknown time) is withheld, a later one isn't
+  (`app_audit_run_held_to_volumes`, 365; `publish/decisionLogCap.db.test.ts`).
+  Who is kept from the volumes stays `app_reads_allocation_units`'s to say:
+  both `app_audit_subject` forms and `app_audit_run_held_to_volumes` call it,
+  and none reads the viewers' switch or ranks a role for it
+  (`allocations/authority-reads.db.test.ts` checks every overload).
   The export's `holder` column is only in an editor's file.
 - **Decision D3** (provisional position, pre-counsel research, 2026-10-01).
   A per-farm volume beside a farm's name identifies its holder in a rural

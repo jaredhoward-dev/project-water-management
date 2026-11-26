@@ -1,0 +1,4 @@
+{
+	"addKb": 4,
+	"why": "The help guides' text split out of guides.ts into guides-start, -howto, -use and -concept, and the glossary's Natural flow and calibration articles out of articles.ts into articles-flow, each its own chunk, so no help chunk nears the 42 KB per-chunk ceiling (the guides' chunk was 43,006 of 43,008 bytes; the largest help chunk is now articles.ts's at 35.5 KB). Same text, five more files: gzip per file costs +4 KB on the total. Measured 2549 -> 2553 KB locally at f22c5caff + this change. Headroom 0 KB."
+}

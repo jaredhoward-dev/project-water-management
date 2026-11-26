@@ -143,6 +143,8 @@ export const JRC_WATER_MAP_ATTRIBUTION = `Dam outline: traced from JRC Global Su
  */
 export const CARAVAN_STATEMENT =
 	'Donor flow records: GRDC-Caravan (Färber et al. 2025, Zenodo 10.5281/zenodo.15349031), CC BY 4.0, from data held by the Global Runoff Data Centre (GRDC); South Africa’s and Namibia’s records © their departments of water.';
+/** The map's attribution control while the Prior donors layer draws a GRDC-Caravan donor set's outlets: short, linking to /data-sources#grdc-caravan. */
+export const CARAVAN_MAP_ATTRIBUTION = 'Prior donors: GRDC-Caravan, CC BY 4.0';
 export const HYDROATLAS_STATEMENT = 'Basin attributes: HydroATLAS v1.0 (BasinATLAS; Linke et al. 2019, Lehner et al. 2022), CC BY 4.0.';
 export const SOILGRIDS_STATEMENT = 'Soil water retention: SoilGrids 2.0 © ISRIC – World Soil Information, CC BY 4.0.';
 export const ISDA_STATEMENT = 'Depth to bedrock: iSDAsoil © Innovative Solutions for Decision Agriculture (iSDA), CC BY 4.0.';

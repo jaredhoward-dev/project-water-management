@@ -92,7 +92,7 @@
 	import { restOfCatchment, staleValues } from './stale';
 	import { alreadyAccepted, areaTargets, areaText, DAM_POSITION_LABEL, featureSummary, isPolygon, KIND_LABEL, KIND_NODES, takesArea, takesDamPosition } from './mapData';
 	import { areaSourceOf, boundaryNextStep, type BoundaryNextStep, delineationLines, featureName, headerLine, inListOrder, keyGroups, pickedFeature, presentKey } from './mapList';
-	import { channelColour, channelMinKm2AtZoom, glyphsUrl, overlayColours, riverNetworkColour } from './mapStyle';
+	import { channelColour, channelMinKm2AtZoom, donorColour, glyphsUrl, overlayColours, riverNetworkColour } from './mapStyle';
 	import { exportFileName, geoJsonText } from './mapExport';
 	import { channelsWanted, chirpsCells, demRiversOffered, layerAsked, layersOn, MAP_GRID_KINDS, MAP_GRIDS, unitLabels } from './mapLayers';
 	import { MapGridLayer } from './mapGridLayer.svelte';
@@ -101,6 +101,9 @@
 	import { AreaFill } from './areaFill.svelte';
 	import MapLayers from './MapLayers.svelte';
 	import { QuaternaryLayer } from './quaternaryLayer.svelte';
+	import { PriorDonorLayer } from './priorDonorLayer.svelte';
+	import { DONOR_FRAME_MAX_ZOOM, DONOR_PICK_MAX_ZOOM, donorBbox, donorTargetName } from './priorDonors';
+	import { priorZoneFromUrl } from '#lib/calibration/priorLinks.js';
 	import { RiverLayer } from './riverLayer.svelte';
 	import { MeasureDraft } from './measure/measureDraft.svelte';
 	import MapKeyRow from './MapKeyRow.svelte';
@@ -975,6 +978,17 @@
 			evaporationGrids = { grids, Toggles: m.default };
 		});
 	});
+	// The regional GR4J prior's donors (docs/maps.md § Prior donors): off unless `layers=donors` (the Regional prior panel
+	// links it on), for the target `priorZone=` names (the panel's For; absent: the headline).
+	const donorZone = $derived(priorZoneFromUrl(params));
+	const priorDonors = new PriorDonorLayer({
+		projectId: () => projectId,
+		on: () => layersOn(params).has('donors'),
+		features: () => features,
+		zone: () => donorZone,
+		load: (id, zone) => api.gr4jPrior.get(id, { zone })
+	});
+	const donorTarget = $derived({ zone: donorZone, name: donorTargetName(donorZone, (id) => editor.model.nodes.find((n) => n.id === id)?.name) });
 	const chirpsOn = $derived(layersOn(params).has('chirps'));
 	const chirpsInView = $derived(chirpsOn ? chirpsCells(mapView) : null);
 	const demGrid = new DemGridLayer({
@@ -1126,8 +1140,28 @@
 	/** While the channels are drawn, the lines on the map in words (the bars and the Key say the same). */
 	const lineItems = $derived(channels.on ? delineationLines({ channels: channelColour(dark), riverNetwork: layersOn(params).has('rivers') ? riverNetworkColour(dark) : null }) : null);
 	const key = $derived(
-		presentKey(keyGroups(overlayColours(dark), { riverNetwork: layersOn(params).has('rivers') ? riverNetworkColour(dark) : null, channels: channels.on ? channelColour(dark) : null }), features)
+		presentKey(
+			keyGroups(overlayColours(dark), {
+				riverNetwork: layersOn(params).has('rivers') ? riverNetworkColour(dark) : null,
+				channels: channels.on ? channelColour(dark) : null,
+				donors: priorDonors.view?.kind === 'donors' ? donorColour(dark) : null
+			}),
+			features
+		)
 	);
+	// The prior's donors framed once per answer after the layer turns on (the target and every donor in view); off clears it.
+	let donorsFramed = '';
+	$effect(() => {
+		const v = priorDonors.view;
+		const asked = priorDonors.asked;
+		if (!priorDonors.on) {
+			donorsFramed = '';
+			return;
+		}
+		if (v?.kind !== 'donors' || mapState !== 'ready' || !mapRef || asked === donorsFramed) return;
+		donorsFramed = asked;
+		mapRef.frameBox(donorBbox(v), DONOR_FRAME_MAX_ZOOM);
+	});
 
 	// --- results on the map (#326 A1): the measure and run from the URL, each unit's and gauge's figure, the fills ---
 	const results = new MapResults({
@@ -1497,6 +1531,9 @@
 		chirps={{ on: chirpsOn, cells: chirpsInView }}
 		labels={!!glyphs}
 		demGrid={demGridOffered ? demGrid : null}
+		{priorDonors}
+		{donorTarget}
+		onframedonor={(d) => mapRef?.frameBox([d.lon, d.lat, d.lon, d.lat], DONOR_PICK_MAX_ZOOM)}
 		demRivers={demRiversShown ? { on: layersOn(params).has('channels'), announce: layerAsked(params, 'channels'), layer: channels } : null}
 		{areaFill}
 	/>
@@ -1687,6 +1724,7 @@
 									apanGrid={evaporationGrids?.grids[0]?.draw ?? null}
 									chirps={chirpsInView}
 									demGrid={demGrid.points}
+									donors={priorDonors.view}
 									fillScale={areaFill.scale}
 								/>
 							{/snippet}

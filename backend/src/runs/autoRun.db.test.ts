@@ -19,6 +19,8 @@ import { fetchWindow, utcToday } from '../feeds/fetch.js';
 import { ingestResult } from '../feeds/ingest.js';
 import { feedForJob } from '../feeds/store.js';
 import { runTick } from '../jobs/runner.js';
+import { RERUN_DEDUPE_KEY } from '../jobs/handlers/rerun.js';
+import { enqueueJob } from '../jobs/queue.js';
 import { onSeriesDaysChanged } from '../series/newData.js';
 import { AUTO_RUN_MAX_WAIT_MINUTES, enqueueRerun, resolveAutoRun } from './autoRun.js';
 import { executeRun, trimRuns } from './execute.js';
@@ -174,13 +176,14 @@ describe('the new-data hook: gate, debounce and dedupe', () => {
 	it('leaves a pending manual re-run as it is (it reads the new data too), and queues a new one behind a running re-run', async () => {
 		const u = await signUp('AutoManual');
 		const pid = await runnable(u, { enabled: true });
-		const manual = await u.call('POST', `/projects/${pid}/jobs`, { kind: 'rerun', label: 'Nightly' });
-		expect(manual.status).toBe(202);
+		// A person's re-run (`manual`; POST /jobs queued these until 2026-11-25, and one may still be pending).
+		const manual = await withUser(u.id, (db) => enqueueJob(db, { projectId: pid, kind: 'rerun', payload: { label: 'Nightly' }, dedupeKey: RERUN_DEDUPE_KEY }));
+		expect(manual.created).toBe(true);
 		const r = await merge(u, pid, '2021-02-04', [1]);
 		const jobs = await rerunJobs(pid);
 		expect(jobs).toHaveLength(1);
 		expect(jobs[0]!.payload).toEqual({ label: 'Nightly' });
-		expect(r.body.rerunQueuedFor).toBe(manual.body.job.runAfter ? new Date(manual.body.job.runAfter).toISOString() : null);
+		expect(r.body.rerunQueuedFor).toBe(manual.job.runAfter ? new Date(manual.job.runAfter).toISOString() : null);
 
 		// While a re-run runs, new data queues another (the claim holds it back until the first finishes).
 		await asOwner(`UPDATE job SET status = 'running', locked_until = now() + interval '5 minutes', lease_token = gen_random_uuid() WHERE id = $1`, [jobs[0]!.id]);
@@ -191,11 +194,11 @@ describe('the new-data hook: gate, debounce and dedupe', () => {
 		await retirePendingJobs(pid);
 	});
 
-	it('a client can’t queue an auto re-run itself', async () => {
+	it('a client can’t queue a re-run itself: there is no route for it (POST /jobs removed 2026-11-25)', async () => {
 		const u = await signUp('AutoForge');
 		const pid = await runnable(u, { enabled: true });
-		expect((await u.call('POST', `/projects/${pid}/jobs`, { kind: 'rerun', trigger: 'auto' })).status).toBe(400);
-		expect((await u.call('POST', `/projects/${pid}/jobs`, { kind: 'rerun', cause: 'feed' })).status).toBe(400);
+		expect((await u.call('POST', `/projects/${pid}/jobs`, { kind: 'rerun', trigger: 'auto' })).status).toBe(404);
+		expect((await u.call('POST', `/projects/${pid}/jobs`, { kind: 'rerun', cause: 'feed' })).status).toBe(404);
 		expect(await rerunJobs(pid)).toHaveLength(0);
 	});
 

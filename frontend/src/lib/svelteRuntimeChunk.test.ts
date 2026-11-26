@@ -2,6 +2,8 @@
 // svelteRuntimeChunk; issue #9). Without the rule the bundler cuts the runtime into
 // ~15 chunks, several under 0.5 KB, and every page loads more (numbers in
 // the bundle budget's history, scripts/guards/bundle-budget/README.md).
+import { readdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import config, { helpArticlesChunk, svelteRuntimeChunk } from '../../vite.config';
 
@@ -34,8 +36,16 @@ describe('the Svelte runtime chunk', () => {
 		expect(helpArticlesChunk('/repo/frontend/src/lib/help/articles-results.ts')).toBe('help-articles-results');
 		expect(helpArticlesChunk('/repo/frontend/src/lib/help/articles-fit.ts')).toBe('help-articles-fit');
 		expect(helpArticlesChunk('/repo/frontend/src/lib/help/guides-pages.ts')).toBe('help-guides-pages');
-		for (const id of ['/repo/frontend/src/lib/help/articles.ts', '/repo/frontend/src/lib/help/content.ts', '/repo/frontend/src/lib/help/tips.ts']) {
+		for (const id of ['/repo/frontend/src/lib/help/articles.ts', '/repo/frontend/src/lib/help/content.ts', '/repo/frontend/src/lib/help/tips.ts', '/repo/frontend/src/lib/help/guides.ts', '/repo/frontend/src/lib/help/guides.test.ts', '/repo/frontend/src/lib/help/articles-data.test.ts', '/repo/frontend/src/lib/components/help/guides-x.ts']) {
 			expect(helpArticlesChunk(id), id).toBeUndefined();
 		}
+	});
+
+	it('gives every guides-<group>.ts and articles-<topic>.ts module in lib/help a chunk of its own, by its name', () => {
+		const help = fileURLToPath(new URL('./help/', import.meta.url));
+		const modules = readdirSync(help).filter((f) => /^(articles|guides)-.+\.ts$/.test(f) && !f.includes('.test.'));
+		// The guides' text (2026-11-25): one module per contents group, so the guides' chunk stays well under the ceiling.
+		for (const g of ['start', 'howto', 'use', 'concept', 'pages']) expect(modules).toContain(`guides-${g}.ts`);
+		for (const f of modules) expect(helpArticlesChunk(`/repo/frontend/src/lib/help/${f}`), f).toBe(`help-${f.slice(0, -3)}`);
 	});
 });

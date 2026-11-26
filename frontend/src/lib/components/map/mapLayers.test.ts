@@ -345,7 +345,15 @@ describe('jrcCreditedFeature and mapCredits (issue #523 C6)', () => {
 		expect(mapCredits([], false, [], ['Invented A-pan grid', `${apan}.`])).toEqual([]);
 		expect(MAP_CREDIT_TEXT['atlas-apan']).toBe('A-pan grid: WRC Atlas (modelled)');
 		// One credit per licensed source the map draws: no S-pan grid credit since the option was removed (issue #738).
-		expect(Object.keys(MAP_CREDIT_TEXT)).toEqual(['hydrorivers', 'jrc-water', 'waas-map', 'lynch-map', 'atlas-apan']);
+		expect(Object.keys(MAP_CREDIT_TEXT)).toEqual(['hydrorivers', 'jrc-water', 'waas-map', 'lynch-map', 'atlas-apan', 'grdc-caravan']);
+	});
+
+	it('credits GRDC-Caravan, last, while the Prior donors layer draws a real donor set (issue #622)', () => {
+		expect(mapCredits([], false, [], [], true)).toEqual(['grdc-caravan']);
+		expect(mapCredits([dam], true, [], [], true)).toEqual(['hydrorivers', 'jrc-water', 'grdc-caravan']);
+		expect(mapCredits([], false, [], [], false)).toEqual([]);
+		expect(MAP_CREDIT_TEXT['grdc-caravan']).toBe('Prior donors: GRDC-Caravan, CC BY 4.0');
+		expect(MAP_CREDIT_TEXT['grdc-caravan'].length).toBeLessThanOrEqual(MAP_CREDIT_TEXT.hydrorivers.length);
 	});
 
 	it('words each credit for the attribution control: the JRC line names the source as JRC asks and says the outline was modified', () => {
@@ -380,5 +388,11 @@ describe('snappedViewBbox and demGridViewBbox', () => {
 
 	it('takes the DEM grid as a layer of its own in the URL', () => {
 		expect(new URLSearchParams(withLayer('?tab=map', 'demgrid', true)).get('layers')).toBe('demgrid');
+	});
+
+	it('takes the prior donors as a layer of their own, off unless the URL names it (the Regional prior panel links it on)', () => {
+		expect(layersOn(new URLSearchParams('')).has('donors')).toBe(false);
+		expect(layersOn(new URLSearchParams('layers=donors')).has('donors')).toBe(true);
+		expect(new URLSearchParams(withLayer('?tab=map', 'donors', true)).get('layers')).toBe('donors');
 	});
 });

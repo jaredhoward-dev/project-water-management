@@ -5261,6 +5261,18 @@ map" card) stays the schematic; this is the geography.
   ([maps.md § Hydrological units layer, § MAP grid, § CHIRPS
   grid](./maps.md#map-grid)). Without glyphs the outlines and dots are drawn
   and the box says the names or values aren't written on the map.
+  **Prior donors** (`layers=donors`, a dashed olive swatch; off by
+  default, linked on from the Regional prior panel's donors fold): on, the
+  regional GR4J prior's kept donor outlets for the target `priorZone=`
+  names (the panel's **For**; absent, the headline target), each a
+  dot sized by its weight with its weight beside it ("23 %"), joined to the
+  target (a ring) by a dashed line, all three keyed in the Key, framed on
+  the first answer, and listed in the box (id, weight, distance,
+  area; each row a button that frames its donor) with a link back to the
+  panel on the same zone; with no prior it says why (the
+  route's own problem, `map-donors-none`), and a real GRDC-Caravan set is
+  credited on the map while drawn ([maps.md § Prior
+  donors](./maps.md#prior-donors)).
 - **Features** (the side column's Features tab): every feature grouped by kind, parcels
   first, then dams, gauges, rivers, other and the boundary, each group
   largest first, then by name (`mapList.ts` `groupFeatures`). A row is a
@@ -9701,13 +9713,22 @@ calibration's line points at *How the shown run fits* for NSE and PBIAS.
   zones, for the zone picked in **For** (each zone's own units, or the
   calibration site's own zone). A table of each parameter's p10, p50 and
   p90 beside its value in the form now ("below p10", "above p90"; X1 "from
-  soil water capacity" when the soil relation has skill), the **Skill**
-  line (the leave-one-out skill and its n, "Not scored" with too few donors,
-  and a **No skill** badge at 0 or below), one line of what the donors were
-  compared on (area, MAP over n water years, aridity, distance from the
-  zone's gauge or the boundary's centre) and the soil relation's state, a
+  soil water capacity" when the soil relation has skill), the **Skill
+  (parameters)** line (the leave-one-out skill and its n, "Not scored" with
+  too few donors, and a **No skill** badge at 0 or below), the **Skill
+  (flow)** line (the donor set's flow-space leave-one-out: median KGE′ of
+  the prior's medians on each held-out donor against their own fits, "Not
+  scored" for a set without one, and a **No skill** badge at or below the
+  mean-flow benchmark, KGE′ −0.41; migration 362), how many of the kept
+  donors' fits ended at a typical bound (per parameter and side, on its own
+  line under the two skills; left out for a set that didn't record it), one line of what the
+  donors were compared on (area, MAP over n water years, aridity, distance
+  from the zone's gauge or the boundary's centre), the soil relation's
+  state, a
   fold with **The n donors** (weight, distance, area, own KGE′, X1, X3,
-  X4), the synthetic-data warning over the invented set, and the donor and
+  X4) and a link that opens the Map with its **Prior donors** layer on
+  for the same target (`priorZone=`, the zone in **For**; the map's link
+  back opens **For** on it), the synthetic-data warning over the invented set, and the donor and
   soil datasets' credits with a link to `/data-sources`. Editors get **Start
   from the prior** in the heading's row, marked *Saves now*: it asks first,
   then writes the medians into the target's parameters as one settings
@@ -9724,7 +9745,15 @@ calibration's line points at *How the shown run fits* for NSE and PBIAS.
   the fit fetches the prior for each step's target (the catchment, or each
   calibration zone's own) before it runs, and the result's notes and the fit
   record (**Regional prior** row) name it, its donors and the donor set's
-  SHA-256. When no fit on the project can have a prior (no donor basins
+  SHA-256. With the prior on, **Also fit without the prior, to show what it
+  cost (one more fit per start)** (`fit-prior-cost-choice`, off by default; a
+  re-fit ticks it again when the last fit's record had one) fits the whole
+  record again without it, from as many starts (engine 1.120.0, model.md
+  §2.10m), and the result (`fit-prior-cost`) and the record's **Regional
+  prior** row (`fit-record-prior-cost`) say "Without the prior: KGE′ 0.850
+  (0.800 with it); the prior cost 0.050 of KGE′." (`priorCostLine` in
+  `lib/calibration/fit.ts`), or, when the fit with the prior scored higher,
+  how much, and that the comparison can't separate that from search luck. When no fit on the project can have a prior (no donor basins
   loaded, or no position to compare donors by: `priorUnavailable`, read from
   the prior route's `dataset` and `target`, asked once as the card opens), the
   choice offers only Off, and the hint under it says why
@@ -15136,8 +15165,14 @@ Account, Sign out) is a signed-in frame, and the two pages already carried most 
 `/help/guides/<id>` link in the app's source names a guide (and section) that exists, and every settings path
 the help or the app names (“Model settings → Rain gaps → Flagged rain”, “Calibration → Calibration record”) resolves to a panel
 on that page and its headings (a Model settings path to one of Calibration's panels fails).
-The guides are `lib/help/guides.ts`, with the *Pages, one by one* guides in `lib/help/guides-pages.ts`, a chunk of
-their own (`vite.config.ts` `helpArticlesChunk`), so neither passes check:bundle's per-chunk ceiling.
+`lib/help/guides.ts` holds the guides' types, lookup, markup and search, and `GUIDES` joins their text from one module
+per contents group, in order: `guides-start.ts`, `guides-howto.ts`, `guides-use.ts`, `guides-concept.ts` and
+`guides-pages.ts` (*Pages, one by one*). The glossary's long text is split the same way (`articles.ts` and one
+`articles-<category>.ts` per topic, joined by `content.ts`). `vite.config.ts` `helpArticlesChunk` makes every
+`guides-<group>.ts` and `articles-<topic>.ts` a chunk of its own by its file name, so no chunk of help text nears
+check:bundle's per-chunk ceiling (the guides' chunk sat 2 bytes under it until 2026-11-25). When a module grows towards
+it, move a group or topic into a new such file: it splits off with no config edit. Every /help page still loads all of
+them, in parallel (search, the contents and `[[guide:…]]` labels need every guide).
 
 Each subpage (a guide, the glossary, search) heads its text the same way: a
 breadcrumb (`help/HelpCrumbs.svelte`: *Help › How to › Add a transfer*,
@@ -15205,7 +15240,7 @@ overview's size, at the same height on every page (`e2e/tests/help-pages.spec.ts
   modal and the node and crop sheets, and every way into the farm drawer),
   and *Compare runs and try what-ifs* points at the Compare runs tab.
   An old `/help#<term>` link goes on to the term's glossary topic page.
-- **Guides** (`/help/guides/<id>`, content in `lib/help/guides.ts`): one task
+- **Guides** (`/help/guides/<id>`, content in `lib/help/guides-<group>.ts`, joined by `lib/help/guides.ts`): one task
   or one idea each, with an "On this page" list (a box under the intro; when
   the Help text column is at least 56rem wide, a container query on
   `help-main`, a sticky rail pinned to the column's right edge instead). A

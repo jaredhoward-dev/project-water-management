@@ -5,7 +5,12 @@
 	catchment or, under calibration zones, one zone's own land units: each
 	parameter's p10–p50–p90 beside its value now, the donors kept (distance,
 	weight, their own fit), the method's leave-one-out skill with "No skill"
-	when it has none, and the soil relation's state. "Start from the prior"
+	when it has none, beside the set's flow-space score (KGE′ of the medians on
+	each held-out donor, 362; "No skill" at or below the mean-flow benchmark),
+	how many kept donors' fits ended at a typical bound, the soil relation's
+	state, and a link to the Map's Prior donors layer for the same target
+	(`priorZone=`, priorLinks.ts; the map links back with it, and For opens on
+	it). "Start from the prior"
 	(editors, in the heading's row, marked "Saves now") writes the medians into
 	that target's parameters as one settings revision naming the donors; it
 	waits while the form has unsaved changes. Fit automatically (below) uses the
@@ -14,12 +19,14 @@
 -->
 <script lang="ts">
 	import { untrack } from 'svelte';
+	import { page } from '$app/state';
 	import { api, type Gr4jPrior } from '#lib/api/index.js';
 	import { confirmDialog } from '#lib/components/common/confirm.svelte.js';
 	import ProposalPanel from '#lib/components/proposals/ProposalPanel.svelte';
 	import ProposalSynthetic from '#lib/components/proposals/ProposalSynthetic.svelte';
 	import { fmtNum } from '#lib/format/number.js';
-	import { donorLine, rangeRows, skillText } from '#lib/calibration/prior.js';
+	import { atBoundLine, donorLine, flowSkillText, rangeRows, skillText } from '#lib/calibration/prior.js';
+	import { panelZoneFor, priorDonorsMapHref, priorZoneFromUrl, routeZoneOf } from '#lib/calibration/priorLinks.js';
 
 	let {
 		projectId,
@@ -44,7 +51,8 @@
 	const uid = $props.id();
 	const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-	let zone = $state<string | null>(null);
+	// For opens on the zone the URL names (`priorZone=`, the Map's Prior donors layer links back with it).
+	let zone = $state<string | null>(untrack(() => panelZoneFor(priorZoneFromUrl(page.url.searchParams), zones)));
 	let data = $state.raw<Gr4jPrior | null>(null);
 	let loading = $state(false);
 	let error = $state<string | null>(null);
@@ -60,7 +68,7 @@
 		error = null;
 		try {
 			// With gauge locations, the null choice is the outlet's own zone (`zone=outlet`, issue #659); alone, the headline's.
-			const d = await api.gr4jPrior.get(projectId, { zone: zone ?? (zones.length ? 'outlet' : null) });
+			const d = await api.gr4jPrior.get(projectId, { zone: routeZoneOf(zone, zones.length > 0) });
 			if (mine === seq) data = d;
 		} catch (e) {
 			if (mine === seq) error = msg(e);
@@ -81,6 +89,8 @@
 	const ok = $derived(data?.prior?.ok && data.ranges && data.provenance ? data : null);
 	const rows = $derived(ok ? rangeRows(ok.ranges!, currentParams(zone)) : []);
 	const skill = $derived(ok?.prior?.ok ? skillText(ok.prior.leaveOneOut?.skill, ok.prior.leaveOneOut?.n) : null);
+	const flowSkill = $derived(ok ? flowSkillText(ok.dataset?.looFlow) : null);
+	const boundLine = $derived(ok ? atBoundLine(ok.donors) : null);
 	const soil = $derived(ok?.prior?.ok ? ok.prior.soil : null);
 	const targetName = $derived(zone === null ? (zones.length ? 'the outlet’s own zone' : 'the catchment') : `the zone at ${zones.find((z) => z.nodeId === zone)?.name ?? 'its gauge'}`);
 	const km = (v: number) => fmtNum(v, v >= 10 ? 0 : 1);
@@ -97,7 +107,7 @@
 		busy = true;
 		startError = null;
 		try {
-			await api.gr4jPrior.start(projectId, { zone: zone ?? (zones.length ? 'outlet' : null), ...(ok.dataset ? { dataset: ok.dataset.dataset } : {}) });
+			await api.gr4jPrior.start(projectId, { zone: routeZoneOf(zone, zones.length > 0), ...(ok.dataset ? { dataset: ok.dataset.dataset } : {}) });
 			notice = `GR4J’s parameters for ${targetName} now start from the regional prior’s medians, saved as a settings revision.`;
 			await Promise.all([load(), onApplied()]);
 			await frame?.focusNotice();
@@ -158,10 +168,16 @@
 			<p class="small" data-testid="prior-started">The parameters of {targetName} were started from this prior and haven’t been changed since: the donors’ medians, not a fit.</p>
 		{/if}
 		<p class="small" data-testid="prior-skill">
-			<strong>Skill:</strong>
+			<strong>Skill (parameters):</strong>
 			{skill?.text}{#if skill?.noSkill}
 				<span class="badge badge-warn" data-testid="prior-no-skill">No skill</span>{/if}
 		</p>
+		<p class="small" data-testid="prior-flow-skill">
+			<strong>Skill (flow):</strong>
+			{flowSkill?.text}{#if flowSkill?.noSkill}
+				<span class="badge badge-warn" data-testid="prior-flow-no-skill">No skill</span>{/if}
+		</p>
+		{#if boundLine}<p class="small" data-testid="prior-at-bound">{boundLine}</p>{/if}
 		<div class="table-wrap">
 			<table class="data compact" data-testid="prior-ranges">
 				<caption>Parameter ranges for {targetName}</caption>
@@ -215,6 +231,7 @@
 					</tbody>
 				</table>
 			</div>
+			<p class="small"><a href={priorDonorsMapHref(routeZoneOf(zone, zones.length > 0))} data-testid="prior-map-link">{zones.length ? `Show ${targetName}’s donors on the Map` : 'Show the donors on the Map'}</a>: each outlet sized by its weight.</p>
 		</details>
 		<p class="small muted" data-testid="prior-credits">
 			{ok.dataset?.attribution}{ok.soil && ok.provenance?.x1From === 'soil' ? ` ${ok.soil.attribution}` : ''} Donor set {ok.dataset?.version}, SHA-256 {ok.dataset?.donorSetSha256.slice(0, 12)}…; <a href="/data-sources#grdc-caravan">data sources</a>.
