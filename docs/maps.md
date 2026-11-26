@@ -2143,7 +2143,8 @@ geocoder, so what is typed leaves the app for no one.
   its own country's; a place found by an alternate name is listed by its
   name with the one matched, "Tshabong (also Tsabong), Botswana",
   "Polokwane (also Pietersburg)", `mapSearch.ts` `hitName`), and picking one moves the map and
-  closes the list (Escape closes it too). A quaternary is framed whole; a
+  closes the list (Escape closes it too); either way the focus goes back to
+  the search box. A quaternary is framed whole; a
   point is centred, at zoom 14 for a gauge or dam and 13 for a place. The
   map's centre is then the match, so a Delineate or a placed point from the
   keyboard (Enter at the crosshair) lands on it. Nothing is drawn or saved:

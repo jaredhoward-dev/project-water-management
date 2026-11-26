@@ -129,6 +129,13 @@ test('a viewer finds codes: one match moves the map at once, a quaternary is fra
 	await v.keyboard.press('Escape');
 	await expect(search(v).getByTestId('map-search-results')).toHaveCount(0);
 	await expect(search(v).getByRole('searchbox')).toBeFocused();
+	// A match picked from the keyboard: the list goes with the focused button, and the focus comes back to the box, not the page.
+	await find(v, 'Z01');
+	await search(v).getByTestId('map-search-hit').nth(2).focus();
+	await v.keyboard.press('Enter');
+	await expect(search(v).getByTestId('map-search-status')).toHaveText('Showing Quaternary Z01C on the map.');
+	await expect(search(v).getByTestId('map-search-results')).toHaveCount(0);
+	await expect(search(v).getByRole('searchbox')).toBeFocused();
 	// Picked, the quaternary is framed whole: its box is in view.
 	await find(v, 'Z01B');
 	await expect(search(v).getByTestId('map-search-status')).toHaveText('Showing Quaternary Z01B on the map.');
