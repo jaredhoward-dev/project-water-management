@@ -87,6 +87,8 @@ const RETAINED_AFTER_DELETION: Record<'id' | 'email' | 'name' | 'typedName', Rec
 let db: pg.Client;
 let owner: User;
 let subject: User;
+/** The subject's session from confirming their authenticator: signed in with a code, which deleting the account needs once a factor is on (stepUp.ts requireCodeIfEnrolled). */
+let subjectTwoStep: string;
 let farmer: User;
 let projectId: string;
 let teamId: string;
@@ -438,6 +440,7 @@ beforeAll(async () => {
 	// Codes by email beside it (206): user_email_otp, and a code sent (mfa_email_code, mfa_email_send). A second
 	// factor needs the two-step session the confirm gave (mfa-routes.ts requireCodeForAnotherFactor).
 	const twoStep = confirmed.headers.getSetCookie().find((c) => c.startsWith(`${SESSION_COOKIE}=`))!.split(';')[0]!;
+	subjectTwoStep = twoStep;
 	expect((await anon('POST', '/auth/mfa/email/enrol', { password: 'correct horse' }, twoStep)).status).toBe(202);
 	expect((await anon('POST', '/auth/mfa/email/confirm', { code: lastMailTo(subject.email)!.text.match(/^(\d{6})$/m)![1] }, twoStep)).status).toBe(200);
 	expect((await subject.call('POST', '/auth/mfa/recovery-codes', { code: 'AAAAA-AAAAA' })).status).toBe(400);
@@ -553,9 +556,10 @@ describe('deleting the account leaves no copy of the person outside the document
 		for (const [k, v] of Object.entries(needles())) before[k] = await whereIs(v);
 		// Through "Delete my account" (DELETE /auth/me, issue #112), as the person under RLS: the operator's path
 		// (the schema owner deleting the row) runs the same keys and triggers, checked end to end in account-deletion.db.test.ts.
+		// From the session that gave a code: with two-step sign-in on, a password-only one is refused (mfa_step_up).
 		const res = await app.request('/auth/me', {
 			method: 'DELETE',
-			headers: { cookie: subject.cookie, origin: ORIGIN, 'content-type': 'application/json' },
+			headers: { cookie: subjectTwoStep, origin: ORIGIN, 'content-type': 'application/json' },
 			body: JSON.stringify({ password: 'correct horse' })
 		});
 		expect(res.status).toBe(204);
