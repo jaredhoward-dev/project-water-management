@@ -7547,8 +7547,7 @@ and add `remote_dam_out` to it. Views find the remote legs of a saved run
 with `plannedRemoteLegs`, which plans them as the run does, the river
 off-takes as the run accepts them included (`planOfftakes`, so an off-take
 the run skips because its destination drains into its source is no link
-there either; before this fix such an off-take hid a leg the run had, and
-the farm view lost that unit's remote supply). `cropSupply.test.ts` holds
+there either). `cropSupply.test.ts` holds
 it to the run's `remote_dam_in` series on random networks.
 
 **Checks.** `checkBalance` closes both units' balances with the two

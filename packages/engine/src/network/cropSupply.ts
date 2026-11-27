@@ -220,7 +220,8 @@ export function cropRiverShareOf(n: NetworkNode): number {
  * units have one).
  */
 export function plannedRemoteLegs(nodes: readonly NetworkNode[], transfers: readonly Transfer[]): { from: number; to: number }[] {
-	// Every destination of a split off-take (engine ≥ 1.114.0) is a link, as runModel plans its pieces.
+	// Every destination of a split off-take (engine ≥ 1.114.0) is a link, as runModel plans its pieces
+	// (expandTransferSplits), and only the pieces planOfftakes accepts.
 	const links = planOfftakes(expandTransferSplits(transfers), nodes, [], () => undefined);
 	const remotes = planRemoteSupply(nodes, nodes.map((n) => cropSharesOf(n, []).shares), links, []);
 	return remotes.flatMap((x, to) => (x ? [{ from: x.from, to }] : []));
