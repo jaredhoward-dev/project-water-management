@@ -649,7 +649,8 @@ export const packRoutes = new Hono<AuthEnv>()
 			// before the pack's row lock, in the same order as drafting (no deadlock with a draft that supersedes).
 			await lockProjectRuns(db, id);
 			const pack = await loadPack(db, id, packId, true);
-			if (pack.status !== 'draft') throw new ApiError(409, `an ${pack.status} pack is never deleted; withdraw it instead`);
+			if (pack.status === 'withdrawn') throw new ApiError(409, 'a withdrawn pack is never deleted');
+			if (pack.status !== 'draft') throw new ApiError(409, `${pack.status === 'issued' ? 'an' : 'a'} ${pack.status} pack is never deleted; withdraw it instead`);
 			if (pack.signoffs > 0) throw new ApiError(409, 'a signed draft is kept with its sign-off; withdraw it instead');
 			mustChange(await db.query(`DELETE FROM evidence_pack WHERE project_id = $1 AND id = $2 AND status = 'draft'`, [id, packId]));
 			await recordAudit(db, id, 'pack.deleted', audit(pack));
