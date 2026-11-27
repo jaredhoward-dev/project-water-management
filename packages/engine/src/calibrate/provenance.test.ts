@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { Monthly } from '../calendar';
+import { fromEpochDay, toEpochDay, type Monthly } from '../calendar';
+import { Rng } from '../random';
 import { DEFAULT_UNIT_MAP_PERIOD, defaultDataQualitySettings, defaultProjectSettings, rainCheckLimits, type ProjectSettings, type RainSourcePeriod, type ZeroRainSettings } from '../project';
 import type { CalibrationReport, ScoredPeriod } from './calibrate';
 import type { FitScores } from './objective';
@@ -14,13 +15,15 @@ import {
 	exclusionError,
 	exclusionLabel,
 	exclusionRange,
+	exclusionRanges,
 	exclusionsError,
 	fitRecordCaveats,
 	fitRecordFromReport,
 	fitRecordStatus,
 	resolveFitRecord,
 	sanitizeExclusions,
-	type AutoFitRecord
+	type AutoFitRecord,
+	type CalibrationExclusion
 } from './provenance';
 import { defaultCalibrationRules } from './rulesSettings';
 
@@ -295,6 +298,50 @@ describe('fit record', () => {
 		// An open-ended window bounds nothing on that side: the same WY 2016 is inside it, a change.
 		const open = fitRecordFromReport(report(), { ...ctx, settings: { ...ctx.settings, calibrationStart: '2012-10-01', calibrationEnd: null, calibrationExclusions: [wy] } });
 		expect(calibrationFitStatus({ ...s, calibrationEnd: null, calibrationExclusions: [wy, after], fitRecord: open } as never, 'flow_logger_m3s')).toBe('otherPeriod');
+	});
+
+	it('property (#829 drift check): after random exclusion edits the fit is "fitted" exactly when the window’s excluded days are the fit’s', () => {
+		const window = { calibrationStart: '2012-10-01', calibrationEnd: '2016-09-30' };
+		const d0 = toEpochDay(window.calibrationStart);
+		const days = toEpochDay(window.calibrationEnd) - d0 + 1;
+		const fm = { 'series-1': [{ start: '2014-01-01', end: '2014-02-01', reason: 'logger stolen' }] };
+		const g = new Rng(829);
+		// Ranges reaching up to a year either side of the window, so some are partly or wholly outside it.
+		const range = (): CalibrationExclusion => {
+			if (g.bool(0.25)) return { waterYear: g.int(2011, 2017), reason: 'year' };
+			const a = d0 - 365 + g.int(0, days + 730);
+			return { start: fromEpochDay(a), end: fromEpochDay(a + g.int(0, 120)), reason: `r${g.int(0, 99)}` };
+		};
+		const mask = (list: CalibrationExclusion[]) => Array.from(excludedDayMask(exclusionRanges(list), window.calibrationStart, days)).join('');
+		let same = 0;
+		let other = 0;
+		for (let k = 0; k < 150; k++) {
+			const fitted = Array.from({ length: g.int(0, 4) }, range);
+			const rec = fitRecordFromReport(report(), { ...ctx, settings: { ...ctx.settings, ...window, calibrationExclusions: fitted, flowMissing: fm } });
+			// An edit: the same list reordered and reworded, a range split in two, one dropped, or a new one added.
+			let edited = [...fitted].reverse().map((x) => ({ ...x, reason: `${x.reason} (edited)` }));
+			const pick = g.int(0, 3);
+			if (pick === 1 && edited.length) {
+				const i = g.int(0, edited.length - 1);
+				const x = edited[i]!;
+				const r = exclusionRange(x);
+				const a = toEpochDay(r.start);
+				const b = toEpochDay(r.end);
+				if (b > a) {
+					const cut = a + g.int(0, b - a - 1);
+					edited.splice(i, 1, { start: r.start, end: fromEpochDay(cut), reason: 'first half' }, { start: fromEpochDay(cut + 1), end: r.end, reason: 'second half' });
+				}
+			} else if (pick === 2 && edited.length) edited = edited.filter((_, i) => i !== 0);
+			else if (pick === 3) edited.push(range());
+			const status = calibrationFitStatus({ ...gr4jSettings(), ...window, calibrationExclusions: edited, flowMissing: fm, fitRecord: rec } as never, 'flow_logger_m3s');
+			const want = mask(edited) === mask(fitted) ? 'fitted' : 'otherPeriod';
+			expect(status, `case ${k}: fitted ${JSON.stringify(fitted)}, edited ${JSON.stringify(edited)}`).toBe(want);
+			if (want === 'fitted') same++;
+			else other++;
+		}
+		// Both outcomes are met, so the property is tested both ways.
+		expect(same).toBeGreaterThan(20);
+		expect(other).toBeGreaterThan(20);
 	});
 
 	it('says when the fit no longer describes the settings', () => {
