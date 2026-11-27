@@ -52,6 +52,7 @@ describe('403: a team over its paid seats', () => {
 	let members: User[];
 	let teamId: string;
 	let account: string;
+	let subRef: string;
 	let sub: { planCode: string; status: string; periodStart: string; periodEnd: string; cancelAtPeriodEnd: boolean };
 
 	beforeAll(async () => {
@@ -68,13 +69,15 @@ describe('403: a team over its paid seats', () => {
 		for (const m of members.slice(0, 4)) expect((await admin.call('POST', `/teams/${teamId}/members`, { email: m.email, role: 'member' })).status).toBe(201);
 		const plan = (await admin.call('GET', `/teams/${teamId}/plan`)).body;
 		account = plan.account.id;
+		// Each mock checkout gets its own subscription id (#929): read the one this checkout made.
+		subRef = ((await asOwner(`SELECT external_ref AS r FROM subscription WHERE billing_account_id = $1 AND status = 'active'`, [account])) as { r: string }[])[0]!.r;
 		sub = { planCode: 'team', status: plan.subscription.status, periodStart: plan.subscription.periodStart, periodEnd: plan.subscription.periodEnd, cancelAtPeriodEnd: false };
 		expect(plan.team).toMatchObject({ editorCount: 5, overSeats: null });
 		expect(await overSince(account)).toBeNull();
 	}, 120_000);
 
 	it('a portal cut to 3 seats is recorded, shown on the plan page and refuses a new editor; it clears once editors are viewers', async () => {
-		const { body, signature } = signedDelivery(SECRET, seatsChangedEvent(account, sub, 3, 3));
+		const { body, signature } = signedDelivery(SECRET, seatsChangedEvent(account, subRef, sub, 3, 3));
 		const res = await app.request('/billing/webhook/mock', { method: 'POST', headers: { 'content-type': 'application/json', 'stripe-signature': signature }, body });
 		expect(res.status).toBe(200);
 		expect(await overSince(account)).not.toBeNull();
