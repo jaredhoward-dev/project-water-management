@@ -204,8 +204,26 @@ export const issuedOf = (packs: readonly Pack[], scenarioId: string | null) => p
 /** A pack's page in the workspace. */
 export const packHref = (base: string, projectId: string, packId: string) => `${base}/projects/${encodeURIComponent(projectId)}/packs/${encodeURIComponent(packId)}`;
 
-/** A draft's checklist before issue, from the API's `issue` (an editor's read of a draft), in the order to do them. */
-export function issueChecklist(c: PackIssueChecks): { id: keyof PackIssueChecks | 'registrationChecked'; ok: boolean; done: string; todo: string }[] {
+/**
+ * Where a failing check's way out is, for the pack page to link (null:
+ * nothing to do here): `report`, the run's evidence report, where a pack is
+ * drafted again; `registration`, the Project page's Registration checks
+ * panel, where the check is recorded; `signoff`, Appendix B.2 further down
+ * the pack page (EvidenceReport's `#ev-b2-h`, issue #934), where it is signed.
+ */
+export type IssueCheckFix = 'report' | 'registration' | 'signoff' | null;
+
+/** The id of Appendix B.2's heading (EvidenceReport), which the "Not signed" check links to. */
+export const SIGNOFF_ANCHOR = 'ev-b2-h';
+
+/**
+ * A draft's checklist before issue, from the API's `issue` (an editor's read
+ * of a draft), in the order to do them. `signoffs`, the draft's sign-off count
+ * when known: a draft no one has signed may simply be deleted (packs.ts
+ * refuses only a signed one), so the way out of a report that can't be issued
+ * says so (issue #934); a signed one is withdrawn.
+ */
+export function issueChecklist(c: PackIssueChecks, signoffs?: number): { id: keyof PackIssueChecks | 'registrationChecked'; ok: boolean; done: string; todo: string; fix: IssueCheckFix }[] {
 	const unchecked = c.registrationUnchecked ?? [];
 	// The registration check (167_signers): listed only while the project requires it.
 	const registration = c.registrationCheckRequired
@@ -214,7 +232,8 @@ export function issueChecklist(c: PackIssueChecks): { id: keyof PackIssueChecks 
 					id: 'registrationChecked' as const,
 					ok: unchecked.length === 0,
 					done: 'Each specialist signer’s registration has a current check against the professional register.',
-					todo: `The registration of ${unchecked.join(', ')} hasn’t been checked against the professional register: an owner records the check on the Project tab (Registration checks).`
+					todo: `The registration of ${unchecked.join(', ')} hasn’t been checked against the professional register: an owner records the check on the Project tab (Registration checks).`,
+					fix: 'registration' as const
 				}
 			]
 		: [];
@@ -223,25 +242,35 @@ export function issueChecklist(c: PackIssueChecks): { id: keyof PackIssueChecks 
 			id: 'issuable',
 			ok: c.issuable,
 			done: 'The frozen report may be issued: no check that stops issue fails.',
-			todo: 'The frozen report can’t be issued: a check that stops issue failed when it was drafted. Withdraw it and draft again once the report passes.'
+			todo: `The frozen report can’t be issued: a check that stops issue failed when it was drafted. ${
+				signoffs === 0
+					? 'No one has signed this draft, so simply delete it (or withdraw it), and draft again once the report passes.'
+					: signoffs === undefined
+						? 'Withdraw it (or, while no one has signed it, simply delete it), and draft again once the report passes.'
+						: 'It is signed, so withdraw it, and draft again once the report passes.'
+			}`,
+			fix: 'report'
 		},
 		{
 			id: 'runsVerified',
 			ok: c.runsVerified,
 			done: 'Both runs still carry the server’s stamp.',
-			todo: 'A run it cites no longer matches the server’s stamp, so it can’t be signed or issued.'
+			todo: 'A run it cites no longer matches the server’s stamp, so it can’t be signed or issued.',
+			fix: null
 		},
 		{
 			id: 'errataRecorded',
 			ok: c.errataRecorded,
 			done: 'Its manifest records every known erratum of its runs’ engines.',
-			todo: 'An erratum found since this draft was made applies to its runs, and the manifest doesn’t record it, so it can’t be issued. Draft the pack again to record it.'
+			todo: 'An erratum found since this draft was made applies to its runs, and the manifest doesn’t record it, so it can’t be issued. Draft the pack again to record it.',
+			fix: 'report'
 		},
 		{
 			id: 'signed',
 			ok: c.signed,
 			done: 'Signed off under the current pack statement.',
-			todo: 'Not signed under the current pack statement: a registered professional signs it in Appendix B.2 (again, if the statement changed since).'
+			todo: 'Not signed under the current pack statement: a registered professional signs it in Appendix B.2 (again, if the statement changed since).',
+			fix: 'signoff'
 		},
 		...registration
 	];

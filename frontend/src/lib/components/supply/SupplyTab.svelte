@@ -19,7 +19,7 @@
 	// down. The tables below grow with their rows rather than scrolling in a box.
 	import { fillHeader } from '#lib/components/workspace/headerSlot.svelte.js';
 	import { onDestroy, tick, untrack } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { page } from '$app/state';
 	import type { DailySeries } from '@water-management/engine';
 	import { api, type Run, type RunMeta, type RunSeriesRef } from '#lib/api/index.js';
@@ -230,7 +230,7 @@
 	function choose(e: MouseEvent, id: string) {
 		if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
 		e.preventDefault();
-		void goto(withParam(page.url, UNIT_PARAM, id), { reset: false }).then(() => {
+		void guardedGoto(withParam(page.url, UNIT_PARAM, id), { reset: false }).then(() => {
 			if (!side) chartEl?.scrollIntoView({ block: 'start' });
 		});
 	}
@@ -239,7 +239,7 @@
 	// (‹ at the first unit is disabled, so to the select), and ‹ › can be pressed again and again.
 	function pickUnitById(id: string) {
 		const from = document.activeElement?.id;
-		void goto(withParam(page.url, UNIT_PARAM, id), { reset: false })
+		void guardedGoto(withParam(page.url, UNIT_PARAM, id), { reset: false })
 			.then(() => tick())
 			.then(() => {
 				if (!from?.startsWith('unit-')) return;
@@ -250,7 +250,7 @@
 	function pickRun(id: string) {
 		const q = new URLSearchParams(page.url.search);
 		q.set('run', id);
-		void goto(`?${q}`, { reset: false });
+		void guardedGoto(`?${q}`, { reset: false });
 	}
 
 	// --- the fold: the least supplied few cards, every unit below the target or short this week, and the

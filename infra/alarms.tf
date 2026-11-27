@@ -140,14 +140,15 @@ resource "aws_sns_topic_policy" "alerts" {
 # Every CloudWatch alarm in this root (here, feeds.tf, jobs.tf, reports.tf,
 # ses.tf) is created per var.alarm_tier. The CloudWatch free tier is 10 alarm
 # metrics shared across the whole AWS Organization, and "full" is ~50 here.
-# "essential" keeps the 15 that catch a client-visible outage or a risk to the
-# account (20 with the assistant on: its errors, throttles, failed charges,
+# "essential" keeps the 16 that catch a client-visible outage or a risk to the
+# account (21 with the assistant on: its errors, throttles, failed charges,
 # failed model calls and hourly token spend): SES reputation (AWS pauses sending past its bounce/complaint
 # limits), dead-lettered work on the jobs, mail-events and feed queues, the
 # worker going quiet, RDS running out of disk, the site 5xxing, API errors,
 # the API at its reserved concurrency (throttles: saturation, and spend at
-# the cap), mail that failed after the user was told it was sent and a page
-# that crashed in someone's browser (client_error). A dropped alarm takes
+# the cap), mail that failed after the user was told it was sent, a page
+# that crashed in someone's browser (client_error) and a billing sweep that
+# keeps failing (billing_tick_failed: plans that don't expire or pause). A dropped alarm takes
 # its log metric filter with it: a filter with default_value publishes a
 # custom metric, which has its own 10-metric free tier.
 locals {
@@ -751,6 +752,34 @@ resource "aws_cloudwatch_metric_alarm" "billing_orphan_failed" {
   statistic           = "Sum"
   threshold           = 0
   alarm_description   = "The billing webhook couldn't cancel or refund a subscription whose account was deleted (an orphan, 352): Stripe redelivers the event for about 3 days, and if every attempt fails the customer keeps paying. Search the API's log group for event = billing_webhook and result = orphan_failed (eventId is Stripe's event id). Find the event in Stripe's dashboard (Developers, Events), cancel its subscription now and refund its payments there; the billing report (billing-admin workflow, billing-report) lists any still pending after the retries. docs/deployment.md § Billing alarms."
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+  treat_missing_data  = "notBreaching"
+}
+
+# --- Billing: a tick's billing sweep that keeps failing ----------------------
+# The worker's tick runs five billing sweeps (backend/src/jobs/runner.ts
+# billingStep: staff grant and reverse trial expiry, the dunning lapse, the
+# silent report refund, the pause after a downgrade) before its feeds, alerts
+# and jobs. One that throws no longer stops the tick: it logs
+#   {"event":"billing_tick_step_failed","step":"plan_pause","error":"DatabaseError","code":"40P01"}
+# (no account, no person) and is tried again next tick, so a lone deadlock
+# heals itself. A sweep failing three ticks running means grants that never
+# end, lapses that never drop to Free, or grace periods and pauses that never
+# happen. The tick reports how many failed as the embedded metric
+# BillingStepsFailed (lambda-worker.ts metricLine), on every tier and in
+# shadow mode too: the sweeps run either way. docs/deployment.md § Billing
+# alarms.
+resource "aws_cloudwatch_metric_alarm" "billing_tick_failed" {
+  count               = local.alarms_essential ? 1 : 0
+  alarm_name          = "${local.project}-billing-tick-failed"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 3
+  metric_name         = "BillingStepsFailed"
+  namespace           = "${local.project}/Jobs"
+  period              = 300
+  statistic           = "Sum"
+  threshold           = 0
+  alarm_description   = "A billing sweep in the worker's tick has failed for 15 minutes (staff grant or reverse trial expiry, dunning lapse, report refund or the pause after a downgrade). The rest of the tick still runs. Search the worker's log group for event = billing_tick_step_failed: step names the sweep, code its SQLSTATE. docs/deployment.md § Billing alarms."
   alarm_actions       = [aws_sns_topic.alerts.arn]
   treat_missing_data  = "notBreaching"
 }

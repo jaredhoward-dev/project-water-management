@@ -23,7 +23,7 @@
 	// through `sections` (CropGrids); scenario override mode shows all three
 	// inline the same way.
 	import { tick, untrack } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { closeSettled, openAfterClose, trackClose } from '#lib/nav/closeNav.js';
 	import { page } from '$app/state';
 	import type { ProjectSettings } from '@water-management/engine';
@@ -181,11 +181,11 @@
 	$effect(() => {
 		// Closed (Done, Esc, the ✕, the crop removed): drop `crop` in place, so Back goes to where it was opened from.
 		// The sheet shuts before the URL follows: an open waits for the drop (lib/nav/closeNav.ts).
-		if (!sheetOpen && untrack(() => cropParam)) void trackClose(goto(withoutParam(page.url, 'crop'), { replace: true, reset: false }));
+		if (!sheetOpen && untrack(() => cropParam)) void trackClose(guardedGoto(withoutParam(page.url, 'crop'), { replace: true, reset: false }));
 	});
 	async function openCrop(id: string) {
 		await closeSettled();
-		await goto(withParam(page.url, 'crop', id), { reset: false });
+		await guardedGoto(withParam(page.url, 'crop', id), { reset: false });
 	}
 	function add() {
 		const c = editor.addCrop();

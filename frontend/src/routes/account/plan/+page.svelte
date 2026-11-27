@@ -8,7 +8,7 @@
 	// sit in the farm frame) is sent back to the account page before anything
 	// is read.
 	import { onMount } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { api, type AccountPlan } from '#lib/api/index.js';
@@ -40,7 +40,7 @@
 		plan = await api.billing.mine();
 	}
 	onMount(() => {
-		if (inFarmFrame()) void goto(resolve('account'), { replace: true });
+		if (inFarmFrame()) void guardedGoto(resolve('account'), { replace: true });
 		else void load();
 	});
 </script>

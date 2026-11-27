@@ -12,7 +12,7 @@
 	// never the only cue and no unit is silently missing. A click on a unit opens
 	// it on Hydrological units.
 	import { PUBLIC_TILES_GLYPHS_URL, PUBLIC_TILES_URL } from '$app/env/public';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { page } from '$app/state';
 	import type { RunSummary } from '@water-management/engine';
 	import { api, type MapFeature } from '#lib/api/index.js';
@@ -80,7 +80,7 @@
 
 	/** Shade by: a push, so Back returns to the measure before; the default is left out of the URL. */
 	function choose(m: string) {
-		void goto(m === 'met' ? withoutParam(url, EWR_MAP_MEASURE_PARAM) : withParam(url, EWR_MAP_MEASURE_PARAM, m), { reset: false });
+		void guardedGoto(m === 'met' ? withoutParam(url, EWR_MAP_MEASURE_PARAM) : withParam(url, EWR_MAP_MEASURE_PARAM, m), { reset: false });
 	}
 	/** Hide the map: its measure goes with it. */
 	function hide() {
@@ -88,10 +88,10 @@
 		q.delete(EWR_MAP_PARAM);
 		q.delete(EWR_MAP_MEASURE_PARAM);
 		const s = q.toString();
-		void goto(`${url.pathname}${s ? `?${s}` : ''}${url.hash}`, { reset: false });
+		void guardedGoto(`${url.pathname}${s ? `?${s}` : ''}${url.hash}`, { reset: false });
 	}
 	function pick(nodeId: string) {
-		void goto(supplyHref(runId, { unit: nodeId, hash: 'res-farm' }));
+		void guardedGoto(supplyHref(runId, { unit: nodeId, hash: 'res-farm' }));
 	}
 
 	const shading = $derived(features && units ? ewrShading(units, features, measure) : null);
@@ -117,7 +117,7 @@
 		{#if open}
 			<button type="button" class="btn btn-sm" aria-expanded="true" aria-controls="ewr-map-body" onclick={hide}>Hide the map</button>
 		{:else}
-			<a class="btn btn-sm" href={withParam(url, EWR_MAP_PARAM, '1')} data-sveltekit-noscroll data-sveltekit-keepfocus aria-expanded="false" aria-controls="ewr-map-body">Show the map</a>
+			<a class="btn btn-sm" href={withParam(url, EWR_MAP_PARAM, '1')} data-sveltekit-reset="false" aria-expanded="false" aria-controls="ewr-map-body">Show the map</a>
 		{/if}
 	</div>
 	<p class="small muted lead">

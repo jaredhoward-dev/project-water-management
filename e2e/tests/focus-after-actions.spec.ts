@@ -133,6 +133,7 @@ test('removing a hydrological unit from its sheet drops it from the URL', async 
 	void owner;
 	const project = await seedRunnableProject(page.request, 'Remove from sheet');
 	const upper = project.model.nodes.find((n) => n.name === 'Upper farm')!;
+	const lower = project.model.nodes.find((n) => n.name === 'Lower farm')!;
 	await page.goto(`/projects/${project.id}?tab=network`);
 	await page.getByRole('button', { name: 'Edit Upper farm' }).click();
 	await expect(page).toHaveURL(new RegExp(`[?&]edit=${upper.id}`));
@@ -141,7 +142,10 @@ test('removing a hydrological unit from its sheet drops it from the URL', async 
 	await answerConfirm(page, true);
 	await expect(page).not.toHaveURL(/[?&]edit=/);
 	await expect(page).not.toHaveURL(/[?&]node=/);
-	await expect(page.getByRole('heading', { name: 'All hydrological units' })).toBeFocused();
+	// The focus goes to the All hydrological units row now in its place: the next one (ui.md § Network, nodeRemovedFocus).
+	const nextRow = page.locator(`#node-list-${lower.id}`);
+	await expect(nextRow).toContainText('Lower farm');
+	await expect(nextRow).toBeFocused();
 });
 
 test('a link to a deleted scenario or run says so and offers the newest, not a Try again', async ({ page, owner }) => {

@@ -12,7 +12,7 @@
 	import { basePath } from '#lib/nav/base.js';
 	import { page } from '$app/state';
 	import FarmShell from '#lib/components/farm/FarmShell.svelte';
-	import { farmReturn } from '#lib/components/farm/load.js';
+	import { farmReturn, farmReturnPage } from '#lib/components/farm/load.js';
 	import { hashId, holdAnchor } from '#lib/help/anchor.js';
 	import { FARMER_HELP } from '#lib/help/farmer.js';
 	import { helpTranslations, type HelpTranslation } from '#lib/help/translations.js';
@@ -50,10 +50,23 @@
 	);
 	const paragraphs = (s: string) => s.split(/\n{2,}/);
 
-	// Back to the farm page the words were opened from (?from=, only ever a farm page's own address:
-	// load.ts farmReturn), so a farmer with several farms doesn't land on the list; else the farms.
+	// Back to the farm or account page the words were opened from (?from=, only ever a farm page's own address
+	// or an account page: load.ts farmReturn), so a farmer with several farms, or one reading what an alert email
+	// is from their alert settings, doesn't land on the list; else the farms.
 	const from = $derived(farmReturn(page.url.searchParams.get('from')));
-	const back = $derived(from ? { href: `${basePath()}${from}`, label: t('My hydrological unit') } : { href: resolve('farm'), label: t('Your hydrological units') });
+	// Named for the page it returns to (the dam, Why?, who-decides or an account page, else the farm's own page).
+	const backLabel = (from: string) => {
+		const sub = farmReturnPage(from);
+		if (sub === 'dam') return t('Your dam');
+		if (sub === 'why') return t('Why?');
+		// The page's full title wraps to two or three lines in the header (#942): the back link names it short.
+		if (sub === 'who-decides') return t('Who decides?');
+		if (sub === 'alerts') return t('Alert emails');
+		if (sub === 'invitations') return t('Invitations', {}, 'page title');
+		if (sub === 'account') return t('Account');
+		return t('My hydrological unit');
+	};
+	const back = $derived(from ? { href: `${basePath()}${from}`, label: backLabel(from) } : { href: resolve('farm'), label: t('Your hydrological units') });
 
 	// The SPA renders after navigation, so jump to #id once the list exists,
 	// and hold the entry there while the page settles (lib/help/anchor.ts).

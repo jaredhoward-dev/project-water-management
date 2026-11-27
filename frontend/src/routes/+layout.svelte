@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { onMount, untrack, type Snippet } from 'svelte';
-	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { basePath } from '#lib/nav/base.js';
 	import { page } from '$app/state';
@@ -17,7 +16,7 @@
 	import { followRetry } from '#lib/components/common/loadState.js';
 	import { pageStart } from '#lib/a11y/focusPage.js';
 	import ConfirmHost from '#lib/components/common/ConfirmHost.svelte';
-	import { installLeaveGuard } from '#lib/nav/leaveGuard.js';
+	import { installLeaveGuard, guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { installBackScroll } from '#lib/nav/backScroll.js';
 	import { installCloseNav } from '#lib/nav/closeNav.js';
 	import AppShell from '#lib/components/layout/AppShell.svelte';
@@ -98,9 +97,9 @@
 		if (!session.checked || bootError) return;
 		if (access === 'login') {
 			const next = page.url.pathname + page.url.search;
-			goto(resolve(`login?next=${encodeURIComponent(next)}`), { replace: true });
+			guardedGoto(resolve(`login?next=${encodeURIComponent(next)}`), { replace: true });
 		} else if (access === 'leave') {
-			goto(safeNext(page.url.searchParams.get('next'), resolve('')), { replace: true });
+			guardedGoto(safeNext(page.url.searchParams.get('next'), resolve('')), { replace: true });
 		}
 	});
 
@@ -197,7 +196,7 @@
 			if (isLandingRoute(page.route.id)) {
 				const choice = m.resolveLocale(chosen, m.readStoredLocale());
 				const here = page.params.lang;
-				if (!here && choice !== m.DEFAULT_LOCALE) await goto(`${basePath()}${addressFor(page.route.id, choice)}`, { replace: true });
+				if (!here && choice !== m.DEFAULT_LOCALE) await guardedGoto(`${basePath()}${addressFor(page.route.id, choice)}`, { replace: true });
 				else if (here && m.isLocale(here) && !m.readStoredLocale()) m.storeLocale(here);
 			} else await m.setLocale(m.resolveLocale(chosen, m.readStoredLocale()));
 			i18nReady = true;

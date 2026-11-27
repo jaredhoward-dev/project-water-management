@@ -34,7 +34,7 @@
 <script lang="ts">
 	import DayInput from '#lib/components/common/DayInput.svelte';
 	import { onMount, untrack } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { page } from '$app/state';
 	import { withParam } from '#lib/workspace/overlays.js';
 	import { landOnAnchor } from '#lib/help/anchor.js';
@@ -294,7 +294,7 @@
 		const stopAnchors = followAnchors({
 			page: 'settings',
 			land: (id) => (id.startsWith('set-') ? landOnAnchor(id) : undefined),
-			forward: (to) => void goto(to, { replace: true, reset: false })
+			forward: (to) => void guardedGoto(to, { replace: true, reset: false })
 		});
 		return stopAnchors;
 	});

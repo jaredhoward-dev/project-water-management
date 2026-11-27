@@ -27,6 +27,16 @@ export function issueHref(issue: Pick<ModelIssue, 'area' | 'itemId'>): string {
 	return `?tab=transfers#${transferAnchor(issue.itemId!)}`;
 }
 
+/**
+ * Whether following issueHref keeps the scroll and focus (`data-sveltekit-reset="false"`): a node's or a
+ * crop's problem opens its sheet, a modal that takes the focus, over the page as it is (ui-playbook.md §
+ * a link that keeps the scroll and focus). A transfer's goes to its card further down the tab, a change of
+ * view: SvelteKit scrolls to the `#tr-…-h` heading and TransfersTab focuses it, so it keeps neither.
+ */
+export function issueKeepsPlace(issue: Pick<ModelIssue, 'area' | 'itemId'>): boolean {
+	return !!issue.itemId && (issue.area === 'network' || issue.area === 'crops');
+}
+
 /** The anchor id of a transfer's card heading (TransfersTab), which issueHref links to. */
 export const transferAnchor = (id: string) => `tr-${id}-h`;
 

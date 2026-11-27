@@ -164,3 +164,43 @@ export function runOptionLabel(
 	if (r.legacy) parts.push('workbook comparison');
 	return parts.join(' · ');
 }
+
+/**
+ * The cards waiting on a project picked with no run to choose (issue #924): the project's runs came back empty or
+ * failed to load, so the URL, and the comparison below, still hold the card's previous run. A pick whose runs are
+ * still loading isn't counted yet (it resolves to a run, or to this, in a moment).
+ */
+export function waitingSides<S extends string>(
+	picked: Readonly<Record<S, string | null>>,
+	runs: Readonly<Record<string, readonly unknown[] | undefined>>,
+	errors: Readonly<Record<string, string | undefined>>,
+	sides: readonly S[]
+): S[] {
+	return sides.filter((s) => {
+		const p = picked[s];
+		return !!p && (runs[p]?.length === 0 || !!errors[p]);
+	});
+}
+
+/**
+ * What the comparison says while a card waits (waitingSides): which card, the project it names and why it has no
+ * run, and that everything below still compares the previous runs. null when no card waits.
+ */
+export function staleComparisonNote(waiting: readonly { card: string; project: string; failed: boolean }[]): string | null {
+	if (!waiting.length) return null;
+	const parts = waiting.map((w) => `${w.card}'s project, ${w.project}, ${w.failed ? "couldn't load its runs" : 'has no runs'}`);
+	const list = parts.length === 1 ? parts[0]! : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
+	return `${list}, so the comparison below is still of the runs chosen before. Pick a project with runs, or go Back.`;
+}
+
+/**
+ * The search of the standalone page's Back to runs (issue #924): the Runs tab of the baseline's project, on the run being looked at
+ * there: what-if 1 when it is that project's (the run the Runs tab's Compare with published came from), else the
+ * baseline. No run when neither is that project's.
+ */
+export function runsTabSearch(projectId: string, a: RunRef | null, b: RunRef | null): string {
+	const run = [b, a].find((r) => r && r.projectId === projectId)?.runId;
+	const q = new URLSearchParams({ tab: 'runs' });
+	if (run) q.set('run', run);
+	return `?${q}`;
+}

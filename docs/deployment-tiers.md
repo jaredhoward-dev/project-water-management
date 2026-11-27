@@ -145,7 +145,7 @@ sqs_endpoint_az_count            = 2
 s3_endpoint_az_count             = 2
 ```
 
-(`infra/tests/guardrails.tftest.hcl` run `full_tier` plans exactly this.)
+(`infra/tests/guardrails_edge.tftest.hcl` run `full_tier` plans exactly this.)
 
 Cost:
 

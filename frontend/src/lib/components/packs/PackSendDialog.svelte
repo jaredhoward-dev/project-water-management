@@ -9,6 +9,7 @@
 	// an email linking the pack's page (sign-in needed to download) and the
 	// verify page. Never a file, never a link that works on its own.
 	import { untrack } from 'svelte';
+	import { resolve } from '$app/paths';
 	import { api, type AuthorityDelegate } from '#lib/api/index.js';
 	import { session } from '#lib/auth/session.svelte.js';
 	import Dialog from '#lib/components/common/Dialog.svelte';
@@ -68,7 +69,10 @@
 			<p class="muted" role="status">Loading the members…</p>
 		{:else if members !== null && !acting.length}
 			<p class="alert alert-info" data-testid="pack-send-none">
-				No other member acts for the responsible authority. The authority confirms who acts for it on the Project page (“Acts for the authority”); a proposal alone isn’t enough.
+				No other member acts for the responsible authority. The authority confirms who acts for it on the Project page, in <a
+					href={resolve(`projects/${encodeURIComponent(projectId)}?tab=project#delegates-h`)}
+					data-testid="pack-send-delegates">Acts for the authority</a
+				>; a proposal alone isn’t enough.
 			</p>
 		{:else if acting.length}
 			<fieldset>

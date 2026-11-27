@@ -1925,7 +1925,7 @@ were swept and who was mailed.
   with (`keyed_on`, `first_affected`, `fixed_in`). Public facts; a signed-in
   person reads it (`erratum_sweep_read`; never an API key, which sees only its
   own series), only `app_erratum_sweep` writes it.
-- **`erratum_notice`**: one email per erratum, project and recipient, ever
+- **`erratum_notice`**: one notice per erratum, project and recipient, ever (411: the notices a sweep claims for one owner and project go out as one email listing every erratum, each keeping its own outcome)
   (the primary key), with `run_count` (the project's runs in range when
   swept) and pack_notice's life (pending → sending → sent | skipped |
   failed). Personal: cascades with the account, in the data export
@@ -3904,10 +3904,12 @@ never to a farmer, contributor or viewer.
 | Table | Holds |
 | --- | --- |
 | `plan` | The tiers, `code` (`free`, `pro`, `team`) primary key, `name`, `price_monthly_minor`, `price_annual_minor` (ZAR cents), `currency` (`ZAR`), `limits`, `features`, `trial_days`, `active`. Written only by migrations; a signed-in person reads it (331; the public pricing route through `app_billing_plans()`) |
-| `billing_account` | A person's or a team's: `id`, `kind` (`user`, `team`), `user_id` (cascade) or `team_id` (cascade), exactly one set and each unique (which covers both keys), `projects_created` (every project it has ever billed, Free's lifetime count), `external_customer_ref` (328: the payment provider's customer, Stripe's `cus_…`, unique, NULL until the first Stripe checkout; written only by `app_billing_set_customer_ref`), `assistant_member_max_pct` (336: the most of a Team account's monthly assistant dollars one person may use, 1–100, default 50; written only by `app_team_set_assistant_share` (339), for the team's admins), `over_free_since` (341: when the account, its plan ended, was first seen past Free's live catchments; the 14-day grace starts here; null within its plan), `kept_project_id` (341: no foreign key, since every key to project cascades; a deleted project's id is never among the live ones; the catchment the owner keeps live, written only by `app_billing_keep_catchment`), `created_at` |
+| `billing_account` | A person's or a team's: `id`, `kind` (`user`, `team`), `user_id` (cascade) or `team_id` (cascade), exactly one set and each unique (which covers both keys), `projects_created` (every project it has ever billed, Free's lifetime count), `external_customer_ref` (328: the payment provider's customer, Stripe's `cus_…`, unique, NULL until the first Stripe checkout; written only by `app_billing_set_customer_ref`), `assistant_member_max_pct` (336: the most of a Team account's monthly assistant dollars one person may use, 1–100, default 50; written only by `app_team_set_assistant_share` (339), for the team's admins), `over_free_since` (341: when the account, its plan ended, was first seen past Free's live catchments with billing enforced; the 14-day grace starts here; null within its plan, and always null in shadow mode, where the tick clears it, 409), `kept_project_id` (341: no foreign key, since every key to project cascades; a deleted project's id is never among the live ones; the catchment the owner keeps live, written only by `app_billing_keep_catchment`), `created_at` |
 | `project_plan_pause` | A live catchment whose operations are paused past Free's limit after the grace (341, issue #641; [billing.md § Pausing after a downgrade](./billing.md#pausing-after-a-downgrade)): `project_id` (primary key, cascade), `paused_at`. A marker only: the feed scheduler, the automatic and forecast runs and the alert checks skip the project while it exists; nothing the user set is changed. Members read it (`app_has_role(…, 'viewer')`, SELECT only); written only by `app_plan_pause_sync` (owner-only), reached from the worker's `app_plan_pause_tick`, the subscription trigger and `app_billing_keep_catchment` |
-| `subscription` | An account's plan over time: `billing_account_id` (cascade), `plan_code`, `status` (`trialing`, `active`, `past_due`, `canceled`, `expired`), `seats`, `period_start`, `period_end`, `trial_end`, `cancel_at_period_end`, `provider` (`mock`, `manual`, `stripe`), `external_ref` (unique per provider), `created_at`, `billing_interval` (332: `month` or `year`, null before 332, for the staff grant and when the provider's isn't a plain month or year). A partial unique index, `subscription_one_live_per_account`, allows one live (trialing, active, past_due) row per account; canceled and expired rows stay as history, so an account can take the same plan again. **No live subscription means Free** |
-| `usage_counter` | Monthly counts per account: (`billing_account_id`, `kind` (`reports`, `packs_issued`), `month`) primary key, `qty`. `month` is the first day of the month in Africa/Johannesburg (`app_billing_month()`) |
+| `subscription` | An account's plan over time: `billing_account_id` (cascade), `plan_code`, `status` (`trialing`, `active`, `past_due`, `lapsed` (405: past_due past the dunning limit, not live, revived by a payment), `canceled`, `expired`), `seats`, `period_start`, `period_end`, `trial_end`, `cancel_at_period_end`, `provider` (`mock`, `manual`, `stripe`), `external_ref` (unique per provider), `created_at`, `billing_interval` (332: `month` or `year`, null before 332, for the staff grant and when the provider's isn't a plain month or year), `past_due_since` and `price_minor` (405: when it went past_due; the recurring total last accepted, [billing.md § Price check](./billing.md#price-check)). A partial unique index, `subscription_one_live_per_account`, allows one live (trialing, active, past_due) row per account; canceled and expired rows stay as history, so an account can take the same plan again. **No live subscription means Free** |
+| `usage_counter` | Monthly counts per account: (`billing_account_id`, `kind` (`reports`, `packs_issued`), `month`) primary key, `qty`. `month` is the first day of the month in Africa/Johannesburg (`app_billing_month()`). A report's count is written by `app_report_count_usage(report)` (408: the requester, in the transaction that queued it, once) and given back, never below 0, when the report ends failed (`report_usage_refund` on `report`, `job_report_usage_refund` on `job`, the tick's `app_report_usage_refund_silent()`), to the account and month recorded in `report_usage` ([billing.md § Shadow mode](./billing.md#shadow-mode)) |
+| `report_usage` | Where each report was counted (408, issue #939): `report_id` (primary key, cascade from `report`), `billing_account_id` (set null, indexed), `month` (the SAST month counted), `refunded_at` (when the count was given back because the report ended failed; cleared if it finished after all). Owner only: RLS on, no policy, no privilege to `water_app` (the catalogue's `OWNER_ONLY`), so the project's viewers, who read `report`, never see the account; written only by `app_report_count_usage` and the refund triggers (`report_usage_refund` on `report`, `job_report_usage_refund` on `job`) and the tick's `app_report_usage_refund_silent()` |
+| `first_manual_run` | When each person's first manual run was saved (407, issue #939): `user_id` (primary key, cascade from `app_user`), `first_run_at`. Written once by the `AFTER INSERT` trigger on `model_run` (`first_manual_run_record`, SECURITY DEFINER, `trigger = 'manual'` with a creator), `ON CONFLICT DO NOTHING`, so later runs never move it and deleting runs never removes it; backfilled from the manual runs stored when 407 ran. Owner only: RLS on, no policy, no privilege to `water_app` (the catalogue's `OWNER_ONLY`); read by `billing_metrics_people` (activation) and the person's export (`app_subject_first_manual_run()`, the caller's own row) |
 | `renewal_notice` | The annual renewal notice's sent-log (329, CPA s14): (`subscription_id` (cascade), `period_end`) primary key, so one notice per subscription and period ever; `user_id` (cascade, indexed), `status` (`pending`, `sending`, `sent`, `skipped`, `failed`), `attempts`, `created_at`, `claimed_at`, `locked_until`, `sent_at`, `settled_at`, `reason`. Written only by the worker's `app_renewal_notice_queue`, `_claim` and `_finish` (`alert_worker_context`); `water_app` reads its own rows (`renewal_notice_own`). Never purged: it is the record that the notice went ([billing.md § Renewal notice](./billing.md#renewal-notice)) |
 | `billing_notice` | The owners' plan emails' sent-log (346, issue #641): (`billing_account_id` (cascade), `kind` (`grace`, `paused`, `trial_ending`), `about` (the occurrence: `over_free_since` or `trial_end`), `user_id` (cascade, indexed)) primary key, so one email per occurrence and recipient ever; `status` (`pending`, `sending`, `sent`, `skipped`, `failed`), `attempts`, `created_at`, `claimed_at`, `locked_until`, `sent_at`, `settled_at`, `reason`. Written only by the worker's `app_billing_notice_queue`, `_claim` and `_finish` (`alert_worker_context`); `water_app` reads its own rows (`billing_notice_own`). Never purged: it is the record that the email went ([billing.md § Plan emails](./billing.md#plan-emails)). `app_plan_pause_preview(account)` gives the account's owner 341's order of its live catchments (kept, paused), with no id for one they can't read |
 | `billing_grant_log` | The staff grant's audit log (330, issue #641): `id`, `billing_account_id` (cascade; indexed with `created_at`), `subscription_id` (set null, indexed), `action` (`grant`, `revoke`, `expire`), `plan_code`, `until` (the grant's end, null for until revoked; for a revoke, when), `reason` (1–500 characters), `granted_by` (the operator's name, `expiry`, `invoice` for a paid B2B invoice's grant, `reverse trial`, or `checkout` for a reverse trial a paid plan ended, 344), `created_at`. Append-only: written only by `app_staff_grant_plan` and `app_staff_revoke_grant` (the schema owner's, caller's rights, revoked from `water_app` and PUBLIC), the worker's `app_staff_grant_expire` (`alert_worker_context`) and, for a paid B2B invoice, `app_billing_apply` (335, no user); `water_app` reads the rows of accounts it may read (`app_billing_account_readable`). A grant is a `provider = 'manual'` subscription; the partial index `subscription_manual_end_idx` serves the expiry scan ([billing.md § Staff grants](./billing.md#staff-grants)) |
@@ -3923,7 +3925,7 @@ never to a farmer, contributor or viewer.
   Pro R899 / R8,990 (15 catchments, 5 editors, $15 assistant); Team
   R2,499 / R24,990 (50 catchments, 3 seats, 3 packs a month, $15 a seat).
 - `project.billing_account_id` (nullable, set null, indexed): a team
-  project bills to its team's account, any other to its creator's.
+  project bills to its team's account, any other to its creator's (one leaving a team: to its creator while still a direct owner, else to the owner taking it out; 400, [billing.md § Who the plan belongs to](./billing.md#who-the-plan-belongs-to)).
   Backfilled by `billing_backfill()` (owner-only, idempotent); set on insert
   and on a move into or out of a team by `project_billing_account_set`
   (SECURITY DEFINER; it makes the account if missing and counts the project
@@ -4044,11 +4046,13 @@ never to a farmer, contributor or viewer.
   `water_app` (a call as `water_app` is `42501`), pinned `search_path`:
   - `billing_metrics_accounts(month) → TABLE`: per billing account, its
     plan today, when its person or team started, its catchments today, and
-    the month's runs (`model_run.created_at` in the SAST month), reports
+    the month's runs (`model_run.created_at` in the SAST month; `trigger`
+    `manual` only since 402, so a live catchment's automatic runs aren't
+    activity), reports
     (`usage_counter`) and assistant cost, unpriced turns and latest spend
     (`assistant_usage`, its UTC month).
   - `billing_metrics_people(month) → TABLE`: per person, the address,
-    sign-up, verified or not, first run, and whether the sign-up's SAST
+    sign-up, verified or not, first run (a `manual` one, 402, from `first_manual_run` since 407, so deleted runs don't hide it), and whether the sign-up's SAST
     month is `month` and its SAST day.
   The month's edges are Africa/Johannesburg's whatever the session's time
   zone (`src/billing/metrics.db.test.ts`).
@@ -4061,7 +4065,8 @@ through one function, which is the **only writer of subscription status**.
 
 | Table | Holds |
 | --- | --- |
-| `billing_event` | One row per event acted on: (`provider` (`mock`, `manual`, `stripe`), `event_id`) primary key, `type`, `received_at`, `account_id` (set null when the account goes; indexed), `outcome` (`applied`, `recorded`, `conflict`, `unknown_account`; 327 added `stale`; 352 `orphan_pending` and `orphan_refunded`). **Owner-only**: RLS on, no policy, no privilege for `water_app`; only `app_billing_apply` and 352's orphan functions write it. Indexed on `received_at`, which the tick's purge reads: rows received more than 90 days ago are deleted (327 `app_purge_billing_events`, worker context only, never under 4 days, past Stripe's 3-day redelivery window) |
+| `billing_event` | One row per event acted on: (`provider` (`mock`, `manual`, `stripe`), `event_id`) primary key, `type`, `received_at`, `account_id` (set null when the account goes; indexed), `outcome` (`applied`, `recorded`, `conflict`, `unknown_account`; 327 added `stale`; 352 `orphan_pending` and `orphan_refunded`). 399 added `external_ref`: the subscription id an applied-type event named (null for the record-only types), so a delete that arrives before its subscription keeps the late `created` from going live; a partial index on (`provider`, `external_ref`) over the deletes. **Owner-only**: RLS on, no policy, no privilege for `water_app`; only `app_billing_apply` and 352's orphan functions write it. Indexed on `received_at`, which the tick's purge reads: rows received more than 90 days ago are deleted (327 `app_purge_billing_events`, worker context only, never under 4 days, past Stripe's 3-day redelivery window) |
+| `billing_conflict` | 406 (issue #928): one row per subscription event `app_billing_apply` refused for its price: `id`, `billing_account_id` (cascade; indexed), `provider`, `external_ref`, `event_id` (unique per provider), `reason` (`unpriced`, `discount`, `currency`, `interval`, `amount`), `plan_code`, `billing_interval`, `seats`, `amount_minor`, `currency`, `expected_minor`, `held`, `created_at`, `resolved_at`, `resolved_by` and `resolution` (all three set together: `event` when a later event for the ref applies, else the operator by hand through `app_billing_conflict_resolve`, schema owner only; a partial index over the open rows). **Owner-only**: RLS on, no policy, no privilege for `water_app`; read by `pnpm dev:billing:report`. Resolved rows go 90 days after resolution with `app_purge_billing_events` ([billing.md § Price check](./billing.md#price-check)) |
 | `subscription.billing_interval` (332) | How often the subscription bills (`month`, `year`), from the payload's `interval`: absent keeps the stored value, `null` clears it, anything else is `invalid`. The plan page works out the subscription's total from it ([billing.md § Billing interval and editor count](./billing.md#billing-interval-and-editor-count)) |
 | `subscription.last_event_at` (327) | The provider's time (`eventCreated`) of the newest event applied to the subscription; null before 327, for the staff grant, and while no event carried a time. Bookkeeping for ordering, not in "Download my data" |
 
@@ -4088,7 +4093,9 @@ cancelAtPeriodEnd, externalRef, interval?, eventCreated? }` (`interval`: `month`
 - `conflict`, changing nothing: the ref belongs to another account; a live
   status would make a second live subscription on the account under another
   ref (the one-live index, 323); or a live status for a ref already
-  `canceled` or `expired` (a late or out-of-order update after its delete).
+  `canceled` or `expired` (a late or out-of-order update after its delete),
+  or for a ref not held yet whose `subscription.deleted` is already recorded
+  (399: the delete arrived first).
   The exception (344): a live Pro or Team subscription from `mock` or
   `stripe` ends the account's reverse trial (`manual` + `trialing`) in the
   same transaction, `expired` with its end moved to now and logged in
@@ -5110,6 +5117,25 @@ LOCKED`), deletes each PDF from storage and settles it
 (`app_report_pdf_erasures_settle`: removed entries go, failed ones count an
 attempt); both functions refuse anything but the worker's context
 (`reports/erasure.ts`, `reports/erasure.db.test.ts`; issue #903).
+
+`app_report_pdf_orphaned(p_project, p_report)` (398_report_pdf_orphan.sql,
+issue #911, SECURITY DEFINER, granted to `water_app`): whoever just stored a
+report's PDF asks it, the inline render in its job's transaction and the
+worker when the renderer Lambda's answer arrives (`acceptRenderResult`, from
+the answer's `projectId`). When no report row of that id exists anywhere
+(deleted while it rendered, perhaps after its erasure already ran) it queues
+the ids here and answers true; the tick removes the object. When the row
+exists it does nothing: its PDF is live, or a later deletion queues it
+through the trigger. Definer so that RLS can't make a row the caller can't
+see (a deleted requester's) read as gone. It answers only a signed-in caller
+or the worker on the Lambda's answer, which marks its transaction
+`app.worker_context = 'on'` (`reports/schedule.ts`); any other session with no
+user (a public route, a pre-sign-in flow) and an API key's session are
+refused. And only for a
+project that exists or is in `erasure_log` (deleted mid-render). A unique
+`(project_id, report_id)` keeps one entry per object key: a key already
+queued is re-queued under a new id with its attempts reset, so a settle of
+a claim in flight (by the old id) can't drop it.
 
 ### Reference loads (192_feature_names_reference_load.sql, 248_reference_load_provenance.sql)
 

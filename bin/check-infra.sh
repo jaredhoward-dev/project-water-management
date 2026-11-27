@@ -27,6 +27,9 @@
 #   bin/check-infra.sh -filter=tests/logging.tftest.hcl
 #                                           passes its arguments to `terraform test`
 #   CHECK_INFRA_JOBS=4 bin/check-infra.sh   test files at once (default: the CPUs)
+#   CHECK_INFRA_SHARD=2/4 bin/check-infra.sh
+#                                           only shard 2 of 4's test files (CI's matrix;
+#                                           infra/scripts/terraform-shards.mjs packs them)
 #
 # With no arguments the test files run in parallel, each in its own copy of
 # the checked tree (`terraform test` runs a file's run blocks one by one, and
@@ -90,9 +93,21 @@ fi
 terraform validate
 
 files="$(cd "$work" && ls -S tests/*.tftest.hcl 2>/dev/null || true)"
+shard="${CHECK_INFRA_SHARD:-}"
+if [ -n "$shard" ]; then
+	# One CI shard's share of the files (terraform.yml's matrix), packed by
+	# infra/scripts/terraform-shards.mjs; always run file by file, since a
+	# bare `terraform test` would run every file.
+	[ "$#" -eq 0 ] || { echo "check-infra: CHECK_INFRA_SHARD runs its own files; it takes no terraform test arguments" >&2; exit 2; }
+	files="$(node "$src/scripts/terraform-shards.mjs" "$shard" "$work/tests")"
+fi
 count="$(printf '%s\n' "$files" | grep -c . || true)"
 jobs="${CHECK_INFRA_JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)}"
-if [ "$#" -gt 0 ] || [ "$count" -le 1 ] || [ "$jobs" -le 1 ]; then
+if [ -n "$shard" ] && [ "$count" -eq 0 ]; then
+	echo "check-infra: shard $shard has no test files"
+	exit 0
+fi
+if [ -z "$shard" ] && { [ "$#" -gt 0 ] || [ "$count" -le 1 ] || [ "$jobs" -le 1 ]; }; then
 	terraform test "$@"
 	exit
 fi
@@ -114,7 +129,7 @@ run_file() {
 }
 export -f run_file
 export CHECK_INFRA_BASE="$base" CHECK_INFRA_WORK="$work"
-echo "terraform test: $count files, $jobs at a time"
+echo "terraform test: $count files${shard:+ (shard $shard)}, $jobs at a time"
 printf '%s\n' "$files" | xargs -P "$jobs" -I{} bash -c 'run_file "$1"' _ {}
 
 failed=0

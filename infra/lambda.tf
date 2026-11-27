@@ -189,6 +189,14 @@ resource "aws_lambda_function" "backend" {
       # sharing the Stripe account is never refunded from here (docs/billing.md
       # § Deleting an account). The site's domain: one per deployment.
       BILLING_ENVIRONMENT = var.domain_name
+      # Enforcement and the reverse trial (docs/billing.md § BILLING_ENFORCED,
+      # § The reverse trial): off by default, the exact strings the backend
+      # reads (billing/enforced.ts, billing/reverseTrial.ts). BILLING_ENFORCED
+      # is the same on the worker (jobs.tf) and the assistant (assistant.tf);
+      # only the API grants a trial. variables.tf refuses reverse_trial
+      # without billing_enforced.
+      BILLING_ENFORCED = var.billing_enforced ? "true" : "false"
+      REVERSE_TRIAL    = var.reverse_trial ? "true" : "false"
 
       # Email (ses.tf, docs/deployment.md § Email). MAIL_TRANSPORT must be set:
       # the default `log` sends nothing.
@@ -454,6 +462,12 @@ resource "aws_lambda_function" "migrate" {
       # to the runtime's default, so a load's parse (geo/referenceLoad.ts
       # MAX_TEXT_BYTES) has the room the caps were measured against.
       NODE_OPTIONS = "--max-old-space-size=${floor(var.migrate_memory_mb * 0.85)}"
+      # Owner actions that change a subscription (billing-grant, -revoke,
+      # -invoice) set app.billing_enforced from it on their session
+      # (billing/enforced.ts setOwnerBillingEnforced), so the pause sync their
+      # writes fire doesn't drop the pause markers (docs/billing.md § Pausing
+      # after a downgrade). The same value as the API's.
+      BILLING_ENFORCED = var.billing_enforced ? "true" : "false"
     }
   }
 

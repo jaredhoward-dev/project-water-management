@@ -28,6 +28,15 @@ and `team_id` is set, each unique).
   a team project to its team's account, any other project to its creator's
   own account. New projects get it from a trigger; existing ones were
   backfilled (`323_billing`).
+- **A project leaving its team** (400_project_leaves_team_billing) bills to
+  its creator while they are still a direct owner of it; else to the person
+  taking it out (the route makes them a direct owner); else (the schema
+  owner's SQL) to its longest-standing direct owner. Leaving a team takes
+  the leaver's roles on its projects and only a team admin takes a project
+  out (#900), so before 400 a creator who had left could be billed for a
+  catchment they couldn't open, its live operations using their Free plan's
+  one live catchment. Only the moment it leaves picks the account; a later
+  change of owners moves nothing. `billing/moveOutOwner.db.test.ts`.
 - An account's live `subscription` gives its plan. **No live subscription
   means Free.** In Phase 1 no one has a subscription, so every account is on
   Free.
@@ -73,7 +82,8 @@ All in `backend/migrations/323_billing.sql`; columns and RLS in
 | --- | --- |
 | `plan` | The plans (`free`, `pro`, `team`): name, monthly and annual price in ZAR cents, `limits` (a closed, CHECK-validated key set; a JSON `null` is unlimited), `features`, trial days, `active`. Written only by migrations |
 | `billing_account` | One per person or team that has needed one, and its lifetime count of projects created |
-| `subscription` | An account's plan, status, seats and period; at most one live per account. Written by the webhook (326) and the staff grant (330) |
+| `subscription` | An account's plan, status (`lapsed`: overdue past the [dunning limit](#dunning-limit), not live), seats, period, `past_due_since` and accepted `price_minor` (405); at most one live per account. Written by the webhook (326) and the staff grant (330) |
+| `billing_conflict` | Subscription events refused for their price (406, owner-only): the operator's open actions ([§ Price check](#price-check)) |
 | `billing_grant_log` | The staff grant's audit log (330): every grant, revocation and expiry ([§ Staff grants](#staff-grants)) |
 | `usage_counter` | Monthly counts per account and kind (`reports`, `packs_issued`); `month` is the first day of the month in Africa/Johannesburg |
 
@@ -100,12 +110,36 @@ so a count commits or rolls back with it (`backend/src/billing/entitlements.ts`
 `countUsage`):
 
 - **Server PDF reports**: one per report queued, on demand or by a schedule
-  (`reports/store.ts` `createReport`). A schedule fire that was already queued
-  (its dedupe key) counts nothing.
+  (`reports/store.ts` `createReport`, through `app_report_count_usage`, 408).
+  A schedule fire that was already queued (its dedupe key) counts nothing.
+  - **Which account.** A report counts against the account its project is
+    billed to **when the report is queued**, in that SAST month, both
+    recorded in the owner-only `report_usage` (one row per counted report;
+    the project's viewers, who read every column of `report`, never see the
+    account). A project moved
+    to another account afterwards (into or out of a team) leaves the reports
+    already queued on the old account, and its refunds go back there; reports
+    queued after the move count against the new one. This is the rule a
+    limit is checked by: when the report is asked for, against the account it
+    would use up. (A moved project's runs and assistant spend in the metrics
+    report are read through its current account, since those aren't
+    counters.)
+  - **A report that ends failed gives its count back** (408, issue #939), so
+    a renderer outage doesn't use up anyone's allowance once limits are
+    enforced. Each of the three ways a report ends failed (`reportState` in
+    `reports/store.ts`) refunds it, once (`report_usage.refunded_at`): its
+    status set `failed` (the renderer's failure) or its job gone while
+    unfinished, by the trigger `report_usage_refund`; its job `dead` (attempts
+    used up), by `job_report_usage_refund`; the renderer silent past the
+    hour's answer window, by the worker tick's
+    `app_report_usage_refund_silent()` (`reportsRefunded`). The refund goes
+    to the account and month that were counted, never below 0, even after
+    the month has passed. A refunded report that finishes after all (a late
+    answer) is counted again. `billing/reportUsage.db.test.ts`.
 - **Issued evidence packs**: one per issue (`evidence/packs.ts`, the issue
   route). Drafts, sign-offs, withdrawals and verify never count.
 - **Catchments**: not a counter; `app_account_plan` counts the account's
-  active projects (not archived, not deleted).
+  projects (projects have no archived state yet, and a deleted one is gone).
 - **Assistant tokens and cost**: summed from `assistant_usage` (above), in
   its UTC month. `usage.assistantTokens` is the weighted tokens;
   `usage.assistantCost` is the dollar cost the backend records per turn
@@ -134,6 +168,14 @@ limits built to refuse on it are a Team's editor seats
 gate ([§ Verified email on Free](#verified-email-on-free)); everything else still only counts. Set it in
 `backend/.env.development.local` to see the enforced wording locally
 ([run-locally.md](./run-locally.md#one-time-setup)).
+
+**In production** it is Terraform's `billing_enforced` (bool, default
+`false`), which sets `BILLING_ENFORCED` to the exact string `"true"` or
+`"false"` on the API, the worker and the assistant: every Lambda that opens a
+`withUser` transaction, since `db/tx.ts` sets `app.billing_enforced` from it
+and the SQL limits read that (`infra/lambda.tf`, `jobs.tf`, `assistant.tf`;
+pinned by `infra/tests/guardrails_baseline.tftest.hcl`). The operator turns it on
+through [deployment.md § Turning on enforcement](./deployment.md#turning-on-enforcement).
 
 ## Assistant dollar caps
 
@@ -367,9 +409,11 @@ output never goes into an issue, a PR, a chat or an agent's transcript.
 
 | Metric | How it is worked out | Threshold (the issue's) |
 | --- | --- | --- |
+| Open price conflicts (printed second) | Rows of `billing_conflict` (406) not yet resolved, whatever the month, oldest first: the provider, subscription ref, account id, reason, plan, interval and seats, the amount carried and expected, held or not, the event id and when. Ids and amounts only, so `redact` keeps them ([§ Price check](#price-check)) | any one → not held: refund or grant it; held: check it in Stripe's dashboard |
 | Orphans past the retries (printed first) | Rows of `billing_event` still `orphan_pending` (352) more than 3 days after they were received, whatever the month: the provider, its event id, type and age, oldest first. Stripe has stopped redelivering them, so nothing will cancel or refund them but the operator ([deployment.md § Billing alarms](./deployment.md#billing-alarms)). No account or person: the account is gone | any one → finish it in Stripe's dashboard |
-| Activation | Verified sign-ups of the month (SAST) with a model run within 7 days of signing up. Sign-ups under 7 days old are left out and counted as pending | < 30% → fix onboarding first |
-| Active Free accounts near / at each limit | Active = a run, a server report or assistant use this month on the account's projects. Near ≥ 80% of the limit, at ≥ 100%, for reports (5), the assistant's dollars ($1), catchments (Free has no limit, so none) and live catchments (1: the share at the live-catchment limit). Catchments and live catchments are counted **today**; live is 338's count (`app_live_catchments_in_use`: an enabled feed or alert rule, automatic runs on, or a publication; [§ Live catchments](#live-catchments-free)), so an account past its limit from before enforcement counts as at it, and an idle account with a live catchment isn't in the share | > 15% at reports → 10 a month; < 3% at the monthly assistant cap → room to raise |
+| Teams over their paid seats (403) | Team accounts with `over_seats_since` set whose live Team plan pays for fewer seats than `app_team_seats_in_use` counts now (a stale marker is never listed), whatever the month: the account and team ids, editors, seats and since when, longest over first. Ids and numbers only, so redaction keeps them | any one → the team's new editors are refused; check the portal's quantity setting (§ Team seats) |
+| Activation | Verified sign-ups of the month (SAST) with a model run of their own (`model_run.trigger` `manual`: the live model, a scenario or a calibration they asked for, never a live catchment's automatic or forecast run; 402) within 7 days of signing up. The first run is read from `first_manual_run` (407, issue #939), written by a trigger when the person's first manual run is saved and kept when runs are trimmed by the run cap or deleted (owner only; in the person's data export as `firstManualRun`; deleted with the account). Sign-ups under 7 days old are left out and counted as pending | < 30% → fix onboarding first |
+| Active Free accounts near / at each limit | Active = a run someone asked for (`manual`, as above: an account whose only runs this month are automatic is idle, 402), a server report or assistant use this month on the account's projects. Near ≥ 80% of the limit, at ≥ 100%, for reports (5), the assistant's dollars ($1), catchments (Free has no limit, so none) and live catchments (1: the share at the live-catchment limit). Catchments and live catchments are counted **today**; live is 338's count (`app_live_catchments_in_use`: an enabled feed or alert rule, automatic runs on, or a publication; [§ Live catchments](#live-catchments-free)), so an account past its limit from before enforcement counts as at it, and an idle account with a live catchment isn't in the share | > 15% at reports → 10 a month; < 3% at the monthly assistant cap → room to raise |
 | Reverse trial → paid within 30 days | The reverse trials (342) that **began in the report's SAST month**: `billing_grant_log` `grant` rows by `reverse trial`, one per account (one trial per canonical email). Paid = the account's first paid plan at or after the trial's start: a subscription from a payment provider (`stripe`, or `mock` locally) whose first payment was taken: `active`, `past_due` or `canceled` (so a plan bought and later cancelled counts; not `trialing`, and not `expired`, Stripe's `incomplete_expired`, a first payment never made), or a paid B2B invoice's grant (`billing_grant_log` `grant` by `invoice`, 335); a staff grant is not paid. Converted when it came at most 30 days after the start. A trial under 30 days old is left out and counted as pending (with how many of those already pay). A deleted account's trial goes with it (`billing_grant_log` cascades) | |
 | Assistant spend per account | p50 and p90 (nearest rank) per plan over the accounts that spent this month, with the total and any unpriced turns (then a floor) | Paid: > 20% at $15 → top-up packs sooner |
 | Free spend by accounts under 7 days old | Its share of the month's Free assistant spend. `assistant_usage` is monthly, so an account counts as new when its latest spend of the month came under 7 days after it started: **an upper bound** | > 50% → escalation (b) |
@@ -412,17 +456,21 @@ checkout and the portal are [§ Checkout and portal](#checkout-and-portal).
 
 | Provider | Webhooks | Use |
 | --- | --- | --- |
-| `mock` (code default) | Stripe-shaped events signed with the committed dev-only `BILLING_WEBHOOK_SECRET` in `backend/.env.development` | local dev and tests: the whole path with no Stripe account |
-| `manual` | none (`404`) | subscriptions the operator records by hand; production's setting until Stripe is set up |
+| `mock` (the code default off Lambda) | Stripe-shaped events signed with the committed dev-only `BILLING_WEBHOOK_SECRET` in `backend/.env.development` | local dev, the tests and the e2e server: the whole path with no Stripe account |
+| `manual` (the code default on Lambda) | none (`404`) | subscriptions the operator records by hand; production's setting until Stripe is set up |
 | `stripe` | Stripe's signed events, checked with `BILLING_WEBHOOK_SECRET` (the endpoint's `whsec_…`) | production, once the operator has the account |
 
-Any other value names no provider, and every webhook is `404`. It never falls
-back to the mock: feohledger's billing doc records how a mistyped provider
-name that resolved to its signature-free mock opened its public webhook. The
-production check (`config/production.ts`) refuses an unset `BILLING_PROVIDER`
-(the mock) and anything but `manual` or `stripe` on the API Lambda, and with
-`stripe` it requires a real `BILLING_WEBHOOK_SECRET` (32+ characters, not a
-`dev-only-` placeholder). Terraform sets `BILLING_PROVIDER = "manual"` on the
+Unset (or blank) is the mock off Lambda and `manual` on Lambda
+(`billingProviderName`, keyed on `AWS_LAMBDA_FUNCTION_NAME`), so the mock never
+serves in AWS, and a backend released before the Terraform apply that sets the
+variable still starts, with no webhooks. Any other value names no provider,
+and every webhook is `404`. It never falls back to the mock: feohledger's
+billing doc records how a mistyped provider name that resolved to its
+signature-free mock opened its public webhook. The production check
+(`config/production.ts`) accepts `BILLING_PROVIDER` unset on the API Lambda
+(that is `manual`) and refuses any value set but `manual` or `stripe`, and
+with `stripe` it requires a real `BILLING_WEBHOOK_SECRET` (32+ characters, not
+a `dev-only-` placeholder). Terraform sets `BILLING_PROVIDER = "manual"` on the
 API (`infra/lambda.tf`).
 
 ### Signature check
@@ -451,6 +499,15 @@ The mock signs the same way with the dev key, so the same check serves both.
 checkout. Every payload carries the event's `created` time as `eventCreated`
 (ISO), which orders the events (§ Event order below).
 
+An event whose object has no `billing_account_id` at all (on the
+subscription, the session, or the invoice and its subscription) is about
+something this app never made: an invoice sent from the dashboard ([§ Staff
+grants](#staff-grants)), a payment link's session, a subscription made by
+hand. It is answered `200 ignored` and never written, like a type we don't act
+on: a `400` would have Stripe redeliver it for 3 days, and no retry could
+change it. A `billing_account_id` that isn't a UUID, or a missing
+`plan_code`, period or status, is still `invalid`.
+
 | Stripe type | Normalised type | Effect in 326 |
 | --- | --- | --- |
 | `customer.subscription.created`, `.updated` | `subscription.updated` | the account's subscription upserted by (provider, `externalRef`) |
@@ -478,7 +535,8 @@ count](#billing-interval-and-editor-count)). An invoice's subscription is read f
 Stripe's statuses map as follows:
 
 - `trialing`, `active`, `past_due` and `canceled` keep their names.
-- `unpaid` becomes `past_due`: still owed, not ended.
+- `unpaid` becomes `past_due`: still owed, not ended. The app's own limit
+  lapses it after 14 days ([§ Dunning limit](#dunning-limit)).
 - `incomplete_expired` becomes `expired`.
 - `incomplete` and `paused` grant nothing new, so they become
   `subscription.pending`, recorded only.
@@ -566,6 +624,108 @@ after it was received (`ORPHAN_RETRY_DAYS`, `metrics.ts` `staleOrphans`).
 The operator then cancels and refunds it in Stripe's dashboard
 ([deployment.md § Billing alarms](./deployment.md#billing-alarms)).
 
+### Dunning limit
+
+`405_billing_dunning_and_price.sql` (issue #927). Stripe's `past_due` and
+`unpaid` both arrive as `past_due`, which is live, so without a limit of the
+app's own a subscription Stripe leaves unpaid (its "mark unpaid" or "leave
+past due" setting after the retries) would keep its paid plan for ever.
+
+- `subscription.past_due_since` is when it first went `past_due` (the event's
+  `eventCreated`, else now). Later `past_due` updates keep it; any other
+  status clears it. Subscriptions already `past_due` when 405 ran count from
+  then.
+- The job tick (`app_billing_dunning_lapse`, worker only) moves one overdue
+  for longer than `DUNNING_GRACE_DAYS` (`packages/engine/src/plans.ts`, **14
+  days**, matching the downgrade grace; the operator to confirm the number)
+  to the status **`lapsed`**. It is not live, so everything that reads the
+  live subscription (entitlements, the plan page, [§ Pausing after a
+  downgrade](#pausing-after-a-downgrade)) treats the account as on Free, as
+  after a cancellation, and 341's trigger starts the 14-day downgrade grace
+  before any catchment is paused. The plan page says "Payment overdue; paid
+  features paused until it is paid".
+- `lapsed` is not ended: Stripe still holds the subscription. A further
+  `past_due` keeps it lapsed (and its clock); `active` or `trialing` (the
+  customer paid) revives it at once, with every paused catchment; a delete
+  cancels it. Deleting the account cancels it at the provider like a live
+  one (`cancelOnDelete.ts`), a B2B invoice is still refused beside it, and
+  the billing report counts it as paid.
+- Tests: `billing/dunningPrice.db.test.ts` (through the mock webhook): kept a
+  day short of the limit, lapsed past it, kept lapsed, lifted by a payment,
+  cancelled by a delete, worker only.
+
+### Price check
+
+405 too (issue #928). The plan used to come only from checkout's `plan_code`
+metadata, so a subscription edited in Stripe's dashboard (another price, a
+coupon) was trusted as that plan. The normaliser now sends the
+subscription's `price` (`provider/stripe.ts` `priceOf`): `totalMinor`, the
+items' `unit_amount` × quantity summed; `currency`; and `discounted`. Checkout
+makes its prices inline from the plan table (`price_data`), so there are no
+price ids to match; the amount, currency and interval are the check.
+
+- A live status (`trialing`, `active`, `past_due`) applies only when the
+  total is what the plan table sets for its plan, interval and seats (the
+  base price plus each seat past `seats_included` at the extra-seat price,
+  the sum 335's invoice check uses), in the plan's currency, with no
+  discount; or, for a subscription already held on the same plan and
+  interval, the total accepted before (`subscription.price_minor`), so a
+  list price raised by a later migration never strands a subscriber on the
+  old one. A seat change at an old price then needs the operator.
+- Anything else is a **`conflict`**: nothing written to the subscription, a
+  `200`, a warn line ([§ The route](#the-route)), and a row in the
+  owner-only `billing_conflict` (406): the account, the provider's
+  subscription ref and event id, the reason (`amount`, `currency`,
+  `discount`, `interval`, `unpriced`), the plan, interval and seats claimed,
+  the amount and currency carried, the amount expected, and whether a
+  subscription was held. No card data, name or address. A new subscription
+  gets no plan, though the provider may be charging it (the operator refunds
+  it or grants the plan, [§ Staff grants](#staff-grants)); a held one keeps
+  its last accepted state. Every open row is listed in `pnpm
+  dev:billing:report` and its JSON (`billingConflicts`, [§ Metrics and the
+  abuse report](#metrics-and-the-abuse-report)) until a later event for that
+  subscription applies (a corrected price, a cancellation of a held one),
+  which resolves it (`resolved_by` `event`). A delete for a subscription
+  never held leaves it open: the charge may still need a refund.
+- **Resolving one by hand.** Once the operator has refunded or granted it in
+  the provider's dashboard (or accepted the price), `pnpm
+  dev:billing:conflict --resolve <id> --reason "…" [--by <name>]` (the id is
+  the `#` in `--list`; `--list --all` shows the resolved ones too) runs
+  `app_billing_conflict_resolve` as the schema owner. The row keeps who
+  resolved it, why and when (`resolved_by`, `resolution`, `resolved_at`): its
+  audit trail, operator-only like the row (unlike a staff grant's reason, the
+  customer never reads it). An unknown id or one already resolved is
+  refused. Production runs the same as the `billing-conflicts` and
+  `billing-conflict-resolve` owner actions through the billing-admin
+  workflow, ids only ([deployment.md § Owner
+  actions](./deployment.md#owner-actions)). Retention: open rows stay until
+  resolved or the account is deleted (cascade); resolved rows go 90 days
+  after resolution with the tick's billing event purge
+  ([security.md](./security.md) lists it).
+- An item whose price can't be read (no `unit_amount`: a tiered or metered
+  price; no currency; items in different currencies) sends a `null` total,
+  which never applies. An ended status (`canceled`, `expired`) applies
+  whatever its price. A payload with no `price` at all (no item carries a
+  price: the older fixtures, tests calling `app_billing_apply` directly) is
+  not checked.
+- **Coupons and discounts (decided here):** checkout offers none, so a
+  discount (`discount`, or a non-empty `discounts`) can only come from the
+  dashboard, and a subscription carrying one is a conflict, whatever its
+  size: a 100 % coupon would otherwise be free Pro. A discount the operator
+  means to give is a staff grant (or a B2B invoice at the agreed amount)
+  instead. Revisit if checkout ever takes promotion codes.
+- Fixtures: `subscription-pro-priced` (Pro monthly at the plan's price),
+  `subscription-pro-repriced` (a dashboard price), `subscription-pro-coupon`
+  (a 50 % coupon); the Team fixtures now carry their currency.
+- Tests: `billing/provider/stripe.test.ts` (`priceOf`), `billing/metrics.test.ts`
+  (the report's conflict lines) and `billing/dunningPrice.db.test.ts`: the
+  conflict rows with their reasons and amounts, held or not, listed by the
+  report and resolved by a later applied event, resolved by hand with who and
+  why kept (an unknown id and a second resolve refused), the purge keeping open rows,
+  `water_app` reading none; a dashboard price, another currency and
+  a coupon refused, new or held; the plan's price applied; a price accepted
+  before kept; Team's extra seats summed; an ended status applied.
+
 ### Event order
 
 Stripe doesn't deliver events in the order it created them, so 327 orders
@@ -583,6 +743,13 @@ applied to it (`subscription.last_event_at`):
   unchanged. A malformed one (not ISO 8601 with an offset) is `invalid`.
 - A delete is never stale: it is the provider's last word, and a late live
   update after it is already a `conflict`.
+- A delete that arrives before anything else about its subscription (a
+  subscription cancelled within seconds, or its `created` retried after a
+  failure) has no row to cancel, so it is `recorded`. 399 keeps the
+  subscription id on the event row (`billing_event.external_ref`), and a
+  later live `created` or update for that id is a `conflict` that writes
+  nothing, so the account never gets a plan nothing would ever end. An ended
+  status for it still applies.
 
 ### Retention
 
@@ -603,6 +770,8 @@ The fixtures are `checkout-completed`, `subscription-created` (trialing),
 `subscription-updated` (active), `subscription-past-due`,
 `subscription-deleted`, `subscription-team-seats` (Team, 5 seats as two items),
 `subscription-team-yearly` (the same, billed yearly),
+`subscription-pro-priced`, `subscription-pro-repriced` and
+`subscription-pro-coupon` ([§ Price check](#price-check)),
 `invoice-paid` and `invoice-payment-failed`.
 
 ### Tests
@@ -610,7 +779,7 @@ The fixtures are `checkout-completed`, `subscription-created` (trialing),
 - `billing/provider/signature.test.ts`: good, tampered, stale and future
   signatures, the wrong secret, several `v1` values, malformed headers.
 - `billing/provider/stripe.test.ts`: each type, the status map, both API eras,
-  and the refusals.
+  the refusals, and an object with no `billing_account_id` ignored.
 - `billing/provider.test.ts`: the provider choice.
 - `billing/webhook.test.ts`: the route with the database mocked.
 - `config/production.security.test.ts`: production refuses the mock.
@@ -623,8 +792,9 @@ The fixtures are `checkout-completed`, `subscription-created` (trialing),
   and an event redelivered after its account went is a plain `duplicate`.
 - `billing/apply.db.test.ts`: `app_billing_apply` itself (326, 327) as
   `water_app` with no user: once only, the status moves, conflicts, unknown
-  accounts and invalid payloads, stale updates by `eventCreated`, and the
-  tick's purge of `billing_event`.
+  accounts and invalid payloads, stale updates by `eventCreated`, a delete
+  that arrives before the subscription (399), and the tick's purge of
+  `billing_event`.
 - `mail/templates.renewal.test.ts`: the renewal email's words in English
   and Afrikaans (plan, the period end in South African time under the
   skewed `TZ`, the rand amount, the plan page link), and wholly English when
@@ -662,8 +832,11 @@ a monthly period (≤ 31 days) is never picked, and a trial isn't either (it is
 
 **When.** Each worker tick (after the jobs, [architecture.md § Background
 work](./architecture.md)) takes today's date in South Africa and queues every
-such subscription whose period ends on a date with **45 to 60** business days
-strictly between today and it (neither day counts). So the notice is queued
+such subscription whose **last paid day** has **45 to 60** business days
+strictly between today and it (neither day counts). The last paid day is the
+SAST date of the instant before the period ends (`period_end − 1 µs`, 408,
+issue #930), so a period ending exactly at SAST midnight is filed under the
+day before, the last day paid for, not the day after it. So the notice is queued
 on the first tick 60 business days out; a missed day (an outage, a
 subscription recorded late) still sends, down to 45. The floor is 45, not
 the Act's 40, to leave room for up to five public holidays declared after
@@ -697,7 +870,7 @@ was queued is `skipped`, as is one to an unconfirmed or suppressed address.
 
 **What it says** (`renewalNoticeMail`, keys `mail.renewal.*` in
 `backend/src/mail/i18n/en.ts`): the plan's name, the date this year of it
-ends and renews (South African date), the next year's price
+ends (its last paid day, the SAST date of `period_end − 1 µs`, 408) and the date it renews (`period_end`'s South African date; a period ending at 00:00 SAST on 1 March ends on 28 February and renews on 1 March), the next year's price
 (`plan.price_annual_minor`, as rand), how to cancel (the plan page,
 `/account/plan`, which goes on to the billing portal; cancelling before the
 date charges nothing more), and the Act's right to end a yearly plan at any
@@ -827,6 +1000,17 @@ seats* control ([ui.md § Plan and usage](./ui.md#plan-and-usage)):
 4. **The seats.** A whole number from the plan's included seats to 50
    (`MAX_CHECKOUT_SEATS`), different from the current count; `400`
    otherwise, and for any other field.
+   With `BILLING_ENFORCED` on, never fewer than the team's editors in use
+   (`team.editorCount`, `app_team_seats_in_use`): `409 seats_below_editors`
+   with `{ seats, editors }`, before any provider call. The seat guard
+   (§ Team seats) never takes a seat from someone already holding one, so
+   without this a team could buy seats, fill them and drop back to the
+   included 3 while keeping every editor. Make some editors viewers first.
+   Off (shadow mode) it is counted, never refused. The count is read before
+   the provider call, so an editor added in that moment can still leave the
+   team one over: the webhook's seat write then counts it under the seat
+   guard's lock and records the team over its seats (§ Team seats, 403), and
+   the seat guard refuses the next new editor.
 5. **The provider** changes the subscription, outside any transaction. The
    route writes **no seats**: the provider's `customer.subscription.updated`
    brings them back through the webhook and `app_billing_apply`, as
@@ -960,6 +1144,31 @@ invites"; Enforcement design, "Editors per catchment / Team seats").
   of every transaction (and sets nothing when off, so off costs no round
   trip). Nothing from a request reaches the setting. The committed dev and
   e2e env files leave it off.
+- **Over its seats (403, issue #926).** Stripe's customer portal can change
+  a subscription item's quantity, around this route's check. Every write of
+  a subscription's seats, status or plan (the webhook's `app_billing_apply`,
+  a staff grant, an invoice grant) fires `subscription_seats_sync`, which
+  takes the same account lock as the seat guard and counts the editors in use
+  in a fresh statement: more than the paid seats sets
+  `billing_account.over_seats_since` (kept from the first time), within them
+  clears it. The lock orders a seat cut against an editor add either way: an
+  add that commits first is counted by the cut (recorded over), a cut that
+  commits first is read by the add's guard (refused, enforced). The seat
+  guard refuses any new seat while the team is over, as before; nobody loses
+  a seat. With enforcement off (shadow mode, 404) the seat triggers still
+  reach the guard for a change that gives a new seat, and the guard records
+  the team over its seats rather than refusing. The plan page reads
+  `team.overSeats { seats, editors, since }` from `app_account_plan`, worked
+  out at each read (null within its seats), and shows a note on the Plan
+  card: how many editors over, that everyone keeps access but no one new can
+  be made an editor, and to add seats with *Change seats* or make editors
+  viewers (`plan.ts` `overSeatsNotice`; `billing-seats.spec.ts`). The
+  operator report lists the teams over their seats (§ Metrics and the abuse
+  report). The job tick clears the marker once editors are made viewers or
+  seats bought. **What the portal should allow:** configure Stripe's customer
+  portal without quantity changes on the extra-seat item (seats change
+  through *Change seats*, which refuses a cut below the editors in use); the
+  record is the backstop if it is ever allowed.
 - **Confirming an address.** `markVerified` accepts the person's pending
   invites through `app_accept_invites`, which takes each invite in its own
   subtransaction (360_accept_invites_each): one that would pass a Team's
@@ -974,13 +1183,18 @@ invites"; Enforcement design, "Editors per catchment / Team seats").
   the Invitations page (`/account/invitations`), a translated page, words it
   from its code, so `plan_limit` is in `ERROR_CODES` with words in
   `frontend/src/lib/i18n/apiError.ts` (English and Afrikaans).
-- **Tests.** `billing/teamSeats.db.test.ts` (the count and its exclusions,
+- **Tests.** `billing/seats.db.test.ts` (a reduction below the editors in
+  use refused only when enforced, down to them passing),
+  `billing/teamSeats.db.test.ts` (the count and its exclusions,
   the app role refused the functions, off by default, refused on and passed
   after a seat is added, existing seat holders, a project moving in, a Free
   team, the invite left pending, only the refused one of several left
   pending and the rest accepted, any other refusal on confirming rethrown,
   a project billed to the team's account with no `team_id`, two parallel
-  grants of the last seat), `db/tx.db.test.ts` (the flag set only for
+  grants of the last seat), `billing/overSeats.db.test.ts` (a portal cut
+  replayed through the mock webhook recorded, shown and refusing a new
+  editor, cleared at the tick; the cut and an add racing in both orders; a
+  paused catchment's move), `db/tx.db.test.ts` (the flag set only for
   `BILLING_ENFORCED=true`) and `http/errors.test.ts` (402 with only the
   numbers).
 
@@ -1027,6 +1241,15 @@ the Free pool … Once per canonical email."
 Why both settings: a Pro trial means nothing while no limit refuses, and
 granting it then would spend the person's once-per-email trial for nothing.
 
+**In production** `REVERSE_TRIAL` is Terraform's `reverse_trial` (bool,
+default `false`), set as the exact string `"true"` or `"false"` on the API,
+the only Lambda that grants a trial (`infra/lambda.tf`). Plan refuses
+`reverse_trial = true` without `billing_enforced = true` (a validation in
+`infra/variables.tf`, tested in `infra/tests/guardrails_baseline.tftest.hcl`), so the
+pair can't ship as a switch that grants nothing. The steps, with the web
+release that sets `PUBLIC_REVERSE_TRIAL`: [deployment.md § Turning on
+enforcement](./deployment.md#turning-on-enforcement).
+
 **Granting.** When an address is verified for the first time (the
 verification link, a password reset that proves an unverified inbox, or a
 sign-up through an invite for that address), the backend calls
@@ -1064,7 +1287,13 @@ Stripe trials are `stripe`). Only a verified address qualifies.
 canonical address and when, never the address and no link to the account,
 so it outlives the account's deletion: deleting the account and signing up
 again gets no second trial (`security.md` § Personal information says what
-the record is). "Download my data" shows the person their current
+the record is). The claim follows the person to a new address (401): when
+an address changes and the old one's canonical form is claimed, the new
+one's is claimed too (a trigger on `app_user.email`), so changing the
+address, deleting the account and signing up again with the new address
+gets no second trial either. Before 401 it did, since the trial had only
+ever claimed the address it started on. An account whose old address was
+never claimed (no trial yet) claims nothing by moving. "Download my data" shows the person their current
 address's claim (`reverseTrialClaim`, 396).
 
 **At the end.** The worker's tick moves each trial past its `trial_end` to
@@ -1073,7 +1302,7 @@ subscription) and nothing is deleted. The Plan page already reads
 `subscription.trialEnd` and shows "Trial ends 7 Dec 2026" for a trialing
 subscription (`components/billing/plan.ts` `subscriptionLine`).
 
-**The pricing page and the trial** (decided 2026-11-24). The public
+<a id="the-pricing-page-and-the-trial"></a>**The pricing page and the trial** (decided 2026-11-24). The public
 pricing page ([ui.md § Pricing page](./ui.md#pricing-page)) says "14 days
 of Pro free when you sign up, no card needed. Then Free, unless you choose
 a plan." on Pro, the number from `PLAN_FIGURES`' `trialDays`
@@ -1086,7 +1315,8 @@ whether the trial is on: a build-time flag, `PUBLIC_REVERSE_TRIAL`
 page offers nothing today. The operator sets the repository variable
 `PUBLIC_REVERSE_TRIAL=true` and releases the web in the same change that
 turns on `REVERSE_TRIAL` and `BILLING_ENFORCED`, and unsets it (and
-releases again) when turning them off ([deployment.md](./deployment.md)).
+releases again) when turning them off ([deployment.md § Turning on
+enforcement](./deployment.md#turning-on-enforcement)).
 Rejected: reading `/billing/plans` from the page at load (the page would
 show the line only after a request, flash on every visit and need the API
 up for a static page), and leaving it off the page (the first thing a
@@ -1160,7 +1390,8 @@ Pro already), and its day meter counts the trial's day and its whole $2
 
 **Tests.** `billing/reverseTrial.db.test.ts` (off grants and claims nothing;
 on, a first verification starts 14 days of Pro, logged and on the plan page;
-a Gmail canonical duplicate and the same address after deletion get none; an
+a Gmail canonical duplicate and the same address after deletion get none,
+nor a new address the account moved to after its trial (401); an
 unverified caller gets none and is granted once verified; a live plan keeps
 it; the tick ends it to Free with the project still there; the claim table
 closed to `water_app`; the trial caps refuse only enforced, wait to 00:00 SAST
@@ -1174,13 +1405,23 @@ event never ends a trial), `billing/checkout.test.ts` (`checkoutBlockedBy`),
 
 ### Stripe
 
-Three form-encoded POSTs over `fetch` (`provider/stripeApi.ts`):
+Plain `fetch` calls to Stripe's API (`provider/stripeApi.ts`, whose
+header lists every one): `POST`s form-encoded, `GET` and `DELETE` with
+their parameters in the query. Checkout and the portal are three:
 `/v1/customers` (metadata `billing_account_id`, idempotency key per account),
 `/v1/checkout/sessions` (subscription mode, the stored customer,
 `client_reference_id` the account, and `metadata` plus
 `subscription_data.metadata` with `billing_account_id`, `plan_code` and
 `seats_included`, which the webhook's normaliser reads; Team's extra seats
-as a second line item, § Team seats at checkout), and `/v1/billing_portal/sessions`. Each
+as a second line item, § Team seats at checkout), and `/v1/billing_portal/sessions`.
+The rest: a Team's seat changes (subscriptions, subscription items and the
+extra-seat product, § Changing a Team's seats), cancelling before an
+account is deleted (open checkout sessions expired, subscriptions
+cancelled) and an orphan's cancel and refund (its invoices, invoice
+payments and refunds, § Deleting an account), and the B2B invoice calls
+(§ B2B invoices). The restricted key's permissions follow from that list
+([deployment.md § Turning on Stripe](./deployment.md#turning-on-stripe),
+step 2). Each request
 pins `Stripe-Version: 2026-10-28.endive`, has a 15 s timeout, and accepts
 only an `https://…stripe.com/` URL back.
 
@@ -1189,13 +1430,17 @@ and interval, product name `IC-WBT <plan>`), so `plan` stays the one source
 of prices and nothing has to be set up in Stripe's dashboard first. The
 catch: Stripe's portal can switch plans only between Prices it knows, so
 plan switching there waits for Prices made in the dashboard (the portal
-still handles card updates, invoices and cancellation).
+still handles card updates, invoices and cancellation). Its plan switching,
+quantity changes and promotion codes stay off (deployment.md § Turning on
+Stripe, step 3: issues #926 and #928).
 
 `STRIPE_SECRET_KEY` is read from the environment only. The production check
 refuses `stripe` without a live key (`sk_live_…` or `rk_live_…`). In
 production it comes from the API's runtime secret, beside
 `BILLING_WEBHOOK_SECRET`, once Terraform's `billing_provider` is `stripe`
-([deployment.md § Turning on Stripe](./deployment.md#turning-on-stripe)). Locally the key is never set: the mock needs none, and the unit
+([deployment.md § Turning on Stripe](./deployment.md#turning-on-stripe)). Locally the key is unset (the mock needs none) except for the
+operator's test-mode check, a sandbox restricted key in a gitignored
+`.env.development.local` (deployment.md § Turning on Stripe, step 8); the unit
 tests mock the HTTP layer (`stripeApi.test.ts`, `provider.test.ts`); nothing
 in the repo calls Stripe for real.
 
@@ -1207,22 +1452,45 @@ simulate, as #641's "Local-first" asks (`billing/mockCheckout.ts`):
 Each button is named for what it simulates (*Simulate: pays*, …):
 
 - **Pays**: `checkout.session.completed` and `customer.subscription.created`
-  (active, a month or a year from now, subscription id `sub_mock_<account>`,
-  with Team's extra seats as a second item),
+  (active, a month or a year from now, a new subscription id
+  `sub_mock_<24 hex>` for each checkout, as Stripe makes one per session
+  paid, so re-subscribing never meets the "ended stays ended" conflict of a
+  reused id (399; #929), with Team's extra seats as a second item),
   each signed with the dev key and posted to `POST /billing/webhook/mock`
   in-process: the real route, so `app_billing_apply` writes the
   subscription, as with Stripe. Then `303` to the plan page with
-  `?checkout=done`.
+  `?checkout=done`, only when the webhook took each event (`applied`,
+  `recorded`, `duplicate`, `ignored`). A `conflict`, `stale` or
+  `unknown_account` is still a `200` (Stripe mustn't retry it) but changed
+  nothing: the page says *Nothing changed* with the webhook's answer
+  (`409`), as when a second checkout link still valid is paid after the
+  first (#929).
 - **Declines**: the page again, saying the card was declined, nothing sent
   (Stripe's hosted page keeps the person there too).
 - **Cancels**: `303` back with `?checkout=cancelled`, nothing sent.
 
 The mock portal shows the subscription by its plan's name and offers *Cancel
 at the end of the period* (`customer.subscription.updated` with
-`cancel_at_period_end`, through the webhook the same way) and a link back.
+`cancel_at_period_end` on that subscription's own id, read through
+`app_billing_live_subscription_ref`, through the webhook the same way) and a
+link back. A grant (`manual`: a paid B2B invoice's or a staff grant) shows
+its invoices only, with no cancel, as Stripe's portal would for an invoice
+with no subscription; a hand-made cancel of one is `409` (#941).
 The *This page has expired* page (a stale or forged token) and the
 *Something went wrong* page (the webhook refused an event) each link back to
 the plan page.
+
+**Prices on the items (#928).** Every mock subscription event (paid, the
+portal's cancel, a seat change) prices its items as Stripe does: each
+`price` carries `unit_amount`, `currency` (lowercase) and
+`recurring.interval`, the plan item at the base price and the extra-seat
+item at the extra-seat price, from the plan figures checkout uses
+(`checkoutPrices`; the checkout token's price, the portal token's
+`baseMinor`/`extraSeatMinor`/`currency`, the seat change's plan), so [§ Price
+check](#price-check) applies to them. A token without the figures (signed
+before, or no interval recorded) sends items with no `price` at all, which
+is not checked and keeps the stored interval, never an unreadable price
+(`unpriced`); a real Stripe payload always carries its prices.
 
 **Where the pages live, and why.** On the backend, as plain HTML forms with
 no script, rather than an SPA route: the outcome is an event signed with
@@ -1436,14 +1704,33 @@ Built but off: nothing is paused unless `BILLING_ENFORCED` is on.
   grant) and now has none live (canceled, expired, a lapsed grant) is on
   Free. If it then holds more live catchments than Free's
   `live_catchments` (338's derived "live"), `billing_account.over_free_since`
-  records when that was first seen: the subscription trigger stamps it as
-  the plan ends, and the job tick (`app_plan_pause_tick`, every 5 minutes)
-  catches any path the trigger misses. An account that never had a plan is
+  records when that was first seen **with billing enforced**: the
+  subscription trigger stamps it as the plan ends, and the job tick
+  (`app_plan_pause_tick`, every 5 minutes) catches any path the trigger
+  misses. In shadow mode no grace clock runs (409): nothing stamps it, and
+  the tick clears any stamp it finds (one from before 409, or from
+  enforcement switched off again), so a plan that ended in shadow mode (a
+  staff grant's end, a lapsed trial) starts its 14 days, and its grace
+  email, at the first tick after enforcement is switched on, never pausing
+  at once. The schema owner's own connections (`pnpm dev:billing:grant`,
+  `dev:billing:invoice`, `dev:billing:conflict` and the migrate Lambda's
+  owner actions) set `app.billing_enforced` on their session from
+  `BILLING_ENFORCED` (`setOwnerBillingEnforced` in
+  `backend/src/billing/enforced.ts`, as `db/tx.ts` does for its
+  transactions; Terraform sets it on the migrate Lambda too), so a grant,
+  revoke or invoice they make syncs the pause as the app would: it doesn't
+  drop a paused account's markers until the next tick, and a revoke under
+  enforcement starts the new grace at once. Any other owner connection
+  (`psql`, a migration) runs the sync as not enforced: it leaves an existing
+  stamp alone but drops the account's pause markers, which the next tick
+  (within 5 minutes) puts back. An account that never had a plan is
   never paused (its extra live catchments predate enforcement). A reverse
   trial's end (342, `app_reverse_trial_expire`) is a lapse like any other,
   so it starts the same grace. Auto-calibration on new data isn't paused:
   it refits a model, which is modelling, and Free never limits modelling.
-- **The grace.** For 14 days nothing changes. After them, with billing
+- **The grace.** For 14 days nothing changes (`PLAN_ENDED_GRACE_DAYS` in
+  `packages/engine/src/plans.ts`, which the workspace's words read;
+  `planFigures.db.test.ts` pins it to the functions' `interval '14 days'`). After them, with billing
   enforced, the tick pauses every live catchment past Free's limit and keeps
   one: the one the owner chose (`billing_account.kept_project_id`, set by
   `app_billing_keep_catchment(project)`, the account's person or a team
@@ -1454,16 +1741,59 @@ Built but off: nothing is paused unless `BILLING_ENFORCED` is on.
   as the user left them, and nothing is deleted. The feed scheduler
   (`app_due_feeds`), the automatic re-run (`app_enqueue_rerun`), the forecast
   run (`enqueueForecastRun`) and the alert checks (`app_alert_schedule`,
-  `alertsOn`) pass a paused catchment by. Everyone can still read, export,
+  `alertsOn`) pass a paused catchment by, and a feed's *Fetch now* (`POST
+  …/feeds/:feedId/run-now`) answers `409` with `details.code: plan_paused`
+  and queues nothing (it had queued the fetch the pause holds). Everyone can still read, export,
   run and edit it (Free never limits modelling), and its published farm
   views stay up with their last publication. `app_project_plan_paused(project)`
   answers when it was paused, or null.
+- **A queued fetch (issue #943).** A `feed_fetch` job queued before the
+  pause landed, or retried after it, checks `app_project_plan_paused` when it
+  runs and ends done without fetching (logged `feed_fetch_paused`); the
+  scheduler picks the feed up again after a resume.
+- **Readings pushed by API key are accepted (decided 2026-11-26, issue
+  #943).** `/ingest` still merges a key's readings into a paused catchment:
+  they are the catchment's data, sent by the user's own logger, and refusing
+  them would lose days the logger may not resend, while Free never limits
+  data or modelling. What the pause holds is the operation they would start:
+  the automatic re-run (`app_enqueue_rerun` skips a paused catchment, so the
+  answer's `rerunQueuedFor` is null) and, through it, alerts. The next push
+  after a resume queues the re-run as usual.
+- **Moving accounts (403).** A project whose billing account changes (moved
+  into or out of a team) re-syncs both accounts in the move's transaction
+  (`project_billing_move_sync`): the moved
+  catchment's pause marker and the old account's `over_free_since` follow
+  the move at once instead of at the next tick, and both accounts'
+  over-seats markers are re-counted. The move takes both accounts'
+  `billing:<account>` locks, in id order, first of all, in
+  `project_billing_account_set` before its `projects_created` count on the
+  new account's row, then 361's counter lock (whose trigger now fires on a
+  team move too, so the project's assistant cost moves with it): the same
+  order as `app_billing_apply` (billing lock, account row, counter lock), so
+  a webhook and a move on one account can't deadlock
+  (`billing/overSeats.db.test.ts` lines both up behind a held lock). A
+  person's or a team's deletion takes the same locks first
+  (`assistant_lock_account_first`, 403: its own account and, for a team,
+  every account its projects may land on), then the account row. 403 also
+  re-counts the assistant month counters from `assistant_usage`, putting
+  right the cost earlier team moves left on the account they left.
 - **Resuming.** A live subscription again (the subscription trigger, at
   once), switching the extra catchments' operations off so the account is
   back within Free, or enforcement turned off: the markers go and the grace
   ends. Everything runs again as it was.
 - **The owners are told** when the grace starts and when the pause lands
   ([§ Plan emails](#plan-emails)).
+- **A failing sweep never stops the tick.** The tick's five billing sweeps
+  (staff grant and reverse trial expiry, the dunning lapse, the silent report
+  refund and this pause sweep) each run in their own transaction before the
+  feeds, alerts and jobs (`billingStep` in `jobs/runner.ts`). One that throws
+  is logged as `billing_tick_step_failed` with its `step` and the error's
+  class and SQLSTATE only (never its message, which can carry row values),
+  listed in the tick result's `billingFailed` (the worker's embedded metric
+  `BillingStepsFailed`, which the `billing-tick-failed` alarm reads after
+  three failing ticks: [deployment.md § Billing
+  alarms](./deployment.md#billing-alarms)), and tried again next tick; the
+  rest of the tick runs as usual.
 - **In the workspace.** A paused catchment's section header says so in its
   notice line, an information note, not an error (`project.planPausedAt` on
   `GET /projects/:id`; `billing/planPause.ts`): its feeds, alerts and
@@ -1475,9 +1805,23 @@ Built but off: nothing is paused unless `BILLING_ENFORCED` is on.
   off; past it, enforced, two of three catchments paused, the most recent
   kept, nothing deleted or switched off; the paused one's feeds, re-runs,
   forecast run and alert checks skipped and the kept one's still scheduled
-  (positive control); members read the marker, strangers don't; the owner's
+  (positive control); *Fetch now* refused on the paused one and fetching on
+  the kept one; members read the marker, strangers don't; the owner's
   choice moves the pause and a stranger's is refused; an upgrade resumes
-  everything; a never-paid account isn't paused; only the worker sweeps.
+  everything; a never-paid account isn't paused; only the worker sweeps; a
+  staff grant ending in shadow mode starts no grace and a shadow tick clears
+  an old one, then enforcement switched on starts the grace that tick, queues
+  its email and pauses nothing for 14 days (409; positive control: past them
+  the pause lands); an owner connection set up as the scripts and owner
+  actions open it keeps a paused account's markers through a subscription
+  write (control: a bare owner connection drops them and the tick restores
+  them), and an owner action's grant resumes the account and its revoke
+  starts a new grace. `jobs/runner.test.ts`: a billing sweep that throws
+  doesn't stop the tick (below).
+  `feeds/feeds.db.test.ts` (a fetch queued before the pause ends without
+  fetching, and fetches after a resume), `ingest/ingest.db.test.ts` (a key's
+  readings accepted into a paused catchment, no re-run until it resumes) and
+  `billing/overSeats.db.test.ts` (a move re-syncs both accounts).
 
 ## Plan emails
 
@@ -1547,7 +1891,9 @@ team's name, the count, Afrikaans), `mail/outbound.security.test.ts`.
   /teams/:id/plan/live-catchments` (a team admin; 404 to anyone else) read
   `app_billing_live_catchments(account)`: Free's live limit, when the account
   went past it with its plan ended (`overFreeSince`, the grace's start; null
-  within it or never on a plan) and `pausesFrom` (14 days on), and each live
+  within it, never on a plan, or in shadow mode, where no grace runs) and
+  `pausesFrom` (14 days on), `planEnded` (409: a plan has ended and the
+  account is past Free's live catchments, enforced or not), and each live
   catchment in 341's order with its name, whether the owner chose it, whether
   it stays live and when it was paused. It names every catchment billed to
   the account, whoever's project it is: the account pays for them, and its
@@ -1567,7 +1913,8 @@ team's name, the count, Afrikaans), `mail/outbound.security.test.ts`.
   *Keep live* on each other one, asked through the app's confirm dialog. An
   account that never had a plan sees no card.
 - **Tests.** `backend/src/billing/keepPicker.db.test.ts` (the owner lists and
-  chooses and the pause moves, enforced past the grace; a stranger, a team
+  chooses and the pause moves, enforced past the grace; in shadow mode
+  `planEnded` with no grace dates; a stranger, a team
   member and a project that isn't live all get 404; a bad body 400; every
   member reads `planPausedAt`); `plan.test.ts` and `planPause.test.ts`; e2e
   `billing-keep-live.spec.ts` (the API answered with `page.route`, since e2e
@@ -1584,19 +1931,24 @@ them on together.
 - **What it refuses.** On a project whose billing account has no live
   subscription (Free; trialing, active and past-due accounts are never
   gated, as 338 counts them), the caller can't start an assistant turn
-  (`POST …/assistant/messages`) or switch a data feed on (`POST
-  …/feeds` with the feed enabled, or `PATCH …/feeds/:feedId` taking it from
-  off to on) while their email is unverified (`403 email_unverified`) or on
-  a disposable domain (`403 email_disposable`). The gate is the caller's,
-  whatever their role: an unverified viewer on a verified owner's Free
-  project is refused the assistant. Attaching a feed switched off, saving a
-  feed already on, a project with no billing account, and every route that
-  isn't one of those three are never refused. The refusal comes after the
+  (`POST …/assistant/messages`) or switch a data feed on (any route that
+  attaches a feed switched on: `POST …/feeds` with the feed enabled, the
+  boundary's Apply `POST …/feeds/{chirps,agera5_et0}/from-boundary` and the
+  units' Apply `POST …/feeds/chirps/from-units`; or `PATCH …/feeds/:feedId`
+  taking it from off to on) while their email is unverified (`403
+  email_unverified`) or on a disposable domain (`403 email_disposable`). The
+  gate is the caller's, whatever their role: an unverified viewer on a
+  verified owner's Free project is refused the assistant. Attaching a feed
+  switched off, saving a feed already on (the Applies keep an existing
+  feed's on or off), a project with no billing account, and every other
+  route are never refused. The refusal comes after the
   role check (a non-member still gets 404) and before anything is counted
   or reserved.
 - **Where.** `backend/src/billing/emailGate.ts` (`requireFreeVerifiedEmail`),
-  called from `assistant/routes.ts` before `beginTurn` and from
-  `feeds/routes.ts`; whether it applies comes from `app_free_email_gate`
+  called from `assistant/routes.ts` before `beginTurn`, from `feeds/store.ts`
+  `createFeed` (every attach goes through it, so the boundary's and the units'
+  Apply can't skip the gate, as they did before round 2026-11-27) and from
+  `feeds/routes.ts`'s PATCH; whether it applies comes from `app_free_email_gate`
   (343_free_email_gate), a definer function run as the caller, since
   `app_entitlements` hides the plan below editor. It answers NULL unless
   billing is enforced and the caller is a member of a project on Free, and
@@ -1633,7 +1985,9 @@ them on together.
   connection and checks it answers promptly and is counted.
 - **Tests.** `backend/src/billing/emailGate.db.test.ts` (off allowed; on,
   unverified and disposable refused for the assistant and for attaching and
-  switching on a feed; verified, paid and attached-off allowed; a
+  switching on a feed, and for the boundary's and the units' Apply
+  (counted; a verified owner applies, the positive control); verified, paid
+  and attached-off allowed; a
   non-member's 404; the function's answers; each refusal counted once on
   the SAST day and logged with no address),
   `backend/src/auth/disposable.test.ts`,
@@ -1701,6 +2055,13 @@ defaults to the operator's login.
   the next SAST midnight, whatever the machine's time zone. Without it the
   grant lasts until revoked. With an end, `cancel_at_period_end` is true, so
   the plan page says it ends and the renewal notice never picks a grant up.
+  The plan page reads a grant from `subscription.granted` (`staff` or
+  `invoice`; `entitlements.ts` `subscriptionSource`, from 333's
+  `app_billing_live_subscription_ref`): *Granted by the operator until …*,
+  with no Upgrade or Manage billing (there is nothing at the provider to
+  manage) and a line to ask the operator; a paid invoice's grant reads
+  *Paid by invoice; runs until …* and keeps Manage billing (its Stripe
+  customer's portal holds the invoices).
   `free` can't be granted (revoke instead), the end must be in the future and
   a reason (≤ 500 characters) is required.
 - **Seats** (374). `app_staff_grant_plan(…, replace, seats)` and `--seats`
@@ -1730,7 +2091,9 @@ defaults to the operator's login.
   on Free again, with nothing deleted. "Live" stays 323's status test, so a
   grant can outlive its end by one tick (5 minutes in production; locally,
   until a worker runs). A new grant first expires the account's lapsed one,
-  so a late tick never blocks it. Since 387 the tick (and the reverse
+  and, since 408 (issue #930), a reverse trial past its `trial_end`, logged
+  as the trial's tick logs it (`expire`, `the trial reached its end`), so a
+  late tick never blocks it. Since 387 the tick (and the reverse
   trial's, `app_reverse_trial_expire()`) goes account by account in id
   order, taking the account's billing lock (334's advisory lock) before it
   writes the rows, as every other subscription writer does; before, it met
@@ -1739,7 +2102,11 @@ defaults to the operator's login.
   `billing/expireLockOrder.db.test.ts`).
 - **Revoke.** `app_staff_revoke_grant(account, reason, by)` cancels the live
   grant now (`period_end` now) and logs a `revoke` row; Free again, nothing
-  deleted. It never touches a Stripe or mock subscription.
+  deleted. It never touches a Stripe or mock subscription. Since 401 it takes
+  the account's billing lock before the grant's row, as the expiry ticks do
+  (387); before, it locked the row first and could deadlock against a paid
+  invoice's webhook, which holds that lock and locks the live grant's row
+  (`billing/expireLockOrder.db.test.ts`).
 - **The log.** `billing_grant_log` is append-only (`water_app` holds SELECT
   only; only these functions insert). The account's person and its team's
   admins read their own rows under RLS (`app_billing_account_readable`), and

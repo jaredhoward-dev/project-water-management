@@ -191,7 +191,7 @@ variable "feed_credential_private_key" {
 }
 
 variable "stripe_secret_key" {
-  description = "Stripe's API key for checkout and the Customer Portal (STRIPE_SECRET_KEY; backend/src/billing/provider/stripeApi.ts). The API only, in its runtime secret (secrets.tf), and only while billing_provider is stripe. sops key stripe_secret_key: a live restricted key (rk_live_…) with the permissions docs/billing.md lists. Empty (the default) while billing is manual (docs/deployment.md § Turning on Stripe)."
+  description = "Stripe's API key for checkout and the Customer Portal (STRIPE_SECRET_KEY; backend/src/billing/provider/stripeApi.ts). The API only, in its runtime secret (secrets.tf), and only while billing_provider is stripe. sops key stripe_secret_key: a live restricted key (rk_live_…) with the permissions docs/deployment.md § Turning on Stripe (step 2) lists. Empty (the default) while billing is manual (docs/deployment.md § Turning on Stripe)."
   type        = string
   default     = ""
   sensitive   = true
@@ -528,6 +528,22 @@ variable "billing_provider" {
     # The API is in the private VPC: without the NAT it can't reach api.stripe.com.
     condition     = var.billing_provider != "stripe" || var.stripe_egress_enabled
     error_message = "billing_provider = \"stripe\" needs stripe_egress_enabled = true: the API Lambda can't reach api.stripe.com from the private VPC otherwise (docs/deployment.md § Stripe egress)."
+  }
+}
+
+variable "billing_enforced" {
+  description = "Whether plan limits refuse anything (BILLING_ENFORCED; backend/src/billing/enforced.ts, docs/billing.md § BILLING_ENFORCED). false (the default): shadow mode, usage is counted and shown and nothing refuses. true: the editor seat limit, Free's live catchment, the pause after a downgrade, the assistant's dollar caps, Free's verified-email gate and the disposable-domain refusal all refuse. Set as the exact string \"true\"/\"false\" on the API, the worker and the assistant, every Lambda that opens a withUser transaction (db/tx.ts sets app.billing_enforced from it), and on the migrate Lambda, whose owner actions set it on their session (billing/enforced.ts setOwnerBillingEnforced). Turn on only through docs/deployment.md § Turning on enforcement."
+  type        = bool
+  default     = false
+}
+
+variable "reverse_trial" {
+  description = "Whether a newly verified person gets the 14-day Pro reverse trial (REVERSE_TRIAL on the API; backend/src/billing/reverseTrial.ts, docs/billing.md § The reverse trial). false (the default): no trial is granted and no claim recorded. true needs billing_enforced = true (the backend grants nothing otherwise, and a trial while nothing refuses would spend each person's one trial for nothing), and the web released with PUBLIC_REVERSE_TRIAL=true in the same change (docs/deployment.md § Turning on enforcement)."
+  type        = bool
+  default     = false
+  validation {
+    condition     = !var.reverse_trial || var.billing_enforced
+    error_message = "reverse_trial = true needs billing_enforced = true: the backend grants no trial while enforcement is off (docs/deployment.md § Turning on enforcement)."
   }
 }
 
@@ -896,7 +912,7 @@ variable "jobs_backlog_alarm_seconds" {
 # --- Alert emails (jobs.tf, WP-2.13) -------------------------------------------
 
 variable "alarm_tier" {
-  description = "Which CloudWatch alarms to create. \"full\": every alarm (~50 alarm metrics). \"essential\": 13 alarm metrics: SES bounce + complaint rate, the jobs / mail-events / fetch-requests / ingest-results DLQ arrivals, worker heartbeat, RDS free storage, CloudFront 5xx, API Lambda errors and throttles, unhandled API errors and failed mail sends; two fewer after the cutover (chirps_source = \"mirror\" and dws_source = \"store\" remove the fetch-requests and ingest-results queues and their DLQ alarms, feeds.tf), 15 once ingest_image_tag is set (the data mirror's two freshness alarms, ingest.tf), two more with daily_ingest_enabled (the preliminary and GEFS copies'), one more with era5l_enabled (ERA5-Land's lag, era5land.tf), one more with imerg_enabled (IMERG Late's lag, imerg.tf) and one more with climate_indices_enabled (the ONI and AAO copy's lag, climate_indices.tf) and one more with c3s_enabled (the C3S seasonal copy's lag, c3s.tf). \"none\": no alarms. Each alarm metric past the AWS Organization's shared 10 free costs ~$0.10/month (more in af-south-1). Budgets and cost anomaly detection are not alarms and are unaffected."
+  description = "Which CloudWatch alarms to create. \"full\": every alarm (~50 alarm metrics). \"essential\": 14 alarm metrics: SES bounce + complaint rate, the jobs / mail-events / fetch-requests / ingest-results DLQ arrivals, worker heartbeat, RDS free storage, CloudFront 5xx, API Lambda errors and throttles, unhandled API errors, failed mail sends and a billing sweep failing three ticks running (billing_tick_failed); two fewer after the cutover (chirps_source = \"mirror\" and dws_source = \"store\" remove the fetch-requests and ingest-results queues and their DLQ alarms, feeds.tf), 16 once ingest_image_tag is set (the data mirror's two freshness alarms, ingest.tf), two more with daily_ingest_enabled (the preliminary and GEFS copies'), one more with era5l_enabled (ERA5-Land's lag, era5land.tf), one more with imerg_enabled (IMERG Late's lag, imerg.tf) and one more with climate_indices_enabled (the ONI and AAO copy's lag, climate_indices.tf) and one more with c3s_enabled (the C3S seasonal copy's lag, c3s.tf). \"none\": no alarms. Each alarm metric past the AWS Organization's shared 10 free costs ~$0.10/month (more in af-south-1). Budgets and cost anomaly detection are not alarms and are unaffected."
   type        = string
   default     = "full"
 

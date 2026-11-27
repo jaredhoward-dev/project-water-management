@@ -466,6 +466,20 @@ describe('automatic re-runs from an ingest (042_auto_rerun.sql, WP-2.11)', () =>
 		expect(await rerunJobs(pid)).toHaveLength(0);
 	});
 
+	it('a paused catchment (341) still takes a key’s readings, and queues no re-run until it resumes (issue #943)', async () => {
+		const { pid, secret } = await keyed(owner, { enabled: true });
+		await asOwner('INSERT INTO project_plan_pause (project_id) VALUES ($1)', [pid]);
+		const res = await merge(secret, rain('2026-03-01', [1, 2]));
+		expect(res.status, JSON.stringify(res.body)).toBe(200);
+		expect(res.body).toMatchObject({ daysChanged: 2, rerunQueuedFor: null });
+		expect(await rerunJobs(pid)).toHaveLength(0);
+		// Positive control: resumed, the next new days queue the re-run.
+		await asOwner('DELETE FROM project_plan_pause WHERE project_id = $1', [pid]);
+		expect((await merge(secret, rain('2026-03-03', [3]))).body.rerunQueuedFor).not.toBeNull();
+		expect(await rerunJobs(pid)).toHaveLength(1);
+		await asOwner('DELETE FROM job WHERE project_id = $1', [pid]);
+	});
+
 	it('a key whose creator’s account was deleted still ingests, and skips the re-run', async () => {
 		const creator = await signUp('Kcreator');
 		const pid = (await owner.call('POST', '/projects', { name: 'Orphaned key' })).body.project.id as string;

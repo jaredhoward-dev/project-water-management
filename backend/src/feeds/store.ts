@@ -2,6 +2,7 @@
 // as the signed-in user under RLS, the health update as the feed's acting
 // user, and the scheduler's cross-project claim.
 import { provenanceKey, sameProvenance, type SeriesKind, type SeriesProvenance } from '@water-management/engine';
+import { requireFreeVerifiedEmail } from '../billing/emailGate.js';
 import type { Db } from '../db/tx.js';
 import { DEFAULT_TIME_ZONE, localDate } from '../projects/timeZone.js';
 import { feedProvenance, type FeedConfig, type FeedInput, type FeedSchedule, type FeedSource } from './config.js';
@@ -277,8 +278,14 @@ export const replaceKey = (series: { provenance: SeriesProvenance | null }): str
 /**
  * Insert as the signed-in owner (RLS), who becomes the acting user.
  * `replaceFrom`: the owner confirmed replacing the target, which holds this (032).
+ *
+ * A feed created switched on passes Free's verified-email gate here, the one
+ * place every route that attaches a feed goes through (POST /feeds, the
+ * boundary's and the units' Apply; billing/emailGate.ts, BILLING_ENFORCED
+ * only). Each caller's withUser is wrapped in countGateRefusals.
  */
 export async function createFeed(db: Db, projectId: string, input: FeedInput, replaceFrom: string | null = null): Promise<string> {
+	if (input.enabled) await requireFreeVerifiedEmail(db, projectId, 'feeds');
 	const { rows } = await db.query<{ id: string }>(
 		`INSERT INTO data_feed (project_id, source, config, target_kind, target_name, enabled, schedule, replace_series_from)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,

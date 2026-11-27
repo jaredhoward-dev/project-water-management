@@ -16,6 +16,7 @@
 import os from 'node:os';
 import pg from 'pg';
 import { describeTarget, grantLog, grantPlan, isCalendarDate, revokeGrant, type Target } from '../src/billing/staffGrant.js';
+import { setOwnerBillingEnforced } from '../src/billing/enforced.js';
 import { loadDevEnv } from '../src/config/devEnv.js';
 import { MAX_GRANT_SEATS } from '../src/ops/ownerActions.js';
 
@@ -89,6 +90,8 @@ export function parseArgs(argv: string[], defaultBy: string): GrantArgs | string
 export async function runGrant(url: string, args: GrantArgs): Promise<string[]> {
 	const client = new pg.Client({ connectionString: url });
 	await client.connect();
+	// A grant or revoke fires the pause sync: enforced as the app is, so it doesn't drop the pause markers (409).
+	await setOwnerBillingEnforced(client);
 	const who = describeTarget(args.target);
 	try {
 		if (args.mode === 'list') {

@@ -5,7 +5,7 @@
 	// (the box at the head of every help page) is the other way to find one.
 	// The glossary used to be this one page: an old /help/glossary#<term> link
 	// goes on to the term's topic page.
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { resolve } from '$app/paths';
 	import { basePath } from '#lib/nav/base.js';
 	import { page } from '$app/state';
@@ -19,7 +19,7 @@
 
 	$effect(() => {
 		const e = helpFor(hashId(page.url.hash));
-		if (e) goto(`${basePath()}${glossaryPath(e)}`, { replace: true });
+		if (e) guardedGoto(`${basePath()}${glossaryPath(e)}`, { replace: true });
 	});
 </script>
 

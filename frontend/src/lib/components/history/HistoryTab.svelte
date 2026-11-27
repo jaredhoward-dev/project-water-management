@@ -15,7 +15,7 @@
 	import { SearchStep } from '#lib/nav/searchStep.js';
 	import { untrack } from 'svelte';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { page } from '$app/state';
 	import type { InputChange } from '@water-management/engine';
 	import { api, ApiError, type HistoryItem, type HistoryRevision, type Relink } from '#lib/api/index.js';
@@ -110,7 +110,7 @@
 			if (words) q.set('q', words);
 			else q.delete('q');
 			q.delete('entry');
-			void queryStep.write(`?${q}`, (replace) => goto(`?${q}`, { replace, reset: false }));
+			void queryStep.write(`?${q}`, (replace) => guardedGoto(`?${q}`, { replace, reset: false }));
 		}, 400);
 	}
 	$effect(() => () => clearTimeout(queryTimer));
@@ -167,7 +167,7 @@
 		if (value) q.set(name, value);
 		else q.delete(name);
 		q.delete('entry');
-		void goto(`?${q}`, { reset: false });
+		void guardedGoto(`?${q}`, { reset: false });
 	}
 
 	// --- the layout: a list beside the picked change when there's room, measured, not assumed ---
@@ -241,7 +241,7 @@
 
 	/** After a restore the newest entry is the restore itself: show it (in place, so Back doesn't step to the old pick). */
 	function showNewest() {
-		if (entryParam) void goto(withoutParam(url, 'entry'), { replace: true, reset: false });
+		if (entryParam) void guardedGoto(withoutParam(url, 'entry'), { replace: true, reset: false });
 	}
 
 	// --- Restore this version ---------------------------------------------------
@@ -492,8 +492,7 @@
 													class="row"
 													href={entryHref(e.key)}
 													aria-current={picked?.key === e.key ? 'true' : undefined}
-													data-sveltekit-noscroll
-													data-sveltekit-keepfocus
+													data-sveltekit-reset="false"
 												>
 													<span class="row-meta"><time datetime={e.createdAt}>{localTime(e.createdAt, timeZone())}</time>{' · '}<span class="who">{e.actor ?? 'A deleted account'}</span></span>
 													<span class="row-title">{' '}{s.title}</span>
@@ -526,8 +525,8 @@
 									</p>
 								</div>
 								<p class="steps">
-									{#if newer}<a class="btn btn-sm" href={entryHref(newer.key)} data-sveltekit-noscroll data-sveltekit-keepfocus>Newer</a>{/if}
-									{#if older}<a class="btn btn-sm" href={entryHref(older.key)} data-sveltekit-noscroll data-sveltekit-keepfocus>Older</a>{/if}
+									{#if newer}<a class="btn btn-sm" href={entryHref(newer.key)} data-sveltekit-reset="false">Newer</a>{/if}
+									{#if older}<a class="btn btn-sm" href={entryHref(older.key)} data-sveltekit-reset="false">Older</a>{/if}
 								</p>
 							</div>
 							<div class="what">{@render entryBody(picked, false)}</div>

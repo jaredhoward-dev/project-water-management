@@ -108,6 +108,52 @@ describe('billing_metrics_people', () => {
 	});
 });
 
+// 402: a run the app made by itself (model_run.trigger 'auto' or 'forecast', a live catchment's re-run) is not the
+// person's activity. Before 402 an idle account with automatic runs on counted as active, and an automatic run
+// within 7 days of signing up activated its person. June 2001, a month no other test writes to.
+describe('automatic runs are not activity (402)', () => {
+	const NOW = new Date('2026-11-23T00:00:00Z');
+	let idle: User;
+	let idleProject: string;
+	let idleAccount: string;
+	const run = (trigger: string, at: string) =>
+		asOwner(
+			`INSERT INTO model_run (project_id, created_by, engine_version, start_date, end_date, inputs, created_at, trigger)
+			 VALUES ($1, $2, '1.0.0', '2000-10-01', '2001-09-30', '{}', $3, $4)`,
+			[idleProject, idle.id, at, trigger]
+		);
+
+	beforeAll(async () => {
+		idle = await signUp('MetricsIdle');
+		idleProject = (await idle.call('POST', '/projects', { name: 'Metrics idle synthetic' })).body.project.id;
+		idleAccount = ((await asOwner('SELECT billing_account_id AS id FROM project WHERE id = $1', [idleProject])) as { id: string }[])[0]!.id;
+		await asOwner(`UPDATE app_user SET created_at = '2001-06-02T08:00:00Z' WHERE id = $1`, [idle.id]);
+		await run('auto', '2001-06-03T04:00:00Z');
+		await run('forecast', '2001-06-04T04:00:00Z');
+	});
+
+	it('counts neither in the month’s runs nor as the first run, so the account is not active and its person not activated', async () => {
+		const [acct] = (await asOwner('SELECT runs FROM billing_metrics_accounts($1::date) WHERE account_id = $2', ['2001-06-01', idleAccount])) as { runs: string }[];
+		expect(acct!.runs).toBe('0');
+		const [person] = (await asOwner('SELECT first_run_at FROM billing_metrics_people($1::date) WHERE user_id = $2', ['2001-06-01', idle.id])) as {
+			first_run_at: Date | null;
+		}[];
+		expect(person!.first_run_at).toBeNull();
+		const r = await gatherReport(process.env.TEST_MIGRATION_DATABASE_URL!, '2001-06', NOW);
+		expect(r.freeLimits.active).toBe(0);
+		expect(r.activation).toMatchObject({ cohort: 1, activated: 0 });
+	});
+
+	it('counts the person’s own run (positive control)', async () => {
+		await run('manual', '2001-06-05T04:00:00Z');
+		const [acct] = (await asOwner('SELECT runs FROM billing_metrics_accounts($1::date) WHERE account_id = $2', ['2001-06-01', idleAccount])) as { runs: string }[];
+		expect(acct!.runs).toBe('1');
+		const r = await gatherReport(process.env.TEST_MIGRATION_DATABASE_URL!, '2001-06', NOW);
+		expect(r.freeLimits.active).toBe(1);
+		expect(r.activation).toMatchObject({ cohort: 1, activated: 1 });
+	});
+});
+
 describe('the reverse trial and the live catchments (342, 338)', () => {
 	const NOW = new Date('2026-11-23T00:00:00Z');
 	const report = (month: string) => gatherReport(process.env.TEST_MIGRATION_DATABASE_URL!, month, NOW);
@@ -204,6 +250,88 @@ describe('orphans past the provider\'s retries (352)', () => {
 		// Positive control: once its 3 days pass, the newer one is listed too.
 		const later = await gatherReport(process.env.TEST_MIGRATION_DATABASE_URL!, '2001-03', new Date('2026-11-26T12:00:00Z'));
 		expect(mine(later).map((o) => o.eventId)).toEqual(['evt_metrics_orphan_old', 'evt_metrics_orphan_new']);
+	});
+});
+
+describe('teams over their paid seats (403, issue #926)', () => {
+	it('lists a team recorded over its seats with its ids and numbers; not one recorded but back within them', async () => {
+		const admin = await signUp('MetricsOverSeats');
+		const m1 = await signUp('MetricsOverM1');
+		const teamId = (await admin.call('POST', '/teams', { name: `Metrics over ${crypto.randomUUID().slice(0, 8)}` })).body.team.id as string;
+		const account = ((await asOwner(`SELECT billing_account_ensure('team', $1) AS id`, [teamId])) as { id: string }[])[0]!.id;
+		await asOwner(`INSERT INTO team_member (team_id, user_id, role) VALUES ($1, $2, 'member') ON CONFLICT DO NOTHING`, [teamId, m1.id]);
+		// Team with 1 paid seat (seats below the included 3 count as 3): give it 4 editors by direct SQL, then the subscription.
+		const extra = await Promise.all(['MetricsOverM2', 'MetricsOverM3'].map((n) => signUp(n)));
+		for (const u of extra) await asOwner(`INSERT INTO team_member (team_id, user_id, role) VALUES ($1, $2, 'member')`, [teamId, u.id]);
+		await asOwner(`INSERT INTO subscription (billing_account_id, plan_code, status, seats, provider) VALUES ($1, 'team', 'active', 3, 'mock')`, [account]);
+		const mine = (r: Awaited<ReturnType<typeof gatherReport>>) => r.overSeats.filter((o) => o.accountId === account);
+		const r = await gatherReport(process.env.TEST_MIGRATION_DATABASE_URL!, '2001-03');
+		expect(mine(r)).toEqual([{ accountId: account, teamId, seats: 3, editors: 4, since: expect.any(String) }]);
+		// Positive control the other way: one member made a viewer, back within 3 seats: not listed, even before the tick clears the marker.
+		await asOwner(`UPDATE team_member SET role = 'viewer' WHERE team_id = $1 AND user_id = $2`, [teamId, extra[0]!.id]);
+		expect(mine(await gatherReport(process.env.TEST_MIGRATION_DATABASE_URL!, '2001-03'))).toEqual([]);
+		await asOwner(`DELETE FROM subscription WHERE billing_account_id = $1`, [account]);
+	});
+});
+
+// 407: the first run is a record kept when runs go (the run cap trims them, a person deletes one, a project is deleted).
+// Before 407 it was min(created_at) over the runs still stored, so a person whose runs were deleted stopped counting as
+// activated. August 2001, a month no other test writes to.
+describe('the first manual run is kept when runs are deleted (407)', () => {
+	const NOW = new Date('2026-11-23T00:00:00Z');
+	let keeper: User;
+	let keeperProject: string;
+	const run = (trigger: string, at: string) =>
+		asOwner(
+			`INSERT INTO model_run (project_id, created_by, engine_version, start_date, end_date, inputs, created_at, trigger)
+			 VALUES ($1, $2, '1.0.0', '2000-10-01', '2001-09-30', '{}', $3, $4) RETURNING id`,
+			[keeperProject, keeper.id, at, trigger]
+		);
+	const recorded = async (id: string) =>
+		((await asOwner('SELECT first_run_at FROM first_manual_run WHERE user_id = $1', [id])) as { first_run_at: Date }[])[0]?.first_run_at ?? null;
+
+	beforeAll(async () => {
+		keeper = await signUp('MetricsKeeper');
+		keeperProject = (await keeper.call('POST', '/projects', { name: 'Metrics keeper synthetic' })).body.project.id;
+		await asOwner(`UPDATE app_user SET created_at = '2001-08-02T08:00:00Z' WHERE id = $1`, [keeper.id]);
+	});
+
+	it('records the first manual run when it is saved, not an automatic one, and a later run never moves it', async () => {
+		await run('auto', '2001-08-02T09:00:00Z');
+		expect(await recorded(keeper.id)).toBeNull();
+		await run('manual', '2001-08-03T04:00:00Z');
+		expect(await recorded(keeper.id)).toEqual(new Date('2001-08-03T04:00:00Z'));
+		await run('manual', '2001-08-04T04:00:00Z');
+		expect(await recorded(keeper.id)).toEqual(new Date('2001-08-03T04:00:00Z'));
+	});
+
+	it('still activates the person after every run of theirs is deleted', async () => {
+		await asOwner('DELETE FROM model_run WHERE project_id = $1', [keeperProject]);
+		expect((await asOwner('SELECT count(*)::int AS n FROM model_run WHERE created_by = $1', [keeper.id]))[0]!.n).toBe(0);
+		const [person] = (await asOwner('SELECT first_run_at FROM billing_metrics_people($1::date) WHERE user_id = $2', ['2001-08-01', keeper.id])) as {
+			first_run_at: Date | null;
+		}[];
+		expect(person!.first_run_at).toEqual(new Date('2001-08-03T04:00:00Z'));
+		const r = await gatherReport(process.env.TEST_MIGRATION_DATABASE_URL!, '2001-08', NOW);
+		expect(r.activation).toMatchObject({ cohort: 1, activated: 1 });
+	});
+
+	it('is owner only: the app role reads and writes nothing of it, signed in or not', async () => {
+		const app = new pg.Client({ connectionString: APP_URL });
+		await app.connect();
+		try {
+			for (const sql of ['SELECT * FROM first_manual_run', `INSERT INTO first_manual_run (user_id, first_run_at) VALUES ('${keeper.id}', now())`, 'DELETE FROM first_manual_run']) {
+				const code = await app.query(sql).then(
+					() => 'ok',
+					(e: { code?: string }) => e.code
+				);
+				expect(code, sql).toBe('42501');
+			}
+		} finally {
+			await app.end();
+		}
+		// Positive control: the row is there for the owner.
+		expect(await recorded(keeper.id)).not.toBeNull();
 	});
 });
 

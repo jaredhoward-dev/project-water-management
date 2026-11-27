@@ -18,6 +18,7 @@ const C = '00000000-0000-4000-8000-00000000000c';
 const A = '00000000-0000-4000-8000-00000000000a';
 const list = (keptA: boolean) => ({
 	freeLimit: 1,
+	planEnded: true,
 	overFreeSince: '2026-11-01T08:00:00.000Z',
 	pausesFrom: '2026-11-15T08:00:00.000Z',
 	catchments: keptA

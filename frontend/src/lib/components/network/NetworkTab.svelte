@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { confirmDialog } from '#lib/components/common/confirm.svelte.js';
 	import { onMount, tick, untrack } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { confirmLeave, guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { closeSettled, openAfterClose, trackClose } from '#lib/nav/closeNav.js';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
@@ -36,6 +36,7 @@
 	import NodeCard from './NodeCard.svelte';
 	import NodeDetail from './NodeDetail.svelte';
 	import { TABLES_MENU, withParam, withoutParam } from '#lib/workspace/overlays.js';
+	import { farmDrawerHref, hrefWith, nodeSheetHref } from '#lib/nav/tabUrl.js';
 	import { mapNodeHref } from '#lib/workspace/mapLinks.js';
 	import { MappedNodes } from '#lib/workspace/mappedNodes.svelte.js';
 	import NotesDrawer from '#lib/components/notes/NotesDrawer.svelte';
@@ -46,6 +47,7 @@
 	import { describeUser } from './users';
 	import { flowPathOrder, makeOutlet, moveTo, renumber } from './reorder';
 	import { countByNode, linkedNote, removeMessage } from './farmerLinks';
+	import { nodeRemovedFocus } from './removeQuestions';
 	import Lazy from '#lib/components/common/Lazy.svelte';
 	import { fillHeader } from '#lib/components/workspace/headerSlot.svelte.js';
 
@@ -227,7 +229,9 @@
 	// (`edit=<nodeId>`). `view` is 'table' only inside the grid modal.
 	type View = 'map' | 'table';
 	const view = $derived<View>(only === 'table' ? 'table' : 'map');
-	// Old links: `view=table` opens the node table, `view=node` a node's form.
+	// Old links: `view=table` opens the node table, `view=node` a node's form. On a network with no
+	// node yet there is no form to open: the map says so (oldNodeLink) rather than quietly landing.
+	let oldNodeLink = $state(false);
 	$effect(() => {
 		if (only) return;
 		const v = page.url.searchParams.get('view');
@@ -237,8 +241,12 @@
 			q.delete('view');
 			if (v === 'table') q.set('grid', 'nodes');
 			else if (v === 'node' && nodes[0]) q.set('edit', q.get('node') ?? nodes[0].id);
-			void goto(`?${q}`, { replace: true, reset: false });
+			else if (v === 'node') oldNodeLink = true;
+			void guardedGoto(`?${q}`, { replace: true, reset: false });
 		});
+	});
+	$effect(() => {
+		if (nodes.length) untrack(() => (oldNodeLink = false));
 	});
 
 	// --- the node sheet: a node's full form over the map, while the URL names it (`edit=<id>`) ---
@@ -249,18 +257,30 @@
 	$effect(() => {
 		sheetOpen = !!editing;
 	});
+	/**
+	 * Where closing the sheet goes: `edit` dropped, with the section a link opened it on (`section=`),
+	 * and the pick (`node=`) when that node has gone (removed from the sheet), in one navigation, since
+	 * a second one started beside it from the same URL put back what the other took out.
+	 */
+	function sheetClosedHref(removing: string | null = null): string {
+		const url = new URL(page.url.href);
+		url.searchParams.delete('section');
+		const picked = url.searchParams.get('node');
+		if (picked && (picked === removing || !nodes.some((n) => n.id === picked))) url.searchParams.delete('node');
+		return withoutParam(url, 'edit');
+	}
+	// Done, Esc, the ✕ and Close ask the leave guard first (a field holding text it can't take is
+	// dropped with the sheet): Stay keeps the sheet open, rather than shutting it over a URL the
+	// guard kept naming it (issue #931).
+	const confirmSheetClose = () => confirmLeave(sheetClosedHref());
+	async function closeSheet() {
+		if (await confirmSheetClose()) sheetOpen = false;
+	}
 	$effect(() => {
-		// Closed (Done, Esc, the ✕): drop `edit` in place, so Back goes to where it was opened from.
+		// Closed: drop `edit` in place, so Back goes to where it was opened from.
 		if (!sheetOpen && untrack(() => editParam)) {
-			// The section a link opened it on (`section=`) goes with it, and the pick (`node=`) when that
-			// node has gone (removed from the sheet): one navigation, since a second one started beside
-			// this from the same URL put back what the other took out.
-			const url = new URL(page.url.href);
-			url.searchParams.delete('section');
-			const picked = url.searchParams.get('node');
-			if (picked && !untrack(() => nodes.some((n) => n.id === picked))) url.searchParams.delete('node');
 			// The sheet shuts before the URL follows: an open waits for the drop (lib/nav/closeNav.ts).
-			void trackClose(goto(withoutParam(url, 'edit'), { replace: true, reset: false }));
+			void trackClose(guardedGoto(untrack(sheetClosedHref), { replace: true, reset: false }));
 		}
 	});
 	$effect(() => {
@@ -274,7 +294,8 @@
 		q.set('edit', id);
 		q.delete('section');
 		if (!only) q.set('node', id);
-		return goto(`?${q}`, { replace: replace, reset: false });
+		// Through the guard's goto: ‹ › and the picker replace, and a Leave after its question does too.
+		return guardedGoto(`?${q}`, { replace: replace, reset: false });
 	}
 	// Which nodes have a map feature, for their "Show on map" links (issue #326 A2): fetched after the
 	// tab has drawn, so the map's list never delays it (workspace/mapLinks.ts).
@@ -304,17 +325,24 @@
 	// pick (playbook § 2, as Dams' `dam=`). With none, nothing is picked. The grid modal's table
 	// keeps its pick to itself.
 	const nodeParam = $derived(only ? null : page.url.searchParams.get('node'));
+	// A pick naming a node the model hasn't (removed, or a stale or mistyped link) is replaced out of
+	// the URL (issue #931). Not while the sheet is open or closing: its close drops `node=` with `edit=`.
+	$effect(() => {
+		const id = nodeParam;
+		if (!id || editParam || nodes.some((n) => n.id === id)) return;
+		untrack(() => void guardedGoto(withoutParam(page.url, 'node'), { replace: true, reset: false }));
+	});
 	$effect(() => {
 		const id = nodeParam;
 		// A link with only `edit=` (the Dams page's Edit dam) picks the node it edits.
 		untrack(() => (selectedId = id ?? editing?.id ?? null));
 	});
 
-	/** Picks a node on the map: a new history entry, so Back steps back through the picks. */
+	/** Picks a node on the map: a new history entry, so Back steps back through the picks (playbook § 2, issue #521). */
 	function pick(id: string) {
 		selectedId = id;
 		if (only || nodeParam === id) return;
-		void goto(withParam(page.url, 'node', id), { reset: false });
+		void guardedGoto(hrefWith(page.url, { node: id }), { reset: false });
 	}
 
 	function select(id: string) {
@@ -359,22 +387,30 @@
 		const question = removeMessage({ isFarm, areas, transfers: refs, cover, boreholes, demandObjects, farmers: farmerCount ? (farmerCount[id] ?? 0) : null, upstream, into });
 		const kind = node ? KIND_WORD[node.kind] : 'node';
 		if (question && !(await confirmDialog({ title: `Remove “${name}”?`, message: question, confirmLabel: `Remove ${kind}`, danger: true }))) return;
-		// The row after it in the table (else the one before) takes the focus once it is gone.
-		const at = nodes.findIndex((n) => n.id === id);
-		const next = nodes[at + 1] ?? nodes[at - 1] ?? null;
+		// Removed from its own sheet, the sheet closes with it: ask the leave guard first, as Done does,
+		// and on Stay remove nothing, so the sheet and its `edit=` stay together (issue #931).
+		if (editParam === id && !(await confirmLeave(sheetClosedHref(id)))) return;
+		// Where the focus goes once it is gone (removeQuestions.ts): the row after it in the table or the map's
+		// list (else the one before).
+		const focusIds = nodeRemovedFocus(
+			view,
+			nodes.map((n) => n.id),
+			nodes.findIndex((n) => n.id === id)
+		);
 		editor.removeNode(id);
 		if (selectedId === id) selectedId = null;
+		// From the sheet, closing it drops `node=` too (above); a pick of it elsewhere is dropped by the effect that follows `node=`.
 		if (editParam === id) sheetOpen = false;
-		// From the sheet, closing it drops `node=` too (above).
-		else if (nodeParam === id) void goto(withoutParam(page.url, 'node'), { replace: true, reset: false });
 		// The button that was pressed has gone (the row's ✕, or the sheet with its Remove and the
 		// card's Edit it would hand the focus back to): put the focus somewhere that still is.
 		await tick();
-		const target =
-			view === 'table'
-				? (next && document.getElementById(`node-name-${next.id}`)) || document.getElementById('net-add-node')
-				: document.getElementById('all-nodes-h') ?? document.getElementById('net-empty-add');
-		target?.focus();
+		for (const fid of focusIds) {
+			const el = document.getElementById(fid);
+			if (el) {
+				el.focus();
+				break;
+			}
+		}
 	}
 
 	// --- reordering (display order only; the model runs in topological order) ---
@@ -578,10 +614,7 @@
 	});
 	/** The farm drawer over the map, in place of the sheet. */
 	function plantedHref(id: string): string {
-		const q = new URLSearchParams(page.url.search);
-		q.delete('edit');
-		q.set('farm', id);
-		return `?${q}`;
+		return farmDrawerHref(page.url, id);
 	}
 	const totalArea = $derived(nodes.reduce((s, n) => s + (n.areaKm2 || 0), 0));
 	const farmArea = $derived(farms.reduce((s, n) => s + (n.areaKm2 || 0), 0));
@@ -675,7 +708,8 @@
 						and the EWR applies), then add the hydrological units and gauges that drain into it.
 					{/if}
 				</p>
-				{#if !readonly}<button type="button" class="btn btn-primary" onclick={add}>Add outflow gauge</button>{/if}
+				<!-- id: where the focus lands after the table's last row is removed (removeQuestions.ts nodeRemovedFocus). -->
+				{#if !readonly}<button type="button" class="btn btn-primary" id="net-table-empty-add" onclick={add}>Add outflow gauge</button>{/if}
 			</div>
 		{:else}
 		<p class="muted small intro">
@@ -786,7 +820,7 @@
 										<td class="num by-month vol" data-testid="divert-by-month-{node.id}">
 											<span class="cell-label" aria-hidden="true">{cardLabel(f)} <span class="u">{f.unit}</span></span>
 											{#if projectId}
-												<a href="?tab=network&edit={encodeURIComponent(node.id)}&section=routing" aria-label="{c.aria}: edit it in the hydrological unit’s form" title="Set by month: the one value isn’t used. Edit the months in the hydrological unit’s form.">{c.text}</a>
+												<a href={nodeSheetHref(page.url, node.id, 'routing')} aria-label="{c.aria}: edit it in the hydrological unit’s form" title="Set by month: the one value isn’t used. Edit the months in the hydrological unit’s form.">{c.text}</a>
 											{:else}
 												<span aria-hidden="true" title="Set by month: the one value isn’t used.">{c.text}</span><span class="visually-hidden">{c.aria}</span>
 											{/if}
@@ -901,6 +935,11 @@
 	{#if nodes.length === 0}
 		<section class="panel" aria-label="No hydrological units yet">
 			<div class="empty" data-testid="network-empty">
+				{#if oldNodeLink}
+					<p class="muted small" role="status" data-testid="network-old-node-link">
+						The link opened a hydrological unit’s form, but this network has no hydrological units yet, so it shows the map.
+					</p>
+				{/if}
 				{#if readonly}
 					<p>No hydrological units yet. An editor builds the network here or from the Map.</p>
 				{:else}
@@ -935,7 +974,7 @@
 					{#each nodes as n (n.id)}
 						{@const band = dotBand(n.id)}
 						<li class:on={n.id === selectedId}>
-							<button type="button" class="node-row" aria-pressed={n.id === selectedId} onclick={() => pick(n.id)}>
+							<button type="button" class="node-row" id="node-list-{n.id}" aria-pressed={n.id === selectedId} onclick={() => pick(n.id)}>
 								<span class="dot {n.kind}" data-band={band} aria-hidden="true"></span>
 								<span class="nm">{n.name || '(unnamed)'}</span>
 								<span class="meta muted">{n.downstreamNodeId === null ? 'outlet' : `→ ${labelOf(n.downstreamNodeId)}`}</span>
@@ -974,7 +1013,7 @@
 
 	<!-- A node's full form, over the map (`edit=<id>`): every field, with its help. -->
 	{#if editing}
-		<Dialog bind:open={sheetOpen} title={readonly ? `${editing.name || '(unnamed)'}: details` : `Edit ${editing.name || '(unnamed)'}`} side extraWide>
+		<Dialog bind:open={sheetOpen} beforeclose={confirmSheetClose} title={readonly ? `${editing.name || '(unnamed)'}: details` : `Edit ${editing.name || '(unnamed)'}`} side extraWide>
 			{#snippet subhead()}
 				<div class="picker sheet-picker">
 					<label for="node-pick" class="visually-hidden">Hydrological unit to edit</label>
@@ -1043,9 +1082,9 @@
 			</div>
 			{#snippet actions()}
 				{#if readonly || !onsave}
-					<button type="button" class="btn" onclick={() => (sheetOpen = false)}>Close</button>
+					<button type="button" class="btn" onclick={closeSheet}>Close</button>
 				{:else}
-					<ModelSaveRow {editor} {onsave} ondone={() => (sheetOpen = false)} bind:reason />
+					<ModelSaveRow {editor} {onsave} ondone={closeSheet} bind:reason />
 				{/if}
 			{/snippet}
 		</Dialog>

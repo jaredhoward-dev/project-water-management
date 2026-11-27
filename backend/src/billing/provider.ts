@@ -1,11 +1,14 @@
 // The billing provider seam (issue #641 Phase 3, docs/billing.md § Webhooks and
 // providers). BILLING_PROVIDER picks one of three:
 //
-//   mock   (the code default, local-first) — Stripe-shaped events signed with the
-//          committed dev-only key (backend/.env.development BILLING_WEBHOOK_SECRET),
+//   mock   (the code default off Lambda, local-first) — Stripe-shaped events signed
+//          with the committed dev-only key (backend/.env.development BILLING_WEBHOOK_SECRET),
 //          so the whole webhook path runs with no Stripe account. Production refuses
 //          it (config/production.ts).
 //   manual — subscriptions the operator records by hand (B2B invoices); accepts no webhooks.
+//          The code default on Lambda (AWS_LAMBDA_FUNCTION_NAME set), so a backend
+//          released before the Terraform apply that sets BILLING_PROVIDER serves no
+//          mock (the same pattern as auth/signupOpen.ts).
 //   stripe — Stripe's signed events, checked over the raw body with node:crypto
 //          (provider/signature.ts) and normalised (provider/stripe.ts); checkout and
 //          the portal call Stripe's API over fetch (provider/stripeApi.ts), no
@@ -28,7 +31,7 @@ import { SIGNATURE_HEADER, verifySignature } from './provider/signature.js';
 import { normaliseStripeEvent } from './provider/stripe.js';
 import { billingEnvironment } from './provider/environment.js';
 export { BILLING_ENVIRONMENT_SHAPE, billingEnvironment, LOCAL_BILLING_ENVIRONMENT } from './provider/environment.js';
-import { MOCK_SESSION_TTL_SECONDS, seatsChangedEvent, signMockSession } from './provider/mock.js';
+import { MOCK_SESSION_TTL_SECONDS, mockPricing, seatsChangedEvent, signMockSession, type MockSession } from './provider/mock.js';
 import { createHash } from 'node:crypto';
 import { cancelSubscription, changeSeatItem, createCheckoutSession, createCustomer, createInvoice as createStripeInvoice, createPortalSession, ensureExtraSeatProduct, expireCheckoutSession, getSubscriptionItems, listOpenCheckoutSessions, listOpenSubscriptions, orphanCancelAndRefund, StripeApiError, type InvoiceLine, type OrphanResult } from './provider/stripeApi.js';
 
@@ -53,6 +56,16 @@ export interface SubscriptionPayload {
 	interval?: BillingInterval | null;
 	/** When the provider created the event (ISO): app_billing_apply skips an update older than the last one applied as `stale` (327); absent or null applies in arrival order. */
 	eventCreated?: string | null;
+	/** What it costs each interval (405, issue #928): checked against the plan table for a live status; absent from an older sender (not checked). */
+	price?: SubscriptionPrice;
+}
+export interface SubscriptionPrice {
+	/** The items' unit_amount × quantity, summed, in minor units; null when an item's price can't be read. */
+	totalMinor: number | null;
+	/** Lower-case ISO 4217; null with a null total. */
+	currency: string | null;
+	/** A coupon or discount is attached: never accepted as the plan. */
+	discounted: boolean;
 }
 /** What a recorded-only event carries: whose it is, and the subscription it names when it names one. */
 export interface RecordPayload {
@@ -158,6 +171,11 @@ export interface LiveSubscription {
 	seatsIncluded?: number;
 	/** How often it bills (332), so the mock's portal event carries it as Stripe would; null when not recorded. */
 	interval?: BillingInterval | null;
+	/** Which provider holds it and under which id (333): the mock's portal cancels its own by that id, and shows a `manual` one's invoices only. */
+	provider?: string;
+	externalRef?: string | null;
+	/** The plan as checkout prices it (#928), so the mock's portal event prices its items as Stripe's would; absent when the plan isn't on sale. */
+	plan?: CheckoutPlan;
 }
 export interface ReturnUrls {
 	/** Where the provider sends the person back to: the plan page, with `?checkout=done` or `?checkout=cancelled` for checkout. */
@@ -291,9 +309,12 @@ export interface OrphanRequest {
 }
 export type { OrphanResult };
 
-/** BILLING_PROVIDER as one of ours (unset is the mock, the code default), or null for a value that names none. */
+/**
+ * BILLING_PROVIDER as one of ours, or null for a value that names none. Unset (or blank) is the
+ * mock off Lambda (dev, the tests, the e2e server) and manual on Lambda, never the mock there.
+ */
 export function billingProviderName(env: NodeJS.ProcessEnv = process.env): BillingProviderName | null {
-	const v = env.BILLING_PROVIDER?.trim() || 'mock';
+	const v = env.BILLING_PROVIDER?.trim() || (env.AWS_LAMBDA_FUNCTION_NAME ? 'manual' : 'mock');
 	return (BILLING_PROVIDERS as readonly string[]).includes(v) ? (v as BillingProviderName) : null;
 }
 
@@ -349,10 +370,18 @@ function mockProvider(secret: string | undefined, now: () => number): BillingPro
 			return { url: `${urls.apiBase}/billing/mock/checkout?t=${encodeURIComponent(t)}` };
 		},
 		async createPortal(account, subscription, urls) {
-			const live =
-				subscription && subscription.periodStart && subscription.periodEnd
-					? { ...subscription, periodStart: subscription.periodStart, periodEnd: subscription.periodEnd }
-					: null;
+			let live: Extract<MockSession, { kind: 'portal' }>['subscription'] = null;
+			if (subscription && subscription.periodStart && subscription.periodEnd) {
+				const { plan, ...rest } = subscription;
+				// The plan figures at the subscription's interval go in the token, not the plan itself: the cancel's items carry them (#928).
+				const prices = plan && subscription.interval ? checkoutPrices(plan, subscription.interval, subscription.seats) : null;
+				live = {
+					...rest,
+					periodStart: subscription.periodStart,
+					periodEnd: subscription.periodEnd,
+					...(plan && prices ? { baseMinor: prices.baseMinor, extraSeatMinor: prices.extraSeatMinor, currency: plan.currency } : {})
+				};
+			}
 			const t = sign({ kind: 'portal', accountId: account.id, returnUrl: urls.successUrl, subscription: live, exp: exp(now()) });
 			return { url: `${urls.apiBase}/billing/mock/portal?t=${encodeURIComponent(t)}` };
 		},
@@ -361,8 +390,12 @@ function mockProvider(secret: string | undefined, now: () => number): BillingPro
 		async changeSeats(change) {
 			if (!secret) throw new BillingProviderError();
 			const { deliverMockEvent } = await import('./mockCheckout.js');
-			const event = seatsChangedEvent(change.accountId, change.subscription, change.plan.seatsIncluded, change.seats, now());
-			if (!(await deliverMockEvent(event))) throw new BillingProviderError();
+			// Priced from the plan figures at the subscription's interval, as Stripe's items are (#928); no interval recorded, no prices.
+			const interval = change.subscription.interval;
+			const prices = interval ? checkoutPrices(change.plan, interval, change.seats) : null;
+			const pricing = prices ? mockPricing(interval, change.plan.currency, prices.baseMinor, prices.extraSeatMinor) : null;
+			const event = seatsChangedEvent(change.accountId, change.externalRef, change.subscription, change.plan.seatsIncluded, change.seats, now(), pricing);
+			if (!(await deliverMockEvent(event)).taken) throw new BillingProviderError();
 		},
 		// No network: an invoice id from the key, so the same request answers the same invoice (as Stripe's would).
 		async createInvoice(req) {

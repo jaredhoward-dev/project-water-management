@@ -554,6 +554,37 @@ test('a farm card on the list says when its figures are loading or could not be 
 	await page.unrouteAll({ behavior: 'wait' });
 });
 
+// A card whose live figures fail but whose saved copy this phone has shows the copy marked as such, with when it
+// was saved, as the farm page's strip does: never as if it were current.
+test('a farm card on the list marks a saved copy of its figures as saved, with when', async ({ page }) => {
+	await page.setViewportSize(PHONE);
+	await signIn(page, FARMER2);
+	await expect(page).toHaveURL(/\/farm$/);
+	// Opening Kareebos's page keeps a copy of its figures on this phone.
+	await page.getByRole('link', { name: /Kareebos/ }).click();
+	await expect(page.getByRole('heading', { level: 1, name: /^Kareebos/ })).toBeVisible();
+	const { projects } = (await (await page.request.get(`${API_URL}/projects`)).json()) as { projects: { id: string; role: string }[] };
+	let nodeId = '';
+	for (const p of projects.filter((x) => x.role === 'farmer')) {
+		const ix = (await (await page.request.get(`${API_URL}/projects/${p.id}/farm`)).json()) as { farms: { nodeId: string; name: string }[] };
+		nodeId ||= ix.farms.find((f) => f.name === 'Kareebos')?.nodeId ?? '';
+	}
+	expect(nodeId).not.toBe('');
+	await page.route(`${API_URL}/projects/*/farm/${nodeId}`, (route) =>
+		route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'Internal error' }) })
+	);
+	await page.goto('/farm');
+	const kareebos = page.getByRole('link', { name: /Kareebos/ });
+	await expect(kareebos).toContainText('% of water needed');
+	await expect(kareebos.getByTestId('farm-card-saved')).toHaveText(/^We couldn’t update your figures\. These are the figures saved on this phone at /);
+	// Positive control: the farm whose figures loaded says nothing of a saved copy.
+	const rietspruit = page.getByRole('link', { name: /Rietspruit/ });
+	await expect(rietspruit).toContainText('% of water needed');
+	await expect(rietspruit.getByTestId('farm-card-saved')).toHaveCount(0);
+	await expectNoSidewaysScroll(page);
+	await page.unrouteAll({ behavior: 'wait' });
+});
+
 test('a list of farms that fits the window doesn’t scroll', async ({ page }) => {
 	await signIn(page, FARMER2);
 	await expect(page).toHaveURL(/\/farm$/);
@@ -852,16 +883,24 @@ test('the words page goes back to the farm page it was opened from, and only to 
 	await back.click();
 	await expect(page.getByRole('heading', { level: 1, name: /^Kareebos/ })).toBeVisible();
 
-	// From Why?'s link into an entry: back to Why?, the entry still landed.
+	// From Why?'s link into an entry: back to Why?, the entry still landed, and the link names Why?, not the farm's page.
 	await page.goto(`${farmPath}/why`);
 	await page.getByRole('link', { name: 'What is the river’s reserve?' }).click();
 	await expect(page.locator('#farm-reserve')).toBeInViewport();
-	await expect(page.locator('.farm-header').getByRole('link', { name: 'My hydrological unit' })).toHaveAttribute('href', `${farmPath}/why`);
+	await expect(page.locator('.farm-header').getByRole('link', { name: 'Why?' })).toHaveAttribute('href', `${farmPath}/why`);
 
 	// From the Menu on the words page itself, the way back is kept.
 	await page.getByRole('button', { name: 'Menu' }).click();
 	await page.locator('#farm-menu').getByRole('link', { name: 'What do these words mean?' }).click();
-	await expect(page.locator('.farm-header').getByRole('link', { name: 'My hydrological unit' })).toHaveAttribute('href', `${farmPath}/why`);
+	await expect(page.locator('.farm-header').getByRole('link', { name: 'Why?' })).toHaveAttribute('href', `${farmPath}/why`);
+
+	// From the dam page's "What is “modelled”?": the back link says it returns to the dam page, and does.
+	await page.goto(`${farmPath}/dam`);
+	await page.getByRole('link', { name: 'What is “modelled”?' }).click();
+	const toDam = page.locator('.farm-header').getByRole('link', { name: 'Your dam' });
+	await expect(toDam).toHaveAttribute('href', `${farmPath}/dam`);
+	await toDam.click();
+	await expect(page.getByRole('heading', { level: 1, name: 'Your dam' })).toBeVisible();
 
 	// Opened on its own, or with anything but a farm page's address: back to the list, named as such.
 	for (const from of ['', '?from=https%3A%2F%2Fevil.example%2F', '?from=%2F%2Fevil.example%2Ffarm%2Fx', '?from=%2Fprojects']) {

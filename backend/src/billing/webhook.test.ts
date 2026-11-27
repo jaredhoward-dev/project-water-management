@@ -112,10 +112,21 @@ describe('POST /billing/webhook/:provider', () => {
 	});
 
 	it('is 400 "invalid event" for a signed body it can’t normalise', async () => {
-		const bad = JSON.stringify({ ...JSON.parse(fixture('subscription-updated')), data: { object: { id: 'sub_1' } } });
+		// Ours (it names an account) but missing its plan and period.
+		const bad = JSON.stringify({ ...JSON.parse(fixture('subscription-updated')), data: { object: { id: 'sub_1', metadata: { billing_account_id: '00000000-0000-4000-8000-000000000641' } } } });
 		const res = await post('stripe', bad);
 		expect(res.status).toBe(400);
 		expect(await res.json()).toEqual({ error: 'invalid event' });
+		expect(calls).toHaveLength(0);
+	});
+
+	it('answers 200 "ignored" for a signed invoice this app never made (no billing_account_id), without a database call', async () => {
+		// A dashboard invoice: a 400 would have Stripe redeliver it for 3 days, and no retry could change it.
+		const e = JSON.parse(fixture('invoice-payment-failed'));
+		e.data.object = { id: 'in_dashboard', object: 'invoice', parent: null, metadata: {} };
+		const res = await post('stripe', JSON.stringify(e));
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({ received: true, result: 'ignored' });
 		expect(calls).toHaveLength(0);
 	});
 

@@ -914,7 +914,7 @@ operator/hydrologist waits (SES review, the region opt-in, answers), plan on
       to the existing us-east-1 SNS topic (+$0.50/month);
     - a CloudWatch metric filter on the API log group for unhandled errors
       (`level=error`) with an alarm;
-    - Terraform tests in `tests/guardrails.tftest.hcl` for both.
+    - Terraform tests in `tests/guardrails.tftest.hcl` for both (since split into `tests/guardrails_*.tftest.hcl`).
   - **docs:** new `docs/runbook.md`:
     - deploy and rollback (links to deployment.md);
     - restore (step by step, with the drill's timings);

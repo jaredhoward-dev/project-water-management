@@ -5,7 +5,7 @@
 	// %, the worst notice first. A farmer with one farm goes straight to its page. The root page sends
 	// a user whose every membership is `farmer` here.
 	import { onMount } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { resolve } from '$app/paths';
 	import { basePath } from '#lib/nav/base.js';
 	import type { FarmIndex, FarmView } from '@water-management/engine';
@@ -15,11 +15,11 @@
 	import FarmNoticeGate from '#lib/components/farm/FarmNoticeGate.svelte';
 	import FarmSkeleton from '#lib/components/farm/FarmSkeleton.svelte';
 	import FarmStatus from '#lib/components/farm/FarmStatus.svelte';
-	import { farmSummaryLine, farmsPrivacy, levelWord, stateText } from '#lib/components/farm/cards.js';
+	import { farmSummaryLine, farmsPrivacy, levelWord, savedStrip, stateText } from '#lib/components/farm/cards.js';
 	import { t } from '#lib/i18n/locale.svelte.js';
 	import { ApiError } from '#lib/api/client.js';
 	import { errorText } from '#lib/i18n/apiError.js';
-	import { cardOnFailure, classify, farmHref, worstFirst } from '#lib/components/farm/load.js';
+	import { cardOnFailure, classify, farmHref, savedForPublication, worstFirst } from '#lib/components/farm/load.js';
 	import { clearSaved, readSaved } from '#lib/components/farm/savedCopy.js';
 
 	interface Row {
@@ -34,6 +34,8 @@
 		viewFailed: boolean;
 		/** The figures are withheld from this viewer (403 farm_preview_withheld): the card says why, never the saved copy (#875). */
 		withheld: boolean;
+		/** The figures are this phone's saved copy, fetched then (ms), since the live ones failed: the card says so, never as current. */
+		savedAt: number | null;
 	}
 
 	let rows = $state<Row[] | null>(null);
@@ -70,13 +72,14 @@
 						publication: ix.publication,
 						view: null,
 						viewFailed: false,
-						withheld: false
+						withheld: false,
+						savedAt: null
 					});
 				}
 			});
 			if (!list.length && failure) throw (failure as PromiseRejectedResult).reason;
 			if (list.length === 1) {
-				await goto(farmHref(basePath(), list[0]!.projectId, list[0]!.nodeId, false), { replace: true });
+				await guardedGoto(farmHref(basePath(), list[0]!.projectId, list[0]!.nodeId, false), { replace: true });
 				return;
 			}
 			failures = 0;
@@ -92,16 +95,19 @@
 					if (!row.publication) return;
 					let view: FarmView | null;
 					let withheld = false;
+					let savedAt: number | null = null;
 					try {
 						view = await api.farm.view(row.projectId, row.nodeId);
 					} catch (e) {
-						const next = cardOnFailure(e, () => (user ? (readSaved(user, row.projectId, row.nodeId)?.view ?? null) : null));
+						// A copy from an older publication than the list's is not shown (savedForPublication, #942).
+						const next = cardOnFailure(e, () => (user ? savedForPublication(readSaved(user, row.projectId, row.nodeId), row.publication) : null));
 						if (next.drop) {
 							clearSaved(row.projectId, row.nodeId);
 							if (gen === generation && rows) rows = rows.filter((r) => r.projectId !== row.projectId || r.nodeId !== row.nodeId);
 							return;
 						}
-						view = next.view;
+						view = next.view?.view ?? null;
+						savedAt = next.view?.savedAt ?? null;
 						withheld = next.withheld;
 					}
 					// A reload since (Try again, a new list) owns the cards now.
@@ -110,6 +116,7 @@
 					if (!live) return;
 					live.view = view;
 					live.withheld = withheld;
+					live.savedAt = savedAt;
 					live.viewFailed = view == null && !withheld;
 				})
 			);
@@ -157,6 +164,8 @@
 												: stateText('updating')
 									: t('Not published yet')}</span
 							>
+							<!-- The live figures failed and these are the phone's saved copy: said so, with when it was saved, as the farm page's strip does. -->
+							{#if r.view && r.savedAt != null}<span class="saved" data-testid="farm-card-saved">{savedStrip(r.savedAt, 'failed')}</span>{/if}
 						</a>
 					</li>
 				{/each}
@@ -200,6 +209,10 @@
 	}
 	.pending {
 		color: var(--text-2);
+	}
+	.saved {
+		font-size: 14px;
+		color: var(--warning);
 	}
 	.level {
 		padding: 2px 10px;

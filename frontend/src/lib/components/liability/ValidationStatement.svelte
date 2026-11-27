@@ -5,16 +5,20 @@
 	// run's Record group, the scenario view); the known limitations are
 	// generated from docs/engine-audit.md, the errata from
 	// docs/engine-errata.md, and the methodology statement is cited by version
-	// and hash (docs/methodology).
+	// and hash (docs/methodology). Which errata apply is the API's word when the
+	// run carries it (`errata`, its ids): an older site build would otherwise
+	// leave out errata the backend knows (statementErrata.ts).
 	import { validationStatement, type FitEngines, type RunSummary } from '@water-management/engine';
 	import { fmtDay, fmtNum } from '#lib/format/number.js';
 	import { ENGINE_BUILD } from './engineBuild';
+	import { statementErrata } from './statementErrata';
 
 	let {
 		summary,
 		engineVersion,
 		legacy,
 		fitEngineVersion = null,
+		errata = undefined,
 		headingLevel = 3
 	}: {
 		summary: RunSummary;
@@ -22,6 +26,8 @@
 		legacy: boolean;
 		/** The engine of the automatic fit the run's parameters came from (settings.fitRecord); null for entered parameters. */
 		fitEngineVersion?: FitEngines;
+		/** The run's errata ids as the API worked them out (RunMeta.errata); absent: the engine's own list for its version. */
+		errata?: readonly string[] | null;
 		/** The level of its own headings (Calibration, Data quality, Known limitations): one below the heading it sits under. */
 		headingLevel?: 3 | 4;
 	} = $props();
@@ -29,6 +35,7 @@
 
 	// The site build's record (release builds only); validationStatement shows it only for its own engine version.
 	const v = $derived(validationStatement({ summary, engineVersion, legacy, fitEngineVersion }, ENGINE_BUILD));
+	const errataRows = $derived(statementErrata(v.errata, errata));
 	const uid = `vs-${Math.random().toString(36).slice(2, 9)}`;
 	const metric = (x: number | null, id: string) => (x == null ? '–' : id === 'pbias' ? `${fmtNum(x, 1)} %` : fmtNum(x, 2));
 </script>
@@ -112,7 +119,7 @@
 	{/if}
 
 	<svelte:element this={h} id="{uid}-err">Errata of engine {v.engineVersion}</svelte:element>
-	{#if v.errata.length}
+	{#if errataRows.length}
 		<p class="muted small">
 			Known bugs recorded for this engine version, or for the engine of the fit its parameters came from (docs/engine-errata.md): each changes
 			results only under the conditions given.
@@ -121,7 +128,13 @@
 			<table class="data compact" aria-labelledby="{uid}-err">
 				<thead><tr><th scope="col">Erratum</th><th scope="col">What goes wrong</th><th scope="col">Applies when</th><th scope="col">Fixed in</th></tr></thead>
 				<tbody>
-					{#each v.errata as e (e.id)}<tr><th scope="row">{e.id}</th><td>{e.summary}</td><td>{e.appliesWhen}</td><td>{e.fixedIn ? `engine ${e.fixedIn}` : 'not yet'}</td></tr>{/each}
+					{#each errataRows as e (e.id)}
+						{#if e.known}
+							<tr><th scope="row">{e.id}</th><td>{e.summary}</td><td>{e.appliesWhen}</td><td>{e.fixedIn ? `engine ${e.fixedIn}` : 'not yet'}</td></tr>
+						{:else}
+							<tr data-erratum-unknown><th scope="row">{e.id}</th><td colspan="3">Recorded after this page was built: reload it for the details, or see docs/engine-errata.md.</td></tr>
+						{/if}
+					{/each}
 				</tbody>
 			</table>
 		</div>

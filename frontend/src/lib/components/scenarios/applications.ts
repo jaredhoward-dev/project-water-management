@@ -85,3 +85,42 @@ export function statusPill(a: Pick<Scenario, 'status' | 'outcome'>): { text: str
 	const TONE: Record<ScenarioOutcome, 'good' | 'mixed' | 'bad'> = { licence_issued: 'good', licence_refused: 'bad', application_rejected: 'bad', not_considered: 'mixed' };
 	return a.outcome ? { text: OUTCOME_LABEL[a.outcome], tone: TONE[a.outcome] } : { text: 'Decided', tone: 'neutral' };
 }
+
+/**
+ * The Application panel's error for a move the server refused as a conflict,
+ * once it has read the application again: one sentence (issue #934), with the
+ * server's own words, which start lower-case and end without a stop, in
+ * brackets rather than glued on with ". ".
+ */
+export function applicationConflictText(serverText: string): string {
+	const said = serverText.trim().replace(/[.\s]+$/, '');
+	return `The application changed since this page read it, so the move was refused${said ? ` (${said})` : ''}; someone else may have withdrawn, reopened or decided it, and it now shows where it stands.`;
+}
+
+/**
+ * After the server refused a move on an application: a 409 is a conflict
+ * (another user withdrew, reopened, submitted or decided it since the panel
+ * read it), so read it again and hand it back, for the panel to show its
+ * current status and moves rather than the stale ones. Any other refusal, or
+ * a read that fails, gives null: the panel stays as it was, with the error.
+ */
+export async function rereadAfterConflict<T>(e: unknown, reread: () => Promise<T>): Promise<T | null> {
+	const status = typeof e === 'object' && e !== null ? (e as { status?: unknown }).status : undefined;
+	if (status !== 409) return null;
+	try {
+		return await reread();
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * The heading to land on when the Applications tab switches between its list and Assess together
+ * (`view=assess`): the new view's heading, which takes the focus and so the scroll (ui-playbook.md §
+ * a link that moves to another part of the page). null when the view didn't change (the first render,
+ * a sort or filter step), which keeps the place.
+ */
+export function applicationsViewHeading(prev: boolean | null, assess: boolean): 'assess-h' | 'applications-h' | null {
+	if (prev === null || prev === assess) return null;
+	return assess ? 'assess-h' : 'applications-h';
+}

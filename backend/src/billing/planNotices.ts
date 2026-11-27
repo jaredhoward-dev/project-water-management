@@ -22,14 +22,15 @@
 //
 // Logs name the account and the kind only: never the address, the person or
 // a catchment.
+import { PLAN_ENDED_GRACE_DAYS } from '@water-management/engine/plans';
 import { type Db, withoutUser, withUser } from '../db/tx.js';
 import { logEvent } from '../logging/logEvent.js';
 import { safeError } from '../logging/safeError.js';
 import { planNoticeMail, type PlanAccount } from '../mail/templates.js';
 import { sendMail, type Mail } from '../mail/transport.js';
 
-/** The grace after a paid plan ends before the pause (341's interval). */
-export const PLAN_GRACE_DAYS = 14;
+/** The grace after a paid plan ends before the pause (341's interval), from the plan figures (#941). */
+export const PLAN_GRACE_DAYS = PLAN_ENDED_GRACE_DAYS;
 
 const LEASE = '10 minutes';
 

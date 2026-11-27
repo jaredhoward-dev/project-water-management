@@ -642,7 +642,7 @@ environment's job is the required reviewer (§ 1), not storage.
 | `WAF_CAPTCHA_SCRIPT_URL` | `waf_captcha_script_url` (the sign-in CAPTCHA's jsapi.js; empty until `waf_captcha_integration_url` is set) |
 | secret `WAF_CAPTCHA_API_KEY` | `waf_captcha_api_key` (the CAPTCHA API key for the site's domain; it ships in the public bundle, but the provider marks it sensitive) |
 | `PUBLIC_TILES_URL`, `PUBLIC_TILES_GLYPHS_URL`, `PUBLIC_TERRAIN_URL`, `PUBLIC_CHANNELS_URL` | not outputs: set by hand once the files are in the tiles bucket (§ Map tiles); unset, the map draws the plain background |
-| `PUBLIC_REVERSE_TRIAL` | not an output: set to `true` by hand in the same change that turns on the API's `REVERSE_TRIAL` and `BILLING_ENFORCED`, then release the web; unset (off), the pricing page offers no trial ([billing.md § The pricing page and the trial](./billing.md#the-pricing-page-and-the-trial)) |
+| `PUBLIC_REVERSE_TRIAL` | not an output: set to `true` by hand in the same change that turns on the API's `REVERSE_TRIAL` and `BILLING_ENFORCED` (`reverse_trial`, `billing_enforced`; [§ Turning on enforcement](#turning-on-enforcement)), then release the web; unset (off), the pricing page offers no trial ([billing.md § The pricing page and the trial](./billing.md#the-pricing-page-and-the-trial)) |
 
 `PUBLIC_API_URL` is not a GitHub variable: the build reads `/api` from the
 committed `frontend/.env.production`.
@@ -1127,9 +1127,35 @@ nothing. Step by step:
 2. Pick the version: minor for features, patch for fixes (before 1.0 a
    breaking change bumps minor). It must be newer than the last release of
    the same component.
-3. If the frontend needs new API behaviour, release the backend first and
-   let that deploy finish. Migrations must work with the API version still
-   serving (expand/contract, CLAUDE.md rule 2).
+3. **Order: Terraform, then backend, then web.**
+   - **Apply Terraform from `main` before tagging a backend release when
+     infra changed since the last one.** `deploy-backend.yml` only updates
+     function code; it never applies Terraform, so the new code starts on the
+     environment the last apply wrote. To tell, diff infra against the last
+     backend release: `git diff backend@<last> -- infra/` (empty: no apply
+     needed). If it isn't empty, run the plan and apply from `main` ([§ 3.
+     Terraform](#3-terraform)) first, then tag. The config check
+     (`config/production.ts`) is written so a release before the apply still
+     starts (a setting the new code reads is checked only when set, with a
+     code default equal to Terraform's; `production.security.test.ts` starts
+     every Lambda on the last release's environment), but a new setting only
+     takes effect once applied, and a setting with no safe default would
+     refuse to start every instance of the Lambda.
+   - **Backend first, web promptly after.** If the frontend needs new API
+     behaviour, release the backend and let that deploy finish, then release
+     web without waiting days: the old web against a new-engine backend can't
+     store paired uncertainty bands, and its report validation statement leaves out errata
+     added since its own engine (fixed from the next web release on: the
+     statement lists the run's server-provided `errata` ids when the run has
+     them). Migrations must work with the API version still serving
+     (expand/contract, CLAUDE.md rule 2).
+   - **Release notes.** Say in the notes what a user or owner will notice
+     that the commit list doesn't make plain. For the release after
+     backend@0.26.2: hourly (sub-daily) flow files are now averaged into
+     days, not summed (#829, #840), so a re-imported hourly file gives
+     smaller daily flows; and the engine bump's errata emails reach owners
+     on the first worker tick after the deploy, up to one per erratum per
+     project.
 4. Publish the release. The notes are generated from the commits since the
    previous release; edit them in the web UI if they need a summary.
 
@@ -1314,7 +1340,7 @@ runs in production as `JOB_TRANSPORT=sqs` (infra/jobs.tf):
   the plan code the worker shares with a route lives apart from it:
   `delineation/start.ts` and `divide.ts` beside `startRoutes.ts` and
   `divideRoutes.ts`), and
-  `infra/tests/guardrails.tftest.hcl` if the worker's environment gets either
+  `infra/tests/guardrails_jobs.tftest.hcl` if the worker's environment gets either
   setting back.
 - **Worker Lambda** (`backend/src/lambda-worker.ts`, handler
   `lambda-worker.handler`): in the private VPC, 1024 MB (2 048 with
@@ -3371,7 +3397,19 @@ environment. Under `manual` Terraform leaves both out of the secret, even when
 they are in sops, since the API refuses a key it doesn't expect
 (`config/runtimeSecrets.ts`). Plan refuses `stripe` without both, with a
 test-mode key or with a webhook secret under 32 characters, and refuses `mock`
-outright (`infra/tests/guardrails.tftest.hcl`).
+outright (`infra/tests/guardrails_baseline.tftest.hcl`).
+
+Enforcement and the reverse trial are two more Terraform switches, both
+`false` by default (shadow mode: usage is counted and shown, nothing
+refuses): `billing_enforced` sets `BILLING_ENFORCED` on the API, the worker
+and the assistant (every Lambda that opens a `withUser` transaction, which
+sets `app.billing_enforced` from it), and `reverse_trial` sets
+`REVERSE_TRIAL` on the API, the only Lambda that grants a trial. Each is the
+exact string `"true"` or `"false"`, the only values the backend reads as on
+or off. Plan refuses `reverse_trial = true` without `billing_enforced =
+true`, since the backend grants no trial while nothing refuses
+([§ Turning on enforcement](#turning-on-enforcement);
+[billing.md § BILLING_ENFORCED](./billing.md#billing_enforced)).
 
 ### Turning on Stripe
 
@@ -3383,20 +3421,85 @@ key goes into a chat, an issue or a CI log.
    registry row), and finish its activation (business details, payout bank
    account) so live mode is available.
 2. **Make a restricted key** in live mode: Developers → API keys → Create
-   restricted key, named `ic-wbt-api`. Give it exactly what the API calls
-   (billing.md § Stripe): **Customers: Write**, **Checkout Sessions: Write**
-   and **Customer portal: Write**; everything else **None**. Stripe shows the
-   `rk_live_…` value once: go straight to step 4 with it.
-3. **Make the webhook endpoint** in live mode: Developers → Webhooks → Add
+   restricted key, named `ic-wbt-api`. Give it exactly what the API's calls
+   need (`backend/src/billing/provider/stripeApi.ts`, whose header lists
+   every call; [billing.md § Stripe](./billing.md#stripe)), named as the
+   key screen names them, and everything else **None**:
+
+   | Permission | Level | The API's calls (Stripe's permission) |
+   |---|---|---|
+   | Customers | Write | `POST /v1/customers`, the account's customer (`customer_write`) |
+   | Checkout Sessions | Write | `POST /v1/checkout/sessions`; before an account is deleted, `GET` its open ones and `POST …/expire` (`checkout_session_write`) |
+   | Customer portal | Write | `POST /v1/billing_portal/sessions` (`customer_portal_write`) |
+   | Subscriptions | Write | seat changes: `GET /v1/subscriptions/:id`, `POST`/`DELETE /v1/subscription_items…`; a deleted account's or an orphan's cancel: `GET /v1/subscriptions`, `DELETE /v1/subscriptions/:id` (`subscription_write`, which covers subscription items) |
+   | Products | Write | `POST /v1/products`, the extra-seat product, made once (`product_write`) |
+   | Invoices | Read | an orphan's refund lookup: `GET /v1/invoices`, `GET /v1/invoice_payments` (`invoice_read`, which covers invoice payments) |
+   | Charges and Refunds | Write | an orphan's refund: `POST /v1/refunds` (`charge_write`) |
+
+   The mapping is Stripe's [API permissions
+   reference](https://docs.stripe.com/keys/permissions-reference) (checked
+   2026-11-26; `GET` is read, `POST` and `DELETE` write, and Write includes
+   Read: [Restricted API keys](https://docs.stripe.com/keys/restricted-api-keys)).
+   It lists `POST /v1/refunds/{id}` and `…/cancel` under `charge_write` but
+   not `POST /v1/refunds` itself, so step 8's test key is what proves that
+   row. The B2B invoice calls (`POST /v1/invoices`, `/v1/invoiceitems`,
+   finalize, send) are the migrate function's, not the API's, and that
+   function has no Stripe key yet ([§ Owner actions](#owner-actions)); when
+   it gets one, give it a key of its own with Customers: Write and
+   Invoices: Write, so neither key holds the other's rights. A call the key
+   can't make fails as `billing_provider_error` with Stripe's code in the
+   API's log: add that permission and nothing else. Stripe shows the
+   `rk_live_…` value once: go straight to step 6 with it.
+3. **Set the customer portal** (Settings → Billing → Customer portal, in
+   both modes; [Stripe's settings](https://docs.stripe.com/customer-management/configure-portal)).
+   On: **Payment methods**, **Invoice history visible**, and **Cancel
+   subscription** at the end of the billing period, with **Cancellation
+   reason**; the Terms and privacy links. Off, and why:
+   - **Switch plan**: there are no Stripe Prices to switch between.
+     Checkout sends each plan's price inline (`price_data`) from the `plan`
+     table; plan and interval change on the app's Plan page
+     ([billing.md § Stripe](./billing.md#stripe)).
+   - **Update quantities**: a quantity changed in the portal goes around the
+     seat check that *Change seats* makes (issue #926). The app only records
+     a team cut below its editors, refuses it new editors and lists it in
+     the billing report ([billing.md § Team seats](./billing.md#team-seats),
+     "Over its seats"); it can't undo the change at Stripe.
+   - **Use promotion codes**, **Promotion codes** and **Retention coupons**:
+     any discount on a subscription is a price conflict (issue #928), so the
+     webhook writes nothing for it, the customer may be charged with no plan
+     to show for it, and the operator has to resolve it by hand
+     ([billing.md § Price check](./billing.md#price-check)). A discount you
+     mean to give is a staff grant instead.
+   - **Pause subscription**: a paused subscription is recorded, never
+     applied, so the app keeps its last state while Stripe stops invoicing.
+4. **Set Revenue recovery** (Billing → Revenue recovery → Retries, in both
+   modes; [Stripe's retries](https://docs.stripe.com/billing/revenue-recovery/smart-retries)).
+   Keep **Smart Retries** on with Stripe's default window, up to 8 retries
+   within **2 weeks**, and set what happens when they all fail to **Cancel
+   the subscription**: never *Mark the subscription as unpaid*, *Leave the
+   subscription past-due* or *Pause the subscription*. Why (issue #927):
+   Stripe's `past_due` and `unpaid` both reach the app as `past_due`, which
+   is live, and only a cancel (`customer.subscription.deleted`) ends it at
+   Stripe too. The app's own backstop is the dunning limit: 14 days after a
+   subscription first went `past_due` the job tick moves it to `lapsed`,
+   treated as Free, and a later payment revives it ([billing.md § Dunning
+   limit](./billing.md#dunning-limit)). With a 2-week window the two meet
+   at about the same day, and the cancel then ends the subscription for
+   good; a longer window (3 weeks to 2 months) leaves the account lapsed
+   while Stripe still retries, and charging a card for a plan the app has
+   paused is what a customer complains about. Keep the window at 2 weeks or
+   less, or move both together (`DUNNING_GRACE_DAYS` in
+   `packages/engine/src/plans.ts`).
+5. **Make the webhook endpoint** in live mode: Developers → Webhooks → Add
    endpoint, URL `https://<site domain>/api/billing/webhook/stripe` (CloudFront
    sends `/api/*` to the API), API version `2026-10-28.endive` (the one the
    API pins), and exactly these six events:
    `customer.subscription.created`, `customer.subscription.updated`,
    `customer.subscription.deleted`, `checkout.session.completed`,
    `invoice.paid`, `invoice.payment_failed`. Reveal its signing secret
-   (`whsec_…`). Until step 5's apply the API answers this endpoint `404`
+   (`whsec_…`). Until step 7's apply the API answers this endpoint `404`
    (`manual`), and Stripe retries a failed delivery for up to three days, so
-   do steps 4–5 the same day. **One webhook endpoint per environment:** a
+   do steps 6–7 the same day. **One webhook endpoint per environment:** a
    staging or test deployment on the same Stripe account gets its own
    endpoint pointing at its own site, never this one. Each deployment
    cancels and refunds an orphan (a subscription whose account is gone)
@@ -3405,13 +3508,13 @@ key goes into a chat, an issue or a CI log.
    production check refuses it unset or `local` under `stripe`), so one
    deployment never refunds another's subscriptions ([billing.md § The
    route](./billing.md#the-route), "Only this deployment's").
-4. **Put both in sops:**
+6. **Put both in sops:**
    `cd ~/github/infra-secrets && AWS_PROFILE=water-management sops water-management/prod.sops.yaml`,
    adding `stripe_secret_key: "<rk_live_…>"` and
    `billing_webhook_secret: "<whsec_…>"` (`infra/prod.sops.yaml.example`).
    `tf.sh` passes each as an ephemeral variable when present; neither reaches
    state or a saved plan.
-5. **Switch the provider, plan, read it, then apply** with your own
+7. **Switch the provider, plan, read it, then apply** with your own
    go-ahead. Add `billing_provider = "stripe"` and `stripe_egress_enabled =
    true` (§ Stripe egress: the API's route to Stripe) to `prod.tfvars.sops`, then
    `cd infra && AWS_PROFILE=water-management ./scripts/tf.sh plan -var-file=../../infra-secrets/water-management/prod.tfvars.sops -out=<plan>`
@@ -3424,26 +3527,101 @@ key goes into a chat, an issue or a CI log.
    `runtime_secret_version`, so every Lambda cold-starts). Nothing else.
    A plan that fails on `var.billing_provider` names the missing or
    malformed key.
-6. **Check it.** First in test mode, which production can't take (it
+8. **Check it.** First in test mode, which production can't take (it
    refuses a test key, and a test-mode endpoint's events are signed with a
    different secret), so on your own machine with the
-   [Stripe CLI](https://docs.stripe.com/stripe-cli): in
-   `backend/.env.development.local` set `BILLING_PROVIDER=stripe`, a test-mode
-   `STRIPE_SECRET_KEY=sk_test_…` and the `whsec_…` that
+   [Stripe CLI](https://docs.stripe.com/stripe-cli). In the sandbox, make a
+   **test-mode restricted key** (`ic-wbt-api-test`) with exactly step 2's
+   permissions, not the full `sk_test_…` key, so the test proves the list
+   before the live key is made from it (Stripe's own advice: [Restricted API
+   keys](https://docs.stripe.com/keys/restricted-api-keys), "Create a
+   restricted API key in a sandbox"). Set up steps 3 and 4 in the sandbox
+   too. In `backend/.env.development.local` set `BILLING_PROVIDER=stripe`,
+   `STRIPE_SECRET_KEY=rk_test_…` and the `whsec_…` that
    `stripe listen --forward-to http://localhost:3001/billing/webhook/stripe`
-   prints, then run `pnpm dev` and buy a plan from the plan page with Stripe's
-   test card `4242 4242 4242 4242`. The `stripe listen` window shows each of
-   the events answered `200`, and the account's plan page shows the
-   subscription. (`stripe trigger` events carry no `billing_account_id`, so
-   the API rightly refuses them; use a real test checkout.) Then in
-   production, after the apply: the API's log group shows no
-   `refusing to start the api Lambda`, and the first live event appears in
-   the endpoint's delivery log in Stripe's dashboard answered `200`, with a
-   `billing_webhook` line in the API's log. Remove the local keys afterwards.
+   prints, then run `pnpm dev` and, with Stripe's test card
+   `4242 4242 4242 4242`:
+   - buy Pro from the plan page (Customers, Checkout Sessions): the
+     `stripe listen` window shows each event answered `200`, and the plan
+     page shows the subscription;
+   - buy Team with an extra seat, then *Change seats* up and down
+     (Subscriptions, Products);
+   - open *Manage billing* (Customer portal) and check step 3's settings
+     show: no plan switch, no quantity, no promotion code;
+   - delete a test account that holds a subscription (Checkout Sessions,
+     Subscriptions: its open checkouts expired, its subscription cancelled).
+
+   The orphan refund (Invoices, Charges and Refunds) is hard to reach by
+   hand: pay a checkout link after deleting its account. Without it, those
+   two rows are proven only by the key's request logs (API keys → ⋯ →
+   View request logs) the first time an orphan happens. Any
+   `billing_provider_error` in the API's log names Stripe's code: add that
+   permission to the test key, re-run, and make the live key from the final
+   list. (`stripe trigger` events carry no `billing_account_id`, so the API
+   rightly refuses them; use a real test checkout.) A dashboard price or a
+   coupon on a test subscription shows as a conflict in
+   `pnpm dev:billing:conflict --list` ([billing.md § Price
+   check](./billing.md#price-check)); production lists them through the
+   `billing-conflicts` owner action. Then in production, after the apply:
+   the API's log group shows no `refusing to start the api Lambda`, and the
+   first live event appears in the endpoint's delivery log in Stripe's
+   dashboard answered `200`, with a `billing_webhook` line in the API's
+   log. Remove the local keys afterwards, and delete the test key once the
+   live one works.
 
 To turn it off: `billing_provider = "manual"` and apply. The webhook route
 answers `404` again and checkout falls back to recording by hand; disable the
 endpoint in Stripe's dashboard and remove both sops keys.
+
+### Turning on enforcement
+
+The operator does every step, with their own go-ahead for the apply. No
+secret is involved: both switches are plain variables in
+`prod.tfvars.sops`.
+
+1. **Decide and announce.** Turning on enforcement makes every built limit
+   refuse at once: a Team's editor seats, Free's one live catchment, the pause
+   after a downgrade, the assistant's dollar caps, Free's verified-email gate
+   and the disposable-domain refusal at sign-up ([billing.md §
+   BILLING_ENFORCED](./billing.md#billing_enforced)). Read the billing report
+   first (`billing-admin.yml`, `billing-report`) for the accounts already past
+   a limit, and grant or email them before the switch ([billing.md § Staff
+   grants](./billing.md#staff-grants)). No grace clock runs in shadow mode,
+   so nothing needs resetting: an account whose plan already ended past
+   Free's live catchments starts its 14-day grace, with its grace email, at
+   the first worker tick after the switch, and nothing pauses before those
+   14 days are up ([billing.md § Pausing after a
+   downgrade](./billing.md#pausing-after-a-downgrade)).
+   The switch also reaches the migrate Lambda (its owner actions set it on
+   their database session, so a grant or revoke never drops a pause until
+   the next tick).
+2. **Set the switches.** Add `billing_enforced = true` to
+   `prod.tfvars.sops`, and `reverse_trial = true` too if the trial starts the
+   same day (it may follow later; it can't come first, since plan refuses it
+   alone).
+3. **Plan, read it, then apply:**
+   `cd infra && AWS_PROFILE=water-management ./scripts/tf.sh plan -var-file=../../infra-secrets/water-management/prod.tfvars.sops -out=<plan>`
+   and `AWS_PROFILE=water-management ./scripts/tf.sh apply <plan>`. Expect
+   only environment changes: `BILLING_ENFORCED` from `"false"` to `"true"` on
+   the backend, worker, assistant and migrate functions (the assistant only when
+   `assistant_enabled`), and with the trial `REVERSE_TRIAL` from `"false"` to
+   `"true"` on the backend function. Each function cold-starts with its new
+   value; no release is needed.
+4. **With the trial, release the web the same day:**
+   `gh variable set PUBLIC_REVERSE_TRIAL --body true`, then a web release
+   ([§ Releasing](#releasing)), so the pricing page offers the trial exactly
+   when the API grants it ([billing.md § The reverse
+   trial](./billing.md#the-reverse-trial-built-off), "The pricing page and
+   the trial").
+5. **Check it.** `GET /api/account/plan` (signed in, from the browser's
+   network tab) answers `"enforced": true`; with the trial, a newly verified
+   test account's plan answers its reverse trial (`subscription.reverseTrial`
+   true), and the next billing report counts the trial.
+
+To turn either off: set it back to `false` (the trial first, or both
+together) and apply; with the trial, `gh variable delete
+PUBLIC_REVERSE_TRIAL` and release the web again. Trials already granted run
+to their end (the worker's tick expires them whatever the switch says).
 
 ### Billing alarms
 
@@ -3481,6 +3659,26 @@ row ages out with the other events after 90 days. The row stays
 `orphan_pending` (no owner action marks it done), so the report lists it
 until then; note the event id in the incident log so the next report's line
 is known.
+
+**`billing-tick-failed`** (`infra/alarms.tf`, essential tier, any provider,
+shadow mode too) pages when one of the worker tick's five billing sweeps
+(staff grant and reverse trial expiry, the dunning lapse, the silent report
+refund, the pause after a downgrade; `billingStep` in
+`backend/src/jobs/runner.ts`) has failed in each of three ticks running
+(the embedded metric `BillingStepsFailed`, `water-management/Jobs`, from
+`lambda-worker.ts` `metricLine`; `Sum > 0` for three 5-minute periods). A
+failing sweep no longer holds up the rest of the tick: feeds, alerts, jobs
+and emails go on, and the sweep is tried each tick, so a lone deadlock
+clears itself without paging. While it fails, grants and trials past their
+end stay on, overdue subscriptions don't drop to Free, and no grace or
+pause starts. Search the worker's log group for `event =
+billing_tick_step_failed`: `step` names the sweep (`staff_grant_expire`,
+`reverse_trial_expire`, `dunning_lapse`, `report_refund`, `plan_pause`) and
+`code` its SQLSTATE (the message is never logged). A lock timeout or
+deadlock (`55P03`, `40P01`) that persists points at a long transaction on
+the same accounts; anything else is a bug in that sweep's SQL function,
+fixed by a migration and a backend release. The alarm clears on the first
+tick that runs every sweep.
 
 ## The cutover
 
@@ -4934,6 +5132,8 @@ function as the local script, so production and `pnpm dev:billing:grant`,
 | `billing-grants` | one of those, or none | `… --list`; none: every live grant | one account: `accountId`, `kind`, `planNow`, its `log` (with reasons); all: `grants` (account, kind, person or team id, plan, since, until) |
 | `billing-report` | `month` (YYYY-MM, optional: this SAST month) | `dev:billing:report --month …` (never `--show-emails`) | `report`, redacted as the script prints it |
 | `authority-confirm` | `projectId`; `userId` (or `email`, direct invoke only); `reference` (1–200) | `dev:authority:confirm` | `projectId`, `userId`, `confirmed` |
+| `billing-conflicts` | `all` (optional: the resolved ones too) | `dev:billing:conflict --list [--all]` | `conflicts`: id, provider, subscription ref, account id, reason, plan, interval, seats, amounts, held, when, and how resolved (the workflow's log leaves the resolution out) |
+| `billing-conflict-resolve` | `conflictId`; `reason` (1–500, operator-only); `by` | `dev:billing:conflict --resolve <id>` | the resolved `conflict` (`no_conflict` when no such id; `invalid` when already resolved) |
 | `billing-account` | one of `email`, `userId`, `teamId`. **Direct invoke only**: the workflow doesn't offer it | (the lookup behind the ids the workflow takes; writes nothing) | `kind`, `ownerId` (the person's or team's id), `accountId` (`null`: none yet), `planNow` |
 | `billing-invoice` | one of `accountId`, `userId`, `teamId`, `email`; `plan` (`pro` for a person, `team` for a team); `interval` (`month`, `year`); `seats` (optional, 1–50: default the plan's included seats); `from` (YYYY-MM-DD, SAST, optional: today); `poNumber` (1–64 letters, digits, spaces and `. / _ # : ( ) -`). **Direct invoke only**: a PO number may identify the client | `dev:billing:invoice <who> <plan> --interval … --po …` ([billing.md § B2B invoices](./billing.md#b2b-invoices)) | `accountId`, `kind`, `plan`, `seats`, `interval`, `from`, `until` (the grant's `until` once it is paid), `invoiceId`, `number`, `status`, `totalMinor`, `dueAt`, `reused` (never the PO number) |
 

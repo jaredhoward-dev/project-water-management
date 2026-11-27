@@ -67,10 +67,20 @@ const CODES: Record<string, Msg> = {
 	mfa_email_wait: msg('We just emailed you a code. You can ask for another in {wait}.'),
 	mfa_email_failed: msg('We couldn’t send the email. Try again in a minute.'),
 	comment_throttled: msg('You have posted 10 comments in the last hour. Wait a while, then try again.'),
-	// Accepting an invite to a team whose paid editor seats are all in use (334_team_seats; never a farmer's role).
+	// Accepting an invite to a team whose paid editor seats are all in use (334_team_seats; never a farmer's role):
+	// the seat refusal, which names no `key`; the live-catchment one (338) is PLAN_LIMIT_BY_KEY's (#941).
 	plan_limit: msg('Every editor seat on this team’s plan is in use. Ask a team admin to add a seat, then accept the invitation again.'),
 	// Not from the API: the WAF's sign-in CAPTCHA (client.ts CAPTCHA_REQUIRED), on a page that can't show the puzzle.
 	captcha_required: msg('Too many sign-in attempts from your network. Wait a few minutes, then try again.')
+};
+
+/**
+ * plan_limit's words by the refusal's `params.key` (#941): no key is the seat refusal (CODES), `live_catchments`
+ * Free's live-catchment one (338); any other key reads as its status, never as a seat refusal it isn't.
+ */
+// i18n-section: error
+const PLAN_LIMIT_BY_KEY: Record<string, Msg> = {
+	live_catchments: msg('This plan’s catchments with automatic updates are all in use. Ask the person who manages the plan to switch one off or choose another plan, then try again.')
 };
 
 // i18n-section: error.minutes
@@ -109,6 +119,10 @@ export function errorText(err: unknown): string {
 	const words = err.code && Object.hasOwn(CODES, err.code) ? CODES[err.code]! : null;
 	if (!words) return byStatus(err.status);
 	const params = err.params ?? {};
+	if (err.code === 'plan_limit' && params.key !== undefined) {
+		const keyed = Object.hasOwn(PLAN_LIMIT_BY_KEY, String(params.key)) ? PLAN_LIMIT_BY_KEY[String(params.key)]! : null;
+		return keyed ? t(keyed, params) : byStatus(err.status);
+	}
 	// A send limit is usually under a minute: say the seconds, then minutes.
 	if (err.code === 'mfa_email_wait') {
 		const seconds = n(params.seconds);

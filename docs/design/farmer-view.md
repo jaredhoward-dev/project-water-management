@@ -340,7 +340,7 @@ screen-reader user can jump by heading.
 | Offline or out of date (8) | A dark status strip "No signal. These are the figures saved on this phone at 07:42 on 19 Jan 2024." over a reduced view (the notice, received %, dam %). Charts, "Why?" and downloads say they need a connection. Stale data gets the amber dates line, online or not |
 | Several farms (9) | `/farm`: a card per linked farm across projects: name, catchment, the notice level, received % and dam % (or "no dam", or "not published yet"). A farmer with one farm goes straight to its view |
 | Preview as farmer (viewer+) | The same page under a banner "You're previewing Vaalbank as its farmer sees it". A farmer never sees it |
-| Access removed | The next request answers 403 or 404: "You no longer have access to this hydrological unit. Contact [WUA]." The saved copy is cleared (§9) |
+| Access removed | The next request answers 403 or 404 from the API itself (its JSON error): "You no longer have access to this hydrological unit. Contact [WUA]." The saved copy is cleared (§9). A 403 or 404 the API didn't write (a WAF block, a proxy page) counts as a failed load: the saved copy stays |
 | No last season | "Not available: the model's data starts on [date]." |
 
 ## 7. Visual design and accessibility

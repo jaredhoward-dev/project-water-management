@@ -12,7 +12,7 @@
 	// issued pack, when there is one).
 	import { untrack } from 'svelte';
 	import { followRetry } from '#lib/components/common/loadState.js';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { resolve } from '$app/paths';
 	import { basePath } from '#lib/nav/base.js';
 	import { REPORT_FOOTER, type EvidenceReport } from '@water-management/engine';
@@ -131,7 +131,7 @@
 		createError = null;
 		try {
 			const pack = await api.packs.create(projectId, runId, current?.id);
-			await goto(packHref(basePath(), projectId, pack.id));
+			await guardedGoto(packHref(basePath(), projectId, pack.id));
 		} catch (e) {
 			createError = e instanceof Error ? e.message : String(e);
 		} finally {

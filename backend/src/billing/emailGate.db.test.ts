@@ -10,11 +10,13 @@
 //  - 348: each refusal is logged with its code and feature, never the address or its domain, and counted in
 //    email_gate_refusal on today's SAST day, whatever the session's time zone (CLAUDE.md rule 7), although the route's
 //    transaction rolls back; an allowed turn counts nothing; water_app can't read or write the table directly;
+//  - every route that attaches a feed switched on meets the gate, not only POST /feeds: the boundary's Apply and the
+//    units' Apply create enabled feeds too (createFeed holds the gate), and their refusals are counted;
 //  - the count is written after the route's transaction has ended: with a pool of ONE connection (the assistant
 //    Lambda's, infra/assistant.tf) a refused turn and a refused feed answer 403 at once and are still counted.
 import pg from 'pg';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { app, asOwner, disableFeedsAfterFile, retirePendingJobs, signUp } from '../__tests__/helpers.js';
+import { app, asOwner, disableFeedsAfterFile, node, retirePendingJobs, signUp } from '../__tests__/helpers.js';
 import { APP_URL } from '../__tests__/test-db.js';
 import { closePool, getPool } from '../db/pool.js';
 import { withUser } from '../db/tx.js';
@@ -186,6 +188,88 @@ describe('343: switching a feed on needs a verified email on Free', () => {
 		enforce();
 		expect((await verified.call('POST', `/projects/${p}/feeds`, feedBody(true))).status).toBe(201);
 		expect((await paid.call('POST', `/projects/${q}/feeds`, feedBody(true))).status).toBe(201);
+	});
+});
+
+describe('343: every route that attaches a feed switched on meets the gate', () => {
+	const ring = (w: number, s: number, e: number, n: number) => [
+		[w, s],
+		[e, s],
+		[e, n],
+		[w, n],
+		[w, s]
+	];
+	const feedCount = async (p: string) => ((await asOwner('SELECT count(*)::int AS n FROM data_feed WHERE project_id = $1', [p])) as { n: number }[])[0]!.n;
+	const refusals = async () =>
+		(
+			(await asOwner(
+				`SELECT coalesce(sum(refusals), 0)::int AS n FROM email_gate_refusal
+				 WHERE day = (now() AT TIME ZONE 'Africa/Johannesburg')::date AND code = 'email_unverified' AND feature = 'feeds'`
+			)) as { n: number }[]
+		)[0]!.n;
+	async function withBoundary(u: User, name: string) {
+		const p = await newProject(u, name);
+		const r = await u.call('POST', `/projects/${p}/map/features`, {
+			kind: 'catchment_boundary',
+			name: 'Gate catchment',
+			geometry: { type: 'Polygon', coordinates: [ring(21.21, -33.79, 21.33, -33.69)] }
+		});
+		expect(r.status, JSON.stringify(r.body)).toBe(201);
+		return { p, b: r.body.feature as { id: string; updatedAt: string } };
+	}
+	async function withUnitParcel(u: User, name: string) {
+		const p = await newProject(u, name);
+		const outlet = node('Outlet', null);
+		const a = node('Unit A', outlet.id);
+		expect((await u.call('PUT', `/projects/${p}/model`, { nodes: [outlet, a], crops: [], cropAreas: [], transfers: [] })).status).toBe(200);
+		const f = await u.call('POST', `/projects/${p}/map/features`, {
+			kind: 'farm_parcel',
+			name: 'Parcel',
+			nodeId: a.id,
+			geometry: { type: 'Polygon', coordinates: [ring(21.21, -33.79, 21.27, -33.74)] }
+		});
+		expect(f.status, JSON.stringify(f.body)).toBe(201);
+		return p;
+	}
+
+	it('on: the boundary’s Apply is refused email_unverified and counted, nothing created; a verified owner applies it (positive control)', async () => {
+		const unverified = await signUp('GateBoundaryU', { verified: false });
+		const verified = await signUp('GateBoundaryV');
+		const u = await withBoundary(unverified, 'Gate boundary U');
+		const v = await withBoundary(verified, 'Gate boundary V');
+		enforce();
+		const before = await refusals();
+		const refused = await unverified.call('POST', `/projects/${u.p}/feeds/chirps/from-boundary`, { featureId: u.b.id, updatedAt: u.b.updatedAt });
+		expect(refused.status, JSON.stringify(refused.body)).toBe(403);
+		expect(refused.body.code).toBe('email_unverified');
+		expect(await feedCount(u.p)).toBe(0);
+		expect(await refusals()).toBe(before + 1);
+		const ok = await verified.call('POST', `/projects/${v.p}/feeds/chirps/from-boundary`, { featureId: v.b.id, updatedAt: v.b.updatedAt });
+		expect(ok.status, JSON.stringify(ok.body)).toBe(201);
+	});
+
+	it('off: the boundary’s Apply works for an unverified owner, as before', async () => {
+		const unverified = await signUp('GateBoundaryOff', { verified: false });
+		const u = await withBoundary(unverified, 'Gate boundary off');
+		const r = await unverified.call('POST', `/projects/${u.p}/feeds/chirps/from-boundary`, { featureId: u.b.id, updatedAt: u.b.updatedAt });
+		expect(r.status, JSON.stringify(r.body)).toBe(201);
+	});
+
+	it('on: the units’ Apply is refused email_unverified and counted, nothing created; a verified owner applies it (positive control)', async () => {
+		const unverified = await signUp('GateUnitsU', { verified: false });
+		const verified = await signUp('GateUnitsV');
+		const pU = await withUnitParcel(unverified, 'Gate units U');
+		const pV = await withUnitParcel(verified, 'Gate units V');
+		enforce();
+		const before = await refusals();
+		const refused = await unverified.call('POST', `/projects/${pU}/feeds/chirps/from-units`, {});
+		expect(refused.status, JSON.stringify(refused.body)).toBe(403);
+		expect(refused.body.code).toBe('email_unverified');
+		expect(await feedCount(pU)).toBe(0);
+		expect(await refusals()).toBe(before + 1);
+		const ok = await verified.call('POST', `/projects/${pV}/feeds/chirps/from-units`, {});
+		expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+		expect(ok.body.created).toBe(1);
 	});
 });
 

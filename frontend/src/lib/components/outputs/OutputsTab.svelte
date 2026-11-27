@@ -17,7 +17,7 @@
 -->
 <script lang="ts">
 	import { onDestroy, tick, untrack } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { page } from '$app/state';
 	import { api, type Project, type RunMeta } from '#lib/api/index.js';
 	import LoadState from '#lib/components/common/LoadState.svelte';
@@ -71,7 +71,7 @@
 		const url = new URL(page.url.href);
 		url.searchParams.set('run', id);
 		url.hash = '';
-		goto(url, { reset: false });
+		guardedGoto(url, { reset: false });
 	}
 
 	// --- the run's record, through the run pages' cache. The one on screen stays (busy) until the next is in. ---

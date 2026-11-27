@@ -4,7 +4,8 @@
 import { Hono } from 'hono';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { JobCollisionError } from '../jobs/queue.js';
-import { ApiError, ERROR_CODES, handleError, MACHINE_ERROR_CODES, mustChange, planLimitParams } from './errors.js';
+import { planFigures } from '@water-management/engine/plans';
+import { ApiError, ERROR_CODES, handleError, MACHINE_ERROR_CODES, mustChange, PLAN_LIMIT_LIVE_MESSAGE, planLimitLiveMessage, planLimitParams } from './errors.js';
 
 function appThrowing(err: unknown) {
 	const app = new Hono();
@@ -91,6 +92,14 @@ describe('handleError: the Team seat guard (334_team_seats)', () => {
 		expect(body).toMatchObject({ code: 'plan_limit', params: { limit: 1, used: 2, plan: 'free', key: 'live_catchments' } });
 		expect(body.error).toMatch(/one catchment live/);
 		expect(body.error).not.toMatch(/quota|402|editor seat/i);
+	});
+
+	it('counts the live limit from the refusal, else the plan figures, never a typed number (#941)', async () => {
+		expect(PLAN_LIMIT_LIVE_MESSAGE).toBe(planLimitLiveMessage(planFigures('free').liveCatchments!));
+		const res = await appThrowing(seatError('{"limit": 2, "used": 3, "plan": "free", "key": "live_catchments"}')).request('/');
+		expect(((await res.json()) as { error: string }).error).toMatch(/^Free runs 2 catchments live/);
+		const bare = await appThrowing(seatError('{"key": "live_catchments"}')).request('/');
+		expect(((await bare.json()) as { error: string }).error).toBe(PLAN_LIMIT_LIVE_MESSAGE);
 	});
 });
 

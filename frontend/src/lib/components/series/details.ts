@@ -38,3 +38,22 @@ export function uploadUnitText(s: Pick<SeriesMeta, 'unit' | 'sourceUnit' | 'sour
 	if (!s.sourceUnit) return 'Not recorded';
 	return s.sourceUnitFactor != null && s.sourceUnitFactor !== 1 ? `${s.sourceUnit}, converted to ${s.unit} (× ${s.sourceUnitFactor})` : s.sourceUnit;
 }
+
+/** Saving…, Saved or why not, beside a Series details control that saves on change, by `save-<series id>-<field>`. */
+export type SaveStatus = { state: 'saving' | 'saved' | 'error'; text?: string };
+
+/**
+ * A save's answer, recorded only when no other series was picked since it started (`startedAt` and `now`: how many
+ * times the pick had changed then and now). Picking another series clears every status, as the details show one
+ * series; an answer from before that left its "Saved" or "Not saved…" to greet the return to the series (issue #932).
+ * Null: the answer is dropped.
+ */
+export function settleSave(
+	saves: Readonly<Record<string, SaveStatus>>,
+	key: string,
+	answer: SaveStatus,
+	startedAt: number,
+	now: number
+): Record<string, SaveStatus> | null {
+	return startedAt === now ? { ...saves, [key]: answer } : null;
+}

@@ -386,11 +386,10 @@ export const feedRoutes = new Hono<AuthEnv>()
 			withUser(c.get('userId'), async (db) => {
 				await requireRole(db, id, 'owner');
 				if (input.source === 'station_api' && !stationApiFeedsOn()) throw new ApiError(400, STATION_API_OFF_MESSAGE);
-				// Free's verified-email gate (BILLING_ENFORCED only; billing/emailGate.ts): a feed attached switched on.
-				if (input.enabled) await requireFreeVerifiedEmail(db, id, 'feeds');
 				await attachSlot(db, id, input.source);
 				await refuseTakeOver(db, id, input);
 				const { input: checked, replaceFrom } = await versionCheck(db, id, input, true);
+				// Free's verified-email gate on a feed attached switched on: createFeed (billing/emailGate.ts).
 				const fid = await createFeed(db, id, checked, replaceFrom ?? null).catch(conflict);
 				// Sealed to the fetcher with the new feed's id, in the same transaction (FeedInput refused it on any other source).
 				const credential = input.credential ? await saveKey(db, id, fid, input.credential, input.config as StationApiConfig) : undefined;
@@ -513,6 +512,16 @@ export const feedRoutes = new Hono<AuthEnv>()
 			const feed = await getFeed(db, id, fid);
 			if (!feed) throw new ApiError(404, 'not found');
 			if (!feed.enabled) throw new ApiError(409, 'the feed is switched off');
+			// A catchment paused past Free's live catchments (341, BILLING_ENFORCED only) fetches nothing, by schedule
+			// (app_due_feeds) or by hand: Fetch now would otherwise run the operation the pause holds.
+			const { rows: pause } = await db.query<{ paused: boolean }>('SELECT app_project_plan_paused($1) IS NOT NULL AS paused', [id]);
+			if (pause[0]?.paused) {
+				throw new ApiError(
+					409,
+					'this catchment’s feeds are paused because the plan it is billed to ended: nothing is lost, and they run again once it is back on a plan or within Free’s live catchments',
+					{ code: 'plan_paused' }
+				);
+			}
 			const r = await enqueueJob(db, { projectId: id, kind: 'feed_fetch', payload: { feedId: fid }, dedupeKey: feedFetchDedupeKey(fid) });
 			// A fetch already pending may be waiting (a backfill's next window, a retry): now means now.
 			const pulled = !r.created && (await db.query<{ moved: boolean }>('SELECT app_feed_fetch_now($1) AS moved', [fid])).rows[0]!.moved;

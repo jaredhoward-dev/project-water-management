@@ -598,6 +598,16 @@ address (`LANDING_ROUTES`, `addressFor` in `lib/auth/session.svelte.ts`).
   `@water-management/engine/plans` (`PLAN_FIGURES`), since a static page
   can't read the `plan` table; `backend/src/billing/planFigures.db.test.ts`
   fails when a migration moves a figure and that file doesn't follow.
+- **The cards' lines follow the figures** (#941; `cardLines` in
+  `lib/components/pricing/pricing.ts`). Free's and Pro's live line is "on
+  every catchment" when `liveCatchments` is unlimited, else the count; the
+  report line (`data-testid="reports-<plan>"`) is "Unlimited server PDF
+  reports, and scheduled report emails" for an unlimited plan with
+  `scheduledReports` (Pro today), "Unlimited server PDF reports" without
+  them, else the count a month, with "Scheduled report emails" on its own
+  line for a counted plan that has them. Team's "Everything in Pro" and
+  Pro's "Everything in Free" hold because each plan's figures cover the one
+  below (`coversPlan`, checked in `pricing.test.ts`).
 - **Links.** The landing page's closing panel ("See plans and prices") and
   its footer, in the page's language, and the Plan page's *See all plans*
   (in English, the workspace's language). The workspace's *Compare plans*
@@ -1282,15 +1292,37 @@ project details and the settings (the workspace page; the header's
 half-filled **Add a change** form or a typed but unsaved scenario rename,
 a name typed into the **New scenario** dialog, and a number field holding
 text it can't take ("fields that need fixing", a number or a day field: any change of page or tab
-drops it, since the field unmounts; a `#fragment` doesn't). A navigation that would
+drops it, since the field unmounts; a `#fragment` doesn't, and neither does the app tidying its own
+URL, a replacing goto that only drops query parameters on the same page and tab, such as a stale
+`node=` replaced out or the closed Data feeds card's `rain=` and `feed=`: those never ask,
+`lib/nav/unsaved.ts` `invalidFieldsLeave`). A navigation that would
 drop any of it (another page for the page-level work; another tab or
 scenario for a scenario's) is cancelled and the app's own dialog asks,
 naming what is unsaved and where the link goes: "You have unsaved changes
 (model edits). Leave and go to All projects? They will be lost."
 (`lib/nav/destination.ts` names the sidebar's pages, a section as "the
-Network page", another scenario or project). **Stay** (focused first, and
+Network page", another scenario or project; the guard loads it only when it
+asks, since it pulls in the workspace's section labels, which the root layout
+and so the landing page's first load shouldn't carry, and a failed load asks
+"Leave this page?" unnamed). **Stay** (focused first, and
 Esc) keeps everything; **Leave without saving** makes the navigation again,
-let through once; Back and Forward are retaken the same way. A tab change
+let through once, with the options it was first made with (issue #931:
+every `goto` in the app goes through the guard's `guardedGoto`, which notes
+them, and a link's `data-sveltekit-replacestate` and `data-sveltekit-reset`
+are read on its click, so a replacing step such as the node sheet's ‹ ›
+replaces again and Back doesn't return to what it left; only
+`lib/nav/leaveGuard.ts` imports SvelteKit's `goto`, which
+`leaveGuard.test.ts` checks); Back and Forward
+are retaken the same way. A URL-backed sheet (the node sheet's `edit=`, the
+grid modal's `grid=`, the farm drawer's `farm=`) asks before it shuts:
+Done, Close, Esc and the ✕ put the same question (`confirmLeave`, the
+Dialog's `beforeclose`), so **Stay** keeps it open with the URL still
+naming it, and **Leave without saving** shuts it and drops the parameter in
+place. Esc is the innermost dialog's: in a dialog opened inside the grid
+modal (its **Paste from a spreadsheet…**) it closes that dialog alone, and
+the grid modal neither asks nor shuts (`common/dialogEscape.ts`). Removing a node from its own sheet asks the same after the remove
+question; Stay removes nothing. On the Network, a `node=` naming no node in the model (removed, or a
+stale link) is replaced out of the URL. A tab change
 within the project keeps the page's own edits and doesn't ask. Only closing
 the tab or reloading shows the browser's own "Leave site?" box, which no
 page can restyle.
@@ -3265,7 +3297,9 @@ The page is two cards, side by side where they fit and stacked on a phone:
 
 - **Plan**: its name, its price from the minor units (`R 899.00 a month or
   R 8 990.00 a year`; *No charge* for Free; another currency by its code),
-  then the subscription: *Renews 1 Dec 2026*, *Trial ends …*, or in the
+  then the subscription: *Renews 1 Dec 2026*, *Trial ends …*, *Granted by
+  the operator until …* (a staff grant) or *Paid by invoice; runs until …*
+  (a paid B2B invoice, 335), those two never in the warning colour, or in the
   warning colour *Ends …; it won't renew*, *Payment overdue*, *Cancelled* or
   *Expired*. No subscription says the account is on its plan (Free). Phase 3
   adds the billing buttons, shown only when the API's `provider` is `mock` or
@@ -3273,7 +3307,9 @@ The page is two cards, side by side where they fit and stacked on a phone:
   up): with no subscription, *Upgrade to Pro, monthly (R 899.00 a month)* and
   *…, yearly (R 8 990.00 a year)* (*Team* on a team's page), priced from
   `GET /billing/plans` (unpriced until it answers, or if it fails); with one,
-  *Manage billing*, except during a live reverse trial
+  *Manage billing*, except on a staff grant (`subscription.granted:
+  'staff'`, 330), which offers neither and says *To change or end this plan,
+  ask the operator. Nothing is charged for it here.* (`grantNote`), and
   (`subscription.reverseTrial`, 342), where the Upgrade buttons stay, since
   checkout replaces the trial (344; `plan.ts` `billingActions`,
   `onReverseTrial`). In the trial's last 3 days a note above them says when
@@ -3427,7 +3463,11 @@ each other one, through the app's confirm dialog (`POST …/plan/keep`; a status
 line says which stays live). An information note in #641's tone, never the
 error colour; the page asks only when `usage.liveCatchments` is over its limit
 with no live subscription, and shows nothing for an account that never had a
-plan ([billing.md § Choosing the catchment to keep](./billing.md#choosing-the-catchment-to-keep)).
+plan (the response's `planEnded`, migration 409: in shadow mode `overFreeSince`
+and `pausesFrom` stay null until the grace really starts, so the card says the
+grace starts once limits apply rather than dating it from the plan's end; an
+API from before 409, with no `planEnded`, falls back to `overFreeSince`;
+[billing.md § Choosing the catchment to keep](./billing.md#choosing-the-catchment-to-keep)).
 
 ## Network
 
@@ -3441,14 +3481,44 @@ the **node table** is a grid (**Tables → Hydrological unit table**, `grid=node
 [grid modal](#grid-modal) showing `NetworkTab` with `only="table"`), and a
 node's **full form** opens in a sheet over the map from its row's **Edit** in
 All hydrological units (`edit=<id>`). Old links still land: `view=table` becomes `grid=nodes`,
-`view=node` becomes `edit=<node or the first>`. `node=<id>` is the picked
+`view=node` becomes `edit=<node or the first>`; on a network with no node yet
+there is no form to open, so the empty map says so in one line ("The link
+opened a hydrological unit's form, but this network has no hydrological
+units yet, so it shows the map", `network-old-node-link`) until a node is
+added. `node=<id>` is the picked
 node: a pick in the All hydrological units list or on the drawing writes it (a new
 history entry, so Back steps back through the picks; a reload or a shared
-link keeps it, playbook § 2), opening a node's sheet writes it with `edit=`
+link keeps it, playbook § 2),
+opening a node's sheet writes it with `edit=`
 (so closing the sheet leaves the map on that node), removing the node drops
 it, and a note's link on the Summary lands on it (`notes.ts` `noteHref`).
 With none, nothing is picked. The grid modal's node table keeps its pick to
-itself.
+itself. Removing a node from its sheet hands the focus to the All
+hydrological units row now in its place (the next, else the one before), as
+the node table does (`removeQuestions.ts` `nodeRemovedFocus`).
+
+**The URL rule on the Network and Data tabs** (issue #933, `lib/nav/tabUrl.ts`):
+
+- **A pick is a history step**, as on every page (ui-playbook.md § 2, issue
+  #521): picking a node (`node=`) or a series to chart (`series=`) is in the
+  URL, so a reload and a shared link keep it, and Back returns to the pick
+  before. Opening something (a node's sheet, a grid, the farm drawer) is a
+  history entry too, so Back closes it.
+- **Closing a panel removes its parameter, in place.** Closing the node sheet
+  drops `edit=` and its `section=`; the farm drawer opened from the sheet
+  takes `edit=` and `section=` with it (`farmDrawerHref`); closing the Data
+  feeds card drops the arrival link's `rain=` and `feed=`
+  (`feedCardClosedHref`), so a reload doesn't reopen a closed proposal; and a
+  parameter a pick makes meaningless goes with the pick: charting another
+  series drops `view=` (the flagged period of the series a Warnings link
+  named), `rain=` and `feed=` (`seriesPickHref`).
+- **Links inside a tab are built from the current URL**, keeping every other
+  parameter: the node table's "set by month" cell opens the unit's sheet on
+  its routing section from wherever the page is (`nodeSheetHref`, which
+  drops only `grid=`, since the sheet opens over the map in the grid's place),
+  and a [Demands grid](#demands-grid) row's link to where the rest of it is set
+  (`demandEditHref`: `tab=crops&farm=` for crops, else
+  `tab=network&edit=&node=&section=demand`, the grid giving way).
 
 - **Map** (the A2 board), a page of its own:
   - **Header** (with no nodes yet too): "Network" and one line on what it is
@@ -3635,7 +3705,9 @@ itself.
     hydrological unit** / **Remove gauge** / **Remove other water user**.
     After a removal the focus goes to the All hydrological units heading (the sheet and
     the card's Edit it opened from are gone); in the node table, to the next
-    row's name (else **+ Add hydrological unit**).
+    row's name (else **+ Add hydrological unit**, else, once the last row
+    has gone with the toolbar, the empty table's **Add outflow gauge**;
+    `nodeRemovedFocus` in `removeQuestions.ts`).
 
   Every field of the old Table and One node layouts is a click away (Edit,
   Tables → Hydrological unit table), so nothing was removed.
@@ -4985,7 +5057,11 @@ map" card) stays the schematic; this is the geography.
   catchment, over about 100 km across: work it out in the background**
   above the dataset line sends the point straight there. A reload shows a
   waiting one again (the state's `request`); a sheet closed while it waits
-  shows the proposal once the Map's state reloads. The proposal is drawn dashed in teal
+  shows the proposal once the Map's state reloads. With the sheet closed the
+  Map asks about it every 2 s for at most 15 minutes of asks
+  (`delineation.ts` `BACKGROUND_POLL_LIMIT_MS`); past that it stops and its
+  notice says so, with **Check again**, which opens the sheet (the open sheet
+  asks for itself). The proposal is drawn dashed in teal
   with its outlet over the features (`mapStyle.ts` `proposalLayers`, framed
   when it arrives) and the sheet becomes **The delineated catchment**, its
   title taking the focus: Area, The point is, Outlet ("128 m from the
@@ -6073,8 +6149,9 @@ user's demand could only be read one node form at a time.
   whatever unit the object's form shows); a per-unit object's and the
   crops' are made from other values, so they are text. Everything else (the
   sizing, the schedule, the water source, the priority and rank) stays in
-  the node form, which a row's **Edit** opens (`?tab=network&edit=<node>`,
-  closing the modal); the crops' **Edit** opens the unit's
+  the node form, which a row's **Edit** opens on its demand section
+  (`tab=network&edit=<node>&section=demand`, built from the current URL by
+  `lib/nav/tabUrl.ts` `demandEditHref`, closing the modal; issue #933); the crops' **Edit** opens the unit's
   [farm drawer](#farm-drawer) on Crops & demand. Edits go into the shared
   `ModelEditor` and are saved with the modal's save row.
 - **Show demands in** (above the table, `network/demandUnits.ts`): the unit
@@ -6800,14 +6877,18 @@ with the table the data needs).
   badge.) Ages read "2 months ago" from 60 days and "2 years ago" from 730
   (`agoText` in `lib/format/age.ts`; those two days used to read "1 months" / "1 years").
 - **Picking a series**: clicking a row (or its **View** button) charts it
-  through the URL (`series=<id>`, `withParam`), so the link can be shared
-  and Back returns to the series before. Without `series=` the observed flow
+  through the URL (`series=<id>`, `seriesPickHref`), so the link can be shared
+  and Back returns to the series before; the pick drops `view=`, `rain=` and
+  `feed=`, which belonged to the link that arrived ([the URL rule](#network),
+  issue #933). Without `series=` the observed flow
   a run reads is charted, else the main rainfall, else the first. A
   `series=` naming a series no longer stored (a note's or a run's link to one
   deleted since) is dropped from the address (`goto` with `replace`) and a
   one-line note says "The series that link named is no longer stored:
   showing <name> instead", rather than charting another series without a
-  word (issue #586). Deleting the charted series drops the parameter
+  word (issue #586); the note goes as soon as the URL names a stored
+  series by any route (a row's **View**, an upload charting itself, Back or
+  Forward). Deleting the charted series drops the parameter
   (`goto` with `replace`); an upload through **Add data** on this tab charts the
   uploaded series (`series=<id>`, with `replace`, the page's `onUploaded`).
   A `view=<start>~<end>` beside `series=` (a flagged period's **View** on
@@ -6916,8 +6997,9 @@ station** (issue #553, `series/StationFields.svelte`, helpers in
 its **MAP (mm)**, the MAP's required **Source of the MAP** once a MAP is
 typed, and an optional **Latitude** and **Longitude** (WGS84 degrees, both
 or neither), saved together with **Save the station** (`PATCH
-…/series/:id { station }`, null once every field is empty; disabled while
-nothing changes or while the engine's `rainStationError` finds a problem,
+…/series/:id { station }`, null once every field is empty; `aria-disabled`
+while nothing changes or a save is out, so the focus stays on it after a
+save (issue #932), and disabled while the engine's `rainStationError` finds a problem,
 which shows under the fields: *Say where the station's MAP comes from …*,
 *A station's coordinates need both a latitude and a longitude, or
 neither.*). It says *Saved the station.*, or *Not saved: &lt;reason&gt;*.
@@ -6933,15 +7015,18 @@ field, which shows the browser's own order; issue #521), shown back as
 "2 Oct 2021" and checked against the series' span (its placeholder reads
 *e.g. 15 Nov 2021*, an example rather than a day that looks picked), a *Value (unit)* box that takes the day's stored value when the
 day is picked (12.5 or 12,5; blank = no reading; never negative), and
-**Save the day** (**Clear the day** when the box is blank; disabled while
-nothing changes). The line under them says the stored value and whether the
+**Save the day** (**Clear the day** when the box is blank; `aria-disabled`
+while nothing changes or the save is out, so a failed save leaves the focus
+on it, issue #932). The line under them says the stored value and whether the
 day is already edited by hand, and on a series a data feed fills that the
 feed won't write over the day. Until a day is picked the button reads **Save the day**, disabled (it read
 *Clear the day*, the blank box read as a clearing). It saves through `PUT
 …/series/:id/days/:date`, then says *Saved 2 Oct 2021: 14.2 mm. Kept in
 History, where the value before can be restored.*, and the focus goes to
-the Day field with its text selected, ready for the next day (the button
-that had it is disabled once saved, which dropped the focus to the page); a day outside the series
+the Day field with its text selected, ready for the next day. The line under
+the fields says the saved value as stored at once, before the series'
+values reload (it showed the old value beside a live Save until then;
+`storedValue`, `lib/series/editDay.ts`); a day outside the series
 is for Add data (a file or pasted rows), and while a feed is replacing the
 series the box says to wait. A day edited by hand is marked so an edited
 record never passes as the raw one ([data-model.md § Days edited by
@@ -6958,7 +7043,9 @@ a read-only *At gauge &lt;name&gt;*. Editors set the product, where measured
 and the source there; they **save on change**: each says *Saving…*, then
 *Saved* or *Not saved: &lt;reason&gt;* beside itself (a polite live region the
 control is described by), and a failed save puts the control back to the
-stored value. The row is keyed on the series, so a half-typed source never
+stored value. Picking another series clears those statuses, and an answer
+from before is dropped (`settleSave`, `series/details.ts`), so coming back
+to a series shows no stale *Saved* or *Not saved* (issue #932). The row is keyed on the series, so a half-typed source never
 carries over to the next one picked. Viewers read the same labels with the
 values as words. Editors can **Delete** a series (after a confirm; runs
 already stored are not affected). A CHIRPS series' **Product** says which
@@ -7047,7 +7134,13 @@ before its first or after its last, so a missed reading inside the first or
 last day keeps the day and counts it among those short of whole. The summary
 says how many readings, how many a day, the days left out and how many kept
 days are short of whole. Each
-timestamp closes its interval. A time is HH:MM (seconds optional) or a
+timestamp closes its interval. A file whose readings run from the day
+boundary to one interval before it (00:00 … 23:00, a logger stamping the start
+of each interval) has both edge days read as part days; the refusal of such a
+one-day file, and the summary line naming the days left out of a longer one,
+say that the readings may mark the start of each interval and to move every
+timestamp one interval later (`csv.ts` `looksStartStamped`); the rule itself
+doesn't change. A time is HH:MM (seconds optional) or a
 12-hour time with its AM/PM (7:00 PM is 19:00, 12:00 AM midnight); a time
 followed by anything else (a zone, `Z`) is refused, not trimmed. The series records the choice
 (`dayBoundary`), shown as *08:00–08:00 days, added up from sub-daily
@@ -7092,10 +7185,38 @@ missing-data quality code (151, 165, 170, 172, 246, 247, 255), a blank value or
 a negative placeholder such as -999 is a gap, never a value. The summary adds a
 *DWS export* line (rows, the value column as the file's format block describes
 it, and how many rows were read as gaps and why) and the quality codes met.
-When that block states the values in m³/s (`dws.ts` `unit`), the form's
+When that block states the values in m³/s (`dws.ts` `unit`: cubic metres
+per second or /sec, m3/s, m³/s, m^3/s, m3/sec, cumec or cumecs), the form's
 *Unit* is set to m³/s for a flow kind, so a unit left at l/s or ML/day from
 an earlier file can't scale the export by 1 000 or 86.4; a
-sub-daily DWS export (a TIME column) is refused. A plain date,value CSV reads
+sub-daily DWS export (a TIME column) is refused. So is an export whose block
+describes a water level or a volume (issue #909: HyData words them "Corrected
+level in m" in a primary export and "Monthly volumes in million cubic metres"
+in a monthly one; the daily reservoir wording isn't known, so `dws.ts` matches
+level, stage, height, volume, storage and million m³ loosely), naming what it
+holds and its unit, since no series kind is a level or a volume. A block that
+states mm, rain or evaporation is never read as a level or a volume, so
+*Daily rainfall in mm (storage gauge)* loads as rain. A block that
+states no flow unit at all can still go in as a flow kind, but only after the
+person ticks *These values are daily flows in (the chosen unit)* under *Not said to
+be a flow* (`dwsFlowCheck`; the upload stays disabled until then, and a new
+file clears the tick); headerless rows have no block, so nothing is asked.
+Issue #925 adds two more (`dwsChecks`, each its own line in the summary). A
+reservoir station's daily table (an R in the station code's third place, as
+in the synthetic X0R000, HyData's `SiteType=RES`) has the river-gauge layout
+and says m³/s, but its flow is the dam's spillway discharge, not the river's:
+taken as a flow kind, *A reservoir station* says so and the upload waits for
+*These values are the spillway discharge I mean to import as observed flow*.
+The code is read from the file's text outside its data rows (a heading such
+as `X0R000 (…)`, or a saved page's `Station=X0R000100.00`), else from the
+file name (`X0R000.txt`); a river gauge (H) asks nothing. And a block that
+states m³/s is refused as a rain or evaporation kind (*A flow, not a depth*,
+no tick to get past it: pick a flow kind). A river gauge's (H) or a
+reservoir's (R) table that states no unit, taken as rain or evaporation, asks
+first (*A flow station*: the station measures a flow or a spill, not rain;
+*These values are daily depths in (the chosen unit), not a flow or
+discharge*); headerless rows take the code from the file name, and a weather
+station (E) asks nothing. A plain date,value CSV reads
 a negative value as a gap too (issue #51: every kind is a rain, flow or
 evaporation, so −999 or −1 is a "no reading" placeholder), and its summary
 adds a *Negative values* line with how many (`csv.ts` `negativeGaps`). In number fields, a comma is a thousands separator only in a
@@ -7226,7 +7347,9 @@ series.
 
 A **View** select above the table (issue #613, `preview.ts` `previewViews`,
 `columnsForView`, `areaViewColumns`; help `preview.view`) picks the column set,
-and the column picker then lists, and hides, only that view's columns:
+and the column picker then lists, and hides, only that view's columns
+(columns hidden belong to the view they were hidden in: switching views shows
+the new view's columns whole, issue #933):
 **All** (the default: every column above, unchanged); **each land unit** (listed under *Units with land*) by
 name, in the model's order, showing only what its rain is made of, side by
 side: *<station> raw*, *<station> adjusted to <unit> (× r)* with r to three
@@ -7417,7 +7540,8 @@ editors run one now and read the map's proposals, viewers read.
   is drawn, it is scrolled to the top and held while the page settles, and
   focused. `?rain=boundary` and `?rain=units` then open the add card on that
   proposal once per arrival (closing it while the URL still asks doesn't
-  open it again; a reload does), its heading taking the focus once loaded;
+  open it again), and closing the card removes the parameter in place, so a
+  reload doesn't reopen it either (issue #933), its heading taking the focus once loaded;
   a viewer gets neither, and lands on the panel's heading. The old
   `?tab=settings#set-feeds` links are forwarded here by Settings (issue #586,
   Round 1).
@@ -7817,7 +7941,9 @@ editors run one now and read the map's proposals, viewers read.
   editor's, **Area**), and closing it (Cancel, a proposal's Close, or a
   successful attach) returns focus to the head's **Attach a feed** (or **Rain
   from the map**); the attach status line sits under the head; a bad cell or code marks its field `aria-invalid`, describes it by
-  the message and focuses it (the bounding box too); busy buttons are `aria-disabled` so they keep
+  the message and focuses it (the bounding box too), and editing that field
+  clears the message and the mark until the next Attach checks again, as the
+  station API form does (`editClearsProblem`, issue #932); busy buttons are `aria-disabled` so they keep
   focus; after **Remove**, focus goes to the section heading. Messages land
   in a live region that is always in the page. A failed action re-reads the
   list (it was usually changed elsewhere), and a failed refresh keeps the
@@ -9825,7 +9951,22 @@ calibration's line points at *How the shown run fits* for NSE and PBIAS.
   the estimates then read that one, as does the rules panel after the
   rules are saved. The server's own estimate, which refuses rules that
   would run too long, counts each case the same way
-  (`planAutoCalibration`'s `caseEvaluations`). The button is on the
+  (`planAutoCalibration`'s `caseEvaluations`). A disabled button says why
+  beside it (`fit-blocker`, `fit.ts` `fitBlocker`): "Tick at least one
+  parameter to fit." or "Fix the model runs per fit under Search first."
+  (the penalty weight, starts and seed the same way). A number field
+  holding text it can't take keeps the stored value, so it holds the
+  button too (the panel's own invalid-fields registry,
+  `common/forwardingInvalidFields.svelte.ts`): the fit never runs on a
+  number the field no longer shows. Only a saved setting's field shown in
+  the panel (the WR2012 MAR penalty's) also counts in the page's registry,
+  its save bar and leave guard; Fit's own fields (model runs per fit,
+  starts, seed and the prior's penalty weight, kept in the `FitSession`,
+  never saved) count in the panel's only, and the page's Discard leaves
+  them as typed: only the panel's own reset puts them back (issue #922). **Cancel** takes the
+  button's place while the data loads and the fit runs, and works in
+  both; the focus moves between the two as they swap
+  (`fit-blocker-focus.spec.ts`). The button is on the
   first screen of the section at 1440×900 (`fit-panel-layout.spec.ts`). The
   seed's, starts' and second record's explanations are under the page's
   *Explain each setting* switch. It takes
@@ -9955,6 +10096,17 @@ calibration's line points at *How the shown run fits* for NSE and PBIAS.
     stored until Save. The result stays shown, its button then reading
     **Apply to form again**, and the unsaved settings take over the leave
     guard from the fit.
+  - **A form changed since the fit** (issue #920): while the result isn't
+    applied, the panel runs the engine's `fitRecordStatus` for each step's
+    record as Apply would make it against the form as it stands
+    (`lib/calibration/unappliedFit.ts` `unappliedFitCaveats`; the
+    parameters left out, since the form holds the old ones until Apply).
+    A changed calibration window, exclusions, calibration record, site,
+    quality flags or forcing settings put a warning over the result
+    (`data-testid="fit-stale"`) listing its caveats, each prefixed with the
+    location in a stepwise fit, so the scores aren't read against settings
+    they weren't made on. Once applied, the form's fit record says the same
+    in the calibration header.
   - **The fit's plan and steps** (engine 1.110.0, issue #659; #555,
     model.md §2.10n): the card reads the plan from the form and the network
     as they stand (`zones.ts` `fitPlanOf`, the engine's `locationFitPlan`).
@@ -10791,7 +10943,19 @@ read it before.
   use the saved network…", with a sentence on what Run forecast does when it
   is offered, in words rather than the button's hover title, #586 D18) is one
   slim line under the header (`#run-note`, the buttons' accessible
-  description), with the progress bar under it. Under it, Run readiness
+  description), with the progress bar under it. A run started here belongs
+  to the project page, not the tab (issue #923, `runs/runInFlight.ts`, as the
+  page's own new-data re-run does): leave Runs & results while it goes and
+  come back, and Run model still reads Running model… (disabled), the
+  progress line and its seconds carry on from the start, and the run opens
+  when it ends; ended while another tab is open, it only joins the list (no
+  `?run=` written into that tab's address). The header's Re-run model and
+  Warnings' Run now wait for it too. A run that fails while that project's
+  Runs & results isn't open (another tab, or another project) is said on the
+  project's notice line ("The run from Runs & results failed: …",
+  `tab-run-failed`, an alert, `failureForPage`) until **Dismiss** or the
+  next run; failed with the tab open, the tab says it under its run form
+  instead. Under it, Run readiness
   names the land units with no rain of their own (no station, rain gauge or
   CHIRPS of their own, no MAP with a gauge MAP; issue #615): they run on the
   catchment rain, so their share follows their area, with a link to
@@ -10812,7 +10976,10 @@ read it before.
   boundary](./maps.md#rain-from-the-boundary)); otherwise a plain note
   linking to Data. A note, never a blocker. A run the header started on
   another section and still going when the page opens shows here the same
-  way, the form waiting for it. A viewer gets no form, and
+  way, the form waiting for it. A run started here that finishes after the
+  page was left goes into the workspace's runs list (on the same project)
+  but writes no `run=` into the address now open, so Back doesn't stop on an
+  entry nobody chose. A viewer gets no form, and
   the inputs-changed note as before.
 - **The rail.** Where the page is at least 50rem (700 px) wide (a container
   query, `runs-page`), a 250 px left rail holds the runs list beside the
@@ -11225,7 +11392,8 @@ read it before.
   latest", a new run) is a step in history, so Back returns to the run before,
   as a unit, dam or run pick does on EWR, Hydrological units, Dams
   and Allocations; the default pick and the fallback after a delete replace
-  the entry (issue #521; until then a pick here replaced it); editors delete one with its ✕ (a run already gone, deleted
+  the entry (issue #521; until then a pick here replaced it), and that fallback
+  is the default pick itself (`defaultRunId`, issue #924; it was the newest run); editors delete one with its ✕ (a run already gone, deleted
   elsewhere or trimmed, just leaves the list; a run that can't be opened
   because it's gone says so in words, `runs/runList.ts` `runErrorText`, never
   the API's "not found", with **Show the newest run** in place of a Try
@@ -13675,7 +13843,11 @@ mode ("Your applications"; `?scenario=<id>` selects one):
   it", "Submitted: the assessors can see it, and its changes are frozen", …),
   the owner's **Submit to the assessors** (confirmed; disabled while a change
   doesn't apply), **Withdraw** and **Reopen as a draft**, the decision once
-  made (outcome, by whom, when, the reasons), and **Shared with**: the
+  made (outcome, by whom, when, the reasons; a move the server refuses with a
+  `409`, because someone else withdrew, reopened or decided it meanwhile,
+  reads the application again and says it now shows where it stands,
+  `rereadAfterConflict` in `applications.ts`, in one sentence with the
+  server's words in brackets, `applicationConflictText`, issue #934), and **Shared with**: the
   people who read it, Remove / Leave, and for the owner a **Share with**
   picker of the people they may share it with (`…/share-candidates`: an
   applicant's own applying party; no address box, so it says nothing about
@@ -15073,7 +15245,7 @@ their own application's in [their own view](#the-applicants-pack-view).
   the authority and not through the applicant, the members acting for the
   responsible authority as ticked checkboxes, an optional note and
   **Send**, then "Sent to …"; with none, it says the authority confirms
-  them in Acts for the authority (229; a proposal alone isn't enough); [evidence-pack.md § Sending it to the authority](./evidence-pack.md#sending-it-to-the-authority))
+  them in Acts for the authority, linked (`?tab=project#delegates-h`, issue #934; 229; a proposal alone isn't enough); [evidence-pack.md § Sending it to the authority](./evidence-pack.md#sending-it-to-the-authority))
   and **Notes**, and the version, code, manifest hash, PDF hash
   (or that none is recorded) and the bundle's hash. When an erratum found
   since the manifest was frozen applies to either run's engine or its fit's
@@ -15116,7 +15288,13 @@ their own application's in [their own view](#the-applicants-pack-view).
 - **Where it stands** (`packs/PackActions.svelte`): a draft's checklist from
   the API (the frozen report may be issued, both runs still carry the
   server's stamp, signed under the current pack statement), each ticked or
-  with what to do; an issued pack's issue stamp; a superseded pack's link to
+  with what to do, and a link where the way out is on another page (`issueChecklist`'s
+  `fix`: **Open the evidence report** to draft again, **Open Registration checks**
+  for the Project page's panel, and **Go to Appendix B.2** for the "Not signed"
+  line, to B.2's heading `#ev-b2-h` further down, issue #934). A draft that
+  can't be issued says how to start again: an unsigned one can simply be
+  deleted (or withdrawn), a signed one is withdrawn (`issueChecklist`'s
+  `signoffs`); an issued pack's issue stamp; a superseded pack's link to
   the newer version; a withdrawn pack's reason, marked as shown publicly
   (for a draft withdrawn before issue, which has no verify page, marked as
   the members' only, and the page prints no verify line or **Verify page**
@@ -15127,8 +15305,11 @@ their own application's in [their own view](#the-applicants-pack-view).
   draft** (an unsigned draft only), **New version…** of an issued pack (a
   new draft from the same run's report, superseding it once issued),
   **Withdraw…** (a dialog asking for a reason, 1–1 000 characters, that says
-  the reason is public, or for a draft that it stays with the members). The server holds every rule and its refusal is
-  shown with the ways out it names.
+  the reason is public, or for a draft that it stays with the members). A withdrawn pack's editor gets
+  **Open the evidence report**, to draft a new pack there (nothing moves a withdrawn one again). The server holds every rule and its refusal is
+  shown with the ways out it names; a `409` (another editor issued, withdrew or re-signed it, or a check moved) also reads
+  the pack again, so the board shows where it stands. Issue and Withdraw take their own button away, so the focus then
+  goes to the board (`tabindex="-1"`), not `<body>`.
 - **Sign-off** is Appendix B.2's, against the pack statement: **Sign off this
   evidence pack…** opens the run's sign-off dialog with the pack's version,
   manifest hash and engines, the eleventh confirmation, and first a warning
@@ -15477,12 +15658,19 @@ published.
   `worstFirst`), each with its notice level, received %, dam %, or "Not published yet" (while a card's
   figures load it says "Updating…", and when neither they nor a saved copy
   can be had, "We couldn’t load your hydrological unit", never a blank
-  line; a farm whose figures answer 403/404, unlinked since the list loaded,
+  line; when the live figures fail but the phone has a saved copy, the card
+  shows the copy under the farm page's own failed-update line, "We couldn’t
+  update your figures. These are the figures saved on this phone at …",
+  never as if current; a farm whose figures answer 403/404, unlinked since the list loaded,
   leaves the list and its saved copy goes, as a project the list's own
   403/404 leaves out, while one whose preview is withheld (403
   `farm_preview_withheld`) stays and says why, as the farm page does, with
   no saved figures shown as current, its saved copy kept (issue #875):
-  `farm/load.ts` `cardOnFailure`), and goes straight to the only one. `/farm/[projectId]` is one farm (`?node=` and a
+  `farm/load.ts` `cardOnFailure`; a saved copy from an older publication
+  than the one the list names (another `publishedAt`) is not shown at all,
+  since it describes a superseded decision beside the card's current level
+  word, and the card says its figures couldn't be had instead, the copy
+  itself kept for the farm page: `savedForPublication`, issue #942), and goes straight to the only one. `/farm/[projectId]` is one farm (`?node=` and a
   switcher when the farmer has several there: a row of links above the name
   for up to 4 farms; past that, folded under "Your hydrological units in this catchment
   (N farms)", so the name and the WUA's notice stay on the first screen,
@@ -15498,11 +15686,17 @@ published.
   waits: what accepting means, who sees what); `lib/help/farmer.test.ts` checks each
   link's entry exists in English and Afrikaans). Every link to it from a farm page
   (the Menu, the main page's foot, Why?'s, the dam page's and the cards'
-  entry links) carries that page as `?from=` (`farm/load.ts` `wordsHref`),
-  and its back link, **My hydrological unit**, returns there, so a farmer
-  with several farms comes back to the one they were reading. `from` is
+  entry links), and from the Account, Alert emails and Invitations pages,
+  carries that page as `?from=` (`farm/load.ts` `wordsHref`), and its back
+  link returns there, named for the page it returns to (**My hydrological
+  unit**, **Your dam**, **Why?**, **Who decides?** (short, since the who-decides page's full title
+  wrapped to two or three lines in the header past 380 px, issue #942), **Account**,
+  **Alert emails** or **Invitations**: `farmReturnPage`), so a farmer with
+  several farms comes back to the one they were reading, and one reading
+  what an alert email is comes back to their alert settings. `from` is
   taken only when it is a farm page's own address (`/farm/<id>`, its `/why`,
-  `/dam` or `/who-decides`, an optional `?node=`; `farmReturn`), never
+  `/dam` or `/who-decides`, an optional `?node=`) or exactly `/account`,
+  `/account/alerts` or `/account/invitations` (`farmReturn`), never
   another site or app page; without one the back link is **Your
   hydrological units** to `/farm`. The root
   page sends a user whose every membership is `farmer` to `/farm`; the
@@ -15785,7 +15979,9 @@ published.
   previewing while a cap or full-allocation run is published (`403
   farm_preview_withheld`, #523 I): the `withheld` state, saying why
   (worded from the code, `apiError.ts`), clearing nothing, since the farm
-  is still there; and a link to a unit that isn't the farmer's
+  is still there, with **Back to the workspace** under it as well as in the
+  preview banner, since only WUA staff previewing are ever withheld from
+  (issue #942); and a link to a unit that isn't the farmer's
   (`?node=` the catchment's list doesn't hold, while it holds others): "This
   hydrological unit isn’t linked to your account. If it should be, contact
   …", never "no longer" (it may never have been theirs), with **Your
@@ -16276,8 +16472,10 @@ the catalogue, [§ Language](#language)); both unit-tested.
   `dailyCap`, and `capNotice` in `alerts/words.ts` words it, "1 alert email
   … comes" for one and "every alert email waits" for 0) ending in **What are
   alert emails?**, an inline link to the `farm-alerts` entry on
-  `/farm/words` (inline so the line stays one row; no `?from=`, so its back
-  link is **Your hydrological units**), and, when mail is
+  `/farm/words` (inline so the line stays one row; with `?from=`, so its
+  back link is **Alert emails** and returns here; it stays inline and under
+  44 px tall by decision, issue #942: WCAG 2.2 SC 2.5.8 exempts a link in a
+  line of text, and enlarging it would break the one-row line), and, when mail is
   paused, the banner below. Then a card per catchment you can open, as many
   across as fit the page's own width (at least 34rem each: two at 1440 and
   1280, stacked on a phone; `auto-fit`, so a lone catchment takes the whole
@@ -16456,7 +16654,11 @@ signed in or out, for someone outside the project, on a phone first.
   privacy" and a dead link, so a chart-less answer asks the view again, and
   a link revoked or expired since the page loaded is dead, not private
   (`share/load.ts`); a link
-  without its token ("This page needs the whole link…"); and an error with
+  without its token ("This page needs the whole link…"), both ending in
+  **Go to the home page**, a link (a full tap target) to the landing page
+  (`/welcome`, which goes on to the device's language), which says what the app is and offers Sign in:
+  most readers of a share link are signed out and have no account, so the
+  home page rather than the sign-in page (issue #942); and an error with
   Try again. Every string is in `lib/components/share/share.ts`, the chart
   in `share/chart.ts`, the loading rules in `share/load.ts`, all
   unit-tested.

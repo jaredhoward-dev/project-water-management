@@ -8,10 +8,12 @@
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import CompareView from '#lib/components/compare/CompareView.svelte';
-	import { compareSearch } from '#lib/components/compare/picker.js';
+	import { compareSearch, parseRef, runsTabSearch } from '#lib/components/compare/picker.js';
 
 	const projectParam = $derived(page.url.searchParams.get('project'));
 	let projectA = $state<string | null>(null);
+	// Back to runs opens the Runs tab on the run being looked at (issue #924), not its default.
+	const backSearch = (p: string) => runsTabSearch(p, parseRef(page.url.searchParams.get('a')), parseRef(page.url.searchParams.get('b')));
 </script>
 
 <svelte:head><title>Compare runs · IC-WBT</title></svelte:head>
@@ -27,7 +29,7 @@
 		bind:projectA
 	>
 		{#snippet actions()}
-			{#if projectA}<a href={resolve(`projects/${projectA}?tab=runs`)}>Back to runs</a>{/if}
+			{#if projectA}<a href={resolve(`projects/${projectA}${backSearch(projectA)}`)}>Back to runs</a>{/if}
 		{/snippet}
 	</CompareView>
 </main>

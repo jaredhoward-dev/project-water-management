@@ -15,11 +15,14 @@
 //
 // The account is the subscription's (or session's, or invoice's
 // subscription_details') metadata `billing_account_id`, which checkout sets;
-// the plan is its metadata `plan_code`. An event without them is `invalid`.
+// the plan is its metadata `plan_code`. An event with no billing_account_id
+// at all is about an object this app never made (a dashboard invoice, a
+// payment link): `ignored`, like an unknown type. One with a malformed
+// account, or no plan_code, is `invalid`.
 // The seats are its metadata `seats_included` plus the items' extra seats
 // (seatsOf, below), and the interval its items' prices' recurring.interval
 // (intervalOf).
-import { PLAN_CODES, type InvoiceGrantPayload, type NormalisedEvent, type SubscriptionPayload, type SubscriptionStatus } from '../provider.js';
+import { PLAN_CODES, type InvoiceGrantPayload, type NormalisedEvent, type SubscriptionPayload, type SubscriptionPrice, type SubscriptionStatus } from '../provider.js';
 
 export const STRIPE_EVENT_TYPES = [
 	'checkout.session.completed',
@@ -47,7 +50,8 @@ function time(v: unknown): string | null | undefined {
 
 /**
  * Stripe's subscription status as ours. Stripe's `unpaid` (retries exhausted,
- * the subscription kept) is past_due here: still owed, not ended.
+ * the subscription kept) is past_due here: still owed, not ended; the app's own
+ * limit lapses it after DUNNING_GRACE_DAYS (405, issue #927).
  * `incomplete` (the first payment not yet made) and `paused` (a trial ended
  * with no payment method) grant nothing new, so they are recorded and change
  * nothing; `incomplete_expired` is expired.
@@ -62,6 +66,14 @@ const STATUS: Record<string, SubscriptionStatus | 'record'> = {
 	incomplete: 'record',
 	paused: 'record'
 };
+
+/**
+ * Whether the metadata names an account at all. An object with no billing_account_id is one this app never made
+ * (a dashboard invoice, a payment link's session, a subscription made by hand): its event is `ignored`, answered
+ * 200, since a retry can't change it and a 400 would have Stripe redeliver it for 3 days. A billing_account_id
+ * that is there but isn't a uuid is still `invalid`.
+ */
+const namesAccount = (metadata: unknown): boolean => isObj(metadata) && metadata.billing_account_id !== undefined && metadata.billing_account_id !== null;
 
 function accountOf(metadata: unknown): string | null {
 	const id = isObj(metadata) ? str(metadata.billing_account_id) : null;
@@ -123,6 +135,37 @@ export function intervalOf(items: Obj[]): 'month' | 'year' | null | undefined {
 	return found;
 }
 
+/**
+ * What a subscription costs each interval (405, issue #928): the items' price
+ * `unit_amount` times quantity, summed, in their one currency, and whether a
+ * discount (`discount`, or a non-empty `discounts`) is attached. app_billing_apply
+ * accepts a live status only at the plan table's price for its plan, interval
+ * and seats (or the price it accepted before), never discounted: a dashboard
+ * price or a coupon is a conflict for the operator. Undefined when no item
+ * carries a price at all (an object without them, like a test's), so nothing
+ * is checked, as intervalOf; totalMinor null when an item's price can't be
+ * read (no unit_amount, a tiered or metered price), which is never accepted.
+ */
+export function priceOf(sub: Obj, items: Obj[]): SubscriptionPrice | undefined {
+	if (!items.some((item) => item.price !== undefined)) return undefined;
+	const discounted = isObj(sub.discount) || (Array.isArray(sub.discounts) && sub.discounts.length > 0);
+	let total: number | null = 0;
+	let currency: string | null = null;
+	for (const item of items) {
+		const price = isObj(item.price) ? item.price : null;
+		const q = item.quantity ?? 1;
+		const unit = price?.unit_amount;
+		const cur = price ? str(price.currency) : null;
+		if (!price || !isCount(q) || typeof unit !== 'number' || !Number.isInteger(unit) || unit < 0 || !cur || (currency !== null && currency !== cur.toLowerCase())) {
+			total = null;
+			break;
+		}
+		currency = cur.toLowerCase();
+		total += unit * q;
+	}
+	return { totalMinor: total, currency: total === null ? null : currency, discounted };
+}
+
 /** A subscription object as the full payload, or why it can't be. */
 function subscriptionPayload(sub: Obj): SubscriptionPayload | string {
 	const accountId = accountOf(sub.metadata);
@@ -144,6 +187,7 @@ function subscriptionPayload(sub: Obj): SubscriptionPayload | string {
 	if (!periodStart || !periodEnd || trialEnd === undefined) return 'missing or invalid period';
 	if (typeof sub.cancel_at_period_end !== 'boolean') return 'missing cancel_at_period_end';
 	const interval = intervalOf(items);
+	const price = priceOf(sub, items);
 	return {
 		accountId,
 		planCode,
@@ -155,7 +199,8 @@ function subscriptionPayload(sub: Obj): SubscriptionPayload | string {
 		trialEnd,
 		cancelAtPeriodEnd: sub.cancel_at_period_end,
 		externalRef,
-		...(interval === undefined ? {} : { interval })
+		...(interval === undefined ? {} : { interval }),
+		...(price === undefined ? {} : { price })
 	};
 }
 
@@ -182,6 +227,7 @@ function normalise(body: unknown): NormaliseResult {
 	if (!object) return { kind: 'invalid', why: 'no data.object' };
 
 	if (type.startsWith('customer.subscription.')) {
+		if (!namesAccount(object.metadata)) return { kind: 'ignored', eventId, type };
 		const payload = subscriptionPayload(object);
 		if (typeof payload === 'string') return { kind: 'invalid', why: payload };
 		if (type === 'customer.subscription.deleted') return { kind: 'event', event: { eventId, type: 'subscription.deleted', payload: { ...payload, status: 'canceled' } } };
@@ -191,6 +237,7 @@ function normalise(body: unknown): NormaliseResult {
 	}
 
 	if (type === 'checkout.session.completed') {
+		if (!namesAccount(object.metadata)) return { kind: 'ignored', eventId, type };
 		const accountId = accountOf(object.metadata);
 		if (!accountId) return { kind: 'invalid', why: 'no billing_account_id in the session metadata' };
 		const sub = object.subscription;
@@ -202,6 +249,7 @@ function normalise(body: unknown): NormaliseResult {
 	// B2B invoice from the staff tool (billing/invoice.ts), which has no subscription, the invoice's own.
 	const parent = isObj(object.parent) && isObj(object.parent.subscription_details) ? object.parent.subscription_details : null;
 	const details = parent ?? (isObj(object.subscription_details) ? object.subscription_details : null);
+	if (!namesAccount(details?.metadata) && !namesAccount(object.metadata)) return { kind: 'ignored', eventId, type };
 	const accountId = accountOf(details?.metadata) ?? accountOf(object.metadata);
 	if (!accountId) return { kind: 'invalid', why: 'no billing_account_id in the invoice’s subscription or invoice metadata' };
 	const sub = details?.subscription ?? object.subscription;

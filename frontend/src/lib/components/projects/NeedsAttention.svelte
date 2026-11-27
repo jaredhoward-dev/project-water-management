@@ -34,7 +34,7 @@
 		<h2 id="att-h"><span id="att-h-t">Needs attention</span> <HelpTip key="needs-attention" /></h2>
 		{#if !loading && !failed}
 			<span class="count" data-testid="attention-count">{flagged.length} of {shown}</span>
-			{#if flagged.length}<a class="all" href={allHref} data-sveltekit-noscroll data-sveltekit-keepfocus
+			{#if flagged.length}<a class="all" href={allHref} data-sveltekit-reset="false"
 					>{more > 0 ? `Show all ${flagged.length}, most urgent first` : 'Sort the list by it'}</a
 				>{/if}
 		{/if}

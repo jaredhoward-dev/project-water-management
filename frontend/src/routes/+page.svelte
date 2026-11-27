@@ -4,7 +4,7 @@
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { onMount, tick, untrack } from 'svelte';
 	import { focusAfterRemove } from '#lib/a11y/focusAfterRemove.js';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { resolve } from '$app/paths';
 	import { basePath } from '#lib/nav/base.js';
 	import { page } from '$app/state';
@@ -162,8 +162,8 @@
 		if (next.q !== undefined) set('q', next.q.trim(), '');
 		if (u.search === page.url.search) return;
 		const href = u.pathname + u.search;
-		if (next.q !== undefined) void searchStep.write(href, (replace) => goto(href, { replace, reset: false }));
-		else goto(href, { reset: false });
+		if (next.q !== undefined) void searchStep.write(href, (replace) => guardedGoto(href, { replace, reset: false }));
+		else guardedGoto(href, { reset: false });
 	}
 
 	const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -199,7 +199,7 @@
 			// A user who is only ever a farmer has no workspace: their farms are
 			// the farmer view (WP-2.6, docs/design/farmer-view.md).
 			if (isFarmerOnly(p.value.map((x) => x.role))) {
-				await goto(resolve('farm'), { replace: true });
+				await guardedGoto(resolve('farm'), { replace: true });
 				return;
 			}
 			projects = p.value;
@@ -218,7 +218,7 @@
 		if (page.url.searchParams.get('new') === '1') {
 			const u = new URL(page.url.href);
 			u.searchParams.delete('new');
-			await goto(u.pathname + u.search, { replace: true, reset: false });
+			await guardedGoto(u.pathname + u.search, { replace: true, reset: false });
 			if (!loadError) openCreate();
 		}
 	});
@@ -311,7 +311,7 @@
 		try {
 			const p = await api.projects.create(cleanName(newName), newDescription.trim() || undefined, newTeamId || null);
 			createOpen = false;
-			await goto(`${basePath()}${newProjectPath(p.id, newStart)}`);
+			await guardedGoto(`${basePath()}${newProjectPath(p.id, newStart)}`);
 		} catch (err) {
 			actionError = msg(err);
 		} finally {
@@ -431,8 +431,7 @@
 							<a
 								href={hrefWith({ owner: o.value })}
 								aria-current={owner === o.value ? 'true' : undefined}
-								data-sveltekit-noscroll
-								data-sveltekit-keepfocus
+								data-sveltekit-reset="false"
 							>
 								<span class="label">{o.label}</span>
 								<span class="count">{o.count}</span>

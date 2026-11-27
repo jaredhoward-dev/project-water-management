@@ -307,6 +307,8 @@ for (const colorScheme of ['light', 'dark'] as const) {
 					}
 				},
 				{ path: '/help/glossary', ready: (p) => expect(p.getByRole('heading', { level: 1, name: 'Glossary' })).toBeVisible() },
+				// A topic page: its entries' See also links (underlined, WCAG 1.4.1).
+				{ path: '/help/glossary/goodness-of-fit', ready: (p) => expect(p.getByRole('heading', { level: 1, name: 'Goodness of fit' })).toBeVisible() },
 				{
 					path: '/help/search?q=dam',
 					ready: async (p) => {

@@ -234,14 +234,22 @@ export class ApiError extends Error {
 	readonly code: string | null;
 	/** Values for the code's wording (e.g. `seconds` for a sign-in lockout). */
 	readonly params: Record<string, string | number>;
+	/**
+	 * The API itself wrote this answer: its body is the API's JSON error shape (`{ error: string, … }`,
+	 * backend/src/http/errors.ts). False for a status from anything in front of it (a WAF block page,
+	 * a CloudFront error, a proxy), so a caller never reads such a 403 or 404 as the API's verdict
+	 * (the farm pages drop a saved copy only on the API's own; farm/load.ts `classify`).
+	 */
+	readonly fromApi: boolean;
 
-	constructor(status: number, message: string, details?: unknown, code: string | null = null, params: Record<string, string | number> = {}) {
+	constructor(status: number, message: string, details?: unknown, code: string | null = null, params: Record<string, string | number> = {}, fromApi = false) {
 		super(message);
 		this.name = 'ApiError';
 		this.status = status;
 		this.details = details;
 		this.code = code;
 		this.params = params;
+		this.fromApi = fromApi;
 	}
 }
 
@@ -398,7 +406,8 @@ export function createApi(baseUrl: string, fetchFn: FetchFn = (...a) => fetch(..
 		const params = obj.params && typeof obj.params === 'object' && !Array.isArray(obj.params) ? { ...(obj.params as Record<string, string | number>) } : {};
 		const wait = Number(res.headers?.get?.('retry-after'));
 		if (params.retryAfter === undefined && Number.isFinite(wait) && wait > 0) params.retryAfter = Math.ceil(wait);
-		return new ApiError(res.status, msg + describeDetails(obj.details), obj.details, code, params);
+		const fromApi = typeof obj.error === 'string' && obj.error !== '';
+		return new ApiError(res.status, msg + describeDetails(obj.details), obj.details, code, params, fromApi);
 	}
 
 	/**

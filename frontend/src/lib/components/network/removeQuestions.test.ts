@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { newDemandObjectDefaults, type Borehole, type DemandObject, type LandCoverPatch } from '@water-management/engine';
 import { newWindow } from './demandSchedule';
-import { boreholeQuestion, curveQuestion, demandObjectQuestion, focusAfter, patchQuestion, windowQuestion } from './removeQuestions';
+import { boreholeQuestion, curveQuestion, demandObjectQuestion, focusAfter, nodeRemovedFocus, patchQuestion, windowQuestion } from './removeQuestions';
 
 const object = (over: Partial<DemandObject> = {}): DemandObject =>
 	({
@@ -60,5 +60,26 @@ describe('the remove questions', () => {
 		expect(focusAfter(0, 3)).toBe(0);
 		expect(focusAfter(2, 3)).toBe(1);
 		expect(focusAfter(0, 1)).toBeNull();
+	});
+});
+
+describe('nodeRemovedFocus', () => {
+	it('hands the node table focus to the row now in its place, else the one before', () => {
+		expect(nodeRemovedFocus('table', ['a', 'b', 'c'], 0)[0]).toBe('node-name-b');
+		expect(nodeRemovedFocus('table', ['a', 'b', 'c'], 1)[0]).toBe('node-name-c');
+		expect(nodeRemovedFocus('table', ['a', 'b', 'c'], 2)[0]).toBe('node-name-b');
+	});
+	it('falls back to the toolbar Add, then the empty table’s own button when the last row goes', () => {
+		expect(nodeRemovedFocus('table', ['a'], 0)).toEqual(['net-add-node', 'net-table-empty-add']);
+		expect(nodeRemovedFocus('table', ['a', 'b'], 0)).toEqual(['node-name-b', 'net-add-node', 'net-table-empty-add']);
+	});
+	it('names no row for a node it did not find', () => {
+		expect(nodeRemovedFocus('table', ['a'], -1)).toEqual(['net-add-node', 'net-table-empty-add']);
+	});
+	it('on the map: the list row now in its place, as the table does, then the list heading, else its empty state’s Add', () => {
+		expect(nodeRemovedFocus('map', ['a', 'b', 'c'], 0)[0]).toBe('node-list-b');
+		expect(nodeRemovedFocus('map', ['a', 'b', 'c'], 2)[0]).toBe('node-list-b');
+		expect(nodeRemovedFocus('map', ['a', 'b'], 1)).toEqual(['node-list-a', 'all-nodes-h', 'net-empty-add']);
+		expect(nodeRemovedFocus('map', ['a'], 0)).toEqual(['all-nodes-h', 'net-empty-add']);
 	});
 });

@@ -13,7 +13,15 @@ name: Terraform
 #      known-bad patterns (public buckets, `Action: *`, open ingress, root
 #      containers). Advisory (exit-code 0), HIGH/CRITICAL to the Security tab.
 #
-# 1-3 are `bin/check-infra.sh`, the same script as `pnpm check:infra`.
+# 1-3 are `bin/check-infra.sh`, the same script as `pnpm check:infra`. Every
+# run block is a full plan of the root module, so on a 4-CPU runner the suite
+# is bound by its total CPU (about 30 CPU-minutes, 8 minutes on one runner,
+# past the 10-minute timeout as it grows): the test files are split across
+# the matrix's runners (CHECK_INFRA_SHARD=<i>/<n>, packed by measured CPU
+# seconds in infra/scripts/terraform-shards.mjs and
+# infra/tests/shard-weights.json), each shard also running fmt and validate.
+# The `check` job fans them in under the one name the CI gate and branch
+# protection know, and fails when any shard failed, was cancelled or skipped.
 #
 # There is deliberately NO credentialed `terraform plan` against the real
 # account here. The only role CI can assume is the deploy role, whose trust
@@ -34,10 +42,16 @@ permissions:
   contents: read
 
 jobs:
-  check:
-    name: fmt, validate, test (mocked providers)
+  shard:
+    name: fmt, validate, test (mocked providers) ${{ matrix.shard }}/${{ strategy.job-total }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      # Every shard reports, so one red shard doesn't hide the others.
+      fail-fast: false
+      matrix:
+        # Keep terraform-shards.test.mjs's SHARDS in step.
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -52,8 +66,31 @@ jobs:
           terraform_version: ${{ steps.tfver.outputs.version }}
           terraform_wrapper: false
 
-      - name: fmt, validate, test
-        run: bin/check-infra.sh
+      - name: fmt, validate, test (shard ${{ matrix.shard }}/${{ strategy.job-total }})
+        env:
+          SHARD: ${{ matrix.shard }}
+          SHARD_TOTAL: ${{ strategy.job-total }}
+        run: CHECK_INFRA_SHARD="$SHARD/$SHARD_TOTAL" bin/check-infra.sh
+
+  # The fan-in, under the name the CI gate and any required check already
+  # know. `always()`, so a failed, cancelled or skipped shard turns this red
+  # rather than skipping it (a skipped job counts as passed).
+  check:
+    name: fmt, validate, test (mocked providers)
+    needs: shard
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Every shard passed
+        env:
+          SHARDS: ${{ needs.shard.result }}
+        run: |
+          if [ "$SHARDS" != success ]; then
+            echo "::error::The Terraform test shards finished '$SHARDS', not 'success'."
+            exit 1
+          fi
+          echo "Every Terraform test shard passed."
 
   trivy-iac:
     name: Trivy IaC scan

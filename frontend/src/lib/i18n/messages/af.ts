@@ -1407,6 +1407,14 @@ export const af: Catalogue = {
 	'9c6ee3ec': 'Vir studie, navorsing en ’n opvanggebied van jou eie. Net vir nie-kommersiële gebruik.',
 	// Unlimited catchments, runs, calibration, scenarios and exports
 	'c41a330b': 'Onbeperkte opvanggebiede, lopies, kalibrasie, scenario’s en uitvoere',
+	// Live data feeds, automatic runs, alerts and published farm views on every catchment
+	'9c7a94e4': 'Lewendige datavoere, outomatiese lopies, waarskuwings en gepubliseerde bladsye vir boere op elke opvanggebied',
+	// Unlimited server PDF reports, and scheduled report emails
+	'39864af3': 'Onbeperkte PDF-verslae van die bediener, en geskeduleerde verslae per e-pos',
+	// Unlimited server PDF reports
+	'0b1ca392': 'Onbeperkte PDF-verslae van die bediener',
+	// Scheduled report emails
+	'683c2ba3': 'Geskeduleerde verslae per e-pos',
 	// A small assistant allowance each day and month
 	'40e5d7e3': '’n Klein assistenttoelaag elke dag en maand',
 	// Issued evidence packs at {price} each
@@ -1419,10 +1427,6 @@ export const af: Catalogue = {
 	'fc900073': 'Vir een hidroloog, ook vir werk vir kliënte.',
 	// Everything in Free, for commercial work
 	'fb6e914d': 'Alles in Free, vir kommersiële werk',
-	// Live data feeds, automatic runs, alerts and published farm views on every catchment
-	'9c7a94e4': 'Lewendige datavoere, outomatiese lopies, waarskuwings en gepubliseerde bladsye vir boere op elke opvanggebied',
-	// Unlimited server PDF reports, and scheduled report emails
-	'39864af3': 'Onbeperkte PDF-verslae van die bediener, en geskeduleerde verslae per e-pos',
 	// About {n} times Free’s assistant allowance
 	'b82cba2c': 'Omtrent {n} keer Free se assistenttoelaag',
 	// Team
@@ -1929,6 +1933,8 @@ export const af: Catalogue = {
 	'c08acfa2': 'Al die redigeerderplekke in hierdie span se plan is in gebruik. Vra ’n spanadministrateur om ’n plek by te voeg, en aanvaar dan die uitnodiging weer.',
 	// Too many sign-in attempts from your network. Wait a few minutes, then try again.
 	'3c2a05a7': 'Te veel pogings om van jou netwerk af in te teken. Wag ’n paar minute en probeer dan weer.',
+	// This plan’s catchments with automatic updates are all in use. Ask the person who manages the plan to switch one off or choose another plan, then try again.
+	'37a743bb': 'Al hierdie plan se opvanggebiede met outomatiese bywerkings is in gebruik. Vra die persoon wat die plan bestuur om een af te skakel of ’n ander plan te kies, en probeer dan weer.',
 	// {n} minute / {n} minutes
 	'a60f17d2': { one: '{n} minuut', other: '{n} minute' },
 	// {n} second / {n} seconds
@@ -2193,6 +2199,8 @@ export const af: Catalogue = {
 	'b3e48362': 'Wat dit nie is nie',
 	// What is the river’s reserve?
 	'a0ea4b15': 'Wat is die rivier se reserwe?',
+	// Who decides?
+	'8719b563': 'Wie besluit?',
 	// Reset your password
 	'42f0a3dc': 'Stel jou wagwoord terug',
 	// Check your email
@@ -2429,6 +2437,8 @@ export const af: Catalogue = {
 	'519fdd9e': 'Hierdie skakel het verval of is teruggetrek. Vra die persoon wat dit gestuur het vir ’n nuwe een.',
 	// This page needs the whole link. Open the link you were sent again, or ask whoever sent it for a new one.
 	'5950d7c5': 'Hierdie bladsy het die hele skakel nodig. Maak die skakel wat vir jou gestuur is weer oop, of vra die persoon wat dit gestuur het vir ’n nuwe een.',
+	// Go to the home page
+	'9fb5d67d': 'Gaan na die tuisblad',
 	// Couldn’t load this just now. Check your connection and try again.
 	'79725e4a': 'Kon dit nie nou laai nie. Kyk jou verbinding na en probeer weer.',
 	// Catchment water balance, shared read-only

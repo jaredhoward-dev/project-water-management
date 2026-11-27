@@ -18,6 +18,8 @@
 	import { confirmDialog } from '#lib/components/common/confirm.svelte.js';
 	import { onMount, tick, untrack } from 'svelte';
 	import { page } from '$app/state';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
+	import { feedCardClosedHref } from '#lib/nav/tabUrl.js';
 	import { api } from '#lib/api/index.js';
 	import { fmtNum } from '#lib/format/number.js';
 	import NearestGauges from './NearestGauges.svelte';
@@ -40,6 +42,7 @@
 		describeTimes,
 		describeWrites,
 		draftToBody,
+		editClearsProblem,
 		emptyDraft,
 		type FeedBody,
 		type FeedDraft,
@@ -317,6 +320,9 @@
 
 	async function closeForm() {
 		adding = false;
+		// Closing the card removes the link's ?rain= / ?feed= (issue #933, lib/nav/tabUrl.ts): in place, so a reload
+		// or a shared link doesn't reopen the proposal that was closed.
+		if (page.url.searchParams.has('rain') || page.url.searchParams.has('feed')) void guardedGoto(feedCardClosedHref(page.url), { replace: true, reset: false });
 		await tick();
 		attachButton?.focus();
 	}
@@ -328,6 +334,11 @@
 		draft.targetKind = data?.sources.find((x) => x.source === s)?.kinds[0] ?? '';
 		// A problem with the other source's field (or series) no longer applies.
 		formError = formField = takeover = null;
+	}
+
+	/** An edit to the field the problem is about clears it, as the station API form does (issue #932). */
+	function editField(e: Event) {
+		if (editClearsProblem(formField, draft.source, (e.target as HTMLElement | null)?.id, uid)) formError = formField = null;
 	}
 
 	/** A proposed station (NearestGauges): it only fills the field; the owner still attaches the feed. */
@@ -618,7 +629,7 @@
 
 		{#if adding}
 			<!-- The add card, above the list (an add form above a long list, not under it), with its own action row. -->
-			<form class="add" onsubmit={add} novalidate aria-labelledby="{uid}-add-h">
+			<form class="add" onsubmit={add} oninput={editField} onchange={editField} novalidate aria-labelledby="{uid}-add-h">
 				<h3 id="{uid}-add-h">{mapOnly ? 'Rain from the map' : 'Attach a feed'}</h3>
 				<div class="form-row">
 					{#if !mapOnly}

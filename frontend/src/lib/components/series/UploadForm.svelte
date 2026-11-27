@@ -16,6 +16,7 @@
 	import { fmtDay, fmtNum, fmtReading } from '#lib/format/number.js';
 	import { CsvError, subDailyAggregate, type ParsedSeries } from '#lib/series/csv.js';
 	import { parseSeriesFile } from '#lib/series/file.js';
+	import { dwsChecks } from '#lib/series/dws.js';
 	import { parsePastedSeries } from '#lib/series/paste.js';
 	import { defaultUnit, KIND_OPTIONS, kindLabel } from '#lib/series/kinds.js';
 	import { holeBefore, mergePreview, type Daily } from './coverage';
@@ -101,6 +102,8 @@
 	// The overwrite the person was asked about (its `sig`); null while not asking.
 	let confirmSig = $state<string | null>(null);
 	let confirmEl: HTMLElement | undefined = $state();
+	// The DWS checks ticked by hand (dwsChecks: an unstated unit, issue #909; a reservoir's spillway, issue #925), per file.
+	let dwsConfirmed = $state<Record<string, boolean>>({});
 	const CHANGES_SHOWN = 100;
 
 	$effect(() => {
@@ -146,6 +149,8 @@
 	// A new station: its details go with the series it creates. Days for an existing series of that name are added to it as for catchment rain.
 	const newStation = $derived(station && !target);
 	const stationIssue = $derived(newStation ? stationProblem(name, stationIn) : null);
+	const dwsCheckList = $derived(dwsChecks(parsed?.dws, kind, fileName, unit.trim() || undefined));
+	const dwsBlocked = $derived(dwsCheckList.some((c) => c.confirm === null || !dwsConfirmed[c.id]));
 	const stationErr = (f: StationField) => (stationIssue?.field === f && (stationLeft[f] || parsed !== null) ? stationIssue.message : null);
 	const leave = (f: StationField) => (stationLeft = { ...stationLeft, [f]: true });
 	const kindOptions = $derived(
@@ -185,7 +190,7 @@
 		return target && mode === 'merge' ? `${verb} and merge` : target ? `${verb} and replace` : verb;
 	});
 	const submitDisabled = $derived(
-		asking ? uploading : !parsed || uploading || !unit.trim() || halfLabel || !!stationIssue || (!!target && mode === 'merge' && !preview)
+		asking ? uploading : !parsed || uploading || !unit.trim() || halfLabel || !!stationIssue || dwsBlocked || (!!target && mode === 'merge' && !preview)
 	);
 	$effect(() => {
 		submit = { label: submitLabel, disabled: submitDisabled, confirming: asking, uploading, input };
@@ -262,6 +267,7 @@
 		error = null;
 		guessed = null;
 		subDailyText = null;
+		dwsConfirmed = {};
 		parseSeq++;
 		fileName = name;
 	}
@@ -704,7 +710,7 @@
 								>; left out as only partly recorded: {[sd.partialEdges.first, sd.partialEdges.last]
 									.filter((d) => d !== undefined)
 									.map((d) => fmtDay(d))
-									.join(' and ')}</span
+									.join(' and ')}{#if sd.startStamped}. The readings may mark the start of each interval: move every timestamp one interval later and upload it again{/if}</span
 							>{/if}{#if sd.incompleteDays}
 							<span class="warn-text"
 								>; {fmtNum(sd.incompleteDays)} days have fewer readings, so {sd.aggregate === 'mean' ? 'their averages lean on the hours recorded' : 'their totals may be short'}</span
@@ -739,6 +745,25 @@
 						{/if}
 					</dd>
 				</div>
+				{#each dwsCheckList as c (c.id)}
+					<div class="wide">
+						<dt>{c.title}</dt>
+						<dd data-testid="dws-{c.id === 'unstated' ? 'flow' : c.id}-check">
+							<span class="warn-text">{c.message}</span>
+							{#if c.confirm}
+								<label class="flow-confirm"
+									><input
+										type="checkbox"
+										checked={!!dwsConfirmed[c.id]}
+										onchange={(e) => (dwsConfirmed = { ...dwsConfirmed, [c.id]: e.currentTarget.checked })}
+										data-testid="dws-{c.id === 'unstated' ? 'flow' : c.id}-confirm"
+									/>
+									{c.confirm}</label
+								>
+							{/if}
+						</dd>
+					</div>
+				{/each}
 				<div class="wide">
 					<dt>Quality codes</dt>
 					<dd data-testid="dws-quality">{qualityList(d.quality) || 'none given'}</dd>
@@ -952,6 +977,12 @@
 	}
 	form > .btn-primary {
 		margin-top: 0.75rem;
+	}
+	.flow-confirm {
+		display: flex;
+		gap: 0.4rem;
+		align-items: center;
+		margin-top: 0.35rem;
 	}
 	.confirm {
 		margin-top: 0.75rem;

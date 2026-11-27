@@ -10,23 +10,29 @@ export type Failure = 'removed' | 'withheld' | 'offline' | 'failed';
  * 403 coded `farm_preview_withheld`: a WUA viewer kept from registered volumes
  * previewing a farm while a cap or full-allocation run is published (#523 I);
  * the farm is still in the catchment, so the page says why and keeps the
- * saved copies. Any other 403 or 404: the farm (or the project) is no longer
- * this user's, so the page says so and the saved copy goes. Status 0: no
- * signal. Anything else: the server had a problem; the page offers Try
+ * saved copies. Any other 403 or 404 the API wrote itself (a code, or its JSON
+ * error shape: ApiError `fromApi`): the farm (or the project) is no longer
+ * this user's, so the page says so and the saved copy goes. A 403 or 404 from
+ * anything in front of the API (a WAF block page, a CloudFront error) says
+ * nothing about access, so it is `failed` and the saved copy stays. Status 0:
+ * no signal. Anything else: the server had a problem; the page offers Try
  * again. Never the raw error text.
  */
 export function classify(e: unknown): Failure {
-	const status = e && typeof e === 'object' && 'status' in e ? (e as { status: unknown }).status : null;
-	const code = e && typeof e === 'object' && 'code' in e ? (e as { code: unknown }).code : null;
+	const field = (name: string): unknown => (e && typeof e === 'object' && name in e ? (e as Record<string, unknown>)[name] : null);
+	const status = field('status');
+	const code = field('code');
 	if (status === 403 && code === 'farm_preview_withheld') return 'withheld';
-	if (status === 403 || status === 404) return 'removed';
+	const fromApi = field('fromApi') === true || (typeof code === 'string' && code !== '');
+	if ((status === 403 || status === 404) && fromApi) return 'removed';
 	if (status === 0) return 'offline';
 	return 'failed';
 }
 
 /**
  * A card's figures on /farm when asking for them failed: a farm unlinked (or
- * a project lost) between loading the list and its figures (403/404) is
+ * a project lost) between loading the list and its figures (the API's own
+ * 403/404; a WAF block keeps the card and its copy, `classify`) is
  * dropped from the list, as the list's own 403/404 leaves a project out, and
  * its saved copy goes. A preview withheld (403 `farm_preview_withheld`) keeps
  * the card and the phone's saved copy, as the farm page does, but shows no
@@ -41,6 +47,18 @@ export function cardOnFailure<V>(e: unknown, saved: () => V | null): CardFailure
 	if (why === 'removed') return { drop: true };
 	if (why === 'withheld') return { drop: false, withheld: true, view: null };
 	return { drop: false, withheld: false, view: saved() };
+}
+
+/**
+ * A saved copy is shown on a /farm card only when it is of the publication the
+ * catchment has now (issue #942): a copy from an older one describes a
+ * superseded decision (another notice, another restriction level beside the
+ * card's current level word), so the card shows none and says its figures
+ * couldn't be had instead. Publications are told apart by `publishedAt`, which
+ * a republish always moves. No current publication: no copy.
+ */
+export function savedForPublication<E extends { view: { publication: { publishedAt: string } } }>(saved: E | null, current: { publishedAt: string } | null): E | null {
+	return saved && current && saved.view.publication.publishedAt === current.publishedAt ? saved : null;
 }
 
 /**
@@ -64,19 +82,34 @@ export function farmHref(base: string, projectId: string, nodeId: string | null,
 /**
  * A farm page's own address (path and ?node=, without the app's base) that
  * /farm/words may send its back link to: one farm page, its Why?, dam or
- * who-decides page, nothing else. Anything else (another site, another app
+ * who-decides page, or one of the three account pages that link to a farmer
+ * word (/account, /account/alerts, /account/invitations, exactly), nothing else. Anything else (another site, another app
  * page, a path with dots or slashes doubled) is null, so `?from=` can never
  * be an open redirect.
  */
 const FARM_RETURN = /^\/farm\/(?!words(?:[/?]|$))[\w-]+(?:\/(?:why|dam|who-decides))?(?:\?node=[\w-]+)?$/;
+const ACCOUNT_RETURN = /^\/account(?:\/(?:alerts|invitations))?$/;
 export function farmReturn(raw: string | null | undefined): string | null {
-	return raw && FARM_RETURN.test(raw) ? raw : null;
+	return raw && (FARM_RETURN.test(raw) || ACCOUNT_RETURN.test(raw)) ? raw : null;
 }
 
 /**
- * "/farm/words" (with `#anchor`), carrying the farm page it is opened from as
- * `?from=`, so its back link returns there rather than to the list of farms.
- * `here` is the current URL; a page that isn't a farm page adds nothing, and
+ * Which page a `farmReturn` address is: the farm's own page, its dam, Why?
+ * or who-decides page, or an account page. The words page names its back link by it,
+ * so "back" never says "My hydrological unit" and lands on the dam page.
+ */
+export type FarmReturnPage = 'farm' | 'dam' | 'why' | 'who-decides' | 'account' | 'alerts' | 'invitations';
+export function farmReturnPage(from: string | null): FarmReturnPage | null {
+	if (!from || !farmReturn(from)) return null;
+	if (ACCOUNT_RETURN.test(from)) return from === '/account/alerts' ? 'alerts' : from === '/account/invitations' ? 'invitations' : 'account';
+	const sub = from.split('?')[0]!.split('/')[3];
+	return sub === 'dam' || sub === 'why' || sub === 'who-decides' ? sub : 'farm';
+}
+
+/**
+ * "/farm/words" (with `#anchor`), carrying the farm or account page it is
+ * opened from as `?from=`, so its back link returns there rather than to the
+ * list of farms. `here` is the current URL; any other page adds nothing, and
  * the words page passes on its own `from`.
  */
 export function wordsHref(base: string, here: Pick<URL, 'pathname' | 'search'>, anchor = ''): string {

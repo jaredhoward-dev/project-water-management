@@ -8,7 +8,7 @@
 # assistant's budget, the deploy role, and the database-connection sum.
 #
 # The mocks, overrides and variables below are copied from
-# guardrails.tftest.hcl (a test file can't share them); keep them in step.
+# guardrails_*.tftest.hcl (a test file can't share them); keep them in step.
 #
 #   pnpm check:infra          (bin/check-infra.sh: fmt + validate + test)
 
@@ -983,7 +983,7 @@ run "on" {
     error_message = "The Bedrock endpoint, RDS and the Secrets Manager endpoint each admit the assistant's group on their one port."
   }
 
-  # Verbatim, as guardrails.tftest.hcl pins the others: a description can't
+  # Verbatim, as guardrails_network.tftest.hcl pins the others: a description can't
   # change in place (the group is replaced under live ENIs).
   assert {
     condition = (

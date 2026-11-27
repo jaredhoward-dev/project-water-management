@@ -7,7 +7,8 @@
 	// the verify page), Delete an unsigned draft. Signing is in Appendix B.2,
 	// where the statement is. The server holds every rule; this offers only
 	// what it would accept, and shows its refusal when something moved.
-	import { goto } from '$app/navigation';
+	import { tick } from 'svelte';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { resolve } from '$app/paths';
 	import { basePath } from '#lib/nav/base.js';
 	import { api, ApiError, type Pack, type PackIssueChecks } from '#lib/api/index.js';
@@ -15,7 +16,7 @@
 	import { confirmDialog } from '#lib/components/common/confirm.svelte.js';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { fmtDate } from '#lib/format/number.js';
-	import { issueChecklist, packHref } from './pack';
+	import { issueChecklist, packHref, SIGNOFF_ANCHOR } from './pack';
 
 	let {
 		projectId,
@@ -31,14 +32,14 @@
 		issue: PackIssueChecks | null;
 		manifestMatches: boolean;
 		canEdit: boolean;
-		/** The pack changed (issued, withdrawn): reload it. */
-		onchange: () => void;
+		/** The pack changed (issued, withdrawn), or the server refused a move because it changed under you (409): read it again. */
+		onchange: () => void | Promise<unknown>;
 	} = $props();
 
 	let busy = $state(false);
 	let error = $state<string | null>(null);
 	let note = $state('');
-	const checklist = $derived(issue ? issueChecklist(issue) : []);
+	const checklist = $derived(issue ? issueChecklist(issue, pack.signoffs) : []);
 	const canIssue = $derived(pack.status === 'draft' && manifestMatches && !!issue && checklist.every((c) => c.ok));
 	const sourceRun = $derived(pack.scenarioRunId ?? pack.baselineRunId);
 	const reportHref = $derived(resolve(`projects/${encodeURIComponent(projectId)}/report?run=${encodeURIComponent(sourceRun)}&evidence`));
@@ -50,15 +51,37 @@
 		return checks?.length ? `${text}${checks.some((c) => c.fix) ? ` Way out: ${checks.map((c) => c.fix).filter(Boolean).join(' ')}` : ''}` : text;
 	}
 
+	let board: HTMLElement | undefined = $state();
+	/**
+	 * Issue and Withdraw take their own button away (the board shows the new
+	 * status), so the focus fell to <body>: put it on the board, which names
+	 * where the pack stands now (ui-playbook § "When a state replaces the
+	 * focused control, move focus to the title"). Only when it was lost.
+	 */
+	async function landOnBoard() {
+		await tick();
+		const active = document.activeElement;
+		if (!board || (active && active !== document.body && active.isConnected)) return;
+		board.focus();
+	}
+
 	async function run(what: string, call: () => Promise<unknown>) {
 		busy = true;
 		error = null;
 		try {
 			await call();
 			note = what;
-			onchange();
+			await onchange();
+			withdrawing = false;
+			await landOnBoard();
 		} catch (e) {
 			error = why(e);
+			// A 409: another editor issued, withdrew or re-signed it, or a check moved, since this page read it.
+			// Read it again, so the board and its checklist show where it stands now, not the stale moves.
+			if (e instanceof ApiError && e.status === 409) {
+				await onchange();
+				await landOnBoard();
+			}
 		} finally {
 			busy = false;
 		}
@@ -84,7 +107,7 @@
 		error = null;
 		try {
 			const next = await api.packs.create(projectId, sourceRun, pack.id);
-			await goto(packHref(basePath(), projectId, next.id));
+			await guardedGoto(packHref(basePath(), projectId, next.id));
 		} catch (e) {
 			error = why(e);
 		} finally {
@@ -99,7 +122,7 @@
 		error = null;
 		try {
 			await api.packs.remove(projectId, pack.id);
-			await goto(reportHref);
+			await guardedGoto(reportHref);
 		} catch (e) {
 			error = why(e);
 		} finally {
@@ -115,11 +138,10 @@
 		e.preventDefault();
 		if (!reasonOk || busy) return;
 		await run('Withdrawn.', () => api.packs.withdraw(projectId, pack.id, reason.trim()));
-		if (!error) withdrawing = false;
 	}
 </script>
 
-<section class="board no-print" aria-labelledby="pack-state-h" data-testid="pack-actions">
+<section class="board no-print" aria-labelledby="pack-state-h" data-testid="pack-actions" tabindex="-1" bind:this={board}>
 	<p id="pack-state-h" class="visually-hidden">Where this pack stands</p>
 	{#if !manifestMatches}
 		<p class="alert alert-error" role="alert">The stored manifest no longer matches its SHA-256, so this pack can’t be trusted or issued. Tell the project’s owner.</p>
@@ -129,7 +151,16 @@
 		{#if issue}
 			<ul class="checks" data-testid="pack-checklist" aria-label="Before it can be issued">
 				{#each checklist as c (c.id)}
-					<li class:fail={!c.ok}><span class="mark" aria-hidden="true">{c.ok ? '✓' : '✗'}</span><span>{c.ok ? c.done : c.todo}</span></li>
+					<li class:fail={!c.ok}>
+						<span class="mark" aria-hidden="true">{c.ok ? '✓' : '✗'}</span><span
+							>{c.ok ? c.done : c.todo}
+							{#if !c.ok && c.fix === 'report'}<a href={resolve(`projects/${encodeURIComponent(projectId)}/report?run=${encodeURIComponent(sourceRun)}&evidence`)} data-testid="pack-check-fix"
+									>Open the evidence report</a
+								>{:else if !c.ok && c.fix === 'registration'}<a href={resolve(`projects/${encodeURIComponent(projectId)}?tab=project#regcheck-h`)} data-testid="pack-check-fix"
+									>Open Registration checks</a
+								>{:else if !c.ok && c.fix === 'signoff'}<a href="#{SIGNOFF_ANCHOR}" data-testid="pack-check-fix">Go to Appendix B.2</a>{/if}</span
+						>
+					</li>
 				{/each}
 			</ul>
 		{/if}
@@ -148,6 +179,13 @@
 			<span class="reason">{pack.statusReason}</span>
 			<HelpTip key="pack-lifecycle" label="About an evidence pack’s lifecycle" />
 		</p>
+		{#if canEdit}
+			<!-- Nothing moves a withdrawn pack again: new evidence is a new pack, drafted from the run's evidence report. -->
+			<p class="small" data-testid="pack-withdrawn-next">
+				To issue this evidence again, draft a new pack from the run’s evidence report.
+				<a href={resolve(`projects/${encodeURIComponent(projectId)}/report?run=${encodeURIComponent(sourceRun)}&evidence`)}>Open the evidence report</a>
+			</p>
+		{/if}
 	{/if}
 
 	{#if canEdit && pack.status !== 'withdrawn'}
@@ -158,12 +196,13 @@
 			{:else if pack.status === 'issued'}
 				<button type="button" class="btn" disabled={busy} onclick={newVersion}>New version…</button>
 			{/if}
-			<button type="button" class="btn btn-ghost" disabled={busy} onclick={() => ((reason = ''), (withdrawing = true))}>Withdraw…</button>
+			<button type="button" class="btn btn-ghost" disabled={busy} onclick={() => ((reason = ''), (error = null), (withdrawing = true))}>Withdraw…</button>
 		</div>
 		{#if pack.status === 'draft' && !canIssue}<p class="muted small">Issue is open once every line above is ticked. Sign the pack in Appendix B.2 below. <HelpTip key="pack-issue-checks" label="About the checks before issue" /></p>{/if}
 		{#if pack.status === 'draft' && pack.signoffs > 0}<p class="muted small">A signed draft is kept with its sign-off: withdraw it rather than delete it.</p>{/if}
 	{/if}
-	{#if error}<p class="alert alert-error" role="alert">{error}</p>{/if}
+	<!-- While the withdraw dialog is open its own alert says it: one alert, not two. -->
+	{#if error && !withdrawing}<p class="alert alert-error" role="alert">{error}</p>{/if}
 	<p class="visually-hidden" role="status">{note}</p>
 </section>
 
@@ -201,6 +240,10 @@
 		background: var(--surface);
 		padding: 0.75rem 1rem;
 		margin-bottom: 1.25rem;
+	}
+	.board:focus-visible {
+		outline: 2px solid var(--focus);
+		outline-offset: 2px;
 	}
 	.board p {
 		margin: 0.25rem 0;

@@ -16,7 +16,7 @@
 	import { AutoCalibrationFollower } from '#lib/calibration/autoFollow.svelte.js';
 	import { applyBlocker, autoCaseRows, autoRunsTotal, autoState, ruleWaterYears, rulesUnsaved, runBlocker as runBlockerOf, selectionText, triggerText, type RunBlocker } from '#lib/calibration/autoFit.js';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
-	import { fmtDay, fmtNum } from '#lib/format/number.js';
+	import { fmtDay, fmtNum, fmtStamp } from '#lib/format/number.js';
 
 	let {
 		projectId,
@@ -152,7 +152,7 @@
 			<div class="result" data-testid="auto-result">
 				<h5>Latest run</h5>
 				<p class="small muted">
-					{triggerText(latest)} · rules revision {latest.rulesRevision} · kept by {selectionText(latest.rules)} · {latest.createdAt.slice(0, 16).replace('T', ' ')}
+					{triggerText(latest)} · rules revision {latest.rulesRevision} · kept by {selectionText(latest.rules)} · {fmtStamp(latest.createdAt)}
 				</p>
 				{#if runState.kind === 'running'}
 					<div class="progress">
@@ -216,7 +216,7 @@
 					</div>
 					{#if latest.appliedAt}
 						<p class="small" data-testid="auto-applied">
-							Applied by {latest.appliedBy ?? 'a former member'} on {latest.appliedAt.slice(0, 16).replace('T', ' ')}{latest.appliedRunId ? ', with a run' : ''}{latest.uncertaintyId
+							Applied by {latest.appliedBy ?? 'a former member'} on {fmtStamp(latest.appliedAt)}{latest.appliedRunId ? ', with a run' : ''}{latest.uncertaintyId
 								? ' and its uncertainty ensemble (Runs tab)'
 								: ''}.
 						</p>

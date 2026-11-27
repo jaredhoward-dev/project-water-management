@@ -853,6 +853,77 @@ describe('a notice under no restriction', () => {
 	});
 });
 
+describe('a notice standing at the deploy (411)', () => {
+	it('a "none" notice published before the release is recorded as announced, never mailed; one published after it is (positive control)', async () => {
+		await reset();
+		const pub = (await owner.call('GET', `/projects/${projectId}/publication`)).body.current;
+		const patch = (restriction: Record<string, unknown>) => editor.call('PATCH', `/projects/${projectId}/publication/${pub.id}`, { restriction });
+		// Before the release: words under no restriction, and a restriction rule on that never fired (a 'none' publication
+		// opened no event then). Two languages, so the signature's order and hashing are exercised.
+		expect((await patch({ level: 'none', pct: null, notice: { en: 'Old words from last season.', af: 'Ou woorde van verlede seisoen.' } })).status).toBe(200);
+		expect((await rules(editor, [{ kind: 'restriction_published', threshold: 0, enabled: true }])).status).toBe(200);
+		await asOwner(`DELETE FROM job WHERE project_id = $1 AND kind = 'alert_eval'`, [projectId]);
+		expect(await asOwner(`SELECT 1 FROM alert_event WHERE project_id = $1 AND kind = 'restriction_published'`, [projectId])).toEqual([]);
+		// The migration's step, as it ran at the deploy.
+		const silenced = async () => Number((await asOwner('SELECT app_alert_silence_standing_notices() AS n'))[0]!.n);
+		expect(await silenced()).toBeGreaterThanOrEqual(1);
+		// Idempotent: the rule now has its event.
+		expect(await silenced()).toBe(0);
+		const [ev] = await asOwner(
+			`SELECT state, detail, run_id::text AS run FROM alert_event WHERE project_id = $1 AND kind = 'restriction_published'`,
+			[projectId]
+		);
+		const [cur] = await asOwner(`SELECT run_id::text AS run FROM run_publication WHERE id = $1`, [pub.id]);
+		expect(ev).toMatchObject({ state: 'cleared', run: cur!.run, detail: { publicationId: pub.id, level: 'none', pct: null, lifted: false } });
+		// Nothing was queued for anyone.
+		expect(await asOwner(`SELECT 1 FROM alert_delivery d JOIN alert_event e ON e.id = d.event_id WHERE e.project_id = $1 AND e.kind = 'restriction_published'`, [projectId])).toEqual([]);
+		// The check sees the signature it would have made itself: no new event, no mail.
+		const f0 = mailsTo(farmer).length;
+		const v0 = mailsTo(viewer).length;
+		const outcome = await withUser(editor.id, (db) => evaluateAlerts(db, projectId));
+		expect(outcome.opened).toBe(0);
+		await tick();
+		expect(mailsTo(farmer).length).toBe(f0);
+		expect(mailsTo(viewer).length).toBe(v0);
+		// Positive control: words published after the deploy are a notice, mailed with them.
+		expect((await patch({ level: 'none', pct: null, notice: { en: 'Pumps off on Friday.' } })).status).toBe(200);
+		await tick();
+		expect(mailsTo(farmer).length).toBe(f0 + 1);
+		expect(mailsTo(farmer).at(-1)!.subject).toBe('New restriction notice — Alerts');
+		expect(mailsTo(farmer).at(-1)!.text).toContain('Pumps off on Friday.');
+		expect(mailsTo(farmer).at(-1)!.text).not.toContain('Old words');
+		expect((await patch({ level: 'none', pct: null, notice: {} })).status).toBe(200);
+		await tick();
+		await reset();
+	});
+
+	it('leaves alone a restricted publication and a "none" one without words, and only the schema owner runs it (positive control: the one above is silenced)', async () => {
+		await reset();
+		const pub = (await owner.call('GET', `/projects/${projectId}/publication`)).body.current;
+		const patch = (restriction: Record<string, unknown>) => editor.call('PATCH', `/projects/${projectId}/publication/${pub.id}`, { restriction });
+		expect((await rules(editor, [{ kind: 'restriction_published', threshold: 0, enabled: true }])).status).toBe(200);
+		await asOwner(`DELETE FROM job WHERE project_id = $1 AND kind = 'alert_eval'`, [projectId]);
+		const events = async () => (await asOwner(`SELECT 1 FROM alert_event WHERE project_id = $1 AND kind = 'restriction_published'`, [projectId])).length;
+		const silenceHere = async () => {
+			await asOwner('SELECT app_alert_silence_standing_notices()');
+			return events();
+		};
+		// 'none' with no words: nothing to announce, nothing recorded.
+		expect((await patch({ level: 'none', pct: null, notice: {} })).status).toBe(200);
+		await asOwner(`DELETE FROM job WHERE project_id = $1 AND kind = 'alert_eval'`, [projectId]);
+		expect(await silenceHere()).toBe(0);
+		// A restriction: the check mails it as it always did.
+		expect((await patch({ level: 'restricted', pct: 15, notice: { en: 'Fifteen percent.' } })).status).toBe(200);
+		await asOwner(`DELETE FROM job WHERE project_id = $1 AND kind = 'alert_eval'`, [projectId]);
+		expect(await silenceHere()).toBe(0);
+		// Water_app (the app) may not call it.
+		await expect(withoutUser((db) => db.query('SELECT app_alert_silence_standing_notices()'))).rejects.toMatchObject({ code: '42501' });
+		await patch({ level: 'none', pct: null, notice: {} });
+		await tick();
+		await reset();
+	});
+});
+
 describe('after an automatic run', () => {
 	it('the auto re-run queues an alert check, which runs in the same tick (positive control: none while alerts are off)', async () => {
 		const { id: pid } = await makeProject(owner, 'Alerts auto');

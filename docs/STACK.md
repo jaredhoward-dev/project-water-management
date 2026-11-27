@@ -184,13 +184,14 @@ pnpm dev:db:psql            # psql as the schema owner
 pnpm dev:authority:confirm <project-id> <email> --reference "<letter>"   # the operator confirms who acts for a project's responsible authority (the first one is the operator's; security.md § Authorization)
 pnpm dev:billing:report [--month YYYY-MM] [--json] [--show-emails]   # the operator's billing Phase 1 metrics and staff abuse report, as the schema owner (325_billing_metrics); addresses only with --show-emails, operator only (billing.md § Metrics and the abuse report)
 pnpm dev:billing:grant <email|team-id> <plan> [--until YYYY-MM-DD] [--seats n] --reason "…" [--replace]   # the operator's staff grant of a plan (330_staff_grant), audit-logged, as the schema owner; --revoke --reason "…" ends it, --list shows the log; a live Stripe subscription is never replaced (billing.md § Staff grants)
+pnpm dev:billing:conflict --list [--all] | --resolve <id> --reason "…" [--by <name>]   # the subscription price conflicts (406, owner-only): list the open ones (--all: resolved too) or resolve one by hand once refunded or granted, who and why kept on its row, as the schema owner; production: the billing-conflicts / billing-conflict-resolve owner actions (billing.md § Price check)
 pnpm dev:billing:invoice <email|team-id> <plan> --interval month|year --po "<PO number>" [--seats n] [--from YYYY-MM-DD] [--paid]   # a B2B invoice (net 30, the PO number on it) through BILLING_PROVIDER, as the schema owner: the mock by default, no network (--paid: the mock pays it, and its invoice.paid grants the plan through the webhook); production runs it as the billing-invoice owner action (billing.md § B2B invoices)
                              # production runs authority-confirm, billing-grant/-revoke/-grants and billing-report as owner actions on the migrate Lambda through .github/workflows/billing-admin.yml, ids only (deployment.md § Owner actions)
 pnpm dev:mail:up            # Mailpit: local inbox for all app email (UI :8026)
 pnpm dev:mail:down | dev:mail:status | dev:mail:logs | dev:mail:open
 pnpm dev:mail:bounce <email> [--complaint | --transient]   # stand in for an SES bounce: pauses that account's alert emails (run-locally.md § Alerts)
 pnpm dev:billing:replay <fixture> [--account <id>] [--new-id]   # sign a synthetic Stripe-shaped event (backend/fixtures/billing/) with the dev key and post it to the local mock webhook (run-locally.md § Billing webhooks)
-pnpm dev:s3:up              # MinIO: report PDFs (API :9002, console :9003, minioadmin / minioadmin)
+pnpm dev:s3:up              # MinIO: report PDFs (API :9002, console :9003, minioadmin / minioadmin); gives water-reports production's 7-day expiry (idempotent)
 pnpm dev:s3:down | dev:s3:status | dev:s3:logs
 pnpm dev:tiles:up           # optional basemap for the Map tab, one step, re-runnable: MinIO, tiles + fonts (cached, else fetched), a cached relief DEM, the frontend's URLs; restart pnpm dev
 pnpm dev:tiles:fetch        # re-download the SA extract (pmtiles CLI) into MinIO; dev:tiles:terrain (the Relief layer's DEM) | dev:tiles:water (Trace a dam's GSW occurrence; GDAL or docker) | dev:tiles:status | dev:tiles:env (maps.md)

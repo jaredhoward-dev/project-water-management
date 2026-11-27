@@ -302,6 +302,38 @@ describe('sub-daily flow and rain (issue #829)', () => {
 		expect(parseSeriesCsv(one.join('\n'), flow).values).toEqual([1]);
 	});
 
+	it('says a one-day file stamped at the start of each interval (00:00–23:00) may be start-stamped, and how to fix it', () => {
+		const rows = ['timestamp,value', ...Array.from({ length: 24 }, (_, h) => `2021-06-01 ${String(h).padStart(2, '0')}:00,1`)];
+		expect(() => parseSeriesCsv(rows.join('\n'), rain)).toThrow(/no whole day: .*may mark the start of each interval.*Move every timestamp one interval later \(00:00 becomes 01:00, 23:00 becomes 00:00 the next day\)/);
+		// Positive control: a part day that isn't start-stamped gets no such hint.
+		expect(() => parseSeriesCsv('2021-06-01 10:00,1\n2021-06-01 11:00,1', flow)).toThrow(/no whole day/);
+		try {
+			parseSeriesCsv('2021-06-01 10:00,1\n2021-06-01 11:00,1', flow);
+		} catch (e) {
+			expect((e as Error).message).not.toMatch(/start of each interval/);
+		}
+		// Shifted one interval later, the same readings make one whole day.
+		const fixed = ['timestamp,value', ...Array.from({ length: 24 }, (_, h) => (h === 23 ? '2021-06-02 00:00,1' : `2021-06-01 ${String(h + 1).padStart(2, '0')}:00,1`))];
+		expect(parseSeriesCsv(fixed.join('\n'), rain).values).toEqual([24]);
+	});
+
+	it('flags a several-day start-stamped file whose edge days are dropped, and not an end-stamped one', () => {
+		const rows = ['timestamp,value'];
+		for (let d = 1; d <= 3; d++) for (let h = 0; h < 24; h++) rows.push(`2021-06-0${d} ${String(h).padStart(2, '0')}:00,1`);
+		const r = parseSeriesCsv(rows.join('\n'), rain);
+		expect(r.subDaily!.partialEdges).toEqual({ first: '2021-05-31', last: '2021-06-03' });
+		expect(r.subDaily!.startStamped).toBe(true);
+		// Positive control: the end-stamped logger keeps every day and carries no flag.
+		expect(parseSeriesCsv(logger(60, 3, () => 1), rain).subDaily!.startStamped).toBeUndefined();
+		// The 08:00 day: 08:00 … 07:00 is start-stamped there.
+		const eight = ['timestamp,value'];
+		for (let i = 0; i < 48; i++) {
+			const iso = new Date(Date.UTC(2021, 5, 1, 8) + i * 3_600_000).toISOString();
+			eight.push(`${iso.slice(0, 10)} ${iso.slice(11, 16)},1`);
+		}
+		expect(parseSeriesCsv(eight.join('\n'), { dayBoundary: '08:00', aggregate: 'sum' }).subDaily!.startStamped).toBe(true);
+	});
+
 	it('refuses a file with no whole day rather than storing a part day', () => {
 		expect(() => parseSeriesCsv('2021-06-01 10:00,1\n2021-06-01 11:00,1', flow)).toThrow(/no whole day: the readings cover only part of 2021-06-01/);
 		expect(() => parseSeriesCsv('2021-06-01 23:00,1\n2021-06-02 00:00,1\n2021-06-02 01:00,1', rain)).toThrow(/cover only parts of 2021-06-01 and 2021-06-02/);

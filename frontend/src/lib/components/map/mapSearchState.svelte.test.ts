@@ -68,6 +68,19 @@ describe('MapSearchState', () => {
 		expect(failing.credits).toEqual([]);
 	});
 
+	it('emptying the box (its clear button ×) closes the list and the last error; typing does not (#938)', async () => {
+		const s = new MapSearchState(answering([place('Kwartsvallei'), place('Kwartsvallei 12')]), vi.fn());
+		await s.find('kwartsvallei');
+		s.edited('kwartsvallei 1');
+		expect(s.open).toBe(true);
+		s.edited('');
+		expect(s.open).toBe(false);
+		await s.find('k');
+		expect(s.error).not.toBeNull();
+		s.edited('  ');
+		expect(s.error).toBeNull();
+	});
+
 	it('refuses a query under 2 characters without asking the backend', async () => {
 		const search = answering([]);
 		const s = new MapSearchState(search, vi.fn());

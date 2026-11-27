@@ -5,7 +5,7 @@
 	import { confirmDialog } from '#lib/components/common/confirm.svelte.js';
 	import { compareTabHref } from '#lib/components/compare/picker.js';
 	import { onDestroy, onMount, tick, untrack } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { runFitEngineVersions, toEpochDay, unitsWithoutGridApan, type SeriesMeta } from '@water-management/engine';
@@ -27,6 +27,7 @@
 	import WaterBalanceTable from './WaterBalanceTable.svelte';
 	import Lazy from '#lib/components/common/Lazy.svelte';
 	import RunNotes from './RunNotes.svelte';
+	import { elapsedSeconds, isFlight, withCreatedRun, type RunInFlight } from './runInFlight';
 	import ValidationPanel from '#lib/components/liability/ValidationPanel.svelte';
 	import NotesDrawer from '#lib/components/notes/NotesDrawer.svelte';
 	import { currentNomination, evidenceLine, modelDriftWarning } from './evidence';
@@ -81,6 +82,8 @@
 		modelDirty,
 		unsaved = modelDirty,
 		busy = false,
+		inFlight = null,
+		onRunStarted,
 		beforeRun,
 		onRunsChange,
 		onInputsRestored
@@ -101,6 +104,13 @@
 		unsaved?: boolean;
 		/** A run the page started (the new-data line's Re-run model) is still going: this form waits for it. */
 		busy?: boolean;
+		/**
+		 * The run this tab started that is still going, kept by the page (issue #923): back on the tab after leaving
+		 * it, the form still waits and the progress line carries on, and the finished run opens here.
+		 */
+		inFlight?: RunInFlight | null;
+		/** A run started here: the page keeps it (inFlight) for as long as it goes. */
+		onRunStarted?: (flight: RunInFlight) => void;
 		/** Asked before a run starts: the page saves unsaved edits first (with the person's say); false stops the run. */
 		beforeRun?: () => Promise<boolean>;
 		onRunsChange?: (runs: RunMeta[]) => void;
@@ -131,11 +141,22 @@
 	let actionError = $state<string | null>(null);
 
 	let label = $state('');
-	let running = $state(false);
+	/** A run started here, until it ends (kept here too, for a page that doesn't keep it). */
+	let ownRun = $state<RunInFlight | null>(null);
+	/** The page's copy wins: it outlives this tab, so a run started before leaving still shows on return. */
+	const flight = $derived(inFlight ?? ownRun);
 	/** This form's run or the page's: either way another can't start yet. */
-	const runBusy = $derived(running || busy);
+	const runBusy = $derived(flight !== null || busy);
 	let elapsed = $state(0);
-	let timer: ReturnType<typeof setInterval> | undefined;
+	// The progress line's seconds, from when the run started, not from when this tab opened.
+	$effect(() => {
+		const startedAt = flight?.startedAt;
+		if (startedAt === undefined) return;
+		const tickElapsed = () => (elapsed = elapsedSeconds(startedAt, Date.now()));
+		tickElapsed();
+		const timer = setInterval(tickElapsed, 250);
+		return () => clearInterval(timer);
+	});
 
 	const selectedId = $derived(page.url.searchParams.get('run'));
 	let detail = $state<{ run: Run; series: RunSeriesRef[] } | null>(
@@ -221,12 +242,14 @@
 			land: (id) => (fragmentShown ? landOnceShown(id) : undefined),
 			forward: (to) => {
 				forwarding = true;
-				void goto(to, { replace: true, reset: false });
+				void guardedGoto(to, { replace: true, reset: false });
 			}
 		});
 		if (forwarding) return;
 		load();
 		loadPublication();
+		// Back on the tab while a run it started still goes: open the run here when it ends (issue #923).
+		if (inFlight) void finish(inFlight);
 	});
 	const currentPublishedRunId = $derived(publication?.current?.runId ?? null);
 	// Every run the history holds: the server keeps them, so they get no delete button.
@@ -235,7 +258,6 @@
 		publication = p;
 		commit(runs.map((r) => ({ ...r, published: r.id === p.current.runId })));
 	}
-	onDestroy(() => clearInterval(timer));
 
 	/**
 	 * Show a run. A pick the user makes is a new history entry, so Back returns to the run before, as a
@@ -247,7 +269,7 @@
 		if (id) url.searchParams.set('run', id);
 		else url.searchParams.delete('run');
 		if (url.search === page.url.search) return Promise.resolve();
-		return goto(url, { replace: how === 'default', reset: false });
+		return guardedGoto(url, { replace: how === 'default', reset: false });
 	}
 	/**
 	 * Go to latest: the button hides once the latest run shows, and it had the focus, so the focus goes to that run's
@@ -269,7 +291,12 @@
 		detailFor = id;
 		const hit = detailCache.get(id);
 		if (hit) {
+			// A cached run is shown at once: a load still out for the run picked before (Back past it) owns nothing now,
+			// so its busy state and any earlier error go too, else the results stayed aria-busy for good.
 			detail = hit;
+			detailLoading = false;
+			detailError = null;
+			detailGone = false;
 			return;
 		}
 		detailLoading = true;
@@ -385,23 +412,39 @@
 	async function start(forecast: boolean) {
 		if (runBusy) return;
 		if (beforeRun && !(await beforeRun())) return;
-		running = true;
 		actionError = null;
-		elapsed = 0;
-		const t0 = Date.now();
-		timer = setInterval(() => (elapsed = Math.floor((Date.now() - t0) / 1000)), 250);
+		const started: RunInFlight = {
+			projectId,
+			startedAt: Date.now(),
+			done: api.runs.create(projectId, label.trim() || undefined, { forecast })
+		};
+		ownRun = started;
+		onRunStarted?.(started);
+		await finish(started, true);
+	}
+	/**
+	 * A run started here ends: the list takes it and, with the tab open, it opens. Also called by a tab opened again
+	 * while the run went (onMount), so the run opens wherever the person is on Runs & results when it ends.
+	 */
+	async function finish(started: RunInFlight, own = false) {
 		try {
-			const { run: r, removedRunIds } = await api.runs.create(projectId, label.trim() || undefined, { forecast });
-			label = '';
-			const { summary: _summary, ...meta } = r;
-			// Drop the oldest runs the server trimmed to stay within its cap.
-			commit([meta, ...runs.filter((x) => x.id !== r.id && !removedRunIds.includes(x.id))]);
-			select(r.id, 'pick');
+			const created = await started.done;
+			if (own && !destroyed) label = '';
+			// Drop the oldest runs the server trimmed to stay within its cap (withCreatedRun).
+			const next = withCreatedRun(runs, created);
+			if (destroyed) {
+				// Left the tab while the run went: the page (still on this project) takes the new run for its other tabs,
+				// but the URL is another tab's or another project's now, so no ?run= is written into it (a history entry
+				// there, or this project's run named on another project). Back on the tab, that instance opens it.
+				if (page.params.id === projectId) onRunsChange?.(next);
+				return;
+			}
+			commit(next);
+			select(created.run.id, 'pick');
 		} catch (err) {
-			actionError = msg(err);
+			if (!destroyed) actionError = msg(err);
 		} finally {
-			clearInterval(timer);
-			running = false;
+			if (isFlight(ownRun, started)) ownRun = null;
 		}
 	}
 
@@ -470,7 +513,8 @@
 		if (selectedId === r.id) {
 			detail = null;
 			detailFor = '';
-			select(runs[0]?.id ?? null);
+			// The same pick as first load (issue #924): for a viewer the published baseline, else the newest.
+			select(defaultRunId(runs, project.role));
 		}
 		// Its row, and the ✕ that had the focus, have gone: the run now in its place takes it.
 		await focusAfterRemove(at, 'ul.runs button.pick', 'runs-h');
@@ -522,7 +566,7 @@
 			else url.searchParams.delete('q');
 			if (url.search === page.url.search) return;
 			written = words;
-			void queryStep.write(url.href, (replace) => goto(url, { replace, reset: false }));
+			void queryStep.write(url.href, (replace) => guardedGoto(url, { replace, reset: false }));
 		}, 300);
 	}
 	$effect(() => () => clearTimeout(queryTimer));
@@ -983,6 +1027,7 @@
 							engineVersion={shownRun.engineVersion}
 							legacy={shownRun.legacy}
 							fitEngineVersion={runFitEngineVersions(shownRun.settings, summary)}
+							errata={shownRun.errata}
 							bind:open={validationOpen}
 						/>
 					</div>

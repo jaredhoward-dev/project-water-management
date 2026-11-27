@@ -45,7 +45,8 @@
 <script lang="ts">
 	import { apanInputOf } from '#lib/model/systems.js';
 	import { untrack } from 'svelte';
-	import { afterNavigate, goto } from '$app/navigation';
+	import { afterNavigate } from '$app/navigation';
+	import { confirmLeave, guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { trackClose } from '#lib/nav/closeNav.js';
 	import { resolve } from '$app/paths';
 	import { basePath } from '#lib/nav/base.js';
@@ -62,7 +63,7 @@
 	import Lazy from '#lib/components/common/Lazy.svelte';
 	import { prefetch } from '#lib/components/common/lazy.js';
 	import { provideUnsaved } from '#lib/components/common/chunkFailed.js';
-	import { guardUnsaved, listAnd } from '#lib/nav/unsaved.js';
+	import { guardUnsaved, invalidFieldsLeave, listAnd } from '#lib/nav/unsaved.js';
 	import { confirmDialog } from '#lib/components/common/confirm.svelte.js';
 	import { provideInvalidFields } from '#lib/components/common/invalidFields.svelte.js';
 	import type { PageDraft } from '#lib/components/model/pageDraft.js';
@@ -106,6 +107,7 @@
 	import { headerSlot } from '#lib/components/workspace/headerSlot.svelte.js';
 	import { sectionContext } from '#lib/components/workspace/context.js';
 	import { GRID_TAB, isGridId, isTabGridId, movedGridHref, withParam, withoutParam } from '#lib/workspace/overlays.js';
+	import { failureForPage, inFlightFor, isFlight, withCreatedRun, type RunFailure, type RunInFlight } from '#lib/components/runs/runInFlight.js';
 	import {
 		ALL_TABS,
 		addsData,
@@ -227,11 +229,12 @@
 		what: () => (fit.busy ? 'an automatic fit still running' : 'an automatic fit not yet applied to the form')
 	});
 	// A number field holding text it can't take (common/invalidFields) is gone with its page or its
-	// tab (the field unmounts), so any change of page or of the URL's query asks; a #fragment doesn't.
+	// tab (the field unmounts), so a change of page or of the URL's query asks; a #fragment doesn't, and
+	// neither does a replacing goto that only drops parameters on the same tab (lib/nav/unsaved.ts invalidFieldsLeave).
 	guardUnsaved({
 		dirty: () => invalidFields.count > 0,
 		what: 'fields that need fixing',
-		leaves: (from, to) => from.pathname !== to.pathname || from.search !== to.search
+		leaves: invalidFieldsLeave
 	});
 	// The save bar's other drafts besides the model (components/model/pageDraft.ts): the project
 	// details and the settings, each an adapter here and a step in saveAll.
@@ -360,6 +363,28 @@
 	let dragDepth = $state(0);
 	let banner = $state<{ text: string; added: number } | null>(null);
 	let rerunning = $state(false);
+	/**
+	 * A run Runs & results started that is still going (issue #923). Kept here, like `rerunning`, so leaving the tab
+	 * and coming back finds it: Run model stays disabled and the progress carries on, and no second run starts.
+	 */
+	let tabRun = $state<RunInFlight | null>(null);
+	/** That run failed while its project's Runs & results wasn't open: said on the notice line until dismissed or the next run. */
+	let tabRunFailure = $state<RunFailure | null>(null);
+	const tabRunError = $derived(tabRunFailure?.projectId === projectId ? tabRunFailure.text : null);
+	function tabRunStarted(flight: RunInFlight) {
+		tabRun = flight;
+		tabRunFailure = null;
+		const clear = () => {
+			if (isFlight(tabRun, flight)) tabRun = null;
+		};
+		flight.done.then(clear, (err: unknown) => {
+			clear();
+			// Read where the person is when it fails: on that project's Runs & results the tab says it itself.
+			tabRunFailure = failureForPage(flight, err, { projectId, tab });
+		});
+	}
+	/** Any run going on this project, the page's or the tab's: no other starts until it ends. */
+	const runGoing = $derived(rerunning || inFlightFor(tabRun, projectId) !== null);
 	let rerunError = $state<string | null>(null);
 
 
@@ -377,7 +402,7 @@
 		untrack(() => {
 			stopField();
 			stopField = landOnField(f);
-			void goto(withoutParam(page.url, 'field'), { replace: true, reset: false });
+			void guardedGoto(withoutParam(page.url, 'field'), { replace: true, reset: false });
 		});
 	});
 	$effect(() => () => stopField());
@@ -391,7 +416,7 @@
 			if (canEdit) openAddData();
 			const to = new URL(withoutParam(page.url, 'add'), page.url.href);
 			if (canEdit && !addsData(tab)) to.searchParams.set('tab', 'series');
-			void goto(`${to.pathname}${to.search}${to.hash}`, { replace: true, reset: false });
+			void guardedGoto(`${to.pathname}${to.search}${to.hash}`, { replace: true, reset: false });
 		});
 	});
 	const carriesFiles = (e: DragEvent) => !!e.dataTransfer && [...e.dataTransfer.types].includes('Files');
@@ -441,7 +466,7 @@
 		if (project && r.meta.rerunQueuedFor !== undefined) project = { ...project, rerunQueuedFor: r.meta.rerunQueuedFor };
 		await loadLists();
 		// On the Data tab the upload is charted, as picking its row would (`series=`).
-		if (tab === 'series') void goto(withParam(page.url, 'series', r.meta.id), { replace: true, reset: false });
+		if (tab === 'series') void guardedGoto(withParam(page.url, 'series', r.meta.id), { replace: true, reset: false });
 		const what = r.meta.name || kindLabel(r.meta.kind);
 		banner = {
 			text: r.added || r.changed ? `${r.message.replace(/\.$/, '')}.` : `No new days for “${what}”: the file matched what is stored.`,
@@ -455,17 +480,18 @@
 	async function startRun(label?: string, forecast = false) {
 		rerunning = true;
 		rerunError = null;
+		tabRunFailure = null;
 		// Started on Calibration, the run opens there, on How the shown run fits, so the calibration loop (fit, run,
 		// read the fit) stays on one page (issue #586 round 3); from anywhere else, in Runs & results.
 		const here = runOpensHere;
 		// Started on Warnings (its Run now, issue #611), the run opens back there, on the new run's warnings.
 		const onWarnings = tab === 'warnings';
 		try {
-			const { run: r, removedRunIds } = await api.runs.create(projectId, label, { forecast });
-			const { summary: _s, ...meta } = r;
-			setRuns([meta, ...(runs ?? []).filter((x) => x.id !== r.id && !removedRunIds.includes(x.id))]);
+			const created = await api.runs.create(projectId, label, { forecast });
+			const r = created.run;
+			setRuns(withCreatedRun(runs ?? [], created));
 			banner = null;
-			await goto(here ? `?tab=calibration&run=${r.id}#cal-fit` : onWarnings ? `?tab=warnings&run=${r.id}#warn-run` : `?tab=runs&run=${r.id}`, { reset: false });
+			await guardedGoto(here ? `?tab=calibration&run=${r.id}#cal-fit` : onWarnings ? `?tab=warnings&run=${r.id}#warn-run` : `?tab=runs&run=${r.id}`, { reset: false });
 			if (onWarnings) landOnAnchor('warn-run');
 			// A goto the page makes itself lands nowhere (nav/anchorLandingEnv.svelte.ts), so land on the part, focused.
 			if (here && tab === 'calibration') landOnAnchor('cal-fit');
@@ -591,7 +617,7 @@
 					return;
 				}
 				if (here?.role === 'farmer') {
-					await goto(resolve(`farm/${encodeURIComponent(projectId)}`), { replace: true });
+					await guardedGoto(resolve(`farm/${encodeURIComponent(projectId)}`), { replace: true });
 					return;
 				}
 				if (here?.role === 'contributor') {
@@ -760,7 +786,7 @@
 				const href = saveProblems[0]!.href;
 				// A number field on this page: focus it; anything else is another page or sheet.
 				if (show && href.startsWith('#')) document.getElementById(href.slice(1))?.focus();
-				else if (show) await goto(href, { reset: false });
+				else if (show) await guardedGoto(href, { reset: false });
 				return false;
 			}
 			const ok = await confirmDialog({
@@ -773,7 +799,7 @@
 		return true;
 	}
 	async function runModel(label?: string, forecast = false) {
-		if (rerunning) return;
+		if (runGoing) return;
 		if (await saveBeforeRun()) await startRun(label, forecast);
 	}
 
@@ -790,8 +816,11 @@
 		drawerOpen = !!drawerFarm;
 	});
 	$effect(() => {
-		if (!drawerOpen && untrack(() => drawerFarm)) goto(withoutFarm(page.url), { replace: true, reset: false });
+		if (!drawerOpen && untrack(() => drawerFarm)) void guardedGoto(withoutFarm(page.url), { replace: true, reset: false });
 	});
+	// Its closes ask the leave guard first, as the grid modal's and the node sheet's do: Stay keeps it
+	// open, rather than shutting it over a URL the guard kept naming it (issue #931).
+	const confirmDrawerClose = () => confirmLeave(withoutFarm(page.url));
 
 	// --- the grid modal: open while the URL names a grid, closed the same way --
 	// A tab's own grid (TAB_GRIDS: the Map's `grid=map-features`) is the tab's to open and close.
@@ -805,13 +834,14 @@
 	$effect(() => {
 		if (!gridOpen && untrack(() => gridParam) && !isTabGridId(untrack(() => gridParam)) && !untrack(() => movedGridHref(page.url))) {
 			// The modal shuts before the URL follows: a link to a grid waits for the drop (lib/nav/closeNav.ts).
-			void trackClose(goto(withoutParam(page.url, 'grid'), { replace: true, reset: false }));
+			void trackClose(guardedGoto(withoutParam(page.url, 'grid'), { replace: true, reset: false }));
 		}
 	});
+	const confirmGridClose = () => confirmLeave(withoutParam(page.url, 'grid'));
 	// A grid that left the modal: its old link goes where the grid is now (grid=demand → Crops & demand's table, issue #174).
 	$effect(() => {
 		const moved = movedGridHref(page.url);
-		if (moved) void goto(moved, { replace: true, reset: false });
+		if (moved) void guardedGoto(moved, { replace: true, reset: false });
 	});
 
 	// Selecting a tab keeps the scroll and adds a history entry so Back works. The tabs that show
@@ -885,14 +915,14 @@
 			const id = await createProposalScenario(projectId, p, p.apply, (pid, body) => api.scenarios.create(pid, body));
 			assistantOpen = false;
 			scenariosKey++;
-			await goto(`?tab=scenarios&scenario=${encodeURIComponent(id)}`, { reset: false });
+			await guardedGoto(`?tab=scenarios&scenario=${encodeURIComponent(id)}`, { reset: false });
 			return;
 		}
 		settings.applyPatch(p.apply.patch);
 		appliedReason = `Assistant suggestion: ${p.title}`;
 		saveReason = appliedReason;
 		assistantOpen = false;
-		if (tab !== 'settings') await goto('?tab=settings', { reset: false });
+		if (tab !== 'settings') await guardedGoto('?tab=settings', { reset: false });
 	}
 	/** Bumped when a scenario is made from here, so a Scenarios tab already open lists it. */
 	let scenariosKey = $state(0);
@@ -939,7 +969,7 @@
 	}
 
 	async function onLeftProject() {
-		await goto(resolve(''));
+		await guardedGoto(resolve(''));
 	}
 
 	// Start the open tab's chunk alongside the project fetch; warm the others
@@ -985,7 +1015,7 @@
 		if (!step) return;
 		e.preventDefault();
 		const next = strip[(strip.indexOf(id) + step + strip.length) % strip.length]!;
-		goto(tabHref(next), { reset: false }).then(() => document.getElementById(`tab-${next}`)?.focus());
+		guardedGoto(tabHref(next), { reset: false }).then(() => document.getElementById(`tab-${next}`)?.focus());
 	}
 </script>
 
@@ -998,7 +1028,7 @@
 					<a
 						id="tab-{id}"
 						href={tabHref(id)}
-						data-sveltekit-noscroll
+						data-sveltekit-reset="false"
 						aria-current={tab === id ? 'page' : undefined}
 						onkeydown={(e) => tabKeydown(e, id)}
 						onclick={followTab}
@@ -1140,7 +1170,7 @@
 	{@const behind = !banner && behindRun.length > 0 && tab !== 'runs'}
 	{@const paused = pausedNotice(project, basePath())}
 	{@const trial = trialNotice(project, basePath())}
-	{#if !canEdit || banner || behind || rerunError || paused || trial}
+	{#if !canEdit || banner || behind || rerunError || tabRunError || paused || trial}
 		<div class="notice-line" data-testid="notice-line">
 			{#if trial}
 				<!-- 349: the person's reverse trial ends within 3 days (billing/trialEnding.ts); an information note, not an error. -->
@@ -1177,7 +1207,7 @@
 					{#if banner.added > 0 && rerunQueued}
 						<span data-testid="rerun-queued">{queuedSentence}</span>
 					{:else if canEdit && banner.added > 0}
-						<button type="button" class="btn btn-primary btn-sm" disabled={rerunning} onclick={rerun}>{rerunning ? 'Running model…' : 'Re-run model'}</button>
+						<button type="button" class="btn btn-primary btn-sm" disabled={runGoing} onclick={rerun}>{runGoing ? 'Running model…' : 'Re-run model'}</button>
 					{/if}
 					<button type="button" class="btn btn-ghost btn-sm" onclick={() => (banner = null)}>Dismiss</button>
 				</span>
@@ -1185,10 +1215,17 @@
 				<span class="note note-info behind" role="status">
 					<!-- On a phone the series' names are for screen readers only, so the words and Re-run model share one line. -->
 					<span class="note-text">New data since the last run<span class="behind-list">{' '}({behindRun.map((s) => s.name || kindLabel(s.kind)).join(', ')})</span>.</span>
-					{#if rerunQueued}<span data-testid="rerun-queued">{queuedSentence}</span>{:else if canEdit}<button type="button" class="btn btn-sm rerun" disabled={rerunning} onclick={rerun}>{rerunning ? 'Running model…' : 'Re-run model'}</button>{/if}
+					{#if rerunQueued}<span data-testid="rerun-queued">{queuedSentence}</span>{:else if canEdit}<button type="button" class="btn btn-sm rerun" disabled={runGoing} onclick={rerun}>{runGoing ? 'Running model…' : 'Re-run model'}</button>{/if}
 				</span>
 			{/if}
 			{#if rerunError}<span class="note err" role="alert">The run didn’t start: {rerunError}</span>{/if}
+			{#if tabRunError}
+				<!-- A run started on Runs & results failed while the person was elsewhere (issue #923, runs/runInFlight.ts). -->
+				<span class="note err" role="alert" data-testid="tab-run-failed">
+					<span class="note-text">The run from Runs &amp; results failed: {tabRunError}</span>
+					<button type="button" class="btn btn-ghost btn-sm" onclick={() => (tabRunFailure = null)}>Dismiss</button>
+				</span>
+			{/if}
 		</div>
 	{/if}
 {/snippet}
@@ -1336,7 +1373,7 @@
 				{:else if tab === 'warnings'}
 					<Lazy load={LOAD.warnings}>
 						{#snippet children(WarningsTab)}
-							<WarningsTab {projectId} project={project!} {series} {runs} {canEdit} nodes={editor.model.nodes} issues={editor.issues} blockers={settings.blockers} behind={fresh?.behind ?? []} running={rerunning} onRun={() => void runModel('After fixing warnings')} {onProjectChange} />
+							<WarningsTab {projectId} project={project!} {series} {runs} {canEdit} nodes={editor.model.nodes} issues={editor.issues} blockers={settings.blockers} behind={fresh?.behind ?? []} running={runGoing} onRun={() => void runModel('After fixing warnings')} {onProjectChange} />
 						{/snippet}
 					</Lazy>
 				{:else if tab === 'runs'}
@@ -1352,6 +1389,8 @@
 								modelDirty={editor.dirty}
 								{unsaved}
 								busy={rerunning}
+								inFlight={inFlightFor(tabRun, projectId)}
+								onRunStarted={tabRunStarted}
 								beforeRun={saveBeforeRun}
 								onRunsChange={setRuns}
 								onInputsRestored={reloadInputs}
@@ -1435,6 +1474,7 @@
 					{#snippet children(FarmCropsDrawer)}
 						<FarmCropsDrawer
 							bind:open={drawerOpen}
+							beforeclose={confirmDrawerClose}
 							{editor}
 							settings={project!.settings}
 							nodeId={drawerFarm}
@@ -1452,6 +1492,7 @@
 					{#snippet children(GridModal)}
 						<GridModal
 							bind:open={gridOpen}
+							beforeclose={confirmGridClose}
 							grid={openGrid}
 							{editor}
 							settings={project!.settings}

@@ -189,7 +189,7 @@ resource "aws_cloudfront_origin_access_control" "packs" {
 # VPC. One AZ (~$7.30/month, plus $0.01/GB processed and cross-AZ transfer
 # for the API's DEM and water reads): both subnets still reach it.
 # A free S3 gateway endpoint would need a prefix-list egress rule, which the
-# network guardrails refuse (tests/guardrails.tftest.hcl, run "network").
+# network guardrails refuse (tests/guardrails_network.tftest.hcl, run "network").
 
 data "aws_iam_policy_document" "worker_packs" {
   statement {

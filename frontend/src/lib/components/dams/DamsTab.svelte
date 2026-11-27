@@ -29,7 +29,7 @@
 	// come through the Runs tab's cache.
 	import { fillHeader } from '#lib/components/workspace/headerSlot.svelte.js';
 	import { tick, untrack } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { page } from '$app/state';
 	import { beforeForecast, type DailySeries } from '@water-management/engine';
 	import { api, type Run, type RunMeta, type RunSeriesRef } from '#lib/api/index.js';
@@ -97,7 +97,7 @@
 	const isNewest = $derived(!!latest && ordered[0]?.id === latest.id);
 	const scenarioNote = $derived(latest ? scenarioRunNote(latest, runs) : null);
 	function chooseRun(id: string) {
-		void goto(withParam(page.url, 'run', id), { reset: false });
+		void guardedGoto(withParam(page.url, 'run', id), { reset: false });
 	}
 	const theRun = $derived(isNewest ? 'the latest run' : 'this run');
 
@@ -233,7 +233,7 @@
 	function choose(e: MouseEvent, id: string) {
 		if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
 		e.preventDefault();
-		void goto(withParam(page.url, 'dam', id), { reset: false }).then(() => {
+		void guardedGoto(withParam(page.url, 'dam', id), { reset: false }).then(() => {
 			if (!side) chartEl?.scrollIntoView({ block: 'start' });
 		});
 	}
@@ -280,13 +280,13 @@
 	const PROPOSALS_ID = 'dam-proposals';
 	// Dam of picked a dam: the page picks it (a step in history, as a card click is).
 	function pickFromProposals(id: string) {
-		void goto(withParam(page.url, 'dam', id), { reset: false });
+		void guardedGoto(withParam(page.url, 'dam', id), { reset: false });
 	}
 	// A card's Proposals: pick the dam (the box follows the pick), open the box, then bring it into view with the keyboard on its picker.
 	function toProposals(e: MouseEvent, id: string) {
 		if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
 		e.preventDefault();
-		void goto(withParam(page.url, 'dam', id), { reset: false }).then(async () => {
+		void guardedGoto(withParam(page.url, 'dam', id), { reset: false }).then(async () => {
 			proposalsOpen = true;
 			await tick();
 			const box = document.getElementById(PROPOSALS_ID);
