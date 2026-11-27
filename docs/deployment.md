@@ -1127,9 +1127,35 @@ nothing. Step by step:
 2. Pick the version: minor for features, patch for fixes (before 1.0 a
    breaking change bumps minor). It must be newer than the last release of
    the same component.
-3. If the frontend needs new API behaviour, release the backend first and
-   let that deploy finish. Migrations must work with the API version still
-   serving (expand/contract, CLAUDE.md rule 2).
+3. **Order: Terraform, then backend, then web.**
+   - **Apply Terraform from `main` before tagging a backend release when
+     infra changed since the last one.** `deploy-backend.yml` only updates
+     function code; it never applies Terraform, so the new code starts on the
+     environment the last apply wrote. To tell, diff infra against the last
+     backend release: `git diff backend@<last> -- infra/` (empty: no apply
+     needed). If it isn't empty, run the plan and apply from `main` ([§ 3.
+     Terraform](#3-terraform)) first, then tag. The config check
+     (`config/production.ts`) is written so a release before the apply still
+     starts (a setting the new code reads is checked only when set, with a
+     code default equal to Terraform's; `production.security.test.ts` starts
+     every Lambda on the last release's environment), but a new setting only
+     takes effect once applied, and a setting with no safe default would
+     refuse to start every instance of the Lambda.
+   - **Backend first, web promptly after.** If the frontend needs new API
+     behaviour, release the backend and let that deploy finish, then release
+     web without waiting days: the old web against a new-engine backend can't
+     store paired uncertainty bands, and its report validation statement leaves out errata
+     added since its own engine (fixed from the next web release on: the
+     statement lists the run's server-provided `errata` ids when the run has
+     them). Migrations must work with the API version still serving
+     (expand/contract, CLAUDE.md rule 2).
+   - **Release notes.** Say in the notes what a user or owner will notice
+     that the commit list doesn't make plain. For the release after
+     backend@0.26.2: hourly (sub-daily) flow files are now averaged into
+     days, not summed (#829, #840), so a re-imported hourly file gives
+     smaller daily flows; and the engine bump's errata emails reach owners
+     on the first worker tick after the deploy, up to one per erratum per
+     project.
 4. Publish the release. The notes are generated from the commits since the
    previous release; edit them in the web UI if they need a summary.
 
