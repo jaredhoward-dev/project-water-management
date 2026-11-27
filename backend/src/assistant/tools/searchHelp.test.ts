@@ -56,4 +56,22 @@ describe('search_help', () => {
 		const r = await searchHelpTool.run(ctx, '{"query":"dam"}');
 		expect(r.ok && (r.data as { hits: unknown[] }).hits.length).toBeGreaterThan(0);
 	});
+
+	it('gives at most `limit` hits (5 when not asked), and an unknown field is refused', async () => {
+		const hits = async (args: unknown) => {
+			const r = await searchHelpTool.run(ctx, args);
+			if (!r.ok) throw new Error(r.error);
+			return (r.data as { hits: unknown[] }).hits;
+		};
+		// A word nearly every guide holds, so the cap is what limits the hits.
+		expect(searchHelpIndex('dam', MAX_HITS).length).toBe(MAX_HITS);
+		expect(await hits({ query: 'dam' })).toHaveLength(5);
+		expect(await hits({ query: 'dam', limit: 2 })).toHaveLength(2);
+		expect(await hits({ query: 'dam', limit: MAX_HITS })).toHaveLength(MAX_HITS);
+		expect((await searchHelpTool.run(ctx, { query: 'dam', projectId: 'x' })).ok).toBe(false);
+	});
+
+	it('answers a query of only stop words with no hits and a note to try other words, not an error', async () => {
+		expect(await searchHelpTool.run(ctx, { query: 'how is the' })).toEqual({ ok: true, data: { hits: [], note: 'nothing in the help matches; try other words' } });
+	});
 });
