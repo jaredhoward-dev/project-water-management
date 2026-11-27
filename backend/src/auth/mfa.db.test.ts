@@ -157,6 +157,25 @@ describe('signing in with two steps', () => {
 		expect(await anon('POST', '/auth/mfa/verify', { code: c }, again.challenge)).toMatchObject({ status: 400, body: { code: 'mfa_code_wrong' } });
 	});
 
+	// Two right codes (the app's and a recovery code) sent with one challenge at the same moment: both passed the
+	// challenge check before either recorded it, and both got a session. The claim is atomic now (412).
+	it('one challenge sent twice at once with two right codes gets exactly one session; the loser spends nothing', async () => {
+		const v = await enrolled('MfaVerifyRace');
+		const { challenge } = await login(v);
+		const recovery = v.recoveryCodes[0]!;
+		const [a, b] = await Promise.all([
+			anon('POST', '/auth/mfa/verify', { code: code(v.secret) }, challenge),
+			anon('POST', '/auth/mfa/verify', { code: recovery }, challenge)
+		]);
+		expect([a.status, b.status].sort()).toEqual([200, 401]);
+		const loser = a.status === 401 ? a : b;
+		expect(loser.body.code).toBe('mfa_challenge_expired');
+		expect(cookieOf(loser.headers, SESSION_COOKIE)).toBeUndefined();
+		// The recovery code is spent only if its request won: a refused one rolls back.
+		const left = await asOwner('SELECT count(*)::int AS n FROM user_recovery_code WHERE user_id = $1', [v.id]);
+		expect(left[0]!.n).toBe(b.status === 200 ? 9 : 10);
+	});
+
 	it('a recovery code works once, and is recorded', async () => {
 		const rc = u.recoveryCodes[0]!;
 		const first = await anon('POST', '/auth/mfa/verify', { code: rc.toLowerCase() }, (await login(u)).challenge);
