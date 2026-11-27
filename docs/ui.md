@@ -1247,7 +1247,10 @@ one with problems to fix is left out and named under "Not in this preview"
 (`preview/UnsavedPreviewDialog.svelte`, its own chunk) "Preview: your
 unsaved settings" (or "model edits", or "settings and model edits"). When
 the page couldn't load the runs list, the dialog asks for it itself rather
-than say there is no run. It starts from the newest run
+than say there is no run. A preview that fails says why, with **Try
+again**, which works it out again (the focus follows the wait line, then
+lands on the dialog's title); a status line under the lede announces the
+wait and the figures' arrival. It starts from the newest run
 of the catchment's own model (`previewBaseRun`: not a scenario's run, not a
 legacy one) and its own input from the server (`GET …/runs/:runId/model-input`,
 `lib/preview/inputs.ts`, kept for the next preview of that run), lays only the
