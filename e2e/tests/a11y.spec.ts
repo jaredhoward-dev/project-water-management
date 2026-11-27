@@ -307,6 +307,14 @@ for (const colorScheme of ['light', 'dark'] as const) {
 					}
 				},
 				{ path: '/help/glossary', ready: (p) => expect(p.getByRole('heading', { level: 1, name: 'Glossary' })).toBeVisible() },
+				// Every upload box's Expected format, with its example-file links (issue #477).
+				{
+					path: '/help/formats',
+					ready: async (p) => {
+						await expect(p.getByRole('heading', { level: 1, name: 'File formats' })).toBeVisible();
+						await expect(p.getByTestId('file-format').first()).toBeVisible();
+					}
+				},
 				{
 					path: '/help/search?q=dam',
 					ready: async (p) => {
