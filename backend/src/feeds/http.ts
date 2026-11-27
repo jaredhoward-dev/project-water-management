@@ -157,7 +157,9 @@ export const FEED_HOSTS: readonly string[] = [
  * Storage serves every bucket from one host, so allowing the host alone
  * would let a redirect, or a later code path, read any public bucket. The
  * path is the URL's parsed one, dot segments (`..`, `%2e%2e`) already
- * resolved, so a path can't climb out of its prefix.
+ * resolved, so a path can't climb out of its prefix. A prefix that doesn't
+ * end in `/` is an endpoint, matched whole: `/geoserver/wfs` never lets
+ * `/geoserver/wfsadmin` or `/geoserver/wfs-x/…` through (pathAllowed).
  */
 export const FEED_HOST_PATHS: Readonly<Record<string, readonly string[]>> = {
 	[new URL(WAPOR_BASE).hostname]: [new URL(WAPOR_BASE).pathname],
@@ -172,7 +174,7 @@ const MAX_REDIRECTS = 3;
 
 const pathAllowed = (url: URL) => {
 	const prefixes = Object.hasOwn(FEED_HOST_PATHS, url.hostname) ? FEED_HOST_PATHS[url.hostname] : undefined;
-	return !prefixes || prefixes.some((p) => url.pathname.startsWith(p));
+	return !prefixes || prefixes.some((p) => (p.endsWith('/') ? url.pathname.startsWith(p) : url.pathname === p));
 };
 
 const allowed = (url: URL) =>
