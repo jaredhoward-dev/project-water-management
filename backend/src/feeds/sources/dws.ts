@@ -154,7 +154,7 @@ const MAX_ROWS = 20 * 366 + 10;
  * (an archived page, 2024); the open-source clients call the column D_AVG_FR,
  * so that spelling is accepted too.
  */
-const M3S = /cubic met(re|er)s?\s*(\/|per)\s*s(ec(ond)?)?\b|\bm(3|³)\s*\/\s*s\b|\bcumecs\b/i;
+const M3S = /cubic met(re|er)s?\s*(\/|per)\s*s(ec(ond)?)?\b|\bm(3|³|\^3)\s*\/\s*s(ec)?\b|\bcumecs?\b/i;
 const DAILY_HEADER = /^DATE (D AVG F\/R|D_AVG_FR) QUAL( |$)/;
 
 /** One listed day of a DWS daily table: its flow (null for a gap) and its quality code as listed (null when none). */
