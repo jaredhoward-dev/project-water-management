@@ -15,6 +15,7 @@
 // sweeps prove they reached the routes and tables they claim to.
 import { beforeAll, describe, expect, it } from 'vitest';
 import { app, asOwner, monthly, node, signUp } from './__tests__/helpers.js';
+import { updatableColumns, updateProbe } from './__tests__/rlsProbe.js';
 import { withApiKey, withUser } from './db/tx.js';
 
 type User = Awaited<ReturnType<typeof signUp>>;
@@ -291,10 +292,13 @@ describe('table sweep: RLS shows and changes nothing of another project', () => 
 	it('lets another user update or delete no row of the victim’s project, in any table', async () => {
 		const before = await ownerCounts();
 		const changed: string[] = [];
+		// A column the app role may update, set to itself, so the UPDATE reaches the policy (__tests__/rlsProbe.ts).
+		const columns = await updatableColumns();
 		for (const u of [outsider, neighbour]) {
 			for (const t of ['project', ...tables]) {
 				const col = t === 'project' ? 'id' : 'project_id';
-				for (const stmt of [`UPDATE "${t}" SET ${col} = ${col} WHERE ${col} = $1`, `DELETE FROM "${t}" WHERE ${col} = $1`]) {
+				const update = updateProbe(columns, t, col);
+				for (const stmt of [...(update ? [update] : []), `DELETE FROM "${t}" WHERE ${col} = $1`]) {
 					// Each attempt in its own transaction, rolled back: a refusal
 					// (no grant, 42501) is as good as zero rows.
 					await withUser(u.id, async (db) => {

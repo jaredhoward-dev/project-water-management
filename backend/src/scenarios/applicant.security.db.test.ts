@@ -26,6 +26,7 @@
 // the oracles); this file is the "nothing else" sweep.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { app, asOwner, monthly, node, retirePendingJobs, signUp } from '../__tests__/helpers.js';
+import { updatableColumns, updateProbe } from '../__tests__/rlsProbe.js';
 import { withUser } from '../db/tx.js';
 import { seriesHash } from '../runs/execute.js';
 
@@ -332,12 +333,15 @@ describe('what an applicant writes, table by table', () => {
 	it('updates and deletes only what CHANGE lists (their own application, notes and runs, and leaving)', async () => {
 		const wrong: string[] = [];
 		const changed: string[] = [];
+		// A column the app role may update, set to itself, so the UPDATE reaches the policy (__tests__/rlsProbe.ts).
+		const columns = await updatableColumns();
 		for (const { t, key } of tables) {
 			for (const verb of ['update', 'delete'] as const) {
 				const sql =
 					verb === 'update'
-						? `UPDATE "${t}" x SET project_id = x.project_id WHERE x.project_id = $1 RETURNING ${key} AS k`
+						? updateProbe(columns, t, 'project_id', `${key} AS k`)
 						: `DELETE FROM "${t}" x WHERE x.project_id = $1 RETURNING ${key} AS k`;
+				if (!sql) continue;
 				const { keys } = await attempt(sql, [projectId]);
 				const allowed = await ownerKeys(t, key, CHANGE[t]?.[verb] ?? 'false');
 				const extra = keys.filter((k) => !allowed.has(k));
@@ -347,7 +351,7 @@ describe('what an applicant writes, table by table', () => {
 		}
 		expect(wrong).toEqual([]);
 		// Positive control: the sweep does reach what they may change.
-		expect(changed).toEqual(expect.arrayContaining(['update scenario', 'delete scenario', 'delete project_member', 'delete scenario_member']));
+		expect(changed).toEqual(expect.arrayContaining(['update scenario', 'delete scenario', 'update note', 'delete project_member', 'delete scenario_member']));
 	});
 
 	it('inserts no copy of a row they cannot read, in any table but KNOWN_INSERTS', async () => {

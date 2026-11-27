@@ -2035,6 +2035,26 @@ In short:
   caller has no role on (`irrigationSystems.db.test.ts`).
 - **Billing** (`323_billing.sql`, issue #641; [billing.md](./billing.md)). A
   plan and its usage are read by the account's person, and a team's by the
+  Every table sweep's UPDATE sets a column the app role may update to
+  itself (`backend/src/__tests__/rlsProbe.ts`). Until 2026-11-27 they all
+  wrote `SET project_id = project_id`, which twenty tables whose grants are
+  column by column (`note`, `model_run`, `project_member`, `evidence_pack`,
+  `share_link`, `api_key`, `run_publication`, …) refuse on the grant
+  (42501) before any policy runs, so the sweeps never tried their UPDATE
+  policies. That applies here, in the team-loss sweep and in the
+  applicant's "nothing else" sweep.
+- **Below editor, RLS changes only your own rows**
+  (`backend/src/projects/below-editor.security.db.test.ts`). The role
+  ladder (below) checks each route's role; this checks the policies under
+  it. On the role ladder's project, plus an evidence pack, a delineation
+  request and an allocation import, a viewer, a farmer, an editor demoted
+  to viewer and a viewer removed from the project each try UPDATE and
+  DELETE on every row of every table with a `project_id`. They may change
+  only their own notes, their own alert preferences and their own
+  membership (leaving). A demoted editor loses the scenario, pack and
+  request they could change at once. A removed viewer reads no row and
+  changes none, their own note included. The owner's and the editor's
+  sweeps reaching those tables are the positive controls.
   team's admins only: `GET /teams/:id/plan` answers `404` to anyone else
   (a member, an outsider), and no project role (editor, viewer, farmer) reads
   another person's account. `water_app` has SELECT only on `plan`,
