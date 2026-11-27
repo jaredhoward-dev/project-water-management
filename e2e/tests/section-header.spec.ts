@@ -214,6 +214,29 @@ async function contextLayout(page: Page) {
 	});
 }
 
+test.describe('narrowing into More actions', () => {
+	test.use({ viewport: { width: 1440, height: 960 } });
+
+	test('a control with the focus that the narrowed header folds into More actions hands the focus to More actions', async ({ page, owner }) => {
+		void owner;
+		const project = await createProject(page.request, 'Header narrowing');
+		await putModel(page.request, project.id, sampleModel());
+		await page.goto(`/projects/${project.id}?tab=crops`);
+		const h = header(page);
+		const tables = h.getByTestId('header-own').locator('summary', { hasText: 'Tables' });
+		await expect(tables).toBeVisible();
+		await expect(h.getByTestId('header-more')).toHaveCount(0);
+		await tables.focus();
+		await expect(tables).toBeFocused();
+		// A phone's width: the header's controls fold under More actions, and the one with the focus is hidden.
+		await page.setViewportSize({ width: 600, height: 900 });
+		const more = h.getByRole('button', { name: 'More actions' });
+		await expect(more).toBeVisible();
+		await expect(tables).toBeHidden();
+		await expect(more).toBeFocused();
+	});
+});
+
 test.describe('a long context line', () => {
 	// The title column used to shrink to 16rem whatever its context, so with the controls
 	// beside it a long context wrapped to 3 or 4 short lines (EWR for a viewer

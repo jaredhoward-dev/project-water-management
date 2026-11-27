@@ -19,7 +19,7 @@
 	// elements as on a wide screen); then the page's main box, its controls
 	// sharing one row. The main box never splits, so it always ends the header.
 	// "How this page works" becomes a 44 px "?" beside the title.
-	import type { Snippet } from 'svelte';
+	import { untrack, type Snippet } from 'svelte';
 
 	let {
 		title,
@@ -75,6 +75,17 @@
 	let more: HTMLButtonElement | undefined = $state();
 	$effect(() => {
 		if (!menu) open = false;
+	});
+	// The header narrowing into More actions (a resize, a phone turned) hides the controls behind it: one that had the
+	// keyboard's focus would leave it on the page, so it goes to More actions. Tracked by focusin/focusout, since the
+	// browser may already have dropped a hidden element's focus to <body> by the time this runs.
+	let focusInItems = false;
+	$effect(() => {
+		if (!menu) return;
+		untrack(() => {
+			const active = document.activeElement;
+			if (!open && (items?.contains(active) || (focusInItems && (!active || active === document.body)))) more?.focus();
+		});
 	});
 
 	/**
@@ -156,6 +167,11 @@
 							hidden={menu && !open}
 							bind:this={items}
 							onclick={picked}
+							onfocusin={() => (focusInItems = true)}
+							onfocusout={(e) => {
+								// Focus moved elsewhere; a focus dropped to <body> (relatedTarget null) may be the hiding itself.
+								if (e.relatedTarget) focusInItems = false;
+							}}
 						>
 							{@render actions()}
 						</div>
