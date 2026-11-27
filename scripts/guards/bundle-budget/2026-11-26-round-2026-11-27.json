@@ -1,0 +1,4 @@
+{
+	"addKb": 10,
+	"why": "round 2026-11-27 (#919): 30 lanes of bug, billing and UX fixes; measured 2582 KB vs main's 2571 KB (+10.7 KB), after moving the leave guard's destination names off the landing"
+}
