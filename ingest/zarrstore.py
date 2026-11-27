@@ -240,6 +240,9 @@ def write_finals(mirror_root: Path, product: str, first_day: dt.date, values: np
         first_year = g.first_year
     values = _check_values(values, g.rows, g.cols)
     spans = finals_spans(first_day, values.shape[0])
+    # Refuse a day before the first year before creating or growing anything,
+    # so a refused write leaves no array behind (and nothing to upload from S3 staging).
+    grid.year_index(spans[0][0], first_year)
     last_year = spans[-1][0]
     years = grid.year_index(last_year, first_year) + 1
     arr = _open_or_create(
