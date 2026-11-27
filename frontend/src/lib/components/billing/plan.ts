@@ -399,13 +399,16 @@ const catchments = (n: number) => `${fmtNum(n)} catchment${n === 1 ? '' : 's'}`;
  * plan that never ended).
  */
 export function keepPickerIntro(list: LiveCatchments, enforced: boolean, whose: string): string | null {
-	if (!list.overFreeSince || list.freeLimit === null || list.catchments.length <= list.freeLimit) return null;
+	// `planEnded` (migration 409), not `overFreeSince`, which stays null in shadow mode until the grace starts.
+	// An API from before 409 sends no `planEnded`: then the grace's start says it, as it did.
+	const ended = typeof list.planEnded === 'boolean' ? list.planEnded : !!list.overFreeSince;
+	if (!ended || list.freeLimit === null || list.catchments.length <= list.freeLimit) return null;
 	const head = `The plan for ${whose} has ended, so it is on Free, which keeps ${catchments(list.freeLimit)} live.`;
 	const lost = 'Nothing is lost: everyone can still open, run, edit and export them, and they carry on as they were on a plan again.';
 	const others = 'feeds, alerts and automatic runs';
 	let when: string;
 	if (list.catchments.some((c) => c.pausedAt)) when = `On the others, ${others} are paused.`;
-	else if (!enforced) when = `Once plan limits apply, ${others} pause on the others ${PLAN_ENDED_GRACE_DAYS} days after the plan ended.`;
+	else if (!enforced) when = `Plan limits don't apply yet: the grace starts once limits apply, and ${others} pause on the others ${PLAN_ENDED_GRACE_DAYS} days after that.`;
 	else when = list.pausesFrom ? `From ${fmtDate(list.pausesFrom)}, ${others} pause on the others.` : `Soon, ${others} pause on the others.`;
 	return `${head} ${when} ${lost}`;
 }

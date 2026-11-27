@@ -3461,7 +3461,11 @@ each other one, through the app's confirm dialog (`POST …/plan/keep`; a status
 line says which stays live). An information note in #641's tone, never the
 error colour; the page asks only when `usage.liveCatchments` is over its limit
 with no live subscription, and shows nothing for an account that never had a
-plan ([billing.md § Choosing the catchment to keep](./billing.md#choosing-the-catchment-to-keep)).
+plan (the response's `planEnded`, migration 409: in shadow mode `overFreeSince`
+and `pausesFrom` stay null until the grace really starts, so the card says the
+grace starts once limits apply rather than dating it from the plan's end; an
+API from before 409, with no `planEnded`, falls back to `overFreeSince`;
+[billing.md § Choosing the catchment to keep](./billing.md#choosing-the-catchment-to-keep)).
 
 ## Network
 

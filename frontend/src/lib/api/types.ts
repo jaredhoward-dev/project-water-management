@@ -4893,7 +4893,12 @@ export interface LiveCatchment {
 export interface LiveCatchments {
 	/** Free's live catchments (1); null if Free had no limit. */
 	freeLimit: number | null;
-	/** When the account, with its plan ended, went past Free's live catchments (the grace's start); null when within. */
+	/**
+	 * Whether the account's plan has ended (migration 409): the picker shows on this, since in shadow mode
+	 * `overFreeSince` and `pausesFrom` stay null until the grace really starts (once limits apply).
+	 */
+	planEnded: boolean;
+	/** When the account, with its plan ended, went past Free's live catchments (the grace's start); null when within, and in shadow mode. */
 	overFreeSince: string | null;
 	/** 14 days after overFreeSince: when, with billing enforced, the extra ones pause; null when within. */
 	pausesFrom: string | null;

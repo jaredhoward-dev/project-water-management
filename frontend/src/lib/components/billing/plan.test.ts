@@ -461,6 +461,7 @@ describe('the live-catchment picker (341, 345)', () => {
 	const live = (used: number, limit: number | null) => plan({ usage: { ...plan().usage, liveCatchments: { used, limit } } });
 	const list = (over: Partial<LiveCatchments> = {}): LiveCatchments => ({
 		freeLimit: 1,
+		planEnded: true,
 		overFreeSince: '2026-11-20T08:00:00Z',
 		pausesFrom: '2026-12-04T08:00:00Z',
 		catchments: [
@@ -479,7 +480,8 @@ describe('the live-catchment picker (341, 345)', () => {
 	});
 
 	it('says nothing on an account whose plan never ended, or within Free', () => {
-		expect(keepPickerIntro(list({ overFreeSince: null, pausesFrom: null }), true, 'your account')).toBeNull();
+		expect(keepPickerIntro(list({ planEnded: false, overFreeSince: null, pausesFrom: null }), true, 'your account')).toBeNull();
+		expect(keepPickerIntro(list({ planEnded: false, overFreeSince: null, pausesFrom: null }), false, 'your account')).toBeNull();
 		expect(keepPickerIntro(list({ catchments: list().catchments.slice(0, 1) }), true, 'your account')).toBeNull();
 	});
 
@@ -493,7 +495,27 @@ describe('the live-catchment picker (341, 345)', () => {
 	it('once paused, says so; with limits not applied yet, says when they would', () => {
 		const paused = list({ catchments: [list().catchments[0]!, { ...list().catchments[1]!, pausedAt: '2026-12-04T08:05:00Z' }] });
 		expect(keepPickerIntro(paused, true, 'this team')).toContain('On the others, feeds, alerts and automatic runs are paused.');
-		expect(keepPickerIntro(list(), false, 'this team')).toContain('Once plan limits apply');
+		expect(keepPickerIntro(list(), false, 'this team')).toContain('the grace starts once limits apply');
+	});
+
+	it('shows on planEnded in shadow mode, where the grace’s dates stay null until limits apply (409)', () => {
+		const shadow = list({ overFreeSince: null, pausesFrom: null });
+		const t = keepPickerIntro(shadow, false, 'your account')!;
+		expect(t).toMatch(/^The plan for your account has ended/);
+		expect(t).toContain("Plan limits don't apply yet");
+		expect(t).toContain('the grace starts once limits apply, and feeds, alerts and automatic runs pause on the others 14 days after that.');
+		expect(t).not.toContain('after the plan ended');
+		// Enforced, with the grace not dated yet: no date is made up.
+		expect(keepPickerIntro(shadow, true, 'your account')).toContain('Soon, feeds, alerts and automatic runs pause on the others.');
+		// Enforced in the grace: the date.
+		expect(keepPickerIntro(list(), true, 'your account')).toContain('From ');
+	});
+
+	it('reads the grace’s start from an API before 409 that sends no planEnded', () => {
+		const { planEnded: _drop, ...old } = list();
+		void _drop;
+		expect(keepPickerIntro(old as LiveCatchments, true, 'your account')).toMatch(/^The plan for your account has ended/);
+		expect(keepPickerIntro({ ...(old as LiveCatchments), overFreeSince: null }, true, 'your account')).toBeNull();
 	});
 
 	it('names each row’s state', () => {
