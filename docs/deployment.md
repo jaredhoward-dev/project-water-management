@@ -642,7 +642,7 @@ environment's job is the required reviewer (§ 1), not storage.
 | `WAF_CAPTCHA_SCRIPT_URL` | `waf_captcha_script_url` (the sign-in CAPTCHA's jsapi.js; empty until `waf_captcha_integration_url` is set) |
 | secret `WAF_CAPTCHA_API_KEY` | `waf_captcha_api_key` (the CAPTCHA API key for the site's domain; it ships in the public bundle, but the provider marks it sensitive) |
 | `PUBLIC_TILES_URL`, `PUBLIC_TILES_GLYPHS_URL`, `PUBLIC_TERRAIN_URL`, `PUBLIC_CHANNELS_URL` | not outputs: set by hand once the files are in the tiles bucket (§ Map tiles); unset, the map draws the plain background |
-| `PUBLIC_REVERSE_TRIAL` | not an output: set to `true` by hand in the same change that turns on the API's `REVERSE_TRIAL` and `BILLING_ENFORCED`, then release the web; unset (off), the pricing page offers no trial ([billing.md § The pricing page and the trial](./billing.md#the-pricing-page-and-the-trial)) |
+| `PUBLIC_REVERSE_TRIAL` | not an output: set to `true` by hand in the same change that turns on the API's `REVERSE_TRIAL` and `BILLING_ENFORCED` (`reverse_trial`, `billing_enforced`; [§ Turning on enforcement](#turning-on-enforcement)), then release the web; unset (off), the pricing page offers no trial ([billing.md § The pricing page and the trial](./billing.md#the-pricing-page-and-the-trial)) |
 
 `PUBLIC_API_URL` is not a GitHub variable: the build reads `/api` from the
 committed `frontend/.env.production`.
@@ -3373,6 +3373,18 @@ they are in sops, since the API refuses a key it doesn't expect
 test-mode key or with a webhook secret under 32 characters, and refuses `mock`
 outright (`infra/tests/guardrails.tftest.hcl`).
 
+Enforcement and the reverse trial are two more Terraform switches, both
+`false` by default (shadow mode: usage is counted and shown, nothing
+refuses): `billing_enforced` sets `BILLING_ENFORCED` on the API, the worker
+and the assistant (every Lambda that opens a `withUser` transaction, which
+sets `app.billing_enforced` from it), and `reverse_trial` sets
+`REVERSE_TRIAL` on the API, the only Lambda that grants a trial. Each is the
+exact string `"true"` or `"false"`, the only values the backend reads as on
+or off. Plan refuses `reverse_trial = true` without `billing_enforced =
+true`, since the backend grants no trial while nothing refuses
+([§ Turning on enforcement](#turning-on-enforcement);
+[billing.md § BILLING_ENFORCED](./billing.md#billing_enforced)).
+
 ### Turning on Stripe
 
 The operator does every step; nothing here is for an agent to run, and no
@@ -3534,6 +3546,48 @@ key goes into a chat, an issue or a CI log.
 To turn it off: `billing_provider = "manual"` and apply. The webhook route
 answers `404` again and checkout falls back to recording by hand; disable the
 endpoint in Stripe's dashboard and remove both sops keys.
+
+### Turning on enforcement
+
+The operator does every step, with their own go-ahead for the apply. No
+secret is involved: both switches are plain variables in
+`prod.tfvars.sops`.
+
+1. **Decide and announce.** Turning on enforcement makes every built limit
+   refuse at once: a Team's editor seats, Free's one live catchment, the pause
+   after a downgrade, the assistant's dollar caps, Free's verified-email gate
+   and the disposable-domain refusal at sign-up ([billing.md §
+   BILLING_ENFORCED](./billing.md#billing_enforced)). Read the billing report
+   first (`billing-admin.yml`, `billing-report`) for the accounts already past
+   a limit, and grant or email them before the switch ([billing.md § Staff
+   grants](./billing.md#staff-grants)).
+2. **Set the switches.** Add `billing_enforced = true` to
+   `prod.tfvars.sops`, and `reverse_trial = true` too if the trial starts the
+   same day (it may follow later; it can't come first, since plan refuses it
+   alone).
+3. **Plan, read it, then apply:**
+   `cd infra && AWS_PROFILE=water-management ./scripts/tf.sh plan -var-file=../../infra-secrets/water-management/prod.tfvars.sops -out=<plan>`
+   and `AWS_PROFILE=water-management ./scripts/tf.sh apply <plan>`. Expect
+   only environment changes: `BILLING_ENFORCED` from `"false"` to `"true"` on
+   the backend, worker and assistant functions (the assistant only when
+   `assistant_enabled`), and with the trial `REVERSE_TRIAL` from `"false"` to
+   `"true"` on the backend function. Each function cold-starts with its new
+   value; no release is needed.
+4. **With the trial, release the web the same day:**
+   `gh variable set PUBLIC_REVERSE_TRIAL --body true`, then a web release
+   ([§ Releasing](#releasing)), so the pricing page offers the trial exactly
+   when the API grants it ([billing.md § The reverse
+   trial](./billing.md#the-reverse-trial-built-off), "The pricing page and
+   the trial").
+5. **Check it.** `GET /api/account/plan` (signed in, from the browser's
+   network tab) answers `"enforced": true`; with the trial, a newly verified
+   test account's plan answers its reverse trial (`subscription.reverseTrial`
+   true), and the next billing report counts the trial.
+
+To turn either off: set it back to `false` (the trial first, or both
+together) and apply; with the trial, `gh variable delete
+PUBLIC_REVERSE_TRIAL` and release the web again. Trials already granted run
+to their end (the worker's tick expires them whatever the switch says).
 
 ### Billing alarms
 

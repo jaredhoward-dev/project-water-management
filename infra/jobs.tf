@@ -191,6 +191,10 @@ resource "aws_lambda_function" "worker" {
         # (lambda.tf), and a live request on this Lambda is refused
         # (backend/src/feeds/http.ts).
         FEED_SOURCE = "live"
+        # Plan limits (docs/billing.md § BILLING_ENFORCED): every withUser
+        # transaction sets app.billing_enforced from it (db/tx.ts), so the
+        # worker's must match the API's (lambda.tf).
+        BILLING_ENFORCED = var.billing_enforced ? "true" : "false"
         # Which CHIRPS a feed fetch reads (issue #604): chc sends it to the
         # fetcher above; mirror reads our copy in the fetch job itself, from
         # the mirror bucket (ingest.tf; the role's GetObject and the S3

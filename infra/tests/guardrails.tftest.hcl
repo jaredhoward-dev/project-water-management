@@ -9,7 +9,7 @@
 # the private-only network (no gateway or default route, the exact security-group graph, the Function
 # URL's auth type, every security group's description), the runtime secrets (in Secrets Manager, never a Lambda
 # environment), and the plan-time rejection of
-# malformed secrets.
+# malformed secrets, and the billing switches (BILLING_ENFORCED, REVERSE_TRIAL).
 #
 #   pnpm check:infra          (bin/check-infra.sh: fmt + validate + test)
 #
@@ -1192,6 +1192,89 @@ run "rejects_placeholder_app_encryption_key" {
   }
 
   expect_failures = [var.app_encryption_key]
+}
+
+# --- Enforcement and the reverse trial (issue #936; docs/deployment.md -------
+# § Turning on enforcement). Off by default; the exact strings the backend
+# reads ("true"/"false", billing/enforced.ts, billing/reverseTrial.ts).
+
+run "billing_enforcement_off_by_default" {
+  command = plan
+
+  variables {
+    assistant_enabled = true
+  }
+
+  assert {
+    condition = (
+      aws_lambda_function.backend.environment[0].variables["BILLING_ENFORCED"] == "false" &&
+      aws_lambda_function.backend.environment[0].variables["REVERSE_TRIAL"] == "false" &&
+      aws_lambda_function.worker.environment[0].variables["BILLING_ENFORCED"] == "false" &&
+      aws_lambda_function.assistant[0].environment[0].variables["BILLING_ENFORCED"] == "false"
+    )
+    error_message = "By default BILLING_ENFORCED is \"false\" on the API, the worker and the assistant, and REVERSE_TRIAL \"false\" on the API."
+  }
+  assert {
+    # Only the API grants a trial; the Lambdas that never open a withUser
+    # transaction read neither.
+    condition = (
+      !contains(keys(aws_lambda_function.worker.environment[0].variables), "REVERSE_TRIAL") &&
+      !contains(keys(aws_lambda_function.assistant[0].environment[0].variables), "REVERSE_TRIAL") &&
+      alltrue([for vars in concat([aws_lambda_function.migrate.environment[0].variables, aws_lambda_function.fetcher.environment[0].variables], [for r in aws_lambda_function.renderer : r.environment[0].variables]) :
+        !contains(keys(vars), "BILLING_ENFORCED") && !contains(keys(vars), "REVERSE_TRIAL")
+      ])
+    )
+    error_message = "REVERSE_TRIAL is on the API alone, and neither setting is on the migrate, fetcher or renderer Lambda."
+  }
+}
+
+run "billing_enforcement_on_with_the_reverse_trial" {
+  command = plan
+
+  variables {
+    assistant_enabled = true
+    billing_enforced  = true
+    reverse_trial     = true
+  }
+
+  assert {
+    condition = (
+      aws_lambda_function.backend.environment[0].variables["BILLING_ENFORCED"] == "true" &&
+      aws_lambda_function.backend.environment[0].variables["REVERSE_TRIAL"] == "true" &&
+      aws_lambda_function.worker.environment[0].variables["BILLING_ENFORCED"] == "true" &&
+      aws_lambda_function.assistant[0].environment[0].variables["BILLING_ENFORCED"] == "true"
+    )
+    error_message = "billing_enforced and reverse_trial set BILLING_ENFORCED=\"true\" on the API, the worker and the assistant, and REVERSE_TRIAL=\"true\" on the API."
+  }
+}
+
+run "billing_enforcement_on_without_the_trial" {
+  command = plan
+
+  variables {
+    billing_enforced = true
+  }
+
+  assert {
+    condition = (
+      aws_lambda_function.backend.environment[0].variables["BILLING_ENFORCED"] == "true" &&
+      aws_lambda_function.backend.environment[0].variables["REVERSE_TRIAL"] == "false" &&
+      aws_lambda_function.worker.environment[0].variables["BILLING_ENFORCED"] == "true"
+    )
+    error_message = "billing_enforced alone turns on BILLING_ENFORCED and leaves REVERSE_TRIAL \"false\"."
+  }
+}
+
+run "reverse_trial_needs_billing_enforced" {
+  command = plan
+
+  # The backend grants no trial while enforcement is off (reverseTrialOn), so
+  # plan refuses the pair rather than ship a switch that does nothing.
+  variables {
+    reverse_trial = true
+  }
+
+  expect_failures = [var.reverse_trial]
 }
 
 # --- Stripe billing (issue #641; docs/deployment.md § Turning on Stripe) ------

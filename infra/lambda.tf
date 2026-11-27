@@ -189,6 +189,14 @@ resource "aws_lambda_function" "backend" {
       # sharing the Stripe account is never refunded from here (docs/billing.md
       # § Deleting an account). The site's domain: one per deployment.
       BILLING_ENVIRONMENT = var.domain_name
+      # Enforcement and the reverse trial (docs/billing.md § BILLING_ENFORCED,
+      # § The reverse trial): off by default, the exact strings the backend
+      # reads (billing/enforced.ts, billing/reverseTrial.ts). BILLING_ENFORCED
+      # is the same on the worker (jobs.tf) and the assistant (assistant.tf);
+      # only the API grants a trial. variables.tf refuses reverse_trial
+      # without billing_enforced.
+      BILLING_ENFORCED = var.billing_enforced ? "true" : "false"
+      REVERSE_TRIAL    = var.reverse_trial ? "true" : "false"
 
       # Email (ses.tf, docs/deployment.md § Email). MAIL_TRANSPORT must be set:
       # the default `log` sends nothing.

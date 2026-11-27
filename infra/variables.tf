@@ -531,6 +531,22 @@ variable "billing_provider" {
   }
 }
 
+variable "billing_enforced" {
+  description = "Whether plan limits refuse anything (BILLING_ENFORCED; backend/src/billing/enforced.ts, docs/billing.md § BILLING_ENFORCED). false (the default): shadow mode, usage is counted and shown and nothing refuses. true: the editor seat limit, Free's live catchment, the pause after a downgrade, the assistant's dollar caps, Free's verified-email gate and the disposable-domain refusal all refuse. Set as the exact string \"true\"/\"false\" on the API, the worker and the assistant, every Lambda that opens a withUser transaction (db/tx.ts sets app.billing_enforced from it). Turn on only through docs/deployment.md § Turning on enforcement."
+  type        = bool
+  default     = false
+}
+
+variable "reverse_trial" {
+  description = "Whether a newly verified person gets the 14-day Pro reverse trial (REVERSE_TRIAL on the API; backend/src/billing/reverseTrial.ts, docs/billing.md § The reverse trial). false (the default): no trial is granted and no claim recorded. true needs billing_enforced = true (the backend grants nothing otherwise, and a trial while nothing refuses would spend each person's one trial for nothing), and the web released with PUBLIC_REVERSE_TRIAL=true in the same change (docs/deployment.md § Turning on enforcement)."
+  type        = bool
+  default     = false
+  validation {
+    condition     = !var.reverse_trial || var.billing_enforced
+    error_message = "reverse_trial = true needs billing_enforced = true: the backend grants no trial while enforcement is off (docs/deployment.md § Turning on enforcement)."
+  }
+}
+
 variable "signup_open" {
   description = "Whether anyone may sign up (SIGNUP_OPEN on the API; backend/src/auth/signupOpen.ts). false (the default): sign-up only through a live invite for that address, so people join when a project member invites them. Set true only once docs/legal-status.md Gates A (the information officer's registration) and C (a published business address) are done, since both come before the first open sign-up."
   type        = bool

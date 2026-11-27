@@ -91,6 +91,15 @@ feeds_contact = "you@example.com"
 # refuses stripe without both, or with a test-mode key.
 # billing_provider = "stripe"
 
+# Plan enforcement and the reverse trial (issue #641; docs/deployment.md
+# § Turning on enforcement). Both off by default (shadow mode: usage counted
+# and shown, nothing refused). billing_enforced sets BILLING_ENFORCED on the
+# API, worker and assistant; reverse_trial sets REVERSE_TRIAL on the API and
+# needs billing_enforced (plan refuses it alone). Release the web with
+# PUBLIC_REVERSE_TRIAL=true in the same change that turns the trial on.
+# billing_enforced = true
+# reverse_trial    = true
+
 # Lambda concurrency caps. A new account's concurrency quota is 10 and AWS
 # keeps 10 unreserved, so ANY reservation fails until the quota is raised:
 # raise it BEFORE the first apply to at least the sum of these + 10 (48 at the

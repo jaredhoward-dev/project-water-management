@@ -169,6 +169,14 @@ gate ([§ Verified email on Free](#verified-email-on-free)); everything else sti
 `backend/.env.development.local` to see the enforced wording locally
 ([run-locally.md](./run-locally.md#one-time-setup)).
 
+**In production** it is Terraform's `billing_enforced` (bool, default
+`false`), which sets `BILLING_ENFORCED` to the exact string `"true"` or
+`"false"` on the API, the worker and the assistant: every Lambda that opens a
+`withUser` transaction, since `db/tx.ts` sets `app.billing_enforced` from it
+and the SQL limits read that (`infra/lambda.tf`, `jobs.tf`, `assistant.tf`;
+pinned by `infra/tests/guardrails.tftest.hcl`). The operator turns it on
+through [deployment.md § Turning on enforcement](./deployment.md#turning-on-enforcement).
+
 ## Assistant dollar caps
 
 Built, **off unless `BILLING_ENFORCED`** (issue #641 "Free AI allowance" and
@@ -1229,6 +1237,15 @@ the Free pool … Once per canonical email."
 Why both settings: a Pro trial means nothing while no limit refuses, and
 granting it then would spend the person's once-per-email trial for nothing.
 
+**In production** `REVERSE_TRIAL` is Terraform's `reverse_trial` (bool,
+default `false`), set as the exact string `"true"` or `"false"` on the API,
+the only Lambda that grants a trial (`infra/lambda.tf`). Plan refuses
+`reverse_trial = true` without `billing_enforced = true` (a validation in
+`infra/variables.tf`, tested in `infra/tests/guardrails.tftest.hcl`), so the
+pair can't ship as a switch that grants nothing. The steps, with the web
+release that sets `PUBLIC_REVERSE_TRIAL`: [deployment.md § Turning on
+enforcement](./deployment.md#turning-on-enforcement).
+
 **Granting.** When an address is verified for the first time (the
 verification link, a password reset that proves an unverified inbox, or a
 sign-up through an invite for that address), the backend calls
@@ -1294,7 +1311,8 @@ whether the trial is on: a build-time flag, `PUBLIC_REVERSE_TRIAL`
 page offers nothing today. The operator sets the repository variable
 `PUBLIC_REVERSE_TRIAL=true` and releases the web in the same change that
 turns on `REVERSE_TRIAL` and `BILLING_ENFORCED`, and unsets it (and
-releases again) when turning them off ([deployment.md](./deployment.md)).
+releases again) when turning them off ([deployment.md § Turning on
+enforcement](./deployment.md#turning-on-enforcement)).
 Rejected: reading `/billing/plans` from the page at load (the page would
 show the line only after a request, flash on every visit and need the API
 up for a static page), and leaving it off the page (the first thing a
