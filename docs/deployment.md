@@ -3383,20 +3383,85 @@ key goes into a chat, an issue or a CI log.
    registry row), and finish its activation (business details, payout bank
    account) so live mode is available.
 2. **Make a restricted key** in live mode: Developers → API keys → Create
-   restricted key, named `ic-wbt-api`. Give it exactly what the API calls
-   (billing.md § Stripe): **Customers: Write**, **Checkout Sessions: Write**
-   and **Customer portal: Write**; everything else **None**. Stripe shows the
-   `rk_live_…` value once: go straight to step 4 with it.
-3. **Make the webhook endpoint** in live mode: Developers → Webhooks → Add
+   restricted key, named `ic-wbt-api`. Give it exactly what the API's calls
+   need (`backend/src/billing/provider/stripeApi.ts`, whose header lists
+   every call; [billing.md § Stripe](./billing.md#stripe)), named as the
+   key screen names them, and everything else **None**:
+
+   | Permission | Level | The API's calls (Stripe's permission) |
+   |---|---|---|
+   | Customers | Write | `POST /v1/customers`, the account's customer (`customer_write`) |
+   | Checkout Sessions | Write | `POST /v1/checkout/sessions`; before an account is deleted, `GET` its open ones and `POST …/expire` (`checkout_session_write`) |
+   | Customer portal | Write | `POST /v1/billing_portal/sessions` (`customer_portal_write`) |
+   | Subscriptions | Write | seat changes: `GET /v1/subscriptions/:id`, `POST`/`DELETE /v1/subscription_items…`; a deleted account's or an orphan's cancel: `GET /v1/subscriptions`, `DELETE /v1/subscriptions/:id` (`subscription_write`, which covers subscription items) |
+   | Products | Write | `POST /v1/products`, the extra-seat product, made once (`product_write`) |
+   | Invoices | Read | an orphan's refund lookup: `GET /v1/invoices`, `GET /v1/invoice_payments` (`invoice_read`, which covers invoice payments) |
+   | Charges and Refunds | Write | an orphan's refund: `POST /v1/refunds` (`charge_write`) |
+
+   The mapping is Stripe's [API permissions
+   reference](https://docs.stripe.com/keys/permissions-reference) (checked
+   2026-11-26; `GET` is read, `POST` and `DELETE` write, and Write includes
+   Read: [Restricted API keys](https://docs.stripe.com/keys/restricted-api-keys)).
+   It lists `POST /v1/refunds/{id}` and `…/cancel` under `charge_write` but
+   not `POST /v1/refunds` itself, so step 8's test key is what proves that
+   row. The B2B invoice calls (`POST /v1/invoices`, `/v1/invoiceitems`,
+   finalize, send) are the migrate function's, not the API's, and that
+   function has no Stripe key yet ([§ Owner actions](#owner-actions)); when
+   it gets one, give it a key of its own with Customers: Write and
+   Invoices: Write, so neither key holds the other's rights. A call the key
+   can't make fails as `billing_provider_error` with Stripe's code in the
+   API's log: add that permission and nothing else. Stripe shows the
+   `rk_live_…` value once: go straight to step 6 with it.
+3. **Set the customer portal** (Settings → Billing → Customer portal, in
+   both modes; [Stripe's settings](https://docs.stripe.com/customer-management/configure-portal)).
+   On: **Payment methods**, **Invoice history visible**, and **Cancel
+   subscription** at the end of the billing period, with **Cancellation
+   reason**; the Terms and privacy links. Off, and why:
+   - **Switch plan**: there are no Stripe Prices to switch between.
+     Checkout sends each plan's price inline (`price_data`) from the `plan`
+     table; plan and interval change on the app's Plan page
+     ([billing.md § Stripe](./billing.md#stripe)).
+   - **Update quantities**: a quantity changed in the portal goes around the
+     seat check that *Change seats* makes (issue #926). The app only records
+     a team cut below its editors, refuses it new editors and lists it in
+     the billing report ([billing.md § Team seats](./billing.md#team-seats),
+     "Over its seats"); it can't undo the change at Stripe.
+   - **Use promotion codes**, **Promotion codes** and **Retention coupons**:
+     any discount on a subscription is a price conflict (issue #928), so the
+     webhook writes nothing for it, the customer may be charged with no plan
+     to show for it, and the operator has to resolve it by hand
+     ([billing.md § Price check](./billing.md#price-check)). A discount you
+     mean to give is a staff grant instead.
+   - **Pause subscription**: a paused subscription is recorded, never
+     applied, so the app keeps its last state while Stripe stops invoicing.
+4. **Set Revenue recovery** (Billing → Revenue recovery → Retries, in both
+   modes; [Stripe's retries](https://docs.stripe.com/billing/revenue-recovery/smart-retries)).
+   Keep **Smart Retries** on with Stripe's default window, up to 8 retries
+   within **2 weeks**, and set what happens when they all fail to **Cancel
+   the subscription**: never *Mark the subscription as unpaid*, *Leave the
+   subscription past-due* or *Pause the subscription*. Why (issue #927):
+   Stripe's `past_due` and `unpaid` both reach the app as `past_due`, which
+   is live, and only a cancel (`customer.subscription.deleted`) ends it at
+   Stripe too. The app's own backstop is the dunning limit: 14 days after a
+   subscription first went `past_due` the job tick moves it to `lapsed`,
+   treated as Free, and a later payment revives it ([billing.md § Dunning
+   limit](./billing.md#dunning-limit)). With a 2-week window the two meet
+   at about the same day, and the cancel then ends the subscription for
+   good; a longer window (3 weeks to 2 months) leaves the account lapsed
+   while Stripe still retries, and charging a card for a plan the app has
+   paused is what a customer complains about. Keep the window at 2 weeks or
+   less, or move both together (`DUNNING_GRACE_DAYS` in
+   `packages/engine/src/plans.ts`).
+5. **Make the webhook endpoint** in live mode: Developers → Webhooks → Add
    endpoint, URL `https://<site domain>/api/billing/webhook/stripe` (CloudFront
    sends `/api/*` to the API), API version `2026-10-28.endive` (the one the
    API pins), and exactly these six events:
    `customer.subscription.created`, `customer.subscription.updated`,
    `customer.subscription.deleted`, `checkout.session.completed`,
    `invoice.paid`, `invoice.payment_failed`. Reveal its signing secret
-   (`whsec_…`). Until step 5's apply the API answers this endpoint `404`
+   (`whsec_…`). Until step 7's apply the API answers this endpoint `404`
    (`manual`), and Stripe retries a failed delivery for up to three days, so
-   do steps 4–5 the same day. **One webhook endpoint per environment:** a
+   do steps 6–7 the same day. **One webhook endpoint per environment:** a
    staging or test deployment on the same Stripe account gets its own
    endpoint pointing at its own site, never this one. Each deployment
    cancels and refunds an orphan (a subscription whose account is gone)
@@ -3405,13 +3470,13 @@ key goes into a chat, an issue or a CI log.
    production check refuses it unset or `local` under `stripe`), so one
    deployment never refunds another's subscriptions ([billing.md § The
    route](./billing.md#the-route), "Only this deployment's").
-4. **Put both in sops:**
+6. **Put both in sops:**
    `cd ~/github/infra-secrets && AWS_PROFILE=water-management sops water-management/prod.sops.yaml`,
    adding `stripe_secret_key: "<rk_live_…>"` and
    `billing_webhook_secret: "<whsec_…>"` (`infra/prod.sops.yaml.example`).
    `tf.sh` passes each as an ephemeral variable when present; neither reaches
    state or a saved plan.
-5. **Switch the provider, plan, read it, then apply** with your own
+7. **Switch the provider, plan, read it, then apply** with your own
    go-ahead. Add `billing_provider = "stripe"` and `stripe_egress_enabled =
    true` (§ Stripe egress: the API's route to Stripe) to `prod.tfvars.sops`, then
    `cd infra && AWS_PROFILE=water-management ./scripts/tf.sh plan -var-file=../../infra-secrets/water-management/prod.tfvars.sops -out=<plan>`
@@ -3424,22 +3489,47 @@ key goes into a chat, an issue or a CI log.
    `runtime_secret_version`, so every Lambda cold-starts). Nothing else.
    A plan that fails on `var.billing_provider` names the missing or
    malformed key.
-6. **Check it.** First in test mode, which production can't take (it
+8. **Check it.** First in test mode, which production can't take (it
    refuses a test key, and a test-mode endpoint's events are signed with a
    different secret), so on your own machine with the
-   [Stripe CLI](https://docs.stripe.com/stripe-cli): in
-   `backend/.env.development.local` set `BILLING_PROVIDER=stripe`, a test-mode
-   `STRIPE_SECRET_KEY=sk_test_…` and the `whsec_…` that
+   [Stripe CLI](https://docs.stripe.com/stripe-cli). In the sandbox, make a
+   **test-mode restricted key** (`ic-wbt-api-test`) with exactly step 2's
+   permissions, not the full `sk_test_…` key, so the test proves the list
+   before the live key is made from it (Stripe's own advice: [Restricted API
+   keys](https://docs.stripe.com/keys/restricted-api-keys), "Create a
+   restricted API key in a sandbox"). Set up steps 3 and 4 in the sandbox
+   too. In `backend/.env.development.local` set `BILLING_PROVIDER=stripe`,
+   `STRIPE_SECRET_KEY=rk_test_…` and the `whsec_…` that
    `stripe listen --forward-to http://localhost:3001/billing/webhook/stripe`
-   prints, then run `pnpm dev` and buy a plan from the plan page with Stripe's
-   test card `4242 4242 4242 4242`. The `stripe listen` window shows each of
-   the events answered `200`, and the account's plan page shows the
-   subscription. (`stripe trigger` events carry no `billing_account_id`, so
-   the API rightly refuses them; use a real test checkout.) Then in
-   production, after the apply: the API's log group shows no
-   `refusing to start the api Lambda`, and the first live event appears in
-   the endpoint's delivery log in Stripe's dashboard answered `200`, with a
-   `billing_webhook` line in the API's log. Remove the local keys afterwards.
+   prints, then run `pnpm dev` and, with Stripe's test card
+   `4242 4242 4242 4242`:
+   - buy Pro from the plan page (Customers, Checkout Sessions): the
+     `stripe listen` window shows each event answered `200`, and the plan
+     page shows the subscription;
+   - buy Team with an extra seat, then *Change seats* up and down
+     (Subscriptions, Products);
+   - open *Manage billing* (Customer portal) and check step 3's settings
+     show: no plan switch, no quantity, no promotion code;
+   - delete a test account that holds a subscription (Checkout Sessions,
+     Subscriptions: its open checkouts expired, its subscription cancelled).
+
+   The orphan refund (Invoices, Charges and Refunds) is hard to reach by
+   hand: pay a checkout link after deleting its account. Without it, those
+   two rows are proven only by the key's request logs (API keys → ⋯ →
+   View request logs) the first time an orphan happens. Any
+   `billing_provider_error` in the API's log names Stripe's code: add that
+   permission to the test key, re-run, and make the live key from the final
+   list. (`stripe trigger` events carry no `billing_account_id`, so the API
+   rightly refuses them; use a real test checkout.) A dashboard price or a
+   coupon on a test subscription shows as a conflict in
+   `pnpm dev:billing:conflict --list` ([billing.md § Price
+   check](./billing.md#price-check)); production lists them through the
+   `billing-conflicts` owner action. Then in production, after the apply:
+   the API's log group shows no `refusing to start the api Lambda`, and the
+   first live event appears in the endpoint's delivery log in Stripe's
+   dashboard answered `200`, with a `billing_webhook` line in the API's
+   log. Remove the local keys afterwards, and delete the test key once the
+   live one works.
 
 To turn it off: `billing_provider = "manual"` and apply. The webhook route
 answers `404` again and checkout falls back to recording by hand; disable the

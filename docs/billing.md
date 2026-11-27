@@ -1383,13 +1383,23 @@ event never ends a trial), `billing/checkout.test.ts` (`checkoutBlockedBy`),
 
 ### Stripe
 
-Three form-encoded POSTs over `fetch` (`provider/stripeApi.ts`):
+Plain `fetch` calls to Stripe's API (`provider/stripeApi.ts`, whose
+header lists every one): `POST`s form-encoded, `GET` and `DELETE` with
+their parameters in the query. Checkout and the portal are three:
 `/v1/customers` (metadata `billing_account_id`, idempotency key per account),
 `/v1/checkout/sessions` (subscription mode, the stored customer,
 `client_reference_id` the account, and `metadata` plus
 `subscription_data.metadata` with `billing_account_id`, `plan_code` and
 `seats_included`, which the webhook's normaliser reads; Team's extra seats
-as a second line item, § Team seats at checkout), and `/v1/billing_portal/sessions`. Each
+as a second line item, § Team seats at checkout), and `/v1/billing_portal/sessions`.
+The rest: a Team's seat changes (subscriptions, subscription items and the
+extra-seat product, § Changing a Team's seats), cancelling before an
+account is deleted (open checkout sessions expired, subscriptions
+cancelled) and an orphan's cancel and refund (its invoices, invoice
+payments and refunds, § Deleting an account), and the B2B invoice calls
+(§ B2B invoices). The restricted key's permissions follow from that list
+([deployment.md § Turning on Stripe](./deployment.md#turning-on-stripe),
+step 2). Each request
 pins `Stripe-Version: 2026-10-28.endive`, has a 15 s timeout, and accepts
 only an `https://…stripe.com/` URL back.
 
@@ -1398,13 +1408,17 @@ and interval, product name `IC-WBT <plan>`), so `plan` stays the one source
 of prices and nothing has to be set up in Stripe's dashboard first. The
 catch: Stripe's portal can switch plans only between Prices it knows, so
 plan switching there waits for Prices made in the dashboard (the portal
-still handles card updates, invoices and cancellation).
+still handles card updates, invoices and cancellation). Its plan switching,
+quantity changes and promotion codes stay off (deployment.md § Turning on
+Stripe, step 3: issues #926 and #928).
 
 `STRIPE_SECRET_KEY` is read from the environment only. The production check
 refuses `stripe` without a live key (`sk_live_…` or `rk_live_…`). In
 production it comes from the API's runtime secret, beside
 `BILLING_WEBHOOK_SECRET`, once Terraform's `billing_provider` is `stripe`
-([deployment.md § Turning on Stripe](./deployment.md#turning-on-stripe)). Locally the key is never set: the mock needs none, and the unit
+([deployment.md § Turning on Stripe](./deployment.md#turning-on-stripe)). Locally the key is unset (the mock needs none) except for the
+operator's test-mode check, a sandbox restricted key in a gitignored
+`.env.development.local` (deployment.md § Turning on Stripe, step 8); the unit
 tests mock the HTTP layer (`stripeApi.test.ts`, `provider.test.ts`); nothing
 in the repo calls Stripe for real.
 
