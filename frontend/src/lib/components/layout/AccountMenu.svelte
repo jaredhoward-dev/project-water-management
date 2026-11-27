@@ -78,7 +78,9 @@
 	const signInAgain = () => signOut(loginReturningTo(page.url.pathname + page.url.search));
 
 	async function signOutEverywhere() {
-		closeMenu();
+		// Back on the trigger before asking: the item pressed is hidden with the list, and the question's
+		// dialog hands the focus back to what had it, so Cancel would leave the keyboard on the page's top.
+		closeMenu(true);
 		const ok = await confirmDialog({
 			title: 'Sign out of every device?',
 			message: 'Any other browser or device signed in to this account — including this one — will need to sign in again.',
