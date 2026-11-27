@@ -320,7 +320,7 @@ export const ENGINE_ERRATA: readonly Erratum[] = [
 		"fixedIn": "1.121.0",
 		"severity": "Medium",
 		"appliesWhen": "An application (a scenario classed against the applicant's units) that changes or removes (transfer.set, transfer.remove) a river off-take of the applicant's whose seepage rejoins the river below another party's unit (lossReturnNodeId)",
-		"summary": "The change was classed as the applicant's proposal though it changes the seepage credited below the other party's unit: the evidence pack showed no red \"Baseline assumptions changed\" callout, its \"No baseline assumption is changed\" check passed so the pack could be issued, and the off-take was judged by protectsEwr as the applicant's own river works rather than stopping issue as a changed baseline assumption",
+		"summary": "The change was classed as the applicant's proposal though it changes the seepage credited below the other party's unit: the evidence pack showed no red \"Baseline assumptions changed\" callout, its \"No baseline assumption is changed\" check passed so the pack could be issued, and the off-take was judged by protectsEwr as the applicant's own river works rather than stopping issue as a changed baseline assumption. What to do: open the application on the current engine and check its changes' classes; if the off-take change is now a baseline assumption, re-issue (supersede) any evidence pack made from it, which now shows the callout and fails the check. A plain run, and an application's figures, are unaffected",
 		"source": "scenarios.md § Classification: proposal or baseline assumption; model.md §2.6a (the seepage return) (issue #852)"
 	},
 	{
@@ -330,7 +330,7 @@ export const ENGINE_ERRATA: readonly Erratum[] = [
 		"fixedIn": "1.121.0",
 		"severity": "Medium",
 		"appliesWhen": "An application whose node.remove removes one of the applicant's units that a transfer rule comes from or goes to (or, engine ≥ 1.114.0, sends a split share to) when the rule also reaches another party's unit (its other end, or the unit its seepage rejoins below); the removal drops that rule",
-		"summary": "The removal was classed as the applicant's proposal though the rule it drops reaches another party's unit: the evidence pack showed no red \"Baseline assumptions changed\" callout and its \"No baseline assumption is changed\" check passed, so the pack could be issued",
+		"summary": "The removal was classed as the applicant's proposal though the rule it drops reaches another party's unit: the evidence pack showed no red \"Baseline assumptions changed\" callout and its \"No baseline assumption is changed\" check passed, so the pack could be issued. What to do: open the application on the current engine and check its changes' classes; if the removal is now a baseline assumption, re-issue (supersede) any evidence pack made from it, which now shows the callout and fails the check. A plain run, and an application's figures, are unaffected",
 		"source": "scenarios.md § Classification: proposal or baseline assumption; present at the first recorded engine, 1.15.0 (issue #852)"
 	},
 	{
@@ -340,7 +340,7 @@ export const ENGINE_ERRATA: readonly Erratum[] = [
 		"fixedIn": "1.123.0",
 		"severity": "Medium",
 		"appliesWhen": "A paired uncertainty band (runPairedEnsemble: the B − A band of a run comparison and an evidence pack's paired figures) on a baseline run whose ensemble was stored on an older engine than the one that ran the pairs (an engine release between the baseline's ensemble and the paired job)",
-		"summary": "The other run's members ran on the newer engine but the baseline side was the ensemble's stored figures from the older one, so the band subtracted across two engines: it carried the engine's own changes as if the application made them, and the same inputs on both runs did not give zero",
+		"summary": "The other run's members ran on the newer engine but the baseline side was the ensemble's stored figures from the older one, so the band subtracted across two engines: it carried the engine's own changes as if the application made them, and the same inputs on both runs did not give zero. What to do: re-run the comparison's or the pack's paired band on the current engine (it now re-runs the baseline side on the same engine), and re-issue (supersede) any evidence pack that printed the old band. A plain run and its own ensemble are unaffected",
 		"source": "model.md §2.10e (paired bands); run-comparison.md; present at the first recorded engine, 1.15.0 (issue #897)"
 	},
 	{
@@ -350,7 +350,7 @@ export const ENGINE_ERRATA: readonly Erratum[] = [
 		"fixedIn": "1.123.0",
 		"severity": "Medium",
 		"appliesWhen": "An evidence report on a project with a declared uncertainty rule (settings.evidenceUncertaintyRule) whose baseline has a complete ensemble started through the API with its own free parameters (fewer than the model's default set) and otherwise the rule's options",
-		"summary": "declaredRuleMismatches didn't compare the parameters varied, so that ensemble could be cited as the declared rule's: the pack printed a band over fewer parameters, narrower than the rule's, as the declared rule's band, and listed it as not departing from the rule",
+		"summary": "declaredRuleMismatches didn't compare the parameters varied, so that ensemble could be cited as the declared rule's: the pack printed a band over fewer parameters, narrower than the rule's, as the declared rule's band, and listed it as not departing from the rule. What to do: check which ensemble the pack cites; if it varied fewer parameters than the declared rule, run the baseline's ensemble with the rule's options and re-issue (supersede) the pack. A plain run is unaffected",
 		"source": "model.md §2.10e (the declared rule and the cited ensemble; Parameters varied)"
 	},
 	{
@@ -360,7 +360,17 @@ export const ENGINE_ERRATA: readonly Erratum[] = [
 		"fixedIn": "1.123.0",
 		"severity": "Low",
 		"appliesWhen": "A cumulative impact (combineScenarios) where one scenario has a demand.scale without nodeIds (every farm's, or every other water user's, demand) and another adds a unit of that kind (node.add or node.insert)",
-		"summary": "The combination was accepted rather than refused as a conflict, though the cut reached the added unit only when the scaling applied after the add: the combined run, and with it the combined change and the interaction column, depended on the order the applications were given",
+		"summary": "The combination was accepted rather than refused as a conflict, though the cut reached the added unit only when the scaling applied after the add: the combined run, and with it the combined change and the interaction column, depended on the order the applications were given. What to do: re-run the cumulative impact on the current engine, which now refuses that combination as a conflict; give the scaling its units (nodeIds) or drop the conflicting application, and re-issue (supersede) any evidence pack that printed it. A plain run is unaffected",
 		"source": "scenarios.md § Engine: combineScenarios and cumulativeImpact (conflicts)"
+	},
+	{
+		"id": "ER-37",
+		"keyedOn": "run",
+		"firstAffected": "1.42.0",
+		"fixedIn": "1.122.0",
+		"severity": "Medium",
+		"appliesWhen": "A scenario run (an application or any other scenario, alone or in a cumulative impact) whose node.remove removes a unit that a river off-take's returned seepage rejoined the river below (lossReturnNodeId), where the off-take itself stays (it neither comes from nor goes to that unit)",
+		"summary": "The removal set the off-take's seepage return to none (share 0) instead of re-pointing it above the removed unit, so that seepage left the catchment: the scenario carried less flow below where the unit was than it should, and in an application or a run comparison that drop was scored as the proposal's impact, even for another party's off-take the applicant can't see. What to do: re-run the scenario on the current engine and compare, and re-issue (supersede) any evidence pack made from it. A plain run is unaffected",
+		"source": "scenarios.md § Op catalogue (node.remove of a unit a seepage return rejoins below); model.md §2.6a (the seepage return) (issue #853)"
 	}
 ];
