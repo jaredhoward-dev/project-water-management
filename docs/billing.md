@@ -1740,10 +1740,17 @@ Built but off: nothing is paused unless `BILLING_ENFORCED` is on.
   after a resume queues the re-run as usual.
 - **Moving accounts (403).** A project whose billing account changes (moved
   into or out of a team) re-syncs both accounts in the move's transaction
-  (`project_billing_move_sync`, both locks in id order): the moved
+  (`project_billing_move_sync`): the moved
   catchment's pause marker and the old account's `over_free_since` follow
   the move at once instead of at the next tick, and both accounts'
-  over-seats markers are re-counted.
+  over-seats markers are re-counted. The move takes both accounts'
+  `billing:<account>` locks, in id order, first of all, in
+  `project_billing_account_set` before its `projects_created` count on the
+  new account's row, then 361's counter lock (whose trigger now fires on a
+  team move too, so the project's assistant cost moves with it): the same
+  order as `app_billing_apply` (billing lock, account row, counter lock), so
+  a webhook and a move on one account can't deadlock
+  (`billing/overSeats.db.test.ts` lines both up behind a held lock).
 - **Resuming.** A live subscription again (the subscription trigger, at
   once), switching the extra catchments' operations off so the account is
   back within Free, or enforcement turned off: the markers go and the grace

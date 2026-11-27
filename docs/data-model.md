@@ -5127,7 +5127,12 @@ the answer's `projectId`). When no report row of that id exists anywhere
 the ids here and answers true; the tick removes the object. When the row
 exists it does nothing: its PDF is live, or a later deletion queues it
 through the trigger. Definer so that RLS can't make a row the caller can't
-see (a deleted requester's) read as gone.
+see (a deleted requester's) read as gone. It answers only a signed-in caller
+or the worker's context (an API key's session is refused), and only for a
+project that exists or is in `erasure_log` (deleted mid-render). A unique
+`(project_id, report_id)` keeps one entry per object key: a key already
+queued is re-queued under a new id with its attempts reset, so a settle of
+a claim in flight (by the old id) can't drop it.
 
 ### Reference loads (192_feature_names_reference_load.sql, 248_reference_load_provenance.sql)
 

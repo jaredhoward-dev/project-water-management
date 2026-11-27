@@ -193,6 +193,41 @@ describe('a PDF stored after its report was deleted (398, issue #911)', () => {
 		expect(await queued([mine])).toEqual([]);
 	});
 
+	it('asks who is calling, needs a project that exists or did, and queues a key once however often it is named', async () => {
+		const owner = await signUp('Owner');
+		const { projectId } = await withRun(owner);
+		const gone = crypto.randomUUID();
+		const orphaned = (db: { query: (q: string, v: unknown[]) => Promise<{ rows: { o: boolean }[] }> }, project = projectId) =>
+			db.query('SELECT app_report_pdf_orphaned($1, $2) AS o', [project, gone]).then((r) => r.rows[0]!.o);
+		// Refused: a session that is neither a signed-in person nor the worker (051's alert_worker_context is "no user and
+		// no API key", so the one such caller is an API key's session).
+		await expect(
+			withoutUser(async (db) => {
+				await db.query("SELECT set_config('app.current_api_key_id', $1, true)", [crypto.randomUUID()]);
+				return orphaned(db);
+			})
+		).rejects.toMatchObject({ code: '42501' });
+		// Refused: a project that never existed.
+		await expect(withUser(owner.id, (db) => orphaned(db, crypto.randomUUID()))).rejects.toMatchObject({ code: '22023' });
+		expect(await queued([gone])).toEqual([]);
+		// Positive control: the signed-in render and the worker are heard, and the key is queued once.
+		expect(await withUser(owner.id, (db) => orphaned(db))).toBe(true);
+		const [first] = await asOwner('SELECT id FROM report_pdf_erasure WHERE report_id = $1', [gone]);
+		await asOwner('UPDATE report_pdf_erasure SET attempts = 2 WHERE report_id = $1', [gone]);
+		expect(await withoutUser((db) => orphaned(db))).toBe(true);
+		expect(await withUser(owner.id, (db) => orphaned(db))).toBe(true);
+		// One row, re-queued under a new id with its attempts reset (a settle of the old id's claim leaves it queued).
+		const rows = await asOwner('SELECT id, attempts FROM report_pdf_erasure WHERE report_id = $1', [gone]);
+		expect(rows).toHaveLength(1);
+		expect(rows[0]!.attempts).toBe(0);
+		expect(rows[0]!.id).not.toBe(first!.id);
+		// A deleted project's late PDF is still heard (erasure_log remembers the project).
+		await asOwner('DELETE FROM project WHERE id = $1', [projectId]);
+		expect(await withoutUser((db) => orphaned(db))).toBe(true);
+		expect(await drain()).toContain(reportKey(projectId, gone));
+		expect(await queued([gone])).toEqual([]);
+	});
+
 	it("the renderer Lambda's answer for a deleted report queues its PDF; a live report's answer (a redelivery) doesn't", async () => {
 		const owner = await signUp('Owner');
 		const gone = await signUp('Gone');

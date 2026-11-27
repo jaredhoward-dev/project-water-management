@@ -236,3 +236,102 @@ describe('403: a paused catchment moving accounts re-syncs both at once', () => 
 		}
 	});
 });
+
+/** Waits until n backends wait on a heavyweight lock (an advisory or a row lock): the real signal that they are queued. */
+async function waiting(n: number) {
+	for (let i = 0; i < 400; i++) {
+		const [r] = (await asOwner(`SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`)) as { n: number }[];
+		if (r!.n >= n) return;
+		await new Promise((res) => setTimeout(res, 5));
+	}
+	throw new Error(`fewer than ${n} transactions waited on a lock`);
+}
+
+describe('403: a project moving accounts and a webhook on the same account take their locks in one order', () => {
+	// app_billing_apply takes the account's billing lock, its row, then 361's counter lock. Before the fix a move into
+	// the team locked the account's row (400's projects_created count) before its billing lock, so a webhook holding
+	// the billing lock and waiting on the row deadlocked with it. A third session holds one of the two locks (the
+	// account's billing lock, or the counter lock, which a move now takes too) until both writers are queued behind it,
+	// so each round lines them up mid-way rather than hoping for a race.
+	it('a team subscription event and a move into or out of that team at once all complete, with no deadlock (40P01)', async () => {
+		vi.stubEnv('BILLING_PROVIDER', 'mock');
+		vi.stubEnv('BILLING_WEBHOOK_SECRET', SECRET);
+		const admin = await signUp('MoveLockAdmin');
+		const teamId = (await admin.call('POST', '/teams', { name: `Move lock ${crypto.randomUUID().slice(0, 8)}` })).body.team.id as string;
+		const start = await admin.call('POST', `/teams/${teamId}/plan/checkout`, { plan: 'team', interval: 'month' });
+		expect(start.status).toBe(200);
+		expect((await formPost(`${local(start.body.url)}&outcome=pays`)).status).toBe(303);
+		const plan = (await admin.call('GET', `/teams/${teamId}/plan`)).body;
+		const account = plan.account.id as string;
+		const subRef = ((await asOwner(`SELECT external_ref AS r FROM subscription WHERE billing_account_id = $1 AND status = 'active'`, [account])) as { r: string }[])[0]!.r;
+		const projectId = (await admin.call('POST', '/projects', { name: 'Move lock' })).body.project.id as string;
+		made.push(projectId);
+		const own = ((await asOwner('SELECT billing_account_id AS id FROM project WHERE id = $1', [projectId])) as { id: string }[])[0]!.id;
+		const t0 = Date.now();
+		for (let round = 0; round < 8; round++) {
+			const sub = { planCode: 'team', status: round % 2 ? 'active' : 'past_due', periodStart: plan.subscription.periodStart, periodEnd: plan.subscription.periodEnd, cancelAtPeriodEnd: false };
+			const { body, signature } = signedDelivery(SECRET, seatsChangedEvent(account, subRef, sub, 1, 1 + (round % 3), t0 + round * 1000));
+			const [blocker, mover] = await Promise.all([ownerClient(), ownerClient()]);
+			try {
+				await blocker.query('BEGIN');
+				// Rounds 0, 1, 4, 5: the account's billing lock, the webhook queued first (granted first when it goes, so it
+				// then wants the account's row): the round that deadlocked before the fix. Rounds 2, 3, 6, 7: the counter
+				// lock, the move queued first (it takes the counter lock last). Each into the team and back out.
+				const counter = Math.floor(round / 2) % 2 === 1;
+				if (counter) await blocker.query('SELECT assistant_counter_lock()');
+				else await blocker.query(`SELECT pg_advisory_xact_lock(hashtext('billing:' || $1::text))`, [account]);
+				const deliver = () => app.request('/billing/webhook/mock', { method: 'POST', headers: { 'content-type': 'application/json', 'stripe-signature': signature }, body });
+				// Into the team's account on even rounds, back out to the person's on odd ones.
+				const moveNow = () => mover.query(`UPDATE project SET team_id = $2 WHERE id = $1`, [projectId, round % 2 ? null : teamId]);
+				let move: Promise<unknown>;
+				let hook: Promise<Response> | Response;
+				if (counter) {
+					move = moveNow();
+					move.catch(() => {});
+					await Promise.race([waiting(1), move.then(() => { throw new Error(`round ${round}: the move did not wait`); })]);
+					hook = deliver();
+				} else {
+					hook = deliver();
+					await waiting(1);
+					move = moveNow();
+					move.catch(() => {});
+				}
+				await waiting(2);
+				await blocker.query('COMMIT');
+				const [moved, hooked] = await Promise.allSettled([move, hook]);
+				expect(moved.status === 'rejected' ? ((moved.reason as { code?: string }).code ?? String(moved.reason)) : 'ok').toBe('ok');
+				expect(hooked.status === 'fulfilled' ? hooked.value.status : String((hooked as PromiseRejectedResult).reason)).toBe(200);
+			} finally {
+				await blocker.end();
+				await mover.end();
+			}
+			const [row] = (await asOwner('SELECT billing_account_id AS id FROM project WHERE id = $1', [projectId])) as { id: string }[];
+			expect(row!.id).toBe(round % 2 ? own : account);
+		}
+		const [last] = (await asOwner('SELECT status FROM subscription WHERE external_ref = $1', [subRef])) as { status: string }[];
+		expect(last!.status).toBe('active');
+		await asOwner(`DELETE FROM subscription WHERE billing_account_id = $1`, [account]);
+	}, 120_000);
+});
+
+describe('403: 361’s assistant cost follows a project moved by its team (a column trigger sees only the SET list)', () => {
+	it('moving into a team moves the month’s cost to the team’s account, and back out returns it', async () => {
+		const owner = await signUp('MoveCostOwner');
+		const teamId = (await owner.call('POST', '/teams', { name: `Move cost ${crypto.randomUUID().slice(0, 8)}` })).body.team.id as string;
+		const projectId = (await owner.call('POST', '/projects', { name: 'Move cost' })).body.project.id as string;
+		made.push(projectId);
+		const own = ((await asOwner('SELECT billing_account_id AS id FROM project WHERE id = $1', [projectId])) as { id: string }[])[0]!.id;
+		const team = ((await asOwner(`SELECT billing_account_ensure('team', $1) AS id`, [teamId])) as { id: string }[])[0]!.id;
+		const month = ((await asOwner(`SELECT date_trunc('month', now() AT TIME ZONE 'UTC')::date::text AS m`)) as { m: string }[])[0]!.m;
+		const counted = async (acct: string) =>
+			Number(((await asOwner('SELECT coalesce(sum(cost_usd_micros), 0)::float8 AS c FROM assistant_month_counter WHERE billing_account_id = $1 AND month = $2', [acct, month])) as { c: number }[])[0]!.c);
+		await asOwner('INSERT INTO assistant_usage (project_id, user_id, month, cost_usd_micros) VALUES ($1, $2, $3, 7000)', [projectId, owner.id, month]);
+		// Positive control: counted on the person's account where it was spent.
+		expect(await counted(own)).toBe(7000);
+		expect((await owner.call('PATCH', `/projects/${projectId}`, { teamId })).status).toBe(200);
+		expect([await counted(own), await counted(team)]).toEqual([0, 7000]);
+		expect((await owner.call('PATCH', `/projects/${projectId}`, { teamId: null })).status).toBe(200);
+		expect([await counted(own), await counted(team)]).toEqual([7000, 0]);
+		await asOwner('DELETE FROM assistant_usage WHERE project_id = $1', [projectId]);
+	});
+});

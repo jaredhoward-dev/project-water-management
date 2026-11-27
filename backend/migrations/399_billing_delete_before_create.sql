@@ -20,7 +20,12 @@
 --      delete already is for a held ref. An ended status still applies.
 --
 -- billing_event's rows go after 90 days (327's purge), far past Stripe's
--- 3-day redelivery. No policy or grant changes: billing_event stays
+-- 3-day redelivery. A subscription.deleted recorded before 399 has a null
+-- external_ref (nothing is backfilled: the ref is only in the event's payload,
+-- which billing_event doesn't keep), so the delete-first check can't see it:
+-- a created or updated arriving late for such a delete still applies, as
+-- before 399. The exposure is limited to events whose delete landed in the
+-- 3 days before this deploys (Stripe redelivers for 3 days). No policy or grant changes: billing_event stays
 -- unreadable to water_app, and CREATE OR REPLACE keeps the function's grants.
 
 ALTER TABLE billing_event ADD COLUMN external_ref text CHECK (external_ref IS NULL OR length(external_ref) BETWEEN 1 AND 255);

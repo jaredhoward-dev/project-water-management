@@ -29,14 +29,46 @@
 --      team.overSeats { seats, editors, since } while the editors in use pass a
 --      live Team plan's paid seats (worked out now, so it never lags the
 --      tick), else null.
---   6. project_billing_move_sync: AFTER UPDATE OF team_id, billing_account_id
---      ON project, when the billing account changed, takes both accounts'
---      locks in id order and runs 341's app_plan_pause_sync and (2) on each:
---      the old account's over_free_since and the moved catchment's pause
---      marker follow the move in the same transaction, not at the next tick.
---      Named to fire before 340's project_move_live_guard and 334's
---      project_team_seat_guard (AFTER triggers fire by name), so the two locks
---      are always taken in id order before either of those takes one.
+--   6. billing_accounts_lock(a, b): takes 334's account lock for two accounts
+--      in id order (a null skipped, one taken once). Owner-only.
+--   7. project_billing_account_set, redefined from 400 (its latest), takes the
+--      locks of the account a project leaves and the one it lands on through
+--      (6) before anything else in the move: before its own projects_created
+--      count on the new account's row. Its trigger now fires on UPDATE OF
+--      team_id, billing_account_id, so a direct change of the account (the
+--      schema owner's SQL; water_app is refused by 323's guard) takes them too.
+--      A cascade from an account's deletion (SET NULL) takes none: the
+--      account's row is already locked by its deletion (364's order).
+--   8. project_billing_move_sync: AFTER UPDATE OF team_id, billing_account_id
+--      ON project, when the billing account changed, runs 341's
+--      app_plan_pause_sync and (2) on both accounts (their locks already held
+--      from (7); an account no longer there, deleted in this transaction, is
+--      skipped): the old account's over_free_since and the moved catchment's
+--      pause marker follow the move in the same transaction, not at the next
+--      tick.
+--   9. assistant_project_counted_upd (361) fires on UPDATE OF team_id,
+--      billing_account_id. A column trigger fires only for the columns named
+--      in the statement's SET list, and a team move sets team_id alone (the
+--      BEFORE trigger (7) writes billing_account_id), so 361's trigger never
+--      fired on a move and a project's assistant cost stayed counted on the
+--      account it left. Its WHEN clause is unchanged.
+--
+-- Lock order. Every billing writer takes, in this order: (a) the
+-- billing:<account> advisory locks, two in id order; (b) the billing_account
+-- rows; (c) 361's deployment-wide counter lock (assistant_counter_lock).
+-- app_billing_apply (344, 399, 406) takes (a), then its account FOR UPDATE,
+-- then (c) in 361's subscription trigger (364's header). A move now takes (a)
+-- for both accounts in (7), (b) in the same trigger's projects_created count,
+-- and (c) in 361's assistant_project_counted_upd, the first AFTER trigger by
+-- name; project_billing_move_sync, 340's project_move_live_guard and 334's
+-- project_team_seat_guard then take (a) again, already held. Before this, a
+-- team move took (b) in 400's count and (a) only in the AFTER triggers, and a
+-- direct change of the account took (c) before (a): each the reverse of
+-- app_billing_apply's order, so a webhook and a move on the same account
+-- could deadlock (40P01; overSeats.db.test.ts reproduces it). An old account
+-- deleted earlier in the same transaction (a team's or a person's deletion,
+-- which holds its row) is skipped by (7) and (8). app_plan_pause_tick (4) walks its
+-- accounts in id order.
 --
 -- No new table or policy. app_account_plan keeps its grant to water_app
 -- (CREATE OR REPLACE); the new functions are owner-only or SECURITY DEFINER
@@ -114,34 +146,107 @@ CREATE OR REPLACE FUNCTION app_plan_pause_tick() RETURNS integer
 			   OR (EXISTS (SELECT 1 FROM subscription s WHERE s.billing_account_id = b.id)
 			       AND NOT EXISTS (SELECT 1 FROM subscription s WHERE s.billing_account_id = b.id AND s.status IN ('trialing', 'active', 'past_due')))
 			   OR EXISTS (SELECT 1 FROM project_plan_pause pp JOIN project p ON p.id = pp.project_id WHERE p.billing_account_id = b.id)
+			ORDER BY b.id
 		LOOP
 			n := n + app_plan_pause_sync(v_account);
 		END LOOP;
 		-- 403: a team back within its seats (editors made viewers, seats bought) clears its marker.
-		FOR v_account IN SELECT b.id FROM billing_account b WHERE b.over_seats_since IS NOT NULL LOOP
+		FOR v_account IN SELECT b.id FROM billing_account b WHERE b.over_seats_since IS NOT NULL ORDER BY b.id LOOP
 			PERFORM app_team_seats_sync(v_account);
 		END LOOP;
 		RETURN n;
 	END
 	$$;
 
-CREATE FUNCTION project_billing_move_sync() RETURNS trigger
-	LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
+CREATE FUNCTION billing_accounts_lock(p_a uuid, p_b uuid) RETURNS void
+	LANGUAGE plpgsql VOLATILE SET search_path = public
 	AS $$
 	DECLARE
-		v_first uuid := least(OLD.billing_account_id, NEW.billing_account_id);
-		v_second uuid := greatest(OLD.billing_account_id, NEW.billing_account_id);
+		v_first uuid := least(p_a, p_b);
+		v_second uuid := greatest(p_a, p_b);
 	BEGIN
-		-- Both accounts' locks in id order (least/greatest skip a null), so two moves in opposite directions can't deadlock.
+		-- least/greatest skip a null: two moves in opposite directions take the same first lock.
 		IF v_first IS NOT NULL THEN
 			PERFORM pg_advisory_xact_lock(hashtext('billing:' || v_first::text));
 		END IF;
 		IF v_second IS NOT NULL AND v_second IS DISTINCT FROM v_first THEN
 			PERFORM pg_advisory_xact_lock(hashtext('billing:' || v_second::text));
 		END IF;
-		PERFORM app_plan_pause_sync(OLD.billing_account_id);
+	END
+	$$;
+REVOKE ALL ON FUNCTION billing_accounts_lock(uuid, uuid) FROM PUBLIC, water_app;
+COMMENT ON FUNCTION billing_accounts_lock(uuid, uuid) IS
+	'Takes 334''s billing:<account> advisory lock for two accounts in id order, before any billing_account row (403). Called only by definer functions.';
+
+-- From 400's definition, with the two accounts' locks first and a direct change of the account locked too.
+CREATE OR REPLACE FUNCTION project_billing_account_set() RETURNS trigger
+	LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
+	AS $$
+	DECLARE
+		v_account uuid;
+		v_payer uuid;
+	BEGIN
+		IF TG_OP = 'UPDATE' AND NEW.team_id IS NOT DISTINCT FROM OLD.team_id THEN
+			-- 403: the account set directly (the schema owner's SQL; 323's guard refuses water_app). A cascade from
+			-- the account's deletion (to null) takes no lock: its row is already locked by the deletion (364).
+			IF NEW.billing_account_id IS DISTINCT FROM OLD.billing_account_id AND NEW.billing_account_id IS NOT NULL THEN
+				PERFORM billing_accounts_lock(OLD.billing_account_id, NEW.billing_account_id);
+			END IF;
+			RETURN NEW;
+		END IF;
+		IF NEW.team_id IS NOT NULL THEN
+			v_account := billing_account_ensure('team', NEW.team_id);
+		ELSE
+			v_payer := NEW.created_by;
+			IF TG_OP = 'UPDATE' AND NOT EXISTS (
+				SELECT 1 FROM project_member m WHERE m.project_id = NEW.id AND m.user_id = NEW.created_by AND m.role = 'owner'
+			) THEN
+				SELECT m.user_id INTO v_payer FROM project_member m
+					WHERE m.project_id = NEW.id AND m.role = 'owner'
+					ORDER BY (m.user_id IS NOT DISTINCT FROM app_current_user_id()) DESC, m.added_at, m.user_id
+					LIMIT 1;
+				v_payer := coalesce(v_payer, NEW.created_by);
+			END IF;
+			v_account := billing_account_ensure('user', v_payer);
+		END IF;
+		-- 403: both accounts' billing locks before the projects_created row below (the order app_billing_apply takes them in);
+		-- not an old account already deleted in this transaction (a team's deletion), whose row its deletion holds.
+		PERFORM billing_accounts_lock(
+			CASE WHEN TG_OP = 'UPDATE' AND EXISTS (SELECT 1 FROM billing_account WHERE id = OLD.billing_account_id) THEN OLD.billing_account_id END,
+			v_account);
+		IF TG_OP = 'INSERT' OR v_account IS DISTINCT FROM OLD.billing_account_id THEN
+			UPDATE billing_account SET projects_created = projects_created + 1 WHERE id = v_account;
+		END IF;
+		NEW.billing_account_id := v_account;
+		RETURN NEW;
+	END
+	$$;
+REVOKE ALL ON FUNCTION project_billing_account_set() FROM PUBLIC, water_app;
+DROP TRIGGER project_billing_account_set ON project;
+CREATE TRIGGER project_billing_account_set BEFORE INSERT OR UPDATE OF team_id, billing_account_id ON project
+	FOR EACH ROW EXECUTE FUNCTION project_billing_account_set();
+
+-- 361's trigger, on a team move too (the BEFORE trigger above writes billing_account_id, which a column trigger doesn't see).
+DROP TRIGGER assistant_project_counted_upd ON project;
+CREATE TRIGGER assistant_project_counted_upd AFTER UPDATE OF team_id, billing_account_id ON project
+	FOR EACH ROW WHEN (OLD.billing_account_id IS DISTINCT FROM NEW.billing_account_id) EXECUTE FUNCTION assistant_project_counted();
+
+CREATE FUNCTION project_billing_move_sync() RETURNS trigger
+	LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
+	AS $$
+	DECLARE
+		v_old uuid := OLD.billing_account_id;
+	BEGIN
+		-- An account deleted in this transaction (the cascade set the project's account to null): nothing to sync on it,
+		-- and its lock would come after its row's (364's order).
+		IF v_old IS NOT NULL AND NOT EXISTS (SELECT 1 FROM billing_account WHERE id = v_old) THEN
+			v_old := NULL;
+		END IF;
+		-- Held already from project_billing_account_set (both, id order); taken here only for a path that skipped it.
+		PERFORM billing_accounts_lock(v_old, NEW.billing_account_id);
+		PERFORM app_plan_pause_sync(v_old);
 		PERFORM app_plan_pause_sync(NEW.billing_account_id);
-		PERFORM app_team_seats_sync(OLD.billing_account_id);
+		PERFORM app_team_seats_sync(v_old);
 		PERFORM app_team_seats_sync(NEW.billing_account_id);
 		RETURN NULL;
 	END

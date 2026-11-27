@@ -24,6 +24,22 @@
 -- report's PDF, whatever project id the caller names. Definer, because RLS
 -- would hide a row the caller can't see (a deleted requester's), which must
 -- not read as gone; it reveals only whether a report id exists. Ids only.
+--
+-- Who may ask, and how much it can queue: a signed-in caller (the inline
+-- render's acting user) or the worker (alert_worker_context, the Lambda's
+-- answer), never an anonymous water_app session; and only for a project that
+-- exists or did (erasure_log's 'project' row: a project deleted mid-render,
+-- whose late PDF is exactly the orphan). report_pdf_erasure gets a unique
+-- (project_id, report_id), so the queue holds one entry per object key
+-- however often a key is named (395's trigger queues a report once; any
+-- duplicates already queued are folded first). A key already queued is
+-- re-queued under a new id with its attempts reset: the settle of a claim in
+-- flight (395's app_report_pdf_erasures_settle deletes by id) may have removed
+-- the object before this PDF was stored, and must not take the entry with it.
+
+DELETE FROM report_pdf_erasure a USING report_pdf_erasure b
+	WHERE a.project_id = b.project_id AND a.report_id = b.report_id AND a.id > b.id;
+CREATE UNIQUE INDEX report_pdf_erasure_key_idx ON report_pdf_erasure (project_id, report_id);
 
 CREATE FUNCTION app_report_pdf_orphaned(p_project uuid, p_report uuid) RETURNS boolean
 	LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
@@ -32,10 +48,20 @@ CREATE FUNCTION app_report_pdf_orphaned(p_project uuid, p_report uuid) RETURNS b
 		IF p_project IS NULL OR p_report IS NULL THEN
 			RAISE EXCEPTION 'name the report and its project' USING ERRCODE = 'invalid_parameter_value';
 		END IF;
+		IF app_current_user_id() IS NULL AND NOT alert_worker_context() THEN
+			RAISE EXCEPTION 'only a signed-in render or the worker reports a stored PDF' USING ERRCODE = 'insufficient_privilege';
+		END IF;
 		IF EXISTS (SELECT 1 FROM report r WHERE r.id = p_report) THEN
 			RETURN false;
 		END IF;
-		INSERT INTO report_pdf_erasure (project_id, report_id) VALUES (p_project, p_report);
+		IF NOT EXISTS (SELECT 1 FROM project WHERE id = p_project)
+		   AND NOT EXISTS (SELECT 1 FROM erasure_log WHERE kind = 'project' AND subject_id = p_project) THEN
+			RAISE EXCEPTION 'no such project' USING ERRCODE = 'invalid_parameter_value';
+		END IF;
+		-- One entry per key; a key already queued is re-queued under a new id (a settle in flight deletes by the old one).
+		INSERT INTO report_pdf_erasure (project_id, report_id) VALUES (p_project, p_report)
+			ON CONFLICT (project_id, report_id) DO UPDATE
+			SET id = nextval('report_pdf_erasure_id_seq'), attempts = 0, queued_at = now();
 		RETURN true;
 	END
 	$$;
