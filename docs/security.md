@@ -644,6 +644,14 @@ the owner secures the account", with a positive control).
   a purpose (a verify token can't reset a password), and expire: reset **1 h**,
   verify **48 h**, invite **7 days**. Issuing a new one replaces the old one.
   Malformed tokens are rejected before any DB work.
+- **A reset hashes the new password only for a live link**
+  (`auth/email-routes.ts`). The Argon2id hash (64 MiB, about 0.1 s) is the
+  costliest work a signed-out caller can ask for, and `/auth/reset-password`
+  sits under only the WAF's `/api/auth/` rate rule, not the sign-in CAPTCHA.
+  So the link is consumed first, and the hash runs inside that transaction
+  only when it named an account: a made-up, spent or expired token is
+  refused after one indexed delete. A failing hash rolls the transaction
+  back and leaves the link unused (`auth/reset-password-cost.db.test.ts`).
 - **No account enumeration:** `POST /auth/forgot-password`,
   `POST /auth/resend-confirmation` and `POST /auth/register` each answer the
   same `202` body for known and unknown addresses. Sign-up is **email-first**
@@ -4507,7 +4515,7 @@ PDF someone else asked for kept the person as a recipient
 | Audit log: actor name, names and masked addresses in subjects | `audit_event` | For the life of the project (the regulator's audit trail; POPIA s14(1)(b)) | Pseudonymised: "Deleted user" as actor and subject (D12, 048), and as the leaver a team project was handed over from (`handedFrom`, 383: by `handedFromId`, or for older entries through the `member.removed` entry the same transaction wrote), and the masked address in invitation entries blanked to `•••` (160). The entries stay and are **still treated as personal information** (owners and editors read them; deleted with the project), not as de-identified. Provisional position (pre-counsel research, 2026-10-01): s24(1)(b) reaches only what s14 no longer authorises, and s14(1)(b) authorises the audit trail. A team that keeps public records (`team.public_records`, 161) keeps the name in its projects' entries | Deleted |
 | Model and series revisions: who saved | `model_revision`, `series_revision` | Model revisions for the life of the project; series revisions 180 days / 5 versions | Who cleared | Deleted |
 | API keys, share links, publications: who made, revoked, published | `api_key`, `share_link`, `run_publication` | Kept after revocation (the audit record) | Who cleared; a key keeps working, its automatic re-runs are skipped | Deleted |
-| Jobs, reports, render tokens: who asked; a report's recipient addresses (`report.email_to`). Not in "Download my data" (reviewed for #906): operational rows kept 8 days; `email_to` is the addresses the requester typed, often someone else's, and the requester's own act is the `report.*` audit event; a schedule's recipients are in `reportSubscriptions` | `job`, `report`, `report_schedule_recipient`, `render_token` | Jobs 30 days after finishing; report rows 8 days, PDFs 7; tokens single use, 5 minutes | Deleted, and the PDFs of their reports removed from storage at the worker's next tick (395, issue #903: the trigger on `report` queues the ids in the owner-only `report_pdf_erasure`, the tick deletes each object, MinIO or the bucket, and retries a failed delete next tick; `reports/erasure.db.test.ts`). Residual: a render still in flight when the account goes stores its PDF after the removal; production's 7-day lifecycle deletes it (a local MinIO keeps it), and nothing can download it (the row and its route are gone) | Deleted, PDFs removed the same way |
+| Jobs, reports, render tokens: who asked; a report's recipients (`report.email_to`, the account ids the PDF is emailed to, at most 50). Not in "Download my data" (reviewed for #906): operational rows kept 8 days; `email_to` names the recipients the requester picked, often other people's accounts, and the requester's own act is the `report.*` audit event; a schedule's recipients are in `reportSubscriptions` | `job`, `report`, `report_schedule_recipient`, `render_token` | Jobs 30 days after finishing; report rows 8 days, PDFs 7; tokens single use, 5 minutes | Deleted, and the PDFs of their reports removed from storage at the worker's next tick (395, issue #903: the trigger on `report` queues the ids in the owner-only `report_pdf_erasure`, the tick deletes each object, MinIO or the bucket, and retries a failed delete next tick; `reports/erasure.db.test.ts`). Residual: a render still in flight when the account goes stores its PDF after the removal; production's 7-day lifecycle deletes it (a local MinIO keeps it), and nothing can download it (the row and its route are gone) | Deleted, PDFs removed the same way |
 | Alerts: a person's choices and the mails sent to them; the rules and events | `alert_subscription`, `alert_delivery`; `alert_rule`, `alert_event` | Choices while a member; deliveries 180 days; events 180 days after clearing | Choices and deliveries deleted; a rule's creator cleared | Deleted |
 | Evidence pack emails: that a person (an editor, or the applicant) was emailed about a pack's issue or withdrawal, and whether it went; the email itself goes to their account address | `pack_notice` (133) | 30 days after it is sent, skipped or failed (`app_purge_pack_notices`, the tick) | Deleted | Deleted |
 | Known engine bug emails: that a project owner was emailed about an erratum that may affect the project's runs, and whether it went | `erratum_notice` (153) | 30 days after it is sent, skipped or failed (`app_purge_erratum_notices`, the tick) | Deleted | Deleted |
@@ -5097,6 +5105,16 @@ key there would let any read-only principal forge any user's session.
   origins; `default-src 'none'` on `/api/*`), HSTS 2 years, nosniff,
   `X-Frame-Options: DENY`, Referrer-Policy (`no-referrer` on `/api/*`),
   `X-XSS-Protection: 0`, Permissions-Policy, COOP (`infra/security_headers.tf`).
+- **Caching: every API answer is `Cache-Control: no-store`** unless its
+  route sets its own (`backend/src/http/noStore.ts`, first in `app.ts`, so
+  refusals, 404s and the error handler's answers get it too; no route sets
+  another value today). Nearly every answer carries someone's data (an
+  account, a project, a share link's catchment, an invitation's address).
+  CloudFront caches nothing under `/api/*` (`Managed-CachingDisabled`), but
+  that tells the browser nothing, and without the header it may keep a
+  response in its disk cache for the next person on a shared computer.
+  Tests: `http/noStore.test.ts` (a route's own value wins; signed-out
+  answers of the public routes are marked).
 - **Email (SES):** the API role may only `ses:SendEmail` as
   `no-reply@<domain>` through one identity and configuration set, over a VPC
   endpoint. DKIM + SPF-aligned MAIL FROM + DMARC; TLS required to the
