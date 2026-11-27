@@ -38,6 +38,12 @@ describe('nodeSheetHref', () => {
 	it('drops a stale section when none is asked for', () => {
 		expect(query(nodeSheetHref(at('/projects/p?tab=network&section=demand'), 'n1'))).toEqual({ tab: 'network', edit: 'n1', node: 'n1' });
 	});
+	it('opens the sheet on the Network from the unit grid over Crops & demand or Overview, dropping a farm drawer', () => {
+		const href = nodeSheetHref(at('/projects/p?tab=crops&grid=nodes&farm=f1&run=r1'), 'n1', 'routing');
+		expect(href.startsWith('/projects/p?')).toBe(true);
+		expect(query(href)).toEqual({ tab: 'network', edit: 'n1', node: 'n1', section: 'routing', run: 'r1' });
+		expect(query(nodeSheetHref(at('/projects/p?tab=overview&grid=nodes'), 'n1'))).toEqual({ tab: 'network', edit: 'n1', node: 'n1' });
+	});
 });
 
 describe('farmDrawerHref', () => {

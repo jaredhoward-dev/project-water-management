@@ -42,10 +42,12 @@ export function feedCardClosedHref(url: ReadonlyURL): string {
  * A node's form in the sheet over the map, from a link inside the Network tab (the node table's
  * "set by month" cell): `edit=` and `node=` set (the node edited is the one picked), the section it
  * opens on, every other parameter kept but the grid modal's `grid=`, since the sheet opens over the map
- * in its place (Back returns to the grid). No section drops a stale one.
+ * in its place (Back returns to the grid). No section drops a stale one. The sheet lives on the Network
+ * tab, so `tab=network` is set and a farm drawer's `farm=` goes: the unit grid also opens over Crops &
+ * demand and Overview (`?tab=crops&grid=nodes`), where keeping the tab landed on Crops with no form.
  */
 export function nodeSheetHref(url: ReadonlyURL, id: string, section: string | null = null): string {
-	return hrefWith(url, { edit: id, node: id, section, grid: null });
+	return hrefWith(url, { tab: 'network', edit: id, node: id, section, grid: null, farm: null });
 }
 
 /** The farm drawer in place of the node sheet: `edit=` and the sheet's `section=` go, `farm=` comes. */
