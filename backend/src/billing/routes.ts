@@ -161,6 +161,11 @@ async function portal(c: Context<AuthEnv>, resolve: (db: Db) => Promise<string |
 				...(ref?.provider ? { provider: ref.provider, externalRef: ref.externalRef ?? null } : {})
 			}
 		: null;
+	// The plan as checkout prices it, so the mock's cancel event prices its items as Stripe's (#928); Stripe's portal ignores it.
+	if (live && provider.name === 'mock') {
+		const onSale = (await withoutUser((db) => listPlans(db))).find((p) => p.code === live.planCode);
+		if (onSale) live.plan = checkoutPlanOf(onSale);
+	}
 	const result = await provider.createPortal({ id: state.id, customerRef: state.customerRef }, live, returnUrls(c, pagePath, false));
 	logEvent('info', { event: 'billing_portal', provider: provider.name });
 	c.header('Cache-Control', 'no-store');
@@ -224,7 +229,8 @@ async function changeSeats(c: Context<AuthEnv>, teamId: string) {
 			periodEnd: sub.periodEnd,
 			cancelAtPeriodEnd: sub.cancelAtPeriodEnd,
 			seats: sub.seats,
-			seatsIncluded: plan.seatsIncluded
+			seatsIncluded: plan.seatsIncluded,
+			interval: sub.interval ?? null
 		},
 		seats: body.seats
 	});

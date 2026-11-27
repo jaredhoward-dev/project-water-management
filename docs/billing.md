@@ -1476,6 +1476,18 @@ The *This page has expired* page (a stale or forged token) and the
 *Something went wrong* page (the webhook refused an event) each link back to
 the plan page.
 
+**Prices on the items (#928).** Every mock subscription event (paid, the
+portal's cancel, a seat change) prices its items as Stripe does: each
+`price` carries `unit_amount`, `currency` (lowercase) and
+`recurring.interval`, the plan item at the base price and the extra-seat
+item at the extra-seat price, from the plan figures checkout uses
+(`checkoutPrices`; the checkout token's price, the portal token's
+`baseMinor`/`extraSeatMinor`/`currency`, the seat change's plan), so [§ Price
+check](#price-check) applies to them. A token without the figures (signed
+before, or no interval recorded) sends items with no `price` at all, which
+is not checked and keeps the stored interval, never an unreadable price
+(`unpriced`); a real Stripe payload always carries its prices.
+
 **Where the pages live, and why.** On the backend, as plain HTML forms with
 no script, rather than an SPA route: the outcome is an event signed with
 `BILLING_WEBHOOK_SECRET`, which must stay on the server. A backend page signs

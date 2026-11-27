@@ -111,6 +111,20 @@ describe('checkout and the portal (Phase 3)', () => {
 		expect(readMockSession(SECRET, portal.searchParams.get('t'), NOW)).toMatchObject({ kind: 'portal', accountId: ACCOUNT, subscription: null });
 	});
 
+	it('mock signs the plan figures at the subscription’s interval into its portal token, never the plan itself (#928)', async () => {
+		const p = billingProvider({ BILLING_WEBHOOK_SECRET: SECRET }, { now: () => NOW })!;
+		const live = { planCode: 'team', status: 'active', periodStart: '2026-11-01T00:00:00.000Z', periodEnd: '2027-11-01T00:00:00.000Z', cancelAtPeriodEnd: false, seats: 5, seatsIncluded: 3 };
+		const token = async (sub: Parameters<typeof p.createPortal>[1]) => readMockSession(SECRET, new URL((await p.createPortal({ id: ACCOUNT, customerRef: null }, sub, URLS)).url).searchParams.get('t'), NOW);
+		const yearly = await token({ ...live, interval: 'year', plan: TEAM });
+		expect(yearly).toMatchObject({ subscription: { baseMinor: 2499000, extraSeatMinor: 499000, currency: 'ZAR', interval: 'year' } });
+		expect(yearly?.kind === 'portal' && yearly.subscription && 'plan' in yearly.subscription).toBe(false);
+		// No interval recorded, or the plan not on sale: no figures, so the cancel's items carry no price (mock.ts MockPricing).
+		for (const sub of [{ ...live, interval: null, plan: TEAM }, { ...live, interval: 'year' as const }]) {
+			const t = await token(sub);
+			expect(t?.kind === 'portal' && t.subscription && 'baseMinor' in t.subscription).toBe(false);
+		}
+	});
+
 	it('mock without its dev key is billing_provider_error, never an unsigned page', async () => {
 		const p = billingProvider({})!;
 		expect(await code(p.createCheckout({ id: ACCOUNT, customerRef: null }, PRO, 'month', URLS))).toBe('503 billing_provider_error');

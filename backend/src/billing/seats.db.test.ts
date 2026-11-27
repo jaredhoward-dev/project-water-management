@@ -64,6 +64,14 @@ describe('POST /teams/:id/plan/seats with the mock provider', () => {
 
 		expect((await admin.call('POST', `/teams/${teamId}/plan/seats`, { seats: 3 })).status).toBe(200);
 		expect((await admin.call('GET', `/teams/${teamId}/plan`)).body.subscription).toMatchObject({ seats: 3 });
+		// Each mock event carried its price (#928) and passed the price check: the price accepted is the plan's, and no conflict.
+		expect(
+			await asOwner(
+				`SELECT s.price_minor = p.price_monthly_minor AS at_plan FROM subscription s JOIN plan p ON p.code = s.plan_code WHERE s.billing_account_id = $1 AND s.status = 'active'`,
+				[accountId]
+			)
+		).toEqual([{ at_plan: true }]);
+		expect(await asOwner('SELECT id FROM billing_conflict WHERE billing_account_id = $1', [accountId])).toEqual([]);
 	});
 });
 
@@ -72,7 +80,8 @@ describe('333: app_billing_live_subscription_ref', () => {
 
 	it('answers the provider and id to the team’s admin (positive control), null to a member and a stranger', async () => {
 		const account = (await admin.call('GET', `/teams/${teamId}/plan`)).body.account.id as string;
-		expect(await ref(admin, account)).toEqual({ provider: 'mock', externalRef: `sub_mock_${account.replace(/-/g, '')}` });
+		// Checkout's own new id (#929), not the per-account one the mock used before.
+		expect(await ref(admin, account)).toEqual({ provider: 'mock', externalRef: expect.stringMatching(/^sub_mock_[0-9a-f]{24}$/) });
 		expect(await ref(member, account)).toBeNull();
 		expect(await ref(stranger, account)).toBeNull();
 	});

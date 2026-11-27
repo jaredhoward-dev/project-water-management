@@ -28,7 +28,7 @@ import { SIGNATURE_HEADER, verifySignature } from './provider/signature.js';
 import { normaliseStripeEvent } from './provider/stripe.js';
 import { billingEnvironment } from './provider/environment.js';
 export { BILLING_ENVIRONMENT_SHAPE, billingEnvironment, LOCAL_BILLING_ENVIRONMENT } from './provider/environment.js';
-import { MOCK_SESSION_TTL_SECONDS, seatsChangedEvent, signMockSession } from './provider/mock.js';
+import { MOCK_SESSION_TTL_SECONDS, mockPricing, seatsChangedEvent, signMockSession, type MockSession } from './provider/mock.js';
 import { createHash } from 'node:crypto';
 import { cancelSubscription, changeSeatItem, createCheckoutSession, createCustomer, createInvoice as createStripeInvoice, createPortalSession, ensureExtraSeatProduct, expireCheckoutSession, getSubscriptionItems, listOpenCheckoutSessions, listOpenSubscriptions, orphanCancelAndRefund, StripeApiError, type InvoiceLine, type OrphanResult } from './provider/stripeApi.js';
 
@@ -171,6 +171,8 @@ export interface LiveSubscription {
 	/** Which provider holds it and under which id (333): the mock's portal cancels its own by that id, and shows a `manual` one's invoices only. */
 	provider?: string;
 	externalRef?: string | null;
+	/** The plan as checkout prices it (#928), so the mock's portal event prices its items as Stripe's would; absent when the plan isn't on sale. */
+	plan?: CheckoutPlan;
 }
 export interface ReturnUrls {
 	/** Where the provider sends the person back to: the plan page, with `?checkout=done` or `?checkout=cancelled` for checkout. */
@@ -362,10 +364,18 @@ function mockProvider(secret: string | undefined, now: () => number): BillingPro
 			return { url: `${urls.apiBase}/billing/mock/checkout?t=${encodeURIComponent(t)}` };
 		},
 		async createPortal(account, subscription, urls) {
-			const live =
-				subscription && subscription.periodStart && subscription.periodEnd
-					? { ...subscription, periodStart: subscription.periodStart, periodEnd: subscription.periodEnd }
-					: null;
+			let live: Extract<MockSession, { kind: 'portal' }>['subscription'] = null;
+			if (subscription && subscription.periodStart && subscription.periodEnd) {
+				const { plan, ...rest } = subscription;
+				// The plan figures at the subscription's interval go in the token, not the plan itself: the cancel's items carry them (#928).
+				const prices = plan && subscription.interval ? checkoutPrices(plan, subscription.interval, subscription.seats) : null;
+				live = {
+					...rest,
+					periodStart: subscription.periodStart,
+					periodEnd: subscription.periodEnd,
+					...(plan && prices ? { baseMinor: prices.baseMinor, extraSeatMinor: prices.extraSeatMinor, currency: plan.currency } : {})
+				};
+			}
 			const t = sign({ kind: 'portal', accountId: account.id, returnUrl: urls.successUrl, subscription: live, exp: exp(now()) });
 			return { url: `${urls.apiBase}/billing/mock/portal?t=${encodeURIComponent(t)}` };
 		},
@@ -374,7 +384,11 @@ function mockProvider(secret: string | undefined, now: () => number): BillingPro
 		async changeSeats(change) {
 			if (!secret) throw new BillingProviderError();
 			const { deliverMockEvent } = await import('./mockCheckout.js');
-			const event = seatsChangedEvent(change.accountId, change.externalRef, change.subscription, change.plan.seatsIncluded, change.seats, now());
+			// Priced from the plan figures at the subscription's interval, as Stripe's items are (#928); no interval recorded, no prices.
+			const interval = change.subscription.interval;
+			const prices = interval ? checkoutPrices(change.plan, interval, change.seats) : null;
+			const pricing = prices ? mockPricing(interval, change.plan.currency, prices.baseMinor, prices.extraSeatMinor) : null;
+			const event = seatsChangedEvent(change.accountId, change.externalRef, change.subscription, change.plan.seatsIncluded, change.seats, now(), pricing);
 			if (!(await deliverMockEvent(event)).taken) throw new BillingProviderError();
 		},
 		// No network: an invoice id from the key, so the same request answers the same invoice (as Stripe's would).
