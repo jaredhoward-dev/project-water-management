@@ -344,5 +344,66 @@ class Truncation(unittest.TestCase):
         self.assertEqual(polite.expected_length(headers(Content_Length="10", Content_Encoding="identity")), 10)
 
 
+class PacingAcrossRetries(unittest.TestCase):
+    """The 1 request/second rule holds across retries, and refusals beat retries."""
+
+    def test_a_retry_after_of_zero_or_in_the_past_still_waits_the_interval(self):
+        for retry_after in ("0", "Tue, 14 Nov 2023 22:00:00 GMT"):  # the wall clock is 22:13:20
+            server = FakeServer((503, {"Retry-After": retry_after}), FakeResponse(b"ok"))
+            c, t = client(server)
+            self.assertEqual(c.get("https://x/f").body, b"ok")
+            # The asked-for wait is 0, then the pacing sleeps the full interval before the retry.
+            self.assertEqual(t.slept, [0.0, 1.0], retry_after)
+            self.assertEqual(c.requests, 2)
+
+    def test_the_interval_is_measured_from_the_last_attempt_not_the_first(self):
+        server = FakeServer((429, {"Retry-After": "3"}), FakeResponse(b"a"), FakeResponse(b"b"))
+        c, t = client(server, min_interval=5)
+        c.get("https://x/1")
+        c.get("https://x/2")
+        # 3 s asked, 2 s more to make up the 5 s interval since the first attempt, then 5 s after the retry.
+        self.assertEqual(t.slept, [3.0, 2.0, 5.0])
+
+    def test_validators_and_range_are_sent_again_on_every_retry(self):
+        server = FakeServer((503, {"Retry-After": "1"}), FakeResponse(b"x", status=206))
+        c, _ = client(server)
+        c.get("https://x/f", etag='"e"', last_modified="Tue, 26 May 2026 00:00:00 GMT", byte_range=(10, 19))
+        for req in server.requests:
+            self.assertEqual(req.get_header("If-none-match"), '"e"')
+            self.assertEqual(req.get_header("If-modified-since"), "Tue, 26 May 2026 00:00:00 GMT")
+            self.assertEqual(req.get_header("Range"), "bytes=10-19")
+
+    def test_a_403_after_a_503_stops_at_once(self):
+        server = FakeServer((503, {"Retry-After": "2"}), 403, FakeResponse(b"never reached"))
+        c, t = client(server, max_retries=5)
+        with self.assertRaises(polite.StopRun):
+            c.get("https://x/f")
+        self.assertEqual(len(server.requests), 2)
+        self.assertEqual(t.slept, [2.0])  # no backoff after the 403
+
+    def test_a_404_is_an_http_error_and_not_retried(self):
+        server = FakeServer(404, FakeResponse(b"never reached"))
+        c, t = client(server)
+        with self.assertRaises(polite.HttpError) as e:
+            c.get("https://x/f")
+        self.assertEqual((e.exception.status, len(server.requests), t.slept), (404, 1, []))
+
+    def test_a_bad_byte_range_is_refused_before_any_request(self):
+        server = FakeServer(FakeResponse(b"never reached"))
+        c, _ = client(server)
+        for bad in [(5, 4), (-1, 3)]:
+            with self.assertRaises(ValueError, msg=bad):
+                c.get("https://x/f", byte_range=bad)
+        self.assertEqual((server.requests, c.requests), ([], 0))
+
+    def test_retry_after_parsing(self):
+        now = lambda: 1_700_000_000.0  # noqa: E731
+        self.assertEqual(polite.retry_after_seconds(" 120 ", now), 120.0)
+        self.assertIsNone(polite.retry_after_seconds(None, now))
+        # Not delta-seconds (a decimal, a negative) and not a date: unreadable, so the default backoff applies.
+        for bad in ("1.5", "-5", "soon", ""):
+            self.assertIsNone(polite.retry_after_seconds(bad, now), bad)
+
+
 if __name__ == "__main__":
     unittest.main()
