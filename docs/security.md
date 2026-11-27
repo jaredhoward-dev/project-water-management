@@ -2058,6 +2058,16 @@ In short:
 - **Irrigation systems** (`198_irrigation_systems.sql`,
   `200_irrigation_system_seed_invoker.sql`,
   `201_irrigation_system_viewer_read.sql`). `irrigation_system` is read from
+  **413_rls_sweep_closes** closed three loose ends the sweep's review found
+  (`backend/src/db/migration-413.security.db.test.ts`, each with a positive
+  control): a queued `delineation_request` keeps its project and maker (an
+  editor of two projects could move one, or name another as who queued
+  it); `app_share_allowed` answers false unless the caller holds a role in
+  the project (it had told any caller, an outsider or a session with no
+  user, who in another project is a contributor and in which party), with
+  the rule moved to the owner-only `share_allowed_rule` that the share
+  triggers call; and `report_delete` needs the requester to still be a
+  viewer, as `report_update` does.
   viewer up and written by editors. A farmer or an applicant reads none of
   it (201; 198 had let every role read it): its rows are the project's,
   an "Imported, NN %" row was made from a farm's own efficiency, and the

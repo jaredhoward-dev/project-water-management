@@ -2370,6 +2370,12 @@ is left for PostGIS when Step 4 needs cross-catchment spatial queries).
   each with a covering index. `refusal_code` also takes `off_channel` and
   `map_changed` (a plan's feature gone before the job read the map), and
   `delineation_request_final` (latest 272) compares the plan columns too.
+  **Migration 413** (`413_rls_sweep_closes.sql`): a request's `id`,
+  `project_id`, `created_by` and `created_at` are fixed from the insert,
+  queued or not, so an editor of two projects can't move a queued request
+  or name someone else as who queued it; `created_by` changes only when its
+  foreign key clears it. The function is SECURITY DEFINER now, as 185 made
+  the proposals', so app_user's RLS can't hide a live account from that check.
   The click views never show a plan, nor the plan view a click.
 - **`start_proposal`** (`178_start_proposal.sql`, issue #326 C3,
   [maps.md § Start from the map](./maps.md#start-from-the-map)): a model
@@ -2891,7 +2897,12 @@ projection's read and narrows their series further:
   consultant, their client). `app_share_allowed`: a contributor-or-above
   member who isn't the owner and, while the owner is a contributor, is in
   the owner's party (compared ignoring case); an owner who is a viewer or
-  above may share with any contributor-or-above member.
+  above may share with any contributor-or-above member. Since
+  413_rls_sweep_closes the rule itself is `share_allowed_rule`, which only the
+  schema owner can run (the share triggers and `app_share_candidates` call
+  it); `app_share_allowed`, the one `water_app` may call, answers false
+  unless the caller holds a role in the project, so it is no oracle on
+  another project's members.
   `app_share_candidates(project)` lists, for the current user, whom they may
   share with (id and display name, never an email): the only way an
   applicant names someone, so no answer says who else is a member.
@@ -6063,7 +6074,9 @@ refuses one.
     under their RLS, and not the run itself); UPDATE of the outcome
     columns only (`status`, `pages`, `bytes`, `error`, `finished_at`, a
     column grant) and only by the requester, which is who the job runs as;
-    DELETE by the requester.
+    DELETE by the requester while still a viewer (413_rls_sweep_closes; it
+    had checked the requester alone, so one who lost their role could
+    delete their old reports with a statement that read no column).
   - `report_schedule`: SELECT for viewers; INSERT / UPDATE / DELETE for
     editors, with the acting user equal to the signed-in user. The
     `report_schedule_stamp` trigger (on `water_app`'s writes) stamps the
