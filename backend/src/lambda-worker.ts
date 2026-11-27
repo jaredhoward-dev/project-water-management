@@ -118,23 +118,25 @@ export const fromMailEventsQueue = (record: Pick<SQSRecord, 'eventSourceARN'>, a
  * dev and tests run no SQS triggers; a stack older than the variable keeps
  * working until its next apply).
  */
+type Env = Record<string, string | undefined>;
+// Each read names its setting, so config/production.security.test.ts can inventory and classify it.
 export const MESSAGE_QUEUES = {
-	wake: 'JOBS_QUEUE_ARN',
-	ingest: 'INGEST_RESULTS_QUEUE_ARN',
-	rendered: 'RENDER_RESULTS_QUEUE_ARN',
-	rendered_pack: 'RENDER_RESULTS_QUEUE_ARN'
-} as const satisfies Record<NonNullable<ReturnType<typeof parseWorkerMessage>>['type'], string>;
+	wake: (env: Env) => env.JOBS_QUEUE_ARN,
+	ingest: (env: Env) => env.INGEST_RESULTS_QUEUE_ARN,
+	rendered: (env: Env) => env.RENDER_RESULTS_QUEUE_ARN,
+	rendered_pack: (env: Env) => env.RENDER_RESULTS_QUEUE_ARN
+} as const satisfies Record<NonNullable<ReturnType<typeof parseWorkerMessage>>['type'], (env: Env) => string | undefined>;
 
 /**
  * Whether a message of `type` may be read from the queue the record came
  * from: when its own queue is configured, only from that queue; and never
  * from a configured queue that belongs to another kind.
  */
-export function fromItsQueue(type: keyof typeof MESSAGE_QUEUES, record: Pick<SQSRecord, 'eventSourceARN'>, env: Record<string, string | undefined> = process.env): boolean {
-	const own = env[MESSAGE_QUEUES[type]];
+export function fromItsQueue(type: keyof typeof MESSAGE_QUEUES, record: Pick<SQSRecord, 'eventSourceARN'>, env: Env = process.env): boolean {
+	const own = MESSAGE_QUEUES[type](env);
 	if (own) return record.eventSourceARN === own;
 	const source = record.eventSourceARN;
-	return !source || !Object.values(MESSAGE_QUEUES).some((name) => env[name] === source);
+	return !source || !Object.values(MESSAGE_QUEUES).some((arnOf) => arnOf(env) === source);
 }
 
 /** Handle one SQS record. Throws only when it should be retried (a database error). */

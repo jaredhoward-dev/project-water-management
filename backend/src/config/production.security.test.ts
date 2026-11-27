@@ -128,6 +128,7 @@ const PROD: Record<Role, Record<string, string>> = {
 		NODE_EXTRA_CA_CERTS: CA,
 		FEED_FETCHER: 'sqs',
 		FETCH_REQUESTS_QUEUE_URL: SQS('fetch-requests.fifo'),
+		INGEST_RESULTS_QUEUE_ARN: 'arn:aws:sqs:af-south-1:000000000000:water-management-ingest-results',
 		// Station API feeds' own queue (infra/feeds.tf, "Station fetches apart"), set while they are on, as here.
 		STATION_FETCH_REQUESTS_QUEUE_URL: SQS('station-fetch-requests.fifo'),
 		FEED_SOURCE: 'live',
@@ -153,6 +154,8 @@ const PROD: Record<Role, Record<string, string>> = {
 		ALERTS_ENABLED: 'true',
 		ALERTS_DAILY_CAP: '5',
 		MAIL_EVENTS_QUEUE_ARN: 'arn:aws:sqs:af-south-1:000000000000:water-management-mail-events',
+		JOBS_QUEUE_ARN: 'arn:aws:sqs:af-south-1:000000000000:water-management-jobs',
+		RENDER_RESULTS_QUEUE_ARN: 'arn:aws:sqs:af-south-1:000000000000:water-management-render-results',
 		DEM_URL: 's3://water-management-tiles-000000000000/tiles/terrain.pmtiles',
 		OPERATOR_EMAIL: 'operator@water.example.org'
 	},
