@@ -82,7 +82,9 @@ export function metricLine(r: TickResult, now = Date.now()): string {
 						{ Name: 'JobsFailed', Unit: 'Count' },
 						// Alert mails (alerts/send.ts): infra/jobs.tf alarms on a burst (docs/deployment.md § Runbooks, alert storm).
 						{ Name: 'AlertMailsSent', Unit: 'Count' },
-						{ Name: 'AlertMailsFailed', Unit: 'Count' }
+						{ Name: 'AlertMailsFailed', Unit: 'Count' },
+						// Billing sweeps that threw this tick (runner.ts billingStep): infra/alarms.tf billing_tick_failed.
+						{ Name: 'BillingStepsFailed', Unit: 'Count' }
 					]
 				}
 			]
@@ -91,7 +93,8 @@ export function metricLine(r: TickResult, now = Date.now()): string {
 		JobsDead: r.dead,
 		JobsFailed: r.failed,
 		AlertMailsSent: r.alerts.sent,
-		AlertMailsFailed: r.alerts.failed
+		AlertMailsFailed: r.alerts.failed,
+		BillingStepsFailed: r.billingFailed.length
 	});
 }
 

@@ -828,8 +828,9 @@ run "essential_alarm_tier" {
       length(aws_cloudwatch_metric_alarm.run_stamp_drift),
       length(aws_cloudwatch_metric_alarm.client_error),
       length(aws_cloudwatch_log_metric_filter.client_error),
+      length(aws_cloudwatch_metric_alarm.billing_tick_failed),
     ] : n == 1]) && length(aws_cloudwatch_log_metric_filter.mail_send_failed) == 2 && length(aws_cloudwatch_log_metric_filter.run_stamp_drift) == 2
-    error_message = "alarm_tier = \"essential\" must keep the 15 essential alarms and the filters that feed them."
+    error_message = "alarm_tier = \"essential\" must keep the 16 essential alarms and the filters that feed them."
   }
 
   assert {
@@ -873,6 +874,31 @@ run "billing_orphan_alarm_with_stripe" {
       aws_cloudwatch_metric_alarm.billing_orphan_failed[0].alarm_actions == toset([aws_sns_topic.alerts.arn])
     )
     error_message = "With billing_provider = \"stripe\", any orphan_failed line from the billing webhook must page the alerts topic."
+  }
+}
+
+# A billing sweep failing three ticks running pages (jobs/runner.ts billingStep): the worker's embedded
+# BillingStepsFailed metric, on the essential tier production runs, whatever the billing provider.
+run "billing_tick_alarm" {
+  command = plan
+
+  variables {
+    alarm_tier = "essential"
+  }
+
+  assert {
+    condition = (
+      length(aws_cloudwatch_metric_alarm.billing_tick_failed) == 1 &&
+      aws_cloudwatch_metric_alarm.billing_tick_failed[0].namespace == "water-management/Jobs" &&
+      aws_cloudwatch_metric_alarm.billing_tick_failed[0].metric_name == "BillingStepsFailed" &&
+      aws_cloudwatch_metric_alarm.billing_tick_failed[0].statistic == "Sum" &&
+      aws_cloudwatch_metric_alarm.billing_tick_failed[0].comparison_operator == "GreaterThanThreshold" &&
+      aws_cloudwatch_metric_alarm.billing_tick_failed[0].threshold == 0 &&
+      aws_cloudwatch_metric_alarm.billing_tick_failed[0].period * aws_cloudwatch_metric_alarm.billing_tick_failed[0].evaluation_periods == 900 &&
+      aws_cloudwatch_metric_alarm.billing_tick_failed[0].treat_missing_data == "notBreaching" &&
+      aws_cloudwatch_metric_alarm.billing_tick_failed[0].alarm_actions == toset([aws_sns_topic.alerts.arn])
+    )
+    error_message = "A billing sweep failing for 15 minutes (the worker's BillingStepsFailed, water-management/Jobs) must page the alerts topic on the essential tier."
   }
 }
 

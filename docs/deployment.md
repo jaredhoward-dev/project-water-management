@@ -3592,6 +3592,9 @@ secret is involved: both switches are plain variables in
    the first worker tick after the switch, and nothing pauses before those
    14 days are up ([billing.md § Pausing after a
    downgrade](./billing.md#pausing-after-a-downgrade)).
+   The switch also reaches the migrate Lambda (its owner actions set it on
+   their database session, so a grant or revoke never drops a pause until
+   the next tick).
 2. **Set the switches.** Add `billing_enforced = true` to
    `prod.tfvars.sops`, and `reverse_trial = true` too if the trial starts the
    same day (it may follow later; it can't come first, since plan refuses it
@@ -3600,7 +3603,7 @@ secret is involved: both switches are plain variables in
    `cd infra && AWS_PROFILE=water-management ./scripts/tf.sh plan -var-file=../../infra-secrets/water-management/prod.tfvars.sops -out=<plan>`
    and `AWS_PROFILE=water-management ./scripts/tf.sh apply <plan>`. Expect
    only environment changes: `BILLING_ENFORCED` from `"false"` to `"true"` on
-   the backend, worker and assistant functions (the assistant only when
+   the backend, worker, assistant and migrate functions (the assistant only when
    `assistant_enabled`), and with the trial `REVERSE_TRIAL` from `"false"` to
    `"true"` on the backend function. Each function cold-starts with its new
    value; no release is needed.
@@ -3656,6 +3659,26 @@ row ages out with the other events after 90 days. The row stays
 `orphan_pending` (no owner action marks it done), so the report lists it
 until then; note the event id in the incident log so the next report's line
 is known.
+
+**`billing-tick-failed`** (`infra/alarms.tf`, essential tier, any provider,
+shadow mode too) pages when one of the worker tick's five billing sweeps
+(staff grant and reverse trial expiry, the dunning lapse, the silent report
+refund, the pause after a downgrade; `billingStep` in
+`backend/src/jobs/runner.ts`) has failed in each of three ticks running
+(the embedded metric `BillingStepsFailed`, `water-management/Jobs`, from
+`lambda-worker.ts` `metricLine`; `Sum > 0` for three 5-minute periods). A
+failing sweep no longer holds up the rest of the tick: feeds, alerts, jobs
+and emails go on, and the sweep is tried each tick, so a lone deadlock
+clears itself without paging. While it fails, grants and trials past their
+end stay on, overdue subscriptions don't drop to Free, and no grace or
+pause starts. Search the worker's log group for `event =
+billing_tick_step_failed`: `step` names the sweep (`staff_grant_expire`,
+`reverse_trial_expire`, `dunning_lapse`, `report_refund`, `plan_pause`) and
+`code` its SQLSTATE (the message is never logged). A lock timeout or
+deadlock (`55P03`, `40P01`) that persists points at a long transaction on
+the same accounts; anything else is a bug in that sweep's SQL function,
+fixed by a migration and a backend release. The alarm clears on the first
+tick that runs every sweep.
 
 ## The cutover
 

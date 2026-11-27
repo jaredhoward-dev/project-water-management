@@ -456,17 +456,21 @@ checkout and the portal are [§ Checkout and portal](#checkout-and-portal).
 
 | Provider | Webhooks | Use |
 | --- | --- | --- |
-| `mock` (code default) | Stripe-shaped events signed with the committed dev-only `BILLING_WEBHOOK_SECRET` in `backend/.env.development` | local dev and tests: the whole path with no Stripe account |
-| `manual` | none (`404`) | subscriptions the operator records by hand; production's setting until Stripe is set up |
+| `mock` (the code default off Lambda) | Stripe-shaped events signed with the committed dev-only `BILLING_WEBHOOK_SECRET` in `backend/.env.development` | local dev, the tests and the e2e server: the whole path with no Stripe account |
+| `manual` (the code default on Lambda) | none (`404`) | subscriptions the operator records by hand; production's setting until Stripe is set up |
 | `stripe` | Stripe's signed events, checked with `BILLING_WEBHOOK_SECRET` (the endpoint's `whsec_…`) | production, once the operator has the account |
 
-Any other value names no provider, and every webhook is `404`. It never falls
-back to the mock: feohledger's billing doc records how a mistyped provider
-name that resolved to its signature-free mock opened its public webhook. The
-production check (`config/production.ts`) refuses an unset `BILLING_PROVIDER`
-(the mock) and anything but `manual` or `stripe` on the API Lambda, and with
-`stripe` it requires a real `BILLING_WEBHOOK_SECRET` (32+ characters, not a
-`dev-only-` placeholder). Terraform sets `BILLING_PROVIDER = "manual"` on the
+Unset (or blank) is the mock off Lambda and `manual` on Lambda
+(`billingProviderName`, keyed on `AWS_LAMBDA_FUNCTION_NAME`), so the mock never
+serves in AWS, and a backend released before the Terraform apply that sets the
+variable still starts, with no webhooks. Any other value names no provider,
+and every webhook is `404`. It never falls back to the mock: feohledger's
+billing doc records how a mistyped provider name that resolved to its
+signature-free mock opened its public webhook. The production check
+(`config/production.ts`) accepts `BILLING_PROVIDER` unset on the API Lambda
+(that is `manual`) and refuses any value set but `manual` or `stripe`, and
+with `stripe` it requires a real `BILLING_WEBHOOK_SECRET` (32+ characters, not
+a `dev-only-` placeholder). Terraform sets `BILLING_PROVIDER = "manual"` on the
 API (`infra/lambda.tf`).
 
 ### Signature check
@@ -1708,8 +1712,18 @@ Built but off: nothing is paused unless `BILLING_ENFORCED` is on.
   enforcement switched off again), so a plan that ended in shadow mode (a
   staff grant's end, a lapsed trial) starts its 14 days, and its grace
   email, at the first tick after enforcement is switched on, never pausing
-  at once. The schema owner's scripts don't carry the setting, so a
-  subscription change made through them leaves an existing stamp alone. An account that never had a plan is
+  at once. The schema owner's own connections (`pnpm dev:billing:grant`,
+  `dev:billing:invoice`, `dev:billing:conflict` and the migrate Lambda's
+  owner actions) set `app.billing_enforced` on their session from
+  `BILLING_ENFORCED` (`setOwnerBillingEnforced` in
+  `backend/src/billing/enforced.ts`, as `db/tx.ts` does for its
+  transactions; Terraform sets it on the migrate Lambda too), so a grant,
+  revoke or invoice they make syncs the pause as the app would: it doesn't
+  drop a paused account's markers until the next tick, and a revoke under
+  enforcement starts the new grace at once. Any other owner connection
+  (`psql`, a migration) runs the sync as not enforced: it leaves an existing
+  stamp alone but drops the account's pause markers, which the next tick
+  (within 5 minutes) puts back. An account that never had a plan is
   never paused (its extra live catchments predate enforcement). A reverse
   trial's end (342, `app_reverse_trial_expire`) is a lapse like any other,
   so it starts the same grace. Auto-calibration on new data isn't paused:
@@ -1775,8 +1789,11 @@ Built but off: nothing is paused unless `BILLING_ENFORCED` is on.
   feeds, alerts and jobs (`billingStep` in `jobs/runner.ts`). One that throws
   is logged as `billing_tick_step_failed` with its `step` and the error's
   class and SQLSTATE only (never its message, which can carry row values),
-  listed in the tick result's `billingFailed`, and tried again next tick;
-  the rest of the tick runs as usual.
+  listed in the tick result's `billingFailed` (the worker's embedded metric
+  `BillingStepsFailed`, which the `billing-tick-failed` alarm reads after
+  three failing ticks: [deployment.md § Billing
+  alarms](./deployment.md#billing-alarms)), and tried again next tick; the
+  rest of the tick runs as usual.
 - **In the workspace.** A paused catchment's section header says so in its
   notice line, an information note, not an error (`project.planPausedAt` on
   `GET /projects/:id`; `billing/planPause.ts`): its feeds, alerts and
@@ -1795,8 +1812,12 @@ Built but off: nothing is paused unless `BILLING_ENFORCED` is on.
   staff grant ending in shadow mode starts no grace and a shadow tick clears
   an old one, then enforcement switched on starts the grace that tick, queues
   its email and pauses nothing for 14 days (409; positive control: past them
-  the pause lands). `jobs/runner.test.ts`: a billing sweep that throws doesn't
-  stop the tick (below).
+  the pause lands); an owner connection set up as the scripts and owner
+  actions open it keeps a paused account's markers through a subscription
+  write (control: a bare owner connection drops them and the tick restores
+  them), and an owner action's grant resumes the account and its revoke
+  starts a new grace. `jobs/runner.test.ts`: a billing sweep that throws
+  doesn't stop the tick (below).
   `feeds/feeds.db.test.ts` (a fetch queued before the pause ends without
   fetching, and fetches after a resume), `ingest/ingest.db.test.ts` (a key's
   readings accepted into a paused catchment, no re-run until it resumes) and

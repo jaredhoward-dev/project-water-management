@@ -47,8 +47,13 @@ describe('metricLine', () => {
 		expect(line._aws.Timestamp).toBe(1_700_000_000_000);
 		expect(line._aws.CloudWatchMetrics[0].Namespace).toBe(METRIC_NAMESPACE);
 		expect(METRIC_NAMESPACE).toBe('water-management/Jobs');
-		expect(line._aws.CloudWatchMetrics[0].Metrics.map((m: { Name: string }) => m.Name)).toEqual(['OldestDueJobAgeSeconds', 'JobsDead', 'JobsFailed', 'AlertMailsSent', 'AlertMailsFailed']);
-		expect(line).toMatchObject({ OldestDueJobAgeSeconds: 420, JobsDead: 1, JobsFailed: 1, AlertMailsSent: 7, AlertMailsFailed: 2 });
+		expect(line._aws.CloudWatchMetrics[0].Metrics.map((m: { Name: string }) => m.Name)).toEqual(['OldestDueJobAgeSeconds', 'JobsDead', 'JobsFailed', 'AlertMailsSent', 'AlertMailsFailed', 'BillingStepsFailed']);
+		expect(line).toMatchObject({ OldestDueJobAgeSeconds: 420, JobsDead: 1, JobsFailed: 1, AlertMailsSent: 7, AlertMailsFailed: 2, BillingStepsFailed: 0 });
+	});
+
+	it('counts the billing sweeps that failed (infra/alarms.tf billing_tick_failed reads it)', () => {
+		const line = JSON.parse(metricLine({ ...tick, billingFailed: ['staff_grant_expire', 'plan_pause'] }));
+		expect(line.BillingStepsFailed).toBe(2);
 	});
 });
 
