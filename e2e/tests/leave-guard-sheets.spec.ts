@@ -55,7 +55,7 @@ test('the node sheet: Stay keeps it open and named in the URL; Leave closes it, 
 	await expect(sheet).toBeHidden();
 });
 
-test('‹ › in the sheet after Leave still replaces: Back goes to before the sheet, not to the node left', async ({ page, owner }) => {
+test('Previous and Next in the sheet after Leave still replace: Back goes to before the sheet, not to the node left', async ({ page, owner }) => {
 	void owner;
 	const project = await createProject(page.request, 'Sheet step guard');
 	await putModel(page.request, project.id, sampleModel());
