@@ -161,6 +161,17 @@ describe('checkedStationRecord', () => {
 		expect(r.warnings.filter((w) => w.includes('unreliable period that isn’t two dates in order'))).toHaveLength(3);
 	});
 
+	it('ignores an unreliable period starting in year 0000, with its warning (engine ≥ 1.123.1: not a date the database can store); from year 0001 it applies (positive control)', () => {
+		const stored = rainOf(1);
+		const old = checkedStationRecord(settingsWith({ unreliable: { S1: [['0000-01-01', '2018-03-10']] } }), seriesOf({ [stationSeriesKey('S1')]: ser(stored) }), 'S1')!;
+		expect(old.record.values).toEqual(stored);
+		expect(old.setAside.unreliable).toBe(0);
+		expect(old.warnings.filter((w) => w.includes('unreliable period that isn’t two dates in order'))).toHaveLength(1);
+		const year1 = checkedStationRecord(settingsWith({ unreliable: { S1: [['0001-01-01', '2018-03-10']] } }), seriesOf({ [stationSeriesKey('S1')]: ser(stored) }), 'S1')!;
+		expect(year1.setAside.unreliable).toBeGreaterThan(0);
+		expect(year1.warnings.some((w) => w.includes('unreliable period that isn’t two dates in order'))).toBe(false);
+	});
+
 	it('is deterministic', () => {
 		const s = settingsWith({ unreliable: { S1: [['2018-03-01', '2018-03-10']] } });
 		const x = seriesOf({ [stationSeriesKey('S1')]: ser(withZeroRun(rainOf(1))), [stationChirpsSeriesKey('S1')]: ser(rainOf(0.7)) });

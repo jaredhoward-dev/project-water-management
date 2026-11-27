@@ -137,7 +137,11 @@ to its default. Each says so in a run warning. A unit's dam and return shares
 (80 meant as a percent would start a dam at 80 × its capacity), and a window
 or period date that doesn't exist (2001-02-29) is not a date: a report window
 date warns and falls back, a simulation date stops the run (before 1.69.0
-Date.parse rolled it over to 1 March). A dam rule from a unit to itself is
+Date.parse rolled it over to 1 March). Nor is a date in year 0000 (engine ≥
+1.123.1): JavaScript's Date takes it, Postgres's date doesn't, so a station
+unreliable period or a rain-source period starting then is skipped with its
+warning, and a scenario op dated then is refused (before, they were applied
+from that day). A dam rule from a unit to itself is
 skipped with a warning, as an off-take to itself is.
 
 ### 2.3 Irrigation demand

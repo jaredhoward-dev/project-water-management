@@ -82,6 +82,14 @@ describe('settings.demandFactorFrom (engine 0.44.0)', () => {
 		expect(out.summary.warnings).toContain('demandFactorFrom "1 Oct" is not an ISO date (YYYY-MM-DD); demand factors apply on every day');
 	});
 
+	it('ignores year 0000 with the same warning (engine ≥ 1.123.1), running as before: every day, as the clamp to the first day did', () => {
+		const base = randomInput(9, { maxNodes: 6, maxDays: 300, allocationModes: false });
+		const scaled = applyScenario(base, everyone(base, 0.5)).input;
+		const out = runModel({ ...scaled, settings: { ...scaled.settings, demandFactorFrom: '0000-01-01' } });
+		expect(out.series).toEqual(runModel(scaled).series);
+		expect(out.summary.warnings).toContain('demandFactorFrom "0000-01-01" is not an ISO date (YYYY-MM-DD); demand factors apply on every day');
+	});
+
 	it('scales month by month from the day (a months-form op)', () => {
 		const base = randomInput(11, { maxNodes: 6, maxDays: 500, allocationModes: false });
 		const x = runModel(base);

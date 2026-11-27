@@ -38,8 +38,10 @@ export function toEpochDay(iso: string): number {
 
 /**
  * A real calendar date written `YYYY-MM-DD` (not 2001-02-29, not month 13), from year 1; never throws.
- * Year 0000 is refused: Date takes it (ISO 8601's 1 BC), but Postgres's date has no year 0, so a date
- * this accepted could fail a backend insert as a 500. A boundary check only: no run reads it differently.
+ * Year 0000 is refused (engine ≥ 1.123.1): Date takes it (ISO 8601's 1 BC), but Postgres's date has no
+ * year 0, so a date this accepted could fail a backend insert as a 500. A saved input dated in year 0000
+ * now reads as "not a date" wherever the engine checks one: a station unreliable period or a rain-source
+ * period starting then is skipped with its warning, and a scenario op with such a `from` is refused.
  */
 export function isIsoDate(v: unknown): v is string {
 	if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v) || v.startsWith('0000')) return false;
