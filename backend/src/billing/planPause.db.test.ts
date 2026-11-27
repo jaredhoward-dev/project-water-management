@@ -370,22 +370,22 @@ describe('417: the tick visits only the accounts it can change', () => {
 		await asOwner(`INSERT INTO subscription (billing_account_id, plan_code, status, provider) VALUES ($1, 'pro', 'canceled', 'mock')`, [acct]);
 		return { u, ids, acct };
 	};
-	const goLive: Record<string, (u: User, pid: string) => Promise<void>> = {
-		feed: async (u, pid) => {
+	const goLive = {
+		feed: async (u: User, pid: string) => {
 			const f = await u.call('POST', `/projects/${pid}/feeds`, feedBody);
 			expect(f.status, JSON.stringify(f.body)).toBe(201);
 		},
-		alert: async (u, pid) => {
+		alert: async (u: User, pid: string) => {
 			expect((await u.call('PUT', `/projects/${pid}/alert-rules`, alertBody)).status).toBe(200);
 		},
-		publication: async (u, pid) => {
+		publication: async (u: User, pid: string) => {
 			const run = ((await asOwner(
 				`INSERT INTO model_run (project_id, created_by, engine_version, start_date, end_date, inputs) VALUES ($1, $2, 'x', '2020-01-01', '2020-02-29', '{}') RETURNING id::text`,
 				[pid, u.id]
 			)) as { id: string }[])[0]!.id;
 			await asOwner(`INSERT INTO run_publication (project_id, run_id) VALUES ($1, $2)`, [pid, run]);
 		},
-		autoRun: async (u, pid) => {
+		autoRun: async (u: User, pid: string) => {
 			expect((await u.call('PATCH', `/projects/${pid}`, { settings: { autoRun: { enabled: true } } })).status).toBe(200);
 		}
 	};
