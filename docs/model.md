@@ -7543,7 +7543,13 @@ hydrologist, #90):
 storage). The EWR attribution (§2.7b) counts the remote share as a transfer
 from the supplying unit to the receiving one. The farm view's dam days left
 (farmProjection.ts `damDraw`) take `remote_dam_in` off the dam's own draw
-and add `remote_dam_out` to it.
+and add `remote_dam_out` to it. Views find the remote legs of a saved run
+with `plannedRemoteLegs`, which plans them as the run does, the river
+off-takes as the run accepts them included (`planOfftakes`, so an off-take
+the run skips because its destination drains into its source is no link
+there either; before this fix such an off-take hid a leg the run had, and
+the farm view lost that unit's remote supply). `cropSupply.test.ts` holds
+it to the run's `remote_dam_in` series on random networks.
 
 **Checks.** `checkBalance` closes both units' balances with the two
 columns; `checkWorkings` replays the dam side against its share, holds
