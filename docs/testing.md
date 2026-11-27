@@ -66,7 +66,11 @@ All of them live in one docker Postgres volume. `pnpm dev:db:reset` drops and
 recreates only the checkout's Dev database and never a test or e2e one (those
 rebuild their schema on every run anyway); `pnpm dev:docker:wipe` deletes the
 volume, every checkout's databases with it
-([run-locally.md § Common issues](./run-locally.md#common-issues)).
+([run-locally.md § Common issues](./run-locally.md#common-issues)). The containers are shared too, so starting them
+from one checkout must not recreate them under another: the `dev:*:up` scripts
+pass `--no-recreate`, and `scripts/guards/docker_recreate.mjs` (run by
+`pnpm test:scripts`) fails any root script whose `docker compose up` doesn't,
+except `dev:db:recreate` (issue #945).
 
 What guards those two: `backend/src/config/devDbReset.test.ts` covers the
 reset's guard (`resetTarget`, `ownDevDbName`: a non-local URL, another port,
