@@ -513,7 +513,7 @@
 						{#if prev.attribution}<p class="muted small">{attributionSummary(prev.attribution)}</p>{/if}
 						<ChangesList changes={prev.changes} authors={lineAuthors(prev.changes, prev.attribution)} />
 					{:else if s.id === 'validation'}
-						<ValidationStatement {summary} engineVersion={run.engineVersion} legacy={run.legacy} fitEngineVersion={runFitEngineVersions(run.settings, summary)} />
+						<ValidationStatement {summary} engineVersion={run.engineVersion} legacy={run.legacy} fitEngineVersion={runFitEngineVersions(run.settings, summary)} errata={run.errata} />
 					{:else if s.id === 'signoff' && signoffs}
 						<SignoffSection {projectId} target={{ kind: 'run', id: run.id }} list={signoffs} onchange={signoffsChanged} {timeZone} />
 					{:else if s.id === 'disclaimer'}

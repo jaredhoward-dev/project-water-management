@@ -1027,6 +1027,7 @@
 							engineVersion={shownRun.engineVersion}
 							legacy={shownRun.legacy}
 							fitEngineVersion={runFitEngineVersions(shownRun.settings, summary)}
+							errata={shownRun.errata}
 							bind:open={validationOpen}
 						/>
 					</div>
