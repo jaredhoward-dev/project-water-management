@@ -335,3 +335,49 @@ describe('403: 361’s assistant cost follows a project moved by its team (a col
 		await asOwner('DELETE FROM assistant_usage WHERE project_id = $1', [projectId]);
 	});
 });
+
+describe('403: a team’s deletion and a webhook on its account take their locks in one order', () => {
+	// Before the fix the deletion locked the team's account row (364's assistant_lock_account_first) and took its
+	// billing lock only in its projects' triggers as they left the team; a webhook holding the billing lock and waiting on
+	// the row deadlocked with it. A third session holds the billing lock until both are queued, the webhook first.
+	it('a subscription event and the team’s deletion at once both complete, with no deadlock (40P01)', async () => {
+		vi.stubEnv('BILLING_PROVIDER', 'mock');
+		vi.stubEnv('BILLING_WEBHOOK_SECRET', SECRET);
+		const admin = await signUp('DeleteLockAdmin');
+		for (let round = 0; round < 3; round++) {
+			const teamId = (await admin.call('POST', '/teams', { name: `Delete lock ${crypto.randomUUID().slice(0, 8)}` })).body.team.id as string;
+			const projectId = (await admin.call('POST', '/projects', { name: 'Delete lock' })).body.project.id as string;
+			made.push(projectId);
+			expect((await admin.call('PATCH', `/projects/${projectId}`, { teamId })).status).toBe(200);
+			const account = ((await asOwner(`SELECT billing_account_ensure('team', $1) AS id`, [teamId])) as { id: string }[])[0]!.id;
+			const subRef = `sub_mock_${crypto.randomUUID().replaceAll('-', '')}`;
+			const now = new Date();
+			const end = new Date(now.getTime() + 30 * 86_400_000);
+			await asOwner(`INSERT INTO subscription (billing_account_id, plan_code, status, seats, provider, external_ref, period_start, period_end) VALUES ($1, 'team', 'active', 3, 'mock', $2, $3, $4)`, [account, subRef, now, end]);
+			const sub = { planCode: 'team', status: 'past_due', periodStart: now.toISOString(), periodEnd: end.toISOString(), cancelAtPeriodEnd: false };
+			const { body, signature } = signedDelivery(SECRET, seatsChangedEvent(account, subRef, sub, 1, 4));
+			const [blocker, deleter] = await Promise.all([ownerClient(), ownerClient()]);
+			try {
+				await blocker.query('BEGIN');
+				await blocker.query(`SELECT pg_advisory_xact_lock(hashtext('billing:' || $1::text))`, [account]);
+				const hook = app.request('/billing/webhook/mock', { method: 'POST', headers: { 'content-type': 'application/json', 'stripe-signature': signature }, body });
+				await waiting(1);
+				const del = deleter.query('DELETE FROM team WHERE id = $1', [teamId]);
+				del.catch(() => {});
+				await waiting(2);
+				await blocker.query('COMMIT');
+				const [deleted, hooked] = await Promise.allSettled([del, hook]);
+				expect(deleted.status === 'rejected' ? ((deleted.reason as { code?: string }).code ?? String(deleted.reason)) : 'ok').toBe('ok');
+				expect(hooked.status === 'fulfilled' ? hooked.value.status : String((hooked as PromiseRejectedResult).reason)).toBe(200);
+			} finally {
+				await blocker.end();
+				await deleter.end();
+			}
+			// The team and its account are gone; the project bills to its creator again.
+			expect(await asOwner('SELECT 1 FROM billing_account WHERE id = $1', [account])).toEqual([]);
+			const [row] = (await asOwner('SELECT team_id, billing_account_id FROM project WHERE id = $1', [projectId])) as { team_id: string | null; billing_account_id: string | null }[];
+			expect(row!.team_id).toBeNull();
+			expect(row!.billing_account_id).not.toBeNull();
+		}
+	}, 120_000);
+});

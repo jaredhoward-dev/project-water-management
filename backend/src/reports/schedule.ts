@@ -148,9 +148,11 @@ export async function acceptRenderResult(msg: RenderResultMessage): Promise<Rend
 		// issue #911). A report that still exists (answered already: a redelivery) keeps its PDF.
 		if (msg.result.ok && msg.projectId) {
 			const projectId = msg.projectId;
-			const { rows: o } = await withoutUser((db) =>
-				db.query<{ orphaned: boolean }>('SELECT app_report_pdf_orphaned($1, $2) AS orphaned', [projectId, msg.reportId])
-			);
+			// The worker's marker (398): a no-user session elsewhere (a public route, a pre-sign-in flow) is refused.
+			const { rows: o } = await withoutUser(async (db) => {
+				await db.query("SELECT set_config('app.worker_context', 'on', true)");
+				return db.query<{ orphaned: boolean }>('SELECT app_report_pdf_orphaned($1, $2) AS orphaned', [projectId, msg.reportId]);
+			});
 			if (o[0]?.orphaned) return 'orphan_queued';
 		}
 		return 'unknown_report';

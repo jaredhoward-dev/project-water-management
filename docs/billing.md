@@ -1750,7 +1750,12 @@ Built but off: nothing is paused unless `BILLING_ENFORCED` is on.
   team move too, so the project's assistant cost moves with it): the same
   order as `app_billing_apply` (billing lock, account row, counter lock), so
   a webhook and a move on one account can't deadlock
-  (`billing/overSeats.db.test.ts` lines both up behind a held lock).
+  (`billing/overSeats.db.test.ts` lines both up behind a held lock). A
+  person's or a team's deletion takes the same locks first
+  (`assistant_lock_account_first`, 403: its own account and, for a team,
+  every account its projects may land on), then the account row. 403 also
+  re-counts the assistant month counters from `assistant_usage`, putting
+  right the cost earlier team moves left on the account they left.
 - **Resuming.** A live subscription again (the subscription trigger, at
   once), switching the extra catchments' operations off so the account is
   back within Free, or enforcement turned off: the markers go and the grace

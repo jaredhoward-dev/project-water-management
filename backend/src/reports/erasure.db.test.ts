@@ -199,11 +199,17 @@ describe('a PDF stored after its report was deleted (398, issue #911)', () => {
 		const gone = crypto.randomUUID();
 		const orphaned = (db: { query: (q: string, v: unknown[]) => Promise<{ rows: { o: boolean }[] }> }, project = projectId) =>
 			db.query('SELECT app_report_pdf_orphaned($1, $2) AS o', [project, gone]).then((r) => r.rows[0]!.o);
-		// Refused: a session that is neither a signed-in person nor the worker (051's alert_worker_context is "no user and
-		// no API key", so the one such caller is an API key's session).
+		const asWorker = <T>(fn: (db: Parameters<Parameters<typeof withoutUser>[0]>[0]) => Promise<T>) =>
+			withoutUser(async (db) => {
+				await db.query("SELECT set_config('app.worker_context', 'on', true)");
+				return fn(db);
+			});
+		// Refused: a session with no user and no key that isn't the worker (a public route's, a pre-sign-in flow's).
+		await expect(withoutUser((db) => orphaned(db))).rejects.toMatchObject({ code: '42501' });
+		// Refused: an API key's session, even if it set the worker's marker.
 		await expect(
 			withoutUser(async (db) => {
-				await db.query("SELECT set_config('app.current_api_key_id', $1, true)", [crypto.randomUUID()]);
+				await db.query("SELECT set_config('app.current_api_key_id', $1, true), set_config('app.worker_context', 'on', true)", [crypto.randomUUID()]);
 				return orphaned(db);
 			})
 		).rejects.toMatchObject({ code: '42501' });
@@ -214,7 +220,7 @@ describe('a PDF stored after its report was deleted (398, issue #911)', () => {
 		expect(await withUser(owner.id, (db) => orphaned(db))).toBe(true);
 		const [first] = await asOwner('SELECT id FROM report_pdf_erasure WHERE report_id = $1', [gone]);
 		await asOwner('UPDATE report_pdf_erasure SET attempts = 2 WHERE report_id = $1', [gone]);
-		expect(await withoutUser((db) => orphaned(db))).toBe(true);
+		expect(await asWorker((db) => orphaned(db))).toBe(true);
 		expect(await withUser(owner.id, (db) => orphaned(db))).toBe(true);
 		// One row, re-queued under a new id with its attempts reset (a settle of the old id's claim leaves it queued).
 		const rows = await asOwner('SELECT id, attempts FROM report_pdf_erasure WHERE report_id = $1', [gone]);
@@ -223,7 +229,7 @@ describe('a PDF stored after its report was deleted (398, issue #911)', () => {
 		expect(rows[0]!.id).not.toBe(first!.id);
 		// A deleted project's late PDF is still heard (erasure_log remembers the project).
 		await asOwner('DELETE FROM project WHERE id = $1', [projectId]);
-		expect(await withoutUser((db) => orphaned(db))).toBe(true);
+		expect(await asWorker((db) => orphaned(db))).toBe(true);
 		expect(await drain()).toContain(reportKey(projectId, gone));
 		expect(await queued([gone])).toEqual([]);
 	});

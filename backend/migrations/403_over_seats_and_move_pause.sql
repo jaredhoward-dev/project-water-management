@@ -51,7 +51,19 @@
 --      in the statement's SET list, and a team move sets team_id alone (the
 --      BEFORE trigger (7) writes billing_account_id), so 361's trigger never
 --      fired on a move and a project's assistant cost stayed counted on the
---      account it left. Its WHEN clause is unchanged.
+--      account it left. Its WHEN clause is unchanged. The month counters
+--      and the pool's month rows are then re-counted from assistant_usage
+--      (as 361's backfill, under the counter lock), so the cost a past move
+--      left behind is put right. Nothing else kept it: assistant_usage, the
+--      per-project rows the plan page sums, was always right; the caps of
+--      the UTC month of a move read the wrong counters.
+--  10. assistant_lock_account_first (364), on a person's or a team's
+--      deletion, takes the billing locks first, in id order: the deleted
+--      owner's account and, for a team, every account its projects may land
+--      on as they leave it (their creators' and owners'). The deletion then
+--      locks the account's row, and its cascades take the counter lock, the
+--      same order as every billing writer. Before, a team's deletion locked
+--      the row first and took the billing lock in its projects' triggers.
 --
 -- Lock order. Every billing writer takes, in this order: (a) the
 -- billing:<account> advisory locks, two in id order; (b) the billing_account
@@ -65,9 +77,9 @@
 -- team move took (b) in 400's count and (a) only in the AFTER triggers, and a
 -- direct change of the account took (c) before (a): each the reverse of
 -- app_billing_apply's order, so a webhook and a move on the same account
--- could deadlock (40P01; overSeats.db.test.ts reproduces it). An old account
--- deleted earlier in the same transaction (a team's or a person's deletion,
--- which holds its row) is skipped by (7) and (8). app_plan_pause_tick (4) walks its
+-- could deadlock (40P01; overSeats.db.test.ts reproduces it, and a team's
+-- deletion, (10)). An old account deleted earlier in the same transaction is
+-- skipped by (7) and (8). app_plan_pause_tick (4) walks its
 -- accounts in id order.
 --
 -- No new table or policy. app_account_plan keeps its grant to water_app
@@ -230,6 +242,51 @@ CREATE TRIGGER project_billing_account_set BEFORE INSERT OR UPDATE OF team_id, b
 DROP TRIGGER assistant_project_counted_upd ON project;
 CREATE TRIGGER assistant_project_counted_upd AFTER UPDATE OF team_id, billing_account_id ON project
 	FOR EACH ROW WHEN (OLD.billing_account_id IS DISTINCT FROM NEW.billing_account_id) EXECUTE FUNCTION assistant_project_counted();
+
+-- From 364's definition (its only one): a person's or a team's deletion takes the billing locks first.
+CREATE OR REPLACE FUNCTION assistant_lock_account_first() RETURNS trigger
+	LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
+	AS $$
+	DECLARE
+		v_account uuid;
+	BEGIN
+		-- 403: the billing:<account> locks before the account's row, in id order: the deleted owner's account and, for
+		-- a team, every account its projects may land on when they leave it (400's payers: their creators and owners).
+		FOR v_account IN
+			SELECT b.id FROM billing_account b
+			WHERE (TG_TABLE_NAME = 'app_user' AND b.user_id = OLD.id)
+			   OR (TG_TABLE_NAME = 'team' AND (b.team_id = OLD.id
+			       OR b.user_id IN (SELECT p.created_by FROM project p WHERE p.team_id = OLD.id)
+			       OR b.user_id IN (SELECT m.user_id FROM project_member m JOIN project p ON p.id = m.project_id
+			                        WHERE p.team_id = OLD.id AND m.role = 'owner')))
+			ORDER BY b.id
+		LOOP
+			PERFORM pg_advisory_xact_lock(hashtext('billing:' || v_account::text));
+		END LOOP;
+		IF TG_TABLE_NAME = 'app_user' THEN
+			PERFORM 1 FROM billing_account WHERE user_id = OLD.id FOR UPDATE;
+		ELSE
+			PERFORM 1 FROM billing_account WHERE team_id = OLD.id FOR UPDATE;
+		END IF;
+		RETURN OLD;
+	END
+	$$;
+REVOKE ALL ON FUNCTION assistant_lock_account_first() FROM PUBLIC;
+
+-- 361's counters re-counted from assistant_usage: before (9), a project moved by its team left its assistant cost
+-- counted on the account it left. Under the counter lock, as 361's backfill; pool membership is unchanged.
+SELECT assistant_counter_lock();
+DELETE FROM assistant_month_counter;
+INSERT INTO assistant_month_counter (billing_account_id, month, cost_usd_micros)
+	SELECT p.billing_account_id, u.month, sum(u.cost_usd_micros)::bigint
+	FROM assistant_usage u JOIN project p ON p.id = u.project_id
+	WHERE p.billing_account_id IS NOT NULL
+	GROUP BY 1, 2 HAVING sum(u.cost_usd_micros) <> 0;
+DELETE FROM assistant_pool_counter WHERE period = 'month';
+INSERT INTO assistant_pool_counter (period, start, cost_usd_micros)
+	SELECT 'month', c.month, sum(c.cost_usd_micros)::bigint
+	FROM assistant_month_counter c JOIN assistant_pool_member m USING (billing_account_id)
+	GROUP BY c.month;
 
 CREATE FUNCTION project_billing_move_sync() RETURNS trigger
 	LANGUAGE plpgsql SECURITY DEFINER SET search_path = public

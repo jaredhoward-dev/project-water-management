@@ -26,8 +26,12 @@
 -- not read as gone; it reveals only whether a report id exists. Ids only.
 --
 -- Who may ask, and how much it can queue: a signed-in caller (the inline
--- render's acting user) or the worker (alert_worker_context, the Lambda's
--- answer), never an anonymous water_app session; and only for a project that
+-- render's acting user) or the worker on the Lambda's answer, which marks
+-- its transaction with app.worker_context = 'on' (reports/schedule.ts). A
+-- session with no user and no API key is not enough: public routes and the
+-- pre-sign-in flows run so too (withoutUser), and they are refused, as is an
+-- API key's session. The marker is a transaction setting, like
+-- app.current_user_id: only the backend's own code sets either. And only for a project that
 -- exists or did (erasure_log's 'project' row: a project deleted mid-render,
 -- whose late PDF is exactly the orphan). report_pdf_erasure gets a unique
 -- (project_id, report_id), so the queue holds one entry per object key
@@ -48,7 +52,8 @@ CREATE FUNCTION app_report_pdf_orphaned(p_project uuid, p_report uuid) RETURNS b
 		IF p_project IS NULL OR p_report IS NULL THEN
 			RAISE EXCEPTION 'name the report and its project' USING ERRCODE = 'invalid_parameter_value';
 		END IF;
-		IF app_current_user_id() IS NULL AND NOT alert_worker_context() THEN
+		IF app_current_user_id() IS NULL
+		   AND NOT (alert_worker_context() AND coalesce(current_setting('app.worker_context', true), '') = 'on') THEN
 			RAISE EXCEPTION 'only a signed-in render or the worker reports a stored PDF' USING ERRCODE = 'insufficient_privilege';
 		END IF;
 		IF EXISTS (SELECT 1 FROM report r WHERE r.id = p_report) THEN

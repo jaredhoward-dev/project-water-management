@@ -5128,7 +5128,10 @@ the ids here and answers true; the tick removes the object. When the row
 exists it does nothing: its PDF is live, or a later deletion queues it
 through the trigger. Definer so that RLS can't make a row the caller can't
 see (a deleted requester's) read as gone. It answers only a signed-in caller
-or the worker's context (an API key's session is refused), and only for a
+or the worker on the Lambda's answer, which marks its transaction
+`app.worker_context = 'on'` (`reports/schedule.ts`); any other session with no
+user (a public route, a pre-sign-in flow) and an API key's session are
+refused. And only for a
 project that exists or is in `erasure_log` (deleted mid-render). A unique
 `(project_id, report_id)` keeps one entry per object key: a key already
 queued is re-queued under a new id with its attempts reset, so a settle of
