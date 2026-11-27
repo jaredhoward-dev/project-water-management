@@ -133,6 +133,13 @@ describe('runRenewalNotices', () => {
 		const midnight = await plantAt(`${next}T00:00:00+02:00`);
 		await runRenewalNotices();
 		expect(await notices(midnight)).toEqual([{ status: 'sent', reason: null, attempts: 1 }]);
+		// The email: this year ends on the last paid day, and renews on the next (period_end's SAST date).
+		const mail = lastMailTo(p.email)!;
+		const endsOn = resetWhen(new Date(at(lastPaid))).date;
+		const renewsOn = resetWhen(new Date(at(next))).date;
+		expect(endsOn).not.toBe(renewsOn);
+		expect(mail.subject).toBe(`Your yearly Pro plan renews on ${renewsOn} — IC-WBT`);
+		expect(mail.text).toContain(`This year of it ends on ${endsOn}.`);
 		await retire(midnight);
 
 		// Control: a microsecond later, the next day is paid for too, so its 61 business days are too early.

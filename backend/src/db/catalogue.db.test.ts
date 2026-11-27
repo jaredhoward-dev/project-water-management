@@ -30,8 +30,10 @@ const NO_RLS = new Set(['schema_migrations']);
 // email_gate_refusal (348): the verified-email gate's daily refusal counts, written only by app_email_gate_refused, read by the owner's report.
 // first_manual_run (407): each person's first manual run, written only by the model_run trigger, read by the owner's
 // metrics and the person's export through definer functions.
+// report_usage (408): where each report was counted and its refund, written only by app_report_count_usage and the
+// refund triggers, so a project's viewers never read the billing account.
 // render_slot (353): render requests in flight to the renderer and those waiting, only through app_render_slot_take / _free.
-const OWNER_ONLY = new Set(['render_slot', 'assistant_reservation', 'assistant_month_counter', 'assistant_pool_counter', 'assistant_pool_member', 'reverse_trial_claim', 'billing_event', 'erasure_log', 'reference_load', 'mfa_reset_cancel', 'mfa_reset_quota', 'allocation_holder_salt', 'run_allocation_holder', 'dam_observation_load_mark', 'et_observation_load_mark', 'email_gate_refusal', 'report_pdf_erasure', 'first_manual_run']);
+const OWNER_ONLY = new Set(['render_slot', 'assistant_reservation', 'assistant_month_counter', 'assistant_pool_counter', 'assistant_pool_member', 'reverse_trial_claim', 'billing_event', 'erasure_log', 'reference_load', 'mfa_reset_cancel', 'mfa_reset_quota', 'allocation_holder_salt', 'run_allocation_holder', 'dam_observation_load_mark', 'et_observation_load_mark', 'email_gate_refusal', 'report_pdf_erasure', 'first_manual_run', 'report_usage']);
 /**
  * Views that may run with their owner's rights (security_invoker off), each
  * with why. An owner-rights view reads its tables as the schema owner, so RLS

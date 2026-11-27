@@ -112,8 +112,10 @@ so a count commits or rolls back with it (`backend/src/billing/entitlements.ts`
   (`reports/store.ts` `createReport`, through `app_report_count_usage`, 408).
   A schedule fire that was already queued (its dedupe key) counts nothing.
   - **Which account.** A report counts against the account its project is
-    billed to **when the report is queued**, in that SAST month; the report
-    records both (`report.usage_account_id`, `usage_month`). A project moved
+    billed to **when the report is queued**, in that SAST month, both
+    recorded in the owner-only `report_usage` (one row per counted report;
+    the project's viewers, who read every column of `report`, never see the
+    account). A project moved
     to another account afterwards (into or out of a team) leaves the reports
     already queued on the old account, and its refunds go back there; reports
     queued after the move count against the new one. This is the rule a
@@ -124,7 +126,7 @@ so a count commits or rolls back with it (`backend/src/billing/entitlements.ts`
   - **A report that ends failed gives its count back** (408, issue #939), so
     a renderer outage doesn't use up anyone's allowance once limits are
     enforced. Each of the three ways a report ends failed (`reportState` in
-    `reports/store.ts`) refunds it, once (`report.usage_refunded_at`): its
+    `reports/store.ts`) refunds it, once (`report_usage.refunded_at`): its
     status set `failed` (the renderer's failure) or its job gone while
     unfinished, by the trigger `report_usage_refund`; its job `dead` (attempts
     used up), by `job_report_usage_refund`; the renderer silent past the
@@ -748,7 +750,7 @@ was queued is `skipped`, as is one to an unconfirmed or suppressed address.
 
 **What it says** (`renewalNoticeMail`, keys `mail.renewal.*` in
 `backend/src/mail/i18n/en.ts`): the plan's name, the date this year of it
-ends and renews (South African date), the next year's price
+ends (its last paid day, the SAST date of `period_end − 1 µs`, 408) and the date it renews (`period_end`'s South African date; a period ending at 00:00 SAST on 1 March ends on 28 February and renews on 1 March), the next year's price
 (`plan.price_annual_minor`, as rand), how to cancel (the plan page,
 `/account/plan`, which goes on to the billing portal; cancelling before the
 date charges nothing more), and the Act's right to end a yearly plan at any

@@ -736,8 +736,14 @@ export function mfaCodeMail(to: string, code: string, reason: MfaCodeReason, loc
 export type RenewalNoticeFacts = {
 	/** The plan's name (plan.name: "Pro"). */
 	plan: string;
-	/** When this year of the plan ends (subscription.period_end). */
+	/** When this year of the plan ends and the next starts (subscription.period_end): the date it renews on. */
 	periodEnd: Date;
+	/**
+	 * An instant on the last paid day (period_end − 1 µs, worked out in Postgres to keep the microseconds; 408, issue
+	 * #930): the date this year "ends on", so a period ending exactly at SAST midnight names the day before, not the
+	 * day it renews. Defaults to periodEnd − 1 ms.
+	 */
+	lastPaidAt?: Date;
 	/** The next year's price in minor units (plan.price_annual_minor) and its currency. */
 	amountMinor: number;
 	currency: string;
@@ -760,6 +766,8 @@ export function moneyText(minor: number, currency: string, locale?: string | nul
 export function renewalNoticeMail(to: string, f: RenewalNoticeFacts, locale?: string | null): Mail {
 	const tr = mailT(locale);
 	const date = resetWhen(f.periodEnd, locale).date;
+	// 408: "ends on" is the last paid day; "renews on" (the subject and the renewal line) stays period_end's date.
+	const ends = resetWhen(f.lastPaidAt ?? new Date(f.periodEnd.getTime() - 1), locale).date;
 	const v = { email: to, product: PRODUCT, plan: f.plan, date, amount: moneyText(f.amountMinor, f.currency, locale) };
 	return render(
 		'renewal_notice',
@@ -767,7 +775,7 @@ export function renewalNoticeMail(to: string, f: RenewalNoticeFacts, locale?: st
 		tr.t('mail.renewal.subject', v),
 		{
 			heading: tr.t('mail.renewal.heading'),
-			paragraphs: [tr.t('mail.renewal.body', v), tr.t('mail.renewal.renews', v), tr.t('mail.renewal.cancel', v), tr.t('mail.renewal.right')],
+			paragraphs: [tr.t('mail.renewal.body', { ...v, date: ends }), tr.t('mail.renewal.renews', v), tr.t('mail.renewal.cancel', v), tr.t('mail.renewal.right')],
 			action: { label: tr.t('mail.renewal.action'), url: sitePage('/account/plan') },
 			footer: [tr.t('mail.renewal.why')]
 		},

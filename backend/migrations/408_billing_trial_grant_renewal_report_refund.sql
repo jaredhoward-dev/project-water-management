@@ -16,17 +16,18 @@
 --      signature, ACL kept.
 --   3. A report's count is refunded when the report ends failed, and it
 --      stays with the account it was counted against (#939 items 2 and 3):
---        - report.usage_account_id / usage_month: the billing account and
---          SAST month the report was counted against when it was queued,
---          written by app_report_count_usage (replacing createReport's
---          app_usage_add call). Cleared on insert (report_usage_clear), so
---          no caller can plant them. A project moved to another account
---          afterwards leaves its queued reports where they were counted.
---        - usage_refunded_at: set when the count was given back.
+--        - report_usage (report_id → billing account, SAST month, refunded_at):
+--          where the report was counted when it was queued, written by
+--          app_report_count_usage (replacing createReport's app_usage_add
+--          call). Owner only (RLS on, no privilege for water_app), so a
+--          project's viewers, who read every column of report, never see
+--          which account it was counted against. A project moved to another
+--          account afterwards leaves its queued reports where they were
+--          counted. It goes with the report (ON DELETE CASCADE).
 --        - The three ways a report ends failed (reports/store.ts
 --          reportState) each refund it, once: its status set 'failed' (the
 --          renderer's failure) or its job gone (report.job_id cleared) while
---          unfinished, by the BEFORE UPDATE trigger report_usage_refund; its
+--          unfinished, by the AFTER UPDATE trigger report_usage_refund; its
 --          job dead (attempts used up), by job_report_usage_refund on job;
 --          the renderer silent past the hour's answer window, by the tick's
 --          app_report_usage_refund_silent(). A refunded report that then
@@ -170,29 +171,19 @@ CREATE OR REPLACE FUNCTION app_renewal_notice_queue(p_from date, p_to date) RETU
 -- ---------------------------------------------------------------------------
 -- 3. A report's count: where it was counted, and its refund
 -- ---------------------------------------------------------------------------
-ALTER TABLE report
-	ADD COLUMN usage_account_id uuid REFERENCES billing_account (id) ON DELETE SET NULL,
-	ADD COLUMN usage_month date,
-	ADD COLUMN usage_refunded_at timestamptz;
-CREATE INDEX report_usage_account_idx ON report (usage_account_id);
-COMMENT ON COLUMN report.usage_account_id IS
-	'The billing account this report was counted against when it was queued (408, issue #939): a later move of the project leaves the count here. Written only by app_report_count_usage.';
-COMMENT ON COLUMN report.usage_month IS 'The SAST month (first day) the report was counted in (408).';
-COMMENT ON COLUMN report.usage_refunded_at IS 'When the count was given back because the report ended failed (408); cleared if it finished after all.';
-
--- Nobody plants them: water_app may INSERT report rows, so the columns are cleared on insert.
-CREATE FUNCTION report_usage_clear() RETURNS trigger
-	LANGUAGE plpgsql SET search_path = public
-	AS $$
-	BEGIN
-		NEW.usage_account_id := NULL;
-		NEW.usage_month := NULL;
-		NEW.usage_refunded_at := NULL;
-		RETURN NEW;
-	END
-	$$;
-CREATE TRIGGER report_usage_clear BEFORE INSERT ON report
-	FOR EACH ROW EXECUTE FUNCTION report_usage_clear();
+-- report_usage: one row per counted report. Owner only (RLS on, no policy, no privilege for water_app), so the
+-- billing account a report counted against is never readable by the project's viewers, as report's columns are.
+CREATE TABLE report_usage (
+	report_id          uuid PRIMARY KEY REFERENCES report (id) ON DELETE CASCADE,
+	billing_account_id uuid REFERENCES billing_account (id) ON DELETE SET NULL,
+	month              date NOT NULL,
+	refunded_at        timestamptz
+);
+CREATE INDEX report_usage_account_idx ON report_usage (billing_account_id);
+COMMENT ON TABLE report_usage IS
+	'Where each report was counted (408, issue #939): the billing account and SAST month when it was queued (a later move of the project leaves it here), and when the count was given back because the report ended failed. Owner only; written only by app_report_count_usage and the refund triggers; goes with the report.';
+ALTER TABLE report_usage ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON report_usage FROM PUBLIC, water_app;
 
 -- Add delta (+1 or −1) to an account's reports count for a month, never below 0. Internal: no EXECUTE for anyone, and
 -- not SECURITY DEFINER itself; only the definer functions and triggers below call it, with their owner's rights.
@@ -226,7 +217,8 @@ CREATE FUNCTION app_report_count_usage(p_report uuid) RETURNS void
 		v_month date := app_billing_month();
 	BEGIN
 		SELECT r.project_id INTO v_project FROM report r
-			WHERE r.id = p_report AND r.requested_by = app_current_user_id() AND r.created_at = now() AND r.usage_month IS NULL
+			WHERE r.id = p_report AND r.requested_by = app_current_user_id() AND r.created_at = now()
+			  AND NOT EXISTS (SELECT 1 FROM report_usage u WHERE u.report_id = r.id)
 			FOR UPDATE;
 		IF v_project IS NULL THEN
 			RAISE EXCEPTION 'no report of yours queued in this transaction to count' USING ERRCODE = 'insufficient_privilege';
@@ -236,65 +228,58 @@ CREATE FUNCTION app_report_count_usage(p_report uuid) RETURNS void
 			RETURN;
 		END IF;
 		PERFORM report_usage_adjust(v_account, v_month, 1);
-		UPDATE report SET usage_account_id = v_account, usage_month = v_month WHERE id = p_report;
+		INSERT INTO report_usage (report_id, billing_account_id, month) VALUES (p_report, v_account, v_month);
 	END
 	$$;
 REVOKE ALL ON FUNCTION app_report_count_usage(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app_report_count_usage(uuid) TO water_app;
 
--- Ways 1 and 2: the report set failed, or its job gone while unfinished (job_id SET NULL); and a refunded report that
--- finishes after all is counted again.
-CREATE FUNCTION report_usage_refund() RETURNS trigger
-	LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
-	AS $$
-	BEGIN
-		IF NEW.usage_month IS NULL THEN
-			RETURN NEW;
-		END IF;
-		IF NEW.usage_refunded_at IS NULL AND (
-			(NEW.status = 'failed' AND OLD.status IS DISTINCT FROM 'failed')
-			OR (NEW.job_id IS NULL AND OLD.job_id IS NOT NULL AND NEW.status IN ('queued', 'rendering'))
-		) THEN
-			PERFORM report_usage_adjust(NEW.usage_account_id, NEW.usage_month, -1);
-			NEW.usage_refunded_at := now();
-		ELSIF NEW.usage_refunded_at IS NOT NULL AND NEW.status = 'done' AND OLD.status IS DISTINCT FROM 'done' THEN
-			PERFORM report_usage_adjust(NEW.usage_account_id, NEW.usage_month, 1);
-			NEW.usage_refunded_at := NULL;
-		END IF;
-		RETURN NEW;
-	END
-	$$;
-REVOKE ALL ON FUNCTION report_usage_refund() FROM PUBLIC, water_app;
-CREATE TRIGGER report_usage_refund BEFORE UPDATE ON report
-	FOR EACH ROW EXECUTE FUNCTION report_usage_refund();
-
--- Ways 2 and 3 (the shared write): refund unfinished reports by id, once. Internal, as report_usage_adjust.
-CREATE FUNCTION report_usage_refund_unfinished(p_reports uuid[]) RETURNS integer
+-- Refund (p_refund) or count again (NOT p_refund) the given reports' counts, each once. Internal, as report_usage_adjust.
+CREATE FUNCTION report_usage_settle(p_reports uuid[], p_refund boolean) RETURNS integer
 	LANGUAGE plpgsql SET search_path = public
 	AS $$
 	DECLARE
 		n integer := 0;
-		r record;
+		u record;
 	BEGIN
-		FOR r IN
-			UPDATE report SET usage_refunded_at = now()
-			WHERE id = ANY (p_reports) AND status IN ('queued', 'rendering') AND usage_month IS NOT NULL AND usage_refunded_at IS NULL
-			RETURNING usage_account_id, usage_month
+		FOR u IN
+			UPDATE report_usage SET refunded_at = CASE WHEN p_refund THEN now() END
+			WHERE report_id = ANY (p_reports) AND (refunded_at IS NULL) = p_refund
+			RETURNING billing_account_id, month
 		LOOP
-			PERFORM report_usage_adjust(r.usage_account_id, r.usage_month, -1);
+			PERFORM report_usage_adjust(u.billing_account_id, u.month, CASE WHEN p_refund THEN -1 ELSE 1 END);
 			n := n + 1;
 		END LOOP;
 		RETURN n;
 	END
 	$$;
-REVOKE ALL ON FUNCTION report_usage_refund_unfinished(uuid[]) FROM PUBLIC, water_app;
+REVOKE ALL ON FUNCTION report_usage_settle(uuid[], boolean) FROM PUBLIC, water_app;
 
--- Way 2: the report's job dead (its attempts used up).
+-- Ways 1 and 2 on report: its status set failed, or its job gone while unfinished (job_id SET NULL, the 30-day purge);
+-- and a refunded report that finishes after all is counted again. Never refuses the update.
+CREATE FUNCTION report_usage_refund() RETURNS trigger
+	LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
+	AS $$
+	BEGIN
+		IF (NEW.status = 'failed' AND OLD.status IS DISTINCT FROM 'failed')
+			OR (NEW.job_id IS NULL AND OLD.job_id IS NOT NULL AND NEW.status IN ('queued', 'rendering')) THEN
+			PERFORM report_usage_settle(ARRAY[NEW.id], true);
+		ELSIF NEW.status = 'done' AND OLD.status IS DISTINCT FROM 'done' THEN
+			PERFORM report_usage_settle(ARRAY[NEW.id], false);
+		END IF;
+		RETURN NULL;
+	END
+	$$;
+REVOKE ALL ON FUNCTION report_usage_refund() FROM PUBLIC, water_app;
+CREATE TRIGGER report_usage_refund AFTER UPDATE OF status, job_id ON report
+	FOR EACH ROW EXECUTE FUNCTION report_usage_refund();
+
+-- Way 2 on job: the report's job dead (its attempts used up) while the report is unfinished.
 CREATE FUNCTION job_report_usage_refund() RETURNS trigger
 	LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
 	AS $$
 	BEGIN
-		PERFORM report_usage_refund_unfinished(ARRAY(SELECT r.id FROM report r WHERE r.job_id = NEW.id));
+		PERFORM report_usage_settle(ARRAY(SELECT r.id FROM report r WHERE r.job_id = NEW.id AND r.status IN ('queued', 'rendering')), true);
 		RETURN NULL;
 	END
 	$$;
@@ -312,11 +297,11 @@ CREATE FUNCTION app_report_usage_refund_silent() RETURNS integer
 		IF NOT alert_worker_context() THEN
 			RAISE EXCEPTION 'only the worker refunds reports' USING ERRCODE = 'insufficient_privilege';
 		END IF;
-		RETURN report_usage_refund_unfinished(ARRAY(
-			SELECT r.id FROM report r
-			WHERE r.status = 'rendering' AND r.usage_month IS NOT NULL AND r.usage_refunded_at IS NULL
+		RETURN report_usage_settle(ARRAY(
+			SELECT r.id FROM report r JOIN report_usage u ON u.report_id = r.id
+			WHERE r.status = 'rendering' AND u.refunded_at IS NULL
 			  AND coalesce(r.sent_at, r.created_at) < now() - interval '1 hour'
-		));
+		), true);
 	END
 	$$;
 REVOKE ALL ON FUNCTION app_report_usage_refund_silent() FROM PUBLIC;

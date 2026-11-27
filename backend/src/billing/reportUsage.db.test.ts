@@ -1,10 +1,11 @@
 // A server report's count (408, issue #939; docs/billing.md § Shadow mode):
-//  - a report is counted when queued against its project's account, and records that account and SAST month;
+//  - a report is counted when queued against its project's account, and the owner-only report_usage records that
+//    account and SAST month (never readable by the project's viewers);
 //  - each of the three ways a report ends failed gives the count back, once: its status set failed (the renderer's
 //    failure), its job dead (attempts used up) or gone, and the renderer silent past the hour (the tick's sweep);
 //  - a refunded report that finishes after all is counted again; a report that finishes normally keeps its count;
 //  - a project moved to another account after the report was queued leaves the count, and its refund, where it was;
-//  - nobody plants the columns or counts a report twice.
+//  - nobody counts a report twice or someone else's.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { asOwner, monthly, node, retirePendingJobs, signUp } from '../__tests__/helpers.js';
 import { withoutUser, withUser } from '../db/tx.js';
@@ -51,8 +52,13 @@ async function queue(pid = projectId, run = runId): Promise<{ id: string; jobId:
 	const [r] = await asOwner('SELECT id FROM report WHERE job_id = $1', [jobId]);
 	return { id: r.id as string, jobId };
 }
+/** The report's owner-only usage row (report_usage), or nulls when it was never counted. */
 const usage = async (id: string) =>
-	((await asOwner('SELECT usage_account_id, usage_month::text AS usage_month, usage_refunded_at IS NOT NULL AS refunded FROM report WHERE id = $1', [id])) as {
+	((await asOwner(
+		`SELECT u.billing_account_id AS usage_account_id, u.month::text AS usage_month, coalesce(u.refunded_at IS NOT NULL, false) AS refunded
+		 FROM report r LEFT JOIN report_usage u ON u.report_id = r.id WHERE r.id = $1`,
+		[id]
+	)) as {
 		usage_account_id: string | null;
 		usage_month: string | null;
 		refunded: boolean;
@@ -83,22 +89,22 @@ describe('counting a report (408)', () => {
 		expect((await usage(id)).refunded).toBe(false);
 	});
 
-	it('refuses a second count, someone else’s report and planted columns', async () => {
+	it('refuses a second count and someone else’s report, and keeps where it counted owner only', async () => {
 		const { id } = await queue();
 		// Not in the transaction that queued it: refused, nothing counted twice.
 		expect(await sqlState(withUser(owner.id, (db) => db.query('SELECT app_report_count_usage($1)', [id])))).toBe('42501');
 		const other = await signUp('ReportUsageOther');
 		expect(await sqlState(withUser(other.id, (db) => db.query('SELECT app_report_count_usage($1)', [id])))).toBe('42501');
-		// A row inserted with the columns set has them cleared (report_usage_clear), so no refund can reach another account.
-		const planted = await withUser(owner.id, async (db) => {
-			const { rows } = await db.query<{ id: string }>(
-				`INSERT INTO report (project_id, run_id, requested_by, email_to, usage_account_id, usage_month)
-				 VALUES ($1, $2, app_current_user_id(), '{}', $3, '2001-01-01') RETURNING id`,
-				[projectId, runId, account]
-			);
-			return rows[0]!.id;
-		});
-		expect(await usage(planted)).toEqual({ usage_account_id: null, usage_month: null, refunded: false });
+		// Where it counted is owner only: the app role, signed in as a viewer of the report or not, reads and writes none of it.
+		for (const sql of ['SELECT * FROM report_usage', `UPDATE report_usage SET refunded_at = now()`, 'DELETE FROM report_usage']) {
+			expect(await sqlState(withUser(owner.id, (db) => db.query(sql))), sql).toBe('42501');
+			expect(await sqlState(withoutUser((db) => db.query(sql))), sql).toBe('42501');
+		}
+		// report itself carries no billing column for viewers to read.
+		const cols = (await asOwner(`SELECT column_name FROM information_schema.columns WHERE table_name = 'report' AND column_name LIKE 'usage%'`)) as unknown[];
+		expect(cols).toEqual([]);
+		// Positive control: the owner reads the row.
+		expect((await usage(id)).usage_account_id).toBe(account);
 	});
 });
 
