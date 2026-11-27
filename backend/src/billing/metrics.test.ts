@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	abuseReport, activation, busiestWeek, buildReport, canonicalEmail, formatReport, freeLimitShares, gateRefusals, heaviestFree, newAccountFreeSpend,
-	NOT_YET_MEASURABLE, ORPHAN_RETRY_DAYS, percentile, redact, reverseTrialToPaid, spendByPlan, staleOrphans, type AccountRow, type PersonRow
+	NOT_YET_MEASURABLE, ORPHAN_RETRY_DAYS, percentile, redact, reverseTrialToPaid, spendByPlan, staleOrphans, type AccountRow, type PersonRow, type PlanPauseRow
 } from './metrics.js';
 
 const t = (iso: string) => new Date(iso);
@@ -299,5 +299,38 @@ describe('open price conflicts (406)', () => {
 		expect(lines[5]).toBe('  stripe  sub_x  account 11111111-1111-4111-8111-111111111111  amount  pro/month × 1  100 zar (expected 89900)  NOT HELD  event evt_x  2026-11-20T00:00:00.000Z');
 		expect(redact(r).billingConflicts).toHaveLength(1);
 		expect(formatReport(buildReport('2026-11', now, [], [], FREE), false).split('\n')[4]).toBe('Subscription price conflicts open: none');
+	});
+});
+
+describe('who will pause and when (341, 409; round 2026-11-28)', () => {
+	const now = new Date('2026-11-24T00:00:00Z');
+	const row = (accountId: string, state: PlanPauseRow['state'], extra: Partial<PlanPauseRow> = {}): PlanPauseRow => ({
+		accountId, kind: 'user', live: 3, limit: 1, state, overFreeSince: null, pausesFrom: null, paused: 0, keptChosen: false, ...extra
+	});
+
+	it('lists paused first, then each grace by its pause date, then those it starts at the switch, then never paid; redact keeps them', () => {
+		const r = buildReport('2026-11', now, [], [], {}, [], [], [], [], [], [
+			row('n', 'never_paid', { live: 2 }),
+			row('s', 'grace_at_switch'),
+			row('g2', 'grace', { overFreeSince: '2026-11-20T00:00:00.000Z', pausesFrom: '2026-12-04T00:00:00.000Z' }),
+			row('g1', 'grace', { overFreeSince: '2026-11-10T00:00:00.000Z', pausesFrom: '2026-11-24T00:00:00.000Z', keptChosen: true }),
+			row('p', 'paused', { overFreeSince: '2026-11-01T00:00:00.000Z', pausesFrom: '2026-11-15T00:00:00.000Z', paused: 2 })
+		]);
+		expect(r.planPauses.map((x) => x.accountId)).toEqual(['p', 'g1', 'g2', 's', 'n']);
+		expect(redact(r).planPauses).toEqual(r.planPauses);
+		const text = formatReport(redact(r), false);
+		expect(text).toContain("Accounts past Free's live catchments with no live plan: 5 (who will pause and when; nothing is deleted)");
+		expect(text).toContain('  account p  user  3 live of 1  PAUSED 2 since the grace ended 2026-11-15T00:00:00.000Z  (the most recently active stays live)');
+		expect(text).toContain('  account g1  user  3 live of 1  in its grace since 2026-11-10T00:00:00.000Z, pauses 2 from 2026-11-24T00:00:00.000Z  (the owner chose the one to keep)');
+		expect(text).toContain('  account s  user  3 live of 1  plan ended, no grace yet: the 14 days and the grace email start at the first enforced tick, then 2 pause');
+		expect(text).toContain('  account n  user  2 live of 1  never had a plan: nothing pauses; with limits enforced no further catchment goes live');
+		expect(formatReport(buildReport('2026-11', now, [], [], {}), false)).toContain("Accounts past Free's live catchments with no live plan: none");
+	});
+
+	it('a team over its seats from before the marker prints as unrecorded, ahead of the recorded ones', () => {
+		const over = (accountId: string, since: string | null) => ({ accountId, teamId: `team-${accountId}`, seats: 3, editors: 4, since });
+		const r = buildReport('2026-11', now, [], [], {}, [], [], [], [over('a', '2026-11-20T00:00:00.000Z'), over('b', null)]);
+		expect(r.overSeats.map((o) => o.accountId)).toEqual(['b', 'a']);
+		expect(formatReport(r, false)).toContain('  account b  team team-b  4 editors on 3 seats  since before it was recorded (no marker)');
 	});
 });
