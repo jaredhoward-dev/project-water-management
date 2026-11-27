@@ -1,7 +1,7 @@
 // 341_plan_pause (issue #641 § Downgrade or lapse): after a paid plan ends, the live catchments past Free's one are
 // paused after a 14-day grace, only when billing is enforced, and resumed on an upgrade. Nothing is deleted.
 //  - a lapse records when the account went over Free's limit; nothing is paused during the grace;
-//  - past the grace with enforcement off, nothing is paused;
+//  - past the grace with enforcement off, nothing is paused and the grace is cleared (409);
 //  - past the grace, enforced, the tick pauses every live catchment but one (the most recently active, or the one the
 //    owner chose), and the paused ones' feeds, automatic runs and alert checks stop while their settings stay on
 //    (positive control: the kept one still schedules all three);
@@ -9,7 +9,9 @@
 //  - the owner's choice moves the pause at once; a stranger can't choose;
 //  - an upgrade resumes everything; members read the pause, strangers don't (positive control);
 //  - the app role can't run the sweep outside the worker;
-//  - the owner's choice racing a sync on the same account waits for it rather than deadlocking (334's lock order).
+//  - the owner's choice racing a sync on the same account waits for it rather than deadlocking (334's lock order);
+//  - 409: a plan ending in shadow mode starts no grace (and a shadow tick clears one); once enforced, the grace starts
+//    then, with its email, and nothing pauses for 14 days (positive control: past them, enforced, the pause lands).
 import pg from 'pg';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { asOwner, disableFeedsAfterFile, retirePendingJobs, signUp } from '../__tests__/helpers.js';
@@ -88,23 +90,27 @@ describe('341: pausing past Free’s limit after a downgrade', () => {
 	});
 
 	it('a lapse starts the grace: the time is recorded, and nothing is paused during it, enforced', async () => {
+		// The schema owner's change carries no enforcement setting: no grace starts (409).
 		await asOwner(`UPDATE subscription SET status = 'canceled' WHERE billing_account_id = $1 AND status = 'active'`, [account]);
-		expect(await overSince(account)).not.toBeNull();
+		expect(await overSince(account)).toBeNull();
 		enforce();
 		await tick();
+		expect(await overSince(account)).not.toBeNull();
 		expect(await paused(account)).toEqual([]);
 		await backdateGrace(account, 13);
 		await tick();
 		expect(await paused(account)).toEqual([]);
 	});
 
-	it('past the grace with enforcement off, nothing is paused', async () => {
+	it('past the grace with enforcement off, nothing is paused and the grace is cleared (409)', async () => {
 		await backdateGrace(account, 15);
 		await tick();
 		expect(await paused(account)).toEqual([]);
+		expect(await overSince(account)).toBeNull();
 	});
 
 	it('past the grace, enforced: every live catchment but the most recently active is paused, and nothing is deleted', async () => {
+		await backdateGrace(account, 15);
 		enforce();
 		const t = await tick();
 		expect(t.catchmentsPaused).toBeGreaterThanOrEqual(2);
@@ -221,6 +227,8 @@ describe('341: lock order on one account', () => {
 		try {
 			// The sync (the tick, a subscription change) has taken 334's lock and not yet written the row.
 			await syncer.query('BEGIN');
+			// Enforced, as the worker's transaction is when the grace starts (409: in shadow mode the sync writes no grace).
+			await syncer.query(`SELECT set_config('app.billing_enforced', 'on', true)`);
 			await syncer.query(`SELECT pg_advisory_xact_lock(hashtext('billing:' || $1::text))`, [acct]);
 			const keeperPid = (await keeper.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0]!.pid;
 			await keeper.query('BEGIN');
@@ -251,5 +259,48 @@ describe('341: lock order on one account', () => {
 		}[];
 		expect(row!.kept).toBe(x);
 		expect(row!.since).toBeInstanceOf(Date);
+	});
+});
+
+describe('409: the grace starts when enforcement does', () => {
+	it('a staff grant ending in shadow mode starts no grace; once enforced, the grace starts then, its email is queued and nothing pauses for 14 days', async () => {
+		const owner = await signUp('GraceLate');
+		const [x, y] = [await newProject(owner, 'Late X'), await newProject(owner, 'Late Y')];
+		for (const p of [x, y]) expect((await owner.call('PUT', `/projects/${p}/alert-rules`, alertBody)).status).toBe(200);
+		const acct = await accountOf(x);
+		const kinds = async () =>
+			((await asOwner('SELECT kind FROM billing_notice WHERE billing_account_id = $1 ORDER BY created_at, kind', [acct])) as { kind: string }[]).map((r) => r.kind);
+		// A staff grant whose end has passed (330), both catchments live under it.
+		await asOwner(`INSERT INTO subscription (billing_account_id, plan_code, status, provider, period_end) VALUES ($1, 'pro', 'active', 'manual', now() - interval '1 minute')`, [
+			acct
+		]);
+		// Shadow mode: the tick expires the grant and starts no grace clock.
+		expect((await tick()).staffGrantsExpired).toBeGreaterThanOrEqual(1);
+		expect(((await asOwner('SELECT status FROM subscription WHERE billing_account_id = $1', [acct])) as { status: string }[])[0]!.status).toBe('expired');
+		expect(await overSince(acct)).toBeNull();
+		// A grace stamped before 409 (or under enforcement since switched off) is cleared by a shadow tick, not kept running.
+		await backdateGrace(acct, 30);
+		await tick();
+		expect(await overSince(acct)).toBeNull();
+		expect(await paused(acct)).toEqual([]);
+		expect(await kinds()).toEqual([]);
+
+		// Enforcement switched on: the first tick starts the grace now, queues (and sends) the grace email, pauses nothing.
+		enforce();
+		await tick();
+		const since = await overSince(acct);
+		expect(since).toBeInstanceOf(Date);
+		expect(Math.abs(Date.now() - since!.getTime())).toBeLessThan(60_000);
+		expect(await kinds()).toEqual(['grace']);
+		expect(await paused(acct)).toEqual([]);
+		await backdateGrace(acct, 13);
+		await tick();
+		expect(await paused(acct)).toEqual([]);
+
+		// Positive control, the enforced path: past the 14 days the catchment past Free's one pauses, and the owner is told.
+		await backdateGrace(acct, 15);
+		expect((await tick()).catchmentsPaused).toBeGreaterThanOrEqual(1);
+		expect((await paused(acct)).length).toBe(1);
+		expect(await kinds()).toContain('paused');
 	});
 });

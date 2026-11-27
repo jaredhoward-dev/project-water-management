@@ -3560,7 +3560,12 @@ secret is involved: both switches are plain variables in
    BILLING_ENFORCED](./billing.md#billing_enforced)). Read the billing report
    first (`billing-admin.yml`, `billing-report`) for the accounts already past
    a limit, and grant or email them before the switch ([billing.md § Staff
-   grants](./billing.md#staff-grants)).
+   grants](./billing.md#staff-grants)). No grace clock runs in shadow mode,
+   so nothing needs resetting: an account whose plan already ended past
+   Free's live catchments starts its 14-day grace, with its grace email, at
+   the first worker tick after the switch, and nothing pauses before those
+   14 days are up ([billing.md § Pausing after a
+   downgrade](./billing.md#pausing-after-a-downgrade)).
 2. **Set the switches.** Add `billing_enforced = true` to
    `prod.tfvars.sops`, and `reverse_trial = true` too if the trial starts the
    same day (it may follow later; it can't come first, since plan refuses it
