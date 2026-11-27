@@ -862,6 +862,22 @@ describe('the cited ensemble (G4) and the declared rule (ER3)', () => {
 		expect(citedEnsemble([narrower], RULE, scope)).toBeNull();
 	});
 
+	it('cites no ensemble when the declared rule can’t be checked on the baseline (its inputs no longer load), and says why (ER-38)', () => {
+		const rows = [ens({})];
+		// Positive control: with the scope worked out, the rule's own ensemble is cited.
+		expect(evidenceReport(input({ ensembles: { baseline: rows, paired: [PAIRED] }, declaredScope: declaredRuleScope(base, RULE) })).uncertainty.cited?.id).toBe('e1');
+		const why = 'its inputs no longer load: the series changed since the run';
+		const blocked = input({ ensembles: { baseline: rows, paired: [PAIRED] }, declaredScope: null, declaredScopeUnavailable: why });
+		const r = evidenceReport(blocked);
+		expect(r.uncertainty.cited).toBeNull();
+		expect(r.uncertainty.ledger.every((e) => !e.cited)).toBe(true);
+		const c = r.checks.find((x) => x.id === 'citedEnsemble')!;
+		expect(c.passed).toBe(false);
+		expect(c.detail).toBe(`The declared rule can’t be checked on the baseline (${why}), so no ensemble is cited.`);
+		expect(c.fix).toMatch(/^The baseline run’s inputs no longer load as it ran: run the model again/);
+		expect(evidenceChecks(blocked).find((x) => x.id === 'citedEnsemble')!.passed).toBe(false);
+	});
+
 	it('without a declared rule: nothing is cited, no change carries a band, and the report can’t be issued', () => {
 		const i = input();
 		const r = evidenceReport(input({ baseline: { ...i.baseline, inputs: { ...i.baseline.inputs, settings: { ...i.baseline.inputs.settings, evidenceUncertaintyRule: null } } } }));

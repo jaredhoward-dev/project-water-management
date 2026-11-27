@@ -499,6 +499,12 @@ export interface EvidenceInput {
 	 * absent when there is no rule or the run's inputs don't resolve it; they are then not compared.
 	 */
 	declaredScope?: DeclaredRuleScope | null;
+	/**
+	 * Why the declared rule's rain sources and records can't be worked out on the baseline run (its inputs no longer
+	 * load, or don't resolve the rule's request; ER-38): the rule can't be checked, so no ensemble is cited and the
+	 * citedEnsemble check says this. Null or absent when the scope was worked out (or there is no rule).
+	 */
+	declaredScopeUnavailable?: string | null;
 	/** diffInputs(baseline, application), with stored values; [] for baseline evidence. */
 	changes: InputChange[];
 	/** Revisions between the previous publication's run and the baseline (C20); null when there is no earlier publication. */

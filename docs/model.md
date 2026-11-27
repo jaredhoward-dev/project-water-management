@@ -10469,7 +10469,11 @@ it never changes a run's results.
   the ones the rule's request resolves to on the baseline run, every one it
   offers (`declaredRuleScope`, which the backend works out from the run's
   inputs), so one started with fewer departs as *Rain sources* or *Observed
-  records*; when the run's inputs no longer load, those two aren't compared),
+  records*; when the run's inputs no longer load as it used them, or don't
+  resolve the rule's request, the rule can't be checked, so no ensemble is
+  cited and the *An ensemble on the declared rule is cited* check says why
+  (`declaredScopeUnavailable`; run the model again and start the rule's
+  ensemble on that run),
   and the first complete paired ensemble on it. First,
   not newest or kindest: the database draws each seed, so once one ensemble
   on the rule has completed, starting more changes nothing the report cites,

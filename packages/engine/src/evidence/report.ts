@@ -135,6 +135,13 @@ export function citedEnsemble(rows: readonly EvidenceEnsembleInput[], rule: Decl
 	return oldestFirst(ok)[0] ?? null;
 }
 
+/**
+ * The ensemble a report on `input` cites: citedEnsemble with the rule's scope, and none when the scope couldn't be
+ * worked out (declaredScopeUnavailable, ER-38): the rule can't then be checked, so nothing is cited as following it.
+ */
+const citedOf = (input: Pick<EvidenceInput, 'ensembles' | 'declaredScope' | 'declaredScopeUnavailable'>, rule: DeclaredUncertaintyRule | null) =>
+	rule && input.declaredScopeUnavailable ? null : citedEnsemble(input.ensembles.baseline, rule, input.declaredScope);
+
 /** The paired ensemble on the application that re-ran the cited one: the first complete one. */
 export function citedPaired(rows: readonly EvidenceEnsembleInput[], cited: EvidenceEnsembleInput | null): EvidenceEnsembleInput | null {
 	if (!cited) return null;
@@ -335,7 +342,7 @@ export function evidenceChecks(input: EvidenceInput): EvidenceCheck[] {
 		blocksIssue: true,
 		fix: 'An editor declares the rule under Model settings → Evidence, runs the model again and nominates that run.'
 	});
-	const cited = citedEnsemble(input.ensembles.baseline, rule, input.declaredScope);
+	const cited = citedOf(input, rule);
 	add({
 		id: 'citedEnsemble',
 		label: 'An ensemble on the declared rule is cited',
@@ -344,10 +351,15 @@ export function evidenceChecks(input: EvidenceInput): EvidenceCheck[] {
 			? `Ensemble ${short(cited.id)}, started ${day(cited.createdAt)}: ${cited.accepted ?? 0} of ${cited.members + 1} sets kept.`
 			: !rule
 				? 'Nothing can be cited without a declared rule.'
-				: `None of the ${input.ensembles.baseline.filter((e) => e.baselineId === null).length} ensembles on the baseline is complete and on the declared rule.`,
+				: input.declaredScopeUnavailable
+					? `The declared rule can’t be checked on the baseline (${input.declaredScopeUnavailable}), so no ensemble is cited.`
+					: `None of the ${input.ensembles.baseline.filter((e) => e.baselineId === null).length} ensembles on the baseline is complete and on the declared rule.`,
 		refuses: false,
 		blocksIssue: true,
-		fix: 'Start an ensemble on the declared rule on the baseline (Runs › Uncertainty) and let it complete.'
+		fix:
+			rule && input.declaredScopeUnavailable
+				? 'The baseline run’s inputs no longer load as it ran: run the model again, nominate that run, and start an ensemble on the declared rule on it.'
+				: 'Start an ensemble on the declared rule on the baseline (Runs › Uncertainty) and let it complete.'
 	});
 	if (a) {
 		const paired = citedPaired(input.ensembles.paired, cited);
@@ -426,7 +438,7 @@ export function evidenceReport(input: EvidenceInput): EvidenceReport {
 	const a = input.application;
 	const checks = evidenceChecks(input);
 	const rule = declaredRuleOf(b);
-	const cited = citedEnsemble(input.ensembles.baseline, rule, input.declaredScope);
+	const cited = citedOf(input, rule);
 	const pairedRow = a ? citedPaired(input.ensembles.paired, cited) : null;
 	const paired = pairedRow?.paired ?? null;
 	const baseSum = cited?.summary ?? null;

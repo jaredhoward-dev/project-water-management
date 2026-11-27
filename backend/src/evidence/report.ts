@@ -732,7 +732,7 @@ export async function loadEvidenceInput(db: Db, projectId: string, runId: string
 		authority: await projectAuthority(db, projectId),
 		baselineEndorsement: await loadEndorsement(db, projectId, baseline.id),
 		ensembles: await loadEnsembles(db, projectId, baseline.id, application?.id ?? null, application?.scenario.ownedNodeIds ?? []),
-		declaredScope: await loadDeclaredScope(db, projectId, baseline),
+		...(await loadDeclaredScope(db, projectId, baseline)),
 		changes,
 		applicationRuns,
 		...others,
@@ -761,21 +761,26 @@ export async function loadEvidenceInput(db: Db, projectId: string, runId: string
 
 /**
  * The rain sources and observed records the declared rule's ensemble varies on the baseline run (ER-38): its inputs
- * loaded as the uncertainty route loads them, the rule's request resolved there. Null when there is no rule, or the
- * run's inputs no longer load (409: series changed since an older hash-only run); the report then compares the rule's
- * other fields only, as before engine 1.123.2.
+ * loaded as the uncertainty route loads them, the rule's request resolved there. When they can't be (the run's inputs
+ * no longer load, 409: series changed since an older hash-only run; or they don't resolve the rule's request), the
+ * rule can't be checked: `unavailable` says why, and the report then cites no ensemble.
  */
-async function loadDeclaredScope(db: Db, projectId: string, baseline: EvidenceRunInput): Promise<EvidenceInput['declaredScope']> {
+export async function loadDeclaredScope(
+	db: Db,
+	projectId: string,
+	baseline: EvidenceRunInput
+): Promise<Pick<EvidenceInput, 'declaredScope' | 'declaredScopeUnavailable'>> {
 	const rule = declaredRuleOf(baseline);
-	if (!rule) return null;
+	if (!rule) return { declaredScope: null, declaredScopeUnavailable: null };
 	let input: ModelInput;
 	try {
 		input = await runModelInput(db, projectId, baseline.id);
 	} catch (e) {
-		if (e instanceof ApiError && e.status === 409) return null;
+		if (e instanceof ApiError && e.status === 409) return { declaredScope: null, declaredScopeUnavailable: 'its inputs no longer load as the run used them' };
 		throw e;
 	}
-	return declaredRuleScope(input, rule);
+	const scope = declaredRuleScope(input, rule);
+	return scope ? { declaredScope: scope, declaredScopeUnavailable: null } : { declaredScope: null, declaredScopeUnavailable: 'its inputs don’t resolve the rule’s ensemble options' };
 }
 
 const sha256 = (text: string) => createHash('sha256').update(text, 'utf8').digest('hex');
