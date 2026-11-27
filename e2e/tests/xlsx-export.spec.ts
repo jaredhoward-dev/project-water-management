@@ -228,6 +228,8 @@ test('the workbook shows progress per node and Cancel stops it', async ({ page, 
 	await page.getByRole('button', { name: 'Cancel' }).click();
 	await expect(status).toHaveText('Workbook download cancelled');
 	await expect(page.getByRole('progressbar')).toHaveCount(0);
+	// The Cancel it pressed is gone: the focus is back on Download, not dropped to the page (WCAG 2.4.3).
+	await expect(page.getByRole('button', { name: 'Download', exact: true })).toBeFocused();
 	await page.unroute(hold);
 	await Promise.all(held.map((go) => go().catch(() => {})));
 });
