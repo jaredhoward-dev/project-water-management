@@ -254,6 +254,76 @@ describe('handler', () => {
 		});
 	});
 
+	describe('each job message only from its own queue (MESSAGE_QUEUES)', () => {
+		const ARN = (q: string) => `arn:aws:sqs:af-south-1:000000000000:water-management-${q}`;
+		const ingest = JSON.stringify({ v: 1, type: 'ingest', fetchJobId: '00000000-0000-4000-8000-000000000002', feedId: '00000000-0000-4000-8000-000000000003', feedVersion: 'v1', result: {} });
+		const rendered = JSON.stringify({ v: 1, type: 'rendered', reportId: '00000000-0000-4000-8000-000000000004', requestId: 'a1'.repeat(16), result: { ok: true, pages: 9, bytes: 1000, ms: 4000 } });
+		const renderedPack = JSON.stringify({ v: 1, type: 'rendered_pack', packId: '00000000-0000-4000-8000-000000000005', requestId: 'b2'.repeat(16), result: { ok: true, pages: 3, bytes: 900, ms: 3000, sha256: 'c'.repeat(64) } });
+		const stubQueues = () => {
+			vi.stubEnv('JOBS_QUEUE_ARN', ARN('jobs'));
+			vi.stubEnv('INGEST_RESULTS_QUEUE_ARN', ARN('ingest-results'));
+			vi.stubEnv('RENDER_RESULTS_QUEUE_ARN', ARN('render-results'));
+		};
+		beforeEach(() => {
+			vi.spyOn(console, 'info').mockImplementation(() => {});
+		});
+		afterEach(() => {
+			vi.unstubAllEnvs();
+			acceptIngestResult.mockClear();
+			acceptRenderResult.mockClear();
+			acceptPackRenderResult.mockClear();
+			freeRenderSlot.mockClear();
+		});
+
+		it('applies each kind from its own queue (positive control)', async () => {
+			stubQueues();
+			const res = await handler({
+				Records: [
+					{ messageId: 'i', eventSourceARN: ARN('ingest-results'), body: ingest },
+					{ messageId: 'r', eventSourceARN: ARN('render-results'), body: rendered },
+					{ messageId: 'p', eventSourceARN: ARN('render-results'), body: renderedPack }
+				]
+			} as never);
+			expect(res).toEqual({ batchItemFailures: [] });
+			expect(acceptIngestResult).toHaveBeenCalledTimes(1);
+			expect(acceptRenderResult).toHaveBeenCalledTimes(1);
+			expect(acceptPackRenderResult).toHaveBeenCalledTimes(1);
+			expect(freeRenderSlot).toHaveBeenCalledTimes(2);
+		});
+
+		it('drops a render answer sent on ingest-results (the fetcher forging one) and a fetch result sent on render-results (the renderer forging one), retrying neither', async () => {
+			stubQueues();
+			const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+			const res = await handler({
+				Records: [
+					{ messageId: 'r', eventSourceARN: ARN('ingest-results'), body: rendered },
+					{ messageId: 'p', eventSourceARN: ARN('ingest-results'), body: renderedPack },
+					{ messageId: 'i', eventSourceARN: ARN('render-results'), body: ingest },
+					{ messageId: 'j', eventSourceARN: ARN('jobs'), body: ingest }
+				]
+			} as never);
+			expect(res).toEqual({ batchItemFailures: [] });
+			expect(acceptIngestResult).not.toHaveBeenCalled();
+			expect(acceptRenderResult).not.toHaveBeenCalled();
+			expect(acceptPackRenderResult).not.toHaveBeenCalled();
+			// A forged answer frees no render slot either.
+			expect(freeRenderSlot).not.toHaveBeenCalled();
+			expect(warn).toHaveBeenCalledWith(JSON.stringify({ event: 'job_message_wrong_queue', messageId: 'r', type: 'rendered' }));
+			expect(warn).toHaveBeenCalledWith(JSON.stringify({ event: 'job_message_wrong_queue', messageId: 'i', type: 'ingest' }));
+		});
+
+		it('with only some queues configured, a configured queue still reads only its own kind', async () => {
+			vi.stubEnv('INGEST_RESULTS_QUEUE_ARN', ARN('ingest-results'));
+			vi.stubEnv('RENDER_RESULTS_QUEUE_ARN', '');
+			vi.spyOn(console, 'warn').mockImplementation(() => {});
+			await handler({ Records: [{ messageId: 'r', eventSourceARN: ARN('ingest-results'), body: rendered }] } as never);
+			expect(acceptRenderResult).not.toHaveBeenCalled();
+			// Unbound (no variable, as locally): read from any queue that isn't another kind's.
+			await handler({ Records: [{ messageId: 'r2', eventSourceARN: ARN('render-results'), body: rendered }] } as never);
+			expect(acceptRenderResult).toHaveBeenCalledTimes(1);
+		});
+	});
+
 	describe('partial batch failures (ReportBatchItemFailures)', () => {
 		const ingest = (n: number) =>
 			JSON.stringify({ v: 1, type: 'ingest', fetchJobId: `00000000-0000-4000-8000-00000000000${n}`, feedId: '00000000-0000-4000-8000-000000000003', feedVersion: 'v1', result: {} });
