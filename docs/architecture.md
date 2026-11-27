@@ -1638,9 +1638,12 @@ row names a source, where to read it and the series it merges into:
   from when it was queued (§ Background work), so a job queued while a
   window ran goes before it. A day the copy doesn't hold yet reads as
   `-`, as a day CHC hasn't published, and a later fetch reads it. No copy at
-  all (no manifest, `MirrorNotReadyError`) writes nothing and records only
-  the attempt (`last_attempt_at`): no failure, no backoff, the same window
-  next time. A cell outside the region fails the feed with a message naming
+  all (no manifest, `MirrorNotReadyError`) writes nothing, not even the
+  re-check's claims (a savepoint taken before `chirps_recheck_claim` is
+  rolled back, so no untagged file's day sits under a 30-minute lease with
+  nothing read), and records only the attempt (`last_attempt_at`): no
+  failure, no backoff, the same window next time. A cell outside the
+  region fails the feed with a message naming
   the region. The re-check keeps only its re-reads: a stale day (a revision
   of the copy, 245) is read again from the copy and applied through
   `chirps_recheck_apply`; nothing is HEADed. Finals from the copy are tagged
@@ -2291,7 +2294,8 @@ EventBridge, daily
   for a cell list and window from the copy, from a running fetch of any
   CHIRPS feed (the cache's writers allow that for these two), with the same
   rules as a CHIRPS feed: a day the copy doesn't hold yet waits, no manifest
-  writes nothing, and stale days (a revision) are read again;
+  writes nothing (the re-check's claims included), and stale days (a
+  revision) are read again;
   `readProductSeries` is the weighted series from the cache, and
   `productVersions` each IMERG day's version (its `chirps_file` tag). The
   cache keeps both products' days as final: ERA5-Land's are, and IMERG Late
