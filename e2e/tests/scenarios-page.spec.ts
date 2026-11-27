@@ -129,7 +129,16 @@ test('thirty scenarios: the rail fills the window and scrolls inside itself, sta
 		await expect(page.getByTestId('scenario-actions').getByRole('button', { name: 'Submit', exact: true })).toBeVisible();
 
 		// Scrolling the scenario keeps the rail in view, and no shorter.
-		await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+		// Scroll to the end and read the rail once the page is really there: the scenario's lower panels can still be
+		// growing the page, so a single scroll can land short (CI run 46033108045 read the rail at the top, 85 px).
+		await expect
+			.poll(() =>
+				page.evaluate(() => {
+					window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' });
+					return window.scrollY > 0 && Math.ceil(window.scrollY + window.innerHeight) >= document.documentElement.scrollHeight - 1;
+				})
+			)
+			.toBe(true);
 		const stuck = (await rail(page).boundingBox())!;
 		expect(stuck.y).toBeGreaterThanOrEqual(0);
 		expect(stuck.y).toBeLessThan(40);
