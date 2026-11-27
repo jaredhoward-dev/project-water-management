@@ -112,6 +112,43 @@ describe('runRenewalNotices', () => {
 		await retire(tooEarly);
 	});
 
+	it('files a period under its last paid day: one ending exactly at SAST midnight counts from the day before (408, issue #930)', async () => {
+		const p = await person('Midnight');
+		const account = await accountOf(p);
+		// The last date with 60 business days before it; the day after it has 61 (so it is itself a business day).
+		const lastPaid = endDatesWithin(today(), RENEWAL_NOTICE_BUSINESS_DAYS, RENEWAL_NOTICE_BUSINESS_DAYS)!.to;
+		const next = addDays(lastPaid, 1);
+		expect(businessDaysBetween(today(), next)).toBe(RENEWAL_NOTICE_BUSINESS_DAYS + 1);
+		/** A yearly period ending at an exact instant (the machine's TZ is skewed; the instant is SAST's, rule 7). */
+		const plantAt = async (end: string) =>
+			(
+				await asOwner(
+					`INSERT INTO subscription (billing_account_id, plan_code, status, seats, period_start, period_end, cancel_at_period_end, provider, external_ref)
+					 VALUES ($1, 'pro', 'active', 1, $2::timestamptz - interval '12 months', $2::timestamptz, false, 'manual', $3) RETURNING id`,
+					[account, end, `renewal-${crypto.randomUUID()}`]
+				)
+			)[0].id as string;
+
+		// Paid through lastPaid, ending at the midnight that starts the next day: filed under lastPaid, so queued at 60.
+		const midnight = await plantAt(`${next}T00:00:00+02:00`);
+		await runRenewalNotices();
+		expect(await notices(midnight)).toEqual([{ status: 'sent', reason: null, attempts: 1 }]);
+		// The email: this year ends on the last paid day, and renews on the next (period_end's SAST date).
+		const mail = lastMailTo(p.email)!;
+		const endsOn = resetWhen(new Date(at(lastPaid))).date;
+		const renewsOn = resetWhen(new Date(at(next))).date;
+		expect(endsOn).not.toBe(renewsOn);
+		expect(mail.subject).toBe(`Your yearly Pro plan renews on ${renewsOn} — IC-WBT`);
+		expect(mail.text).toContain(`This year of it ends on ${endsOn}.`);
+		await retire(midnight);
+
+		// Control: a microsecond later, the next day is paid for too, so its 61 business days are too early.
+		const after = await plantAt(`${next}T00:00:00.000001+02:00`);
+		await runRenewalNotices();
+		expect(await notices(after)).toEqual([]);
+		await retire(after);
+	});
+
 	it('leaves out a team’s account, a monthly plan, a trial and a plan already cancelling; the person’s yearly one beside them gets one', async () => {
 		const p = await person('Excluded');
 		const end = endWith(60);

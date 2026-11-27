@@ -320,6 +320,18 @@ describe('GET /auth/me/export', () => {
 		}
 	});
 
+	it('gives the person’s first manual run record (407, issue #939), and never another person’s', async () => {
+		// Planted as the model_run trigger writes it (the farmers here have made no run of their own).
+		await asOwner(`INSERT INTO first_manual_run (user_id, first_run_at) VALUES ($1, '2026-10-02T08:00:00Z') ON CONFLICT (user_id) DO NOTHING`, [farmer.id]);
+		try {
+			expect((await download(farmer)).doc.firstManualRun).toEqual({ firstRunAt: expect.stringMatching(/^2026-10-02T08:00:00/) });
+			// The other has none: null (positive control above that the reader returns a row).
+			expect((await download(other)).doc.firstManualRun).toBeNull();
+		} finally {
+			await asOwner('DELETE FROM first_manual_run WHERE user_id = $1', [farmer.id]);
+		}
+	});
+
 	it('hashes the canonical address in SQL exactly as reverseTrialHash does (canonical_email, 396, 397), non-ASCII too', async () => {
 		const cases = [
 			'Plain@Example.com',

@@ -74,4 +74,14 @@ describe('renewalNoticeMail', () => {
 			cat['mail.renewal.right'] = kept;
 		}
 	});
+
+	it('says this year ends on the last paid day and renews on period_end’s date, for a period ending exactly at SAST midnight (408)', () => {
+		const mail = renewalNoticeMail(TO, facts('2027-03-01T00:00:00+02:00'), 'en');
+		expect(mail.subject).toBe('Your yearly Pro plan renews on 1 Mar 2027 — IC-WBT');
+		expect(plain(mail.text)).toContain('This year of it ends on 28 Feb 2027.');
+		expect(plain(mail.text)).toContain('Unless you cancel, it renews on 1 Mar 2027');
+		// The last paid day as the backend passes it (period_end − 1 µs from Postgres) gives the same.
+		const passed = renewalNoticeMail(TO, { ...facts('2027-03-01T00:00:00+02:00'), lastPaidAt: new Date('2027-02-28T23:59:59.999+02:00') }, 'en');
+		expect(plain(passed.text)).toContain('This year of it ends on 28 Feb 2027.');
+	});
 });
