@@ -214,7 +214,6 @@ test('removing a project member, revoking an invitation and a farmer’s invitat
 	void owner;
 	const project = await seedRunnableProject(page.request, 'Focus members');
 	const upper = project.model.nodes.find((n) => n.name === 'Upper farm')!;
-	const lower = project.model.nodes.find((n) => n.name === 'Lower farm')!;
 	const colleague = await signIn('Focus editor');
 	await addMember(page.request, project.id, colleague.user.email, 'editor');
 	// Two invitations to addresses without an account, as members and as farmers.
