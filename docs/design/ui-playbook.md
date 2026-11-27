@@ -1458,7 +1458,16 @@ Interaction details that bit:
   silently jumped to the top (issue #931); `lib/nav/leaveGuard.test.ts`
   fails on either old name in `frontend/src`. `data-sveltekit-replacestate`
   replaces the history entry. The leave guard reads both on a click, so a
-  link it stopped is followed again the same way.
+  link it stopped is followed again the same way. A link that keeps the
+  focus but changes the view must still move it, or the reader lands
+  mid-page in a view they didn't see open: Applications' *Back to the list*
+  and *Assess together* keep `reset="false"` (so the focus never falls to
+  `<body>`) and land on the new view's heading with `landOnAnchor`, which
+  scrolls it into view and focuses it (`applicationsViewHeading`). The Fix
+  before saving links (`IssueList`) keep it only where they open a sheet
+  (a node's or a crop's, `issueKeepsPlace`); a transfer's link jumps to its
+  card, so it drops the attribute and the Transfers tab focuses the card's
+  heading.
 - **Motion that runs longer than 5 s needs a way to stop it** (WCAG 2.2.2);
   reduced motion doesn't count. The landing hero has a pause toggle; the
   sign-in panel's decoration simply stops after 4.8 s. Never animate text a

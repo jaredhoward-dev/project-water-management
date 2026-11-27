@@ -32,10 +32,12 @@
 	import { fillHeader } from '#lib/components/workspace/headerSlot.svelte.js';
 	import { fmtDate } from '#lib/format/number.js';
 	import { withoutParam, withParam } from '#lib/workspace/overlays.js';
+	import { landOnAnchor } from '#lib/help/anchor.js';
 	import {
 		APPLICATION_FILTERS,
 		applicationCounts,
 		applicationsContext,
+		applicationsViewHeading,
 		daysSince,
 		daysText,
 		FILTER_LABEL,
@@ -88,6 +90,16 @@
 	const assessView = $derived(page.url.searchParams.get('view') === 'assess');
 	const assessHref = $derived(withParam(page.url, 'view', 'assess'));
 	const listHref = $derived(withoutParam(page.url, 'view'));
+	// Back to the list and Assess together keep the focus (data-sveltekit-reset="false", so it never falls to
+	// <body>) but change the view: the new view's heading takes it, scrolled into view once it is drawn
+	// (landOnAnchor waits for Assess together's load, and yields to Back restoring the reader's place).
+	let shownView: boolean | null = null;
+	$effect(() => {
+		const assess = assessView;
+		const target = applicationsViewHeading(shownView, assess);
+		shownView = assess;
+		if (target) return untrack(() => landOnAnchor(target));
+	});
 	const counts = $derived(applicationCounts(items ?? []));
 	const shown = $derived(sortApplications(filterApplications(items ?? [], filter), sort));
 	const next = $derived(longestWaiting(items ?? []));

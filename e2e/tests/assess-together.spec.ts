@@ -41,6 +41,14 @@ for (const colorScheme of ['light', 'dark'] as const) {
 		await expect(page).toHaveURL(/view=assess/);
 		const panel = page.getByRole('region', { name: 'Assess together' });
 		await expect(panel.getByText('No assessments yet.')).toBeVisible();
+		// The view changed, so its heading takes the focus (and the scroll), never <body> or the link (ui-playbook.md).
+		await expect(page.locator('#assess-h')).toBeFocused();
+		if (colorScheme === 'light') {
+			await page.getByTestId('section-header').getByRole('link', { name: 'Back to the list', exact: true }).click();
+			await expect(page.locator('#applications-h')).toBeFocused();
+			await page.getByTestId('section-header').getByRole('link', { name: 'Assess together', exact: true }).click();
+			await expect(page.locator('#assess-h')).toBeFocused();
+		}
 
 		// The two dam changes conflict: refused, both changes named, nothing run.
 		const apps = panel.getByRole('group', { name: 'Applications' });

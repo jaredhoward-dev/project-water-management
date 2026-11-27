@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Scenario } from '#lib/api/types.js';
 import {
+	applicationsViewHeading,
 	applicationConflictText,
 	applicationCounts,
 	applicationsContext,
@@ -138,5 +139,16 @@ describe('applicationConflictText', () => {
 		expect(applicationConflictText('  ')).toBe(
 			'The application changed since this page read it, so the move was refused; someone else may have withdrawn, reopened or decided it, and it now shows where it stands.'
 		);
+	});
+});
+
+describe('applicationsViewHeading', () => {
+	it('lands on the new view’s heading when the view switches, and nowhere otherwise', () => {
+		expect(applicationsViewHeading(false, true)).toBe('assess-h');
+		expect(applicationsViewHeading(true, false)).toBe('applications-h');
+		// The first render and a step that keeps the view (a sort, a filter) keep the place.
+		expect(applicationsViewHeading(null, true)).toBeNull();
+		expect(applicationsViewHeading(false, false)).toBeNull();
+		expect(applicationsViewHeading(true, true)).toBeNull();
 	});
 });

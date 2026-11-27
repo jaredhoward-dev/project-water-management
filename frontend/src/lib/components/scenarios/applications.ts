@@ -113,3 +113,14 @@ export async function rereadAfterConflict<T>(e: unknown, reread: () => Promise<T
 		return null;
 	}
 }
+
+/**
+ * The heading to land on when the Applications tab switches between its list and Assess together
+ * (`view=assess`): the new view's heading, which takes the focus and so the scroll (ui-playbook.md §
+ * a link that moves to another part of the page). null when the view didn't change (the first render,
+ * a sort or filter step), which keeps the place.
+ */
+export function applicationsViewHeading(prev: boolean | null, assess: boolean): 'assess-h' | 'applications-h' | null {
+	if (prev === null || prev === assess) return null;
+	return assess ? 'assess-h' : 'applications-h';
+}
