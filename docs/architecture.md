@@ -488,6 +488,11 @@ out of order:
 - the report page (`components/report/reportLoad.ts`): changing `?run=`
   while the previous run's report still loads never shows that run under
   the new address (issue #859);
+- the Overview's recent notes (`components/notes/recentLoad.ts`), read
+  again whenever a note changes in any drawer and on Try again;
+- the Restriction log (`components/restrictions/logLoad.ts`): its first
+  page and its older pages share one sequencer, so neither an older page
+  nor another project's first page lands over the newer first page;
 - the share page's link (`routes/share`) and the evidence pack and verify
   pages' lookups.
 
