@@ -335,6 +335,7 @@ test.describe('network layout', () => {
 		const name = table.getByRole('textbox', { name: 'Name' }).last();
 		const remove = table.getByRole('button', { name: 'Remove Lower farm' });
 		for (const end of ['right', 'left'] as const) {
+			// settled: the table is drawn (its width checked above) and nothing loads into it, so its end doesn't move.
 			await box.evaluate((b, e) => (b.scrollLeft = e === 'right' ? b.scrollWidth : 0), end);
 			await expect(name).toBeInViewport({ ratio: 1 });
 			await expect(remove).toBeInViewport({ ratio: 1 });

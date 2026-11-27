@@ -16,7 +16,7 @@ import { API_URL } from '../support/env.ts';
 import { expect, test } from '../support/fixtures.ts';
 import { saveSettings } from '../support/settings.ts';
 import { runJobsTick } from '../support/jobs.ts';
-import { expectNoSidewaysScroll } from '../support/reflow.ts';
+import { expectNoSidewaysScroll, resizeTo } from '../support/reflow.ts';
 import { createScenario } from '../support/scenarios.ts';
 import { answerConfirm } from '../support/confirm.ts';
 
@@ -113,7 +113,7 @@ test('a scenario sets a restriction rule; the outlook’s triggers become the pr
 	await expect(section.getByTestId('restriction-units-table').locator('tbody tr')).toHaveCount(sampleModel().nodes.filter((n) => n.kind === 'farm').length);
 	await expect(page.getByRole('navigation', { name: 'Hydrological units sections' }).getByRole('link', { name: 'Drought restrictions' })).toBeVisible();
 	await expectNoViolations(page, { include: '#res-restrictions' });
-	await page.setViewportSize({ width: 390, height: 844 });
+	await resizeTo(page, { width: 390, height: 844 });
 	await expectNoSidewaysScroll(page);
 
 	// The printable report carries the same tables for the restricted run, and none for the base run made without the rule.

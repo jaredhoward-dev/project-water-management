@@ -4,7 +4,9 @@
 // sheet while the lazily loaded sheet was still on its way, clicked the header's link again and hit the
 // sheet that had opened over it (CI run 37204378090). Each use needs a `// settled:` comment on its line
 // or the line above saying why the state can't be changing then; prefer a web-first `expect` or a
-// signal the app gives (the URL, a data-ready attribute). Run by `pnpm test` (node:test).
+// signal the app gives (the URL, a data-ready attribute). A locator's `count()` read in an `if`, `while` or `?:` is the
+// same one-off look (is the button there yet?), so it needs the same reason. Layout reads after a one-off scroll or a
+// resize have their own guard, measureChecks.test.ts. Run by `pnpm test` (node:test).
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -13,6 +15,8 @@ import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const SNAPSHOT = /\.(isVisible|isHidden|isChecked|isEnabled|isDisabled|isEditable)\(\)/;
+/** A `count()` deciding control flow: in an `if (…)` or `while (…)` condition, or before a `?`. */
+const COUNT_BRANCH = /\b(if|while)\s*\(.*\.count\(\)|\.count\(\)\)?\s*(>\s*0\s*)?\)?\s*\?\s/;
 const SETTLED = /\/\/ settled: \S/;
 
 /** The `file:line` of every snapshot check without a `// settled:` reason. */
@@ -20,7 +24,7 @@ export function unsettledChecks(file: string, text: string): string[] {
 	const lines = text.split('\n');
 	const out: string[] = [];
 	lines.forEach((line, i) => {
-		if (!SNAPSHOT.test(line) || line.trimStart().startsWith('//')) return;
+		if (!(SNAPSHOT.test(line) || COUNT_BRANCH.test(line)) || line.trimStart().startsWith('//')) return;
 		if (SETTLED.test(line) || SETTLED.test(lines[i - 1] ?? '')) return;
 		out.push(`${file}:${i + 1}`);
 	});
@@ -38,6 +42,11 @@ test('the guard flags a bare snapshot check and accepts one with a reason', () =
 	assert.deepEqual(unsettledChecks('a.ts', '\t// settled: the sheet is open.\n\tif (await b.isVisible()) await b.click();'), []);
 	assert.deepEqual(unsettledChecks('a.ts', '\tif (await b.isChecked()) await b.click(); // settled: nothing moves it.'), []);
 	assert.deepEqual(unsettledChecks('a.ts', '\tawait expect(b).toBeVisible();'), []);
+	// count() deciding what to do next is the same look; counting to assert on it is not.
+	assert.deepEqual(unsettledChecks('a.ts', '\tif (await more.count()) await more.click();'), ['a.ts:1']);
+	assert.deepEqual(unsettledChecks('a.ts', '\tconst scope = (await page.locator(MODAL).count()) > 0 ? MODAL : undefined;'), ['a.ts:1']);
+	assert.deepEqual(unsettledChecks('a.ts', '\twhile ((await rows.count()) < 3) await add();'), ['a.ts:1']);
+	assert.deepEqual(unsettledChecks('a.ts', '\tconst before = await nav.getByRole("link").count();\n\texpect(await rows.count()).toBe(3);'), []);
 });
 
 test('every snapshot check in the specs and their support says why the state is settled', () => {

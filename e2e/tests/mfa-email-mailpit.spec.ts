@@ -25,6 +25,7 @@ import { ageEmailCodeSends } from '../support/db.ts';
 import { API_URL, MFA_API_URL } from '../support/env.ts';
 import { expect, test } from '../support/fixtures.ts';
 import { viaMfaApi } from '../support/mfaApi.ts';
+import { scrollToEnd } from '../support/scroll.ts';
 import { sessionToken } from '../support/session.ts';
 
 const MAILPIT = process.env.MAILPIT_URL ?? 'http://localhost:8026';
@@ -225,7 +226,7 @@ test('3. signing an evidence pack with a code over 10 minutes old: “Email me a
 	await dialog.getByLabel('Registration number', { exact: true }).fill('400998/20');
 	await dialog.getByLabel('What this sign-off covers', { exact: true }).fill('Hydrology of a synthetic WULA');
 	for (const box of await dialog.getByRole('checkbox').all()) await box.check();
-	await dialog.getByRole('region', { name: /^Known limitations/ }).evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
+	await scrollToEnd(dialog.getByRole('region', { name: /^Known limitations/ }));
 	await dialog.getByRole('button', { name: 'Sign off', exact: true }).click();
 
 	// 401 mfa_fresh_code: the dialog asks for a code, the app's or one by email.

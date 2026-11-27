@@ -645,6 +645,7 @@ test.describe('fifty projects', () => {
 		await expectNoViolations(page);
 		// A real scroll moves the ⋯ away from the fixed menu, so the menu closes.
 		const more = row(page, 'Big published catchment').getByRole('button', { name: 'More actions for Big published catchment', exact: true });
+		// settled: any real scroll closes the menu; where it lands is never read.
 		await page.locator('.groups').evaluate((el) => el.scrollBy(0, 120));
 		await expect(more).toHaveAttribute('aria-expanded', 'false');
 		await openRowMenu(page, 'Big published catchment');

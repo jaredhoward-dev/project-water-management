@@ -10,7 +10,7 @@ import { expectNoViolations } from '../support/a11y.ts';
 import { API_URL } from '../support/env.ts';
 import { createRun, putModel, seedRunnableProject, type Model } from '../support/api.ts';
 import { expect, test } from '../support/fixtures.ts';
-import { expectNoSidewaysScroll } from '../support/reflow.ts';
+import { expectNoSidewaysScroll, resizeTo } from '../support/reflow.ts';
 import { answerConfirm } from '../support/confirm.ts';
 
 const PHONE = { width: 360, height: 740 };
@@ -197,7 +197,7 @@ test('a share link fits a laptop screen in two columns and a phone in one', asyn
 	await shared.emulateMedia({ colorScheme: 'light' });
 
 	for (const viewport of [PHONE, { width: 390, height: 844 }]) {
-		await shared.setViewportSize(viewport);
+		await resizeTo(shared, viewport);
 		const header = (await shared.locator('.share-header').boundingBox())!;
 		expect(header.height).toBeLessThanOrEqual(64);
 		const en = (await shared.getByRole('button', { name: 'English' }).boundingBox())!;

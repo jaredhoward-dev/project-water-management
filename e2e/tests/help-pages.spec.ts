@@ -4,6 +4,7 @@
 // text is longer than the window.
 import { expectNoViolations } from '../support/a11y.ts';
 import { expect, test } from '../support/fixtures.ts';
+import { scrollToEnd } from '../support/scroll.ts';
 
 test('a guide heads its page with a breadcrumb back to help', async ({ page, owner }) => {
 	void owner;
@@ -133,7 +134,7 @@ test('a guide’s "On this page" marks the section being read', async ({ page, o
 	// Scrolled there directly: Chromium's animated End/Home keyboard scroll
 	// sometimes ignores a Home pressed after End (2 runs in 20, no key
 	// handler in the app), and what this checks is the marker, not the keys.
-	await page.evaluate(() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' }));
+	await scrollToEnd(page);
 	await expect(marked).toHaveText(['Validation: the honest measure']);
 	await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
 	await expect(marked).toHaveCount(0);
@@ -179,6 +180,7 @@ test('widened from a phone past 900 px, the text takes its column at once, besid
 	await page.setViewportSize({ width: 390, height: 844 });
 	await page.goto('/help/guides/a-day-on-a-farm');
 	await expect(page.getByRole('heading', { level: 1, name: 'A day on one hydrological unit' })).toBeVisible();
+	// settled: the read straight after the resize is the point: the column must be wide in the first layout (below).
 	await page.setViewportSize({ width: 1440, height: 960 });
 	// Measured straight after the resize, before the contents column (and the app
 	// sidebar) arrive: the text column was the 13rem contents track, ~180 px, until then.

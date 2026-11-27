@@ -12,6 +12,7 @@ import { acceptInvites, createProject, createRun, seedRunnableProject } from '..
 import { expect, test } from '../support/fixtures.ts';
 import { answerConfirm } from '../support/confirm.ts';
 import { boxesOf } from '../support/reflow.ts';
+import { scrollToEnd } from '../support/scroll.ts';
 
 test('a farm note shown to the farm reaches its farmer; a team note never does', async ({ page, owner, signIn }) => {
 	void owner;
@@ -176,7 +177,7 @@ for (const size of [
 		const body = dialog.locator(':scope > .body');
 		expect(await body.evaluate((b) => b.scrollHeight > b.clientHeight)).toBe(true);
 		await expect(dialog.getByRole('button', { name: 'Close', exact: true })).toBeInViewport();
-		await body.evaluate((b) => (b.scrollTop = b.scrollHeight));
+		await scrollToEnd(body);
 		await expect(items.last()).toBeInViewport();
 		await expect(dialog.getByRole('button', { name: 'Close', exact: true })).toBeInViewport();
 		expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);

@@ -11,6 +11,7 @@ import { seedWhatIfs } from '../support/compare.ts';
 import { expect, test } from '../support/fixtures.ts';
 import { boxesOf, layoutSettled } from '../support/reflow.ts';
 import { openRiver, seedRiverProject } from '../support/river.ts';
+import { scrollToEnd } from '../support/scroll.ts';
 import { openSupply, seedSupplyProject } from '../support/supply.ts';
 
 const SETTINGS_LINKS = [
@@ -257,7 +258,7 @@ test('a narrower window moves the last links into More, which works from the key
 	await expect(auto).toBeInViewport();
 	await expect(more).toHaveAttribute('aria-expanded', 'false');
 	// At the foot of the page, the menu still sticks, and More says it holds the section read.
-	await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+	await scrollToEnd(page);
 	await expect(menu).toBeInViewport();
 	await expect(more).toHaveAccessibleName('More sections, including the one being read');
 
