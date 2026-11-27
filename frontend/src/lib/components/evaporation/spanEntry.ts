@@ -40,3 +40,13 @@ export function parseSpanRow(text: string): { ok: true; values: number[] } | { o
 	if (bad >= 0) return { ok: false, reason: `value ${bad + 1} is not a number of mm from 0 to 1000` };
 	return { ok: true, values };
 }
+
+/**
+ * The equation picked, while the months still let it be used: months edited below an equation's floor disable its
+ * radio, so the pick is dropped rather than left checked and disabled beside "Pick an equation below". Without all 12
+ * months (no results, no radios shown) the pick waits for them.
+ */
+export function keptConversion<Id extends string>(results: readonly { id: Id; result: { ok: boolean } }[] | null, conversion: Id | null): Id | null {
+	if (!conversion || !results) return conversion;
+	return results.some((r) => r.id === conversion && r.result.ok) ? conversion : null;
+}

@@ -1,7 +1,8 @@
 // The A-pan source choice and the S-pan paste (spanEntry.ts).
 import { describe, expect, it } from 'vitest';
 import { CCWR_APAN_DATASET, evaporationGridName } from './ccwrApan';
-import { APAN_SOURCES, parseSpanRow } from './spanEntry';
+import { apanMonthlyFromSpan, SPAN_CONVERSIONS } from '@water-management/engine';
+import { APAN_SOURCES, keptConversion, parseSpanRow } from './spanEntry';
 
 const ROW = [150, 170, 190, 195, 160, 140, 95, 70, 55, 57, 78, 105];
 
@@ -39,5 +40,26 @@ describe('the CCWR A-pan grid’s name', () => {
 		expect(evaporationGridName('Atlas-Apan-2007')).toBe('CCWR A-pan');
 		for (const d of ['synthetic', 'Atlas-Span-2007', 'dPET-1991-2020', 'penpan-2001-2020']) expect(evaporationGridName(d)).toBe(d);
 		// The operator's command names the dataset, as docs/STACK.md has it, and no period (the Atlas states none).
+	});
+});
+
+describe('keptConversion', () => {
+	const results = (span: number[]) => SPAN_CONVERSIONS.map((c) => ({ id: c.id, result: apanMonthlyFromSpan(span, c.id) }));
+
+	it('keeps an equation the months can use, and no pick stays no pick', () => {
+		expect(keptConversion(results(ROW), 'wr90')).toBe('wr90');
+		expect(keptConversion(results(ROW), 'taljaard2023')).toBe('taljaard2023');
+		expect(keptConversion(results(ROW), null)).toBeNull();
+	});
+
+	it('drops the pick once a month falls below its floor (WR90 32.5 mm), keeping one still usable (Taljaard 22.3 mm)', () => {
+		const low = [25, ...ROW.slice(1)];
+		expect(results(low).find((r) => r.id === 'wr90')!.result.ok).toBe(false);
+		expect(keptConversion(results(low), 'wr90')).toBeNull();
+		expect(keptConversion(results(low), 'taljaard2023')).toBe('taljaard2023');
+	});
+
+	it('waits while the months are incomplete (no radios shown)', () => {
+		expect(keptConversion(null, 'wr90')).toBe('wr90');
 	});
 });

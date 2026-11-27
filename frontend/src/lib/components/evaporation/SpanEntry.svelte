@@ -17,7 +17,7 @@
 	import NumberInput from '#lib/components/common/NumberInput.svelte';
 	import { fmtNum } from '#lib/format/number.js';
 	import { WATER_YEAR_MONTHS } from '#lib/format/months.js';
-	import { parseSpanRow } from './spanEntry';
+	import { keptConversion, parseSpanRow } from './spanEntry';
 
 	let {
 		projectId,
@@ -49,6 +49,11 @@
 
 	const full = $derived(span.every((v) => v !== null && Number.isFinite(v)) ? (span as number[]) : null);
 	const results = $derived(full ? SPAN_CONVERSIONS.map((c) => ({ ...c, result: apanMonthlyFromSpan(full, c.id) })) : null);
+	// Months edited below the picked equation's floor disable its radio: drop the pick, not leave it checked and disabled.
+	$effect(() => {
+		const kept = keptConversion(results, conversion);
+		if (kept !== conversion) conversion = kept;
+	});
 	const chosen = $derived(results?.find((r) => r.id === conversion) ?? null);
 	const apan = $derived(chosen?.result.ok ? chosen.result.values : null);
 	const total = (row: readonly number[]) => fmtNum(Math.round(row.reduce((a, b) => a + b, 0)));
@@ -74,6 +79,8 @@
 		if (!ok) return;
 		busy = true;
 		useError = null;
+		// Cleared first, so a second Use's notice is new text in the live region and is announced again.
+		notice = null;
 		try {
 			const r = await api.evaporationSpan.use(projectId, { spanMm: full, conversion: chosen.id, ...(note.trim() ? { note: note.trim() } : {}) });
 			notice = `The A-pan row is now ${total(r.apanMm)} mm a year, converted from your S-pan, saved as a settings revision giving the months and the equation.`;
@@ -92,7 +99,8 @@
 		Symons-pan (S-pan) evaporation, as WR90 and WR2012 publish it, is not the Class-A pan the model reads. Enter or paste the 12 months, pick the
 		equation that converts them, and use the result as the A-pan row. Nothing changes until you use it.
 	</p>
-	{#if notice}<p class="alert alert-success slim" tabindex="-1" bind:this={noticeEl} data-testid="span-entry-notice">{notice}</p>{/if}
+	<!-- Always in the page, so a screen reader announces each Use's notice as it arrives (ProposalPanel's pattern). -->
+	<p class={notice ? 'alert alert-success slim' : 'visually-hidden'} role="status" tabindex="-1" bind:this={noticeEl} data-testid="span-entry-notice">{notice ?? ''}</p>
 	{#if !readonly}
 		<div class="paste">
 			<label for="{uid}-paste">Paste the 12 S-pan months from a spreadsheet <span class="u">(mm, October first)</span></label>
