@@ -92,6 +92,9 @@ const PROD: Record<Role, Record<string, string>> = {
 		// Stripe (the stricter side; Terraform's default is manual, var.billing_provider): the API then needs both Stripe secrets.
 		BILLING_PROVIDER: 'stripe',
 		BILLING_ENVIRONMENT: 'icwbt.example.com',
+		// Enforcement and the reverse trial on (Terraform's defaults are both off; infra/variables.tf refuses the trial alone).
+		BILLING_ENFORCED: 'true',
+		REVERSE_TRIAL: 'true',
 		MAIL_TRANSPORT: 'ses',
 		MAIL_FROM: 'IC-WBT <no-reply@water.example.org>',
 		SITE_URL: SITE,
@@ -140,6 +143,7 @@ const PROD: Record<Role, Record<string, string>> = {
 		ET_OBSERVATIONS: 'off',
 		FUTURE_YIELD: 'off',
 		MIRROR_URL: 's3://water-management-mirror-000000000000',
+		BILLING_ENFORCED: 'true',
 		REPORT_RENDERER: 'sqs',
 		RENDER_REQUESTS_QUEUE_URL: SQS('render-requests'),
 		RENDER_CONCURRENCY: '2',
@@ -196,6 +200,7 @@ const PROD: Record<Role, Record<string, string>> = {
 		DB_POOL_MAX: '1',
 		FEED_SOURCE: 'live',
 		FUTURE_YIELD: 'off',
+		BILLING_ENFORCED: 'true',
 		ASSISTANT_PROVIDER: 'bedrock',
 		ASSISTANT_MODEL: MODEL,
 		ASSISTANT_BEDROCK_REGION: 'af-south-1',
