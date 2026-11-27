@@ -46,12 +46,15 @@ describe('the leave guard', () => {
 		expect(h.confirm).not.toHaveBeenCalled();
 	});
 
-	it('positive control: the same navigation, not shallow, is stopped and asks', () => {
+	it('positive control: the same navigation, not shallow, is stopped and asks', async () => {
 		const n = nav('https://app.test/teams');
 		h.handler!(n);
 		expect(n.cancel).toHaveBeenCalledOnce();
-		expect(h.confirm).toHaveBeenCalledOnce();
+		// The question waits for destination.ts, which loads only when one is asked (nameOf).
+		await vi.waitFor(() => expect(h.confirm).toHaveBeenCalledOnce());
 		expect(h.confirm.mock.calls[0]![0]).toMatchObject({ confirmLabel: 'Leave without saving' });
+		// Named through the lazily loaded destination.ts.
+		expect(h.confirm.mock.calls[0]![0].message).toContain('Leave and go to Teams?');
 	});
 
 	describe('a navigation made again after Leave (issue #931)', () => {

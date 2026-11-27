@@ -1298,7 +1298,10 @@ scenario for a scenario's) is cancelled and the app's own dialog asks,
 naming what is unsaved and where the link goes: "You have unsaved changes
 (model edits). Leave and go to All projects? They will be lost."
 (`lib/nav/destination.ts` names the sidebar's pages, a section as "the
-Network page", another scenario or project). **Stay** (focused first, and
+Network page", another scenario or project; the guard loads it only when it
+asks, since it pulls in the workspace's section labels, which the root layout
+and so the landing page's first load shouldn't carry, and a failed load asks
+"Leave this page?" unnamed). **Stay** (focused first, and
 Esc) keeps everything; **Leave without saving** makes the navigation again,
 let through once, with the options it was first made with (issue #931:
 every `goto` in the app goes through the guard's `guardedGoto`, which notes

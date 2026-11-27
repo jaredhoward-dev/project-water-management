@@ -12,9 +12,8 @@
 import { onMount } from 'svelte';
 import { beforeNavigate, goto, type GotoOptions } from '$app/navigation';
 import { basePath } from '#lib/nav/base.js';
-import { page } from '$app/state';
+import { page, type ReadonlyURL } from '$app/state';
 import { confirmDialog } from '#lib/components/common/confirm.svelte.js';
-import { destinationName } from './destination';
 import { anyUnsaved, leaveQuestion, unsavedDroppedBy, whatOf } from './unsaved';
 
 // A navigation the person already agreed to: let it through once.
@@ -81,11 +80,24 @@ export function guardedGoto(url: string | URL, opts?: GotoOptions): Promise<void
 	return nav;
 }
 
+/**
+ * The destination's name for the question, or null (the question then reads "Leave this page?").
+ * destination.ts loads only when a question is asked: it pulls in the workspace's section
+ * labels (workspace/tabs.ts), which the root layout, and so the landing page's first load,
+ * should not carry (issue #92). A failed load (a stale deploy's chunk) still asks, unnamed.
+ */
+const nameOf = (from: ReadonlyURL, to: ReadonlyURL): Promise<string | null> =>
+	import('./destination').then(
+		(d) => d.destinationName(from, to, basePath()),
+		() => null,
+	);
+
 /** Ask the guard's question about `dropped` work, once at a time; resolves to Leave (true) or Stay. */
 async function ask(dropped: ReturnType<typeof unsavedDroppedBy>, to: URL | null): Promise<boolean> {
 	asking = true;
+	const from = page.url;
 	try {
-		const q = leaveQuestion(dropped.map(whatOf), to ? destinationName(page.url, to, basePath()) : null);
+		const q = leaveQuestion(dropped.map(whatOf), to ? await nameOf(from, to) : null);
 		return await confirmDialog({ ...q, confirmLabel: 'Leave without saving', cancelLabel: 'Stay', danger: true });
 	} finally {
 		asking = false;
