@@ -111,12 +111,14 @@ for (const size of [
 		expect((await rows.nth(20).boundingBox())!.y - first.y).toBeCloseTo(20 * 28, 0);
 
 		// Scrolled to the end, the last day is the last row, at the foot of the scroll box.
+		// settled: the virtual table's height is its day count × 28 px, fixed once drawn (checked above), and the last row is awaited below.
 		await scroll.evaluate((d) => (d.scrollTop = d.scrollHeight));
 		const last = rows.last();
 		await expect(last.getByRole('cell').first()).toHaveText('29 Sep 2021');
 		const end = (await scroll.boundingBox())!;
 		expect(Math.abs((await last.boundingBox())!.y + 28 - (end.y + end.height))).toBeLessThan(3);
 		// Halfway, the row at the top of the box is the day that far in.
+		// settled: a fixed offset into the drawn virtual table; the row there is awaited with a web-first expect.
 		await scroll.evaluate((d) => (d.scrollTop = 365 * 28));
 		await expect(dialog.getByRole('row', { name: /^30 Sep 2020 / })).toBeInViewport();
 

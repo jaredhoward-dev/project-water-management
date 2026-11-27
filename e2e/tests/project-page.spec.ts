@@ -9,6 +9,7 @@ import { plantEmailToken } from '../support/db.ts';
 import { API_URL } from '../support/env.ts';
 import { expect, test } from '../support/fixtures.ts';
 import { fact, membersPanel, openProject } from '../support/project.ts';
+import { layoutSettled } from '../support/reflow.ts';
 import { answerConfirm } from '../support/confirm.ts';
 
 const strip = (page: Page) => page.getByRole('navigation', { name: 'Project sections' });
@@ -398,8 +399,12 @@ const panelHeadings = (page: Page) =>
 async function menuLinks(page: Page): Promise<string[]> {
 	const nav = sections(page);
 	const more = nav.getByRole('button', { name: /^More/ });
+	// Whether the bar needs More is its fit, measured by a ResizeObserver: let the fonts land and that run first.
+	await layoutSettled(page);
+	// settled: the fit has run (layoutSettled above), so More is there or not for this width.
 	if (await more.count()) await more.click();
 	const names = await nav.getByRole('link').allInnerTexts();
+	// settled: the same More as above; reading the links opens and closes nothing.
 	if (await more.count()) await page.keyboard.press('Escape');
 	return names.map((n) => n.trim());
 }

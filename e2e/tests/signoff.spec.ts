@@ -10,6 +10,7 @@ import { addMember, createRun, seedRunnableProject } from '../support/api.ts';
 import { plantSignoff2 } from '../support/db.ts';
 import { answerConfirm } from '../support/confirm.ts';
 import { expect, test } from '../support/fixtures.ts';
+import { scrollToEnd } from '../support/scroll.ts';
 
 const ready = (page: Page) => expect(page.locator('main[data-report-ready="true"]')).toBeVisible();
 
@@ -102,7 +103,7 @@ test('an editor signs a run off from its report; a viewer sees the sign-off and 
 	await expect(dialog.getByText(/^Methods: methodology statement methodology-\d+/)).toBeVisible();
 	const list = dialog.getByRole('region', { name: /^Known limitations \(\d+\) and errata of engine/ });
 	await expect(list.getByText('None recorded for this engine version in docs/engine-errata.md.')).toBeVisible();
-	await list.evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
+	await scrollToEnd(list);
 	await expect(dialog.getByText('You have reached the end of the list.')).toBeVisible();
 	// Unticking one statement blocks it again.
 	await boxes.first().uncheck();

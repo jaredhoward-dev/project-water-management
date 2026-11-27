@@ -16,7 +16,7 @@ import { API_URL } from '../support/env.ts';
 import { expect, test } from '../support/fixtures.ts';
 import { loadSyntheticLandCover } from '../support/landCover.ts';
 import { box } from '../support/map.ts';
-import { expectNoSidewaysScroll } from '../support/reflow.ts';
+import { expectNoSidewaysScroll, resizeTo } from '../support/reflow.ts';
 
 const panel = (page: Page) => page.getByTestId('cropland-proposals');
 const types = (page: Page) => panel(page).getByTestId('croptypes');
@@ -101,7 +101,7 @@ test('an editor uses the unit’s orchards as a crop’s planted area; new plant
 	await expectNoViolations(page, { include: '[data-testid="cropland-proposals"]' });
 
 	// On a phone the crop-type table fits the drawer like the others.
-	await page.setViewportSize({ width: 390, height: 844 });
+	await resizeTo(page, { width: 390, height: 844 });
 	await expectNoSidewaysScroll(page);
 	const [scroll, client] = await types(page).locator('.table-wrap').evaluate((w) => [w.scrollWidth, w.clientWidth]);
 	expect(scroll).toBeLessThanOrEqual(client!);

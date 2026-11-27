@@ -69,6 +69,7 @@ export async function violations(page: Page, { tags = WCAG_TAGS, rules, include 
 	const builder = new AxeBuilder({ page }).options({ resultTypes: ['violations'] }).setLegacyMode();
 	if (rules) builder.withRules(rules);
 	else builder.withTags(tags);
+	// settled: callers scan a page they have waited on: a dialog they opened is open by now, and one they closed is awaited gone.
 	const scope = include ?? ((await page.locator(MODAL).count()) > 0 ? MODAL : undefined);
 	if (scope) builder.include(scope);
 	const results = await builder.analyze();

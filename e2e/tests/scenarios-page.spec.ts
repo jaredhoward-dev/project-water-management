@@ -200,16 +200,24 @@ async function expectNodeTableClearOfBars(page: Page) {
 	const size = await wrap.evaluate((el) => ({ sh: el.scrollHeight, ch: el.clientHeight, sw: el.scrollWidth, cw: el.clientWidth }));
 	expect(size.sh).toBeGreaterThan(size.ch);
 	expect(size.sw).toBeGreaterThan(size.cw);
-	// Scroll the page until the box's foot meets the record bar's top.
-	await wrap.evaluate((el) => {
-		const record = document.querySelector('[data-testid="override-record"]')!.getBoundingClientRect();
-		window.scrollBy(0, el.getBoundingClientRect().bottom - record.top + 2);
-	});
+	// Scroll the page until the box's foot meets the record bar's top, redoing the scroll against the page as it is now:
+	// a page still growing leaves a single scroll short of it.
+	await expect
+		.poll(() =>
+			wrap.evaluate((el) => {
+				const foot = () => el.getBoundingClientRect().bottom - document.querySelector('[data-testid="override-record"]')!.getBoundingClientRect().top;
+				// settled: inside the poll, redone until the foot meets the bar.
+				window.scrollBy({ top: foot() + 2, behavior: 'instant' });
+				return el.getBoundingClientRect().top >= 0 && foot() <= 0;
+			})
+		)
+		.toBe(true);
 	const box = (await wrap.boundingBox())!;
 	const record = (await page.getByTestId('override-record').boundingBox())!;
 	expect(box.y).toBeGreaterThanOrEqual(0);
 	expect(box.y + box.height).toBeLessThanOrEqual(record.y);
 	const bar = anySaveBar(page);
+	// settled: every edit above is in (Record N changes is enabled), and a save bar draws in the same update as the edit that raises it.
 	if (await bar.count()) {
 		const saveBox = (await bar.boundingBox())!;
 		expect(record.y + record.height).toBeLessThanOrEqual(saveBox.y + 1);
@@ -222,17 +230,20 @@ async function expectNodeTableClearOfBars(page: Page) {
 	});
 	expect(hit).toBe(true);
 	// Scrolled down inside its box, the header stays over the rows: the pinned name cells pass under it.
-	const headerOnTop = await wrap.evaluate((el) => {
-		el.scrollTop = el.scrollHeight;
-		const name = el.querySelector('thead th.sticky')!.getBoundingClientRect();
-		const at = document.elementFromPoint(name.left + 8, name.bottom - 4);
-		return !!at && !!at.closest('thead');
-	});
-	expect(headerOnTop).toBe(true);
+	await expect
+		.poll(() =>
+			wrap.evaluate((el) => {
+				el.scrollTop = el.scrollHeight;
+				const name = el.querySelector('thead th.sticky')!.getBoundingClientRect();
+				const at = document.elementFromPoint(name.left + 8, name.bottom - 4);
+				return el.scrollTop > 0 && !!at && !!at.closest('thead');
+			})
+		)
+		.toBe(true);
 	// And it scrolls sideways under the mouse.
 	expect(await wrap.evaluate((el) => el.scrollLeft)).toBe(0);
 	await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-	await page.mouse.wheel(400, 0);
+	await page.mouse.wheel(400, 0); // settled: the poll below waits for the wheel's scroll, and any sideways move passes.
 	await expect.poll(() => wrap.evaluate((el) => el.scrollLeft)).toBeGreaterThan(0);
 }
 

@@ -425,8 +425,12 @@ test('the water balance fits its column at 1440 and 1280: headings wrap, two pai
 	await balance.scrollIntoViewIfNeeded();
 	await expectNoSidewaysScroll(page);
 	const left = (await wrap.boundingBox())!.x;
-	await wrap.evaluate((w) => (w.scrollLeft = w.scrollWidth));
-	await expect.poll(async () => Math.round((await balance.getByRole('rowheader', { name: 'Whole run', exact: true }).boundingBox())!.x - left)).toBeLessThanOrEqual(1);
+	await expect
+		.poll(async () => {
+			await wrap.evaluate((w) => (w.scrollLeft = w.scrollWidth));
+			return Math.round((await balance.getByRole('rowheader', { name: 'Whole run', exact: true }).boundingBox())!.x - left);
+		})
+		.toBeLessThanOrEqual(1);
 });
 
 test('run notes: the team’s Notes button on the heading’s row, saying which is which, and Save notes in an action row under the field', async ({ page, owner }) => {

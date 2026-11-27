@@ -30,6 +30,7 @@ async function openProposals(page: Page, projectId: string, unit: string) {
 	await expect(panel(page).getByTestId('dam-proposals-body')).toHaveAttribute('data-ready', 'true');
 	// With a run the box is folded inside the picked dam's chart panel: open it first.
 	const fold = panel(page).locator('details.fold');
+	// settled: the proposals body, awaited ready above, is drawn inside the fold when there is one, so the fold is there by now.
 	if ((await fold.count()) && (await fold.getAttribute('open')) === null) await fold.locator('> summary').click();
 	await panel(page).getByLabel('Dam of').selectOption({ label: unit });
 	await expect(panel(page).getByTestId('dam-proposals-body')).toHaveAttribute('data-ready', 'true');

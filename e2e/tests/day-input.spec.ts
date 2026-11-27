@@ -11,7 +11,7 @@ import { answerConfirm } from '../support/confirm.ts';
 import { API_URL } from '../support/env.ts';
 import type { Locator, Page } from '@playwright/test';
 import { expect, test } from '../support/fixtures.ts';
-import { expectNoSidewaysScroll } from '../support/reflow.ts';
+import { expectNoSidewaysScroll, resizeTo } from '../support/reflow.ts';
 import { anySaveBar, saveSettings } from '../support/settings.ts';
 
 const MESSAGE = 'Enter a day, day first: 15 Nov 2021, 15/11/2021 or 2021-11-15';
@@ -66,7 +66,7 @@ test('a typed day reads day first or ISO, shows back day first and saves as YYYY
 
 	// No sideways scroll on a phone with the fields in place.
 	for (const width of [320, 390]) {
-		await page.setViewportSize({ width, height: 800 });
+		await resizeTo(page, { width, height: 800 });
 		await expectNoSidewaysScroll(page);
 	}
 });

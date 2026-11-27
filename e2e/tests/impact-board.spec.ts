@@ -8,6 +8,7 @@ import type { Page } from '@playwright/test';
 import { expectNoViolations } from '../support/a11y.ts';
 import { createProject, createRun, putModel, putSeries, sampleModel, updateSettings, type Model } from '../support/api.ts';
 import { expect, test } from '../support/fixtures.ts';
+import { resizeTo } from '../support/reflow.ts';
 
 const START = '2012-10-01';
 /** Nine complete water years, 2012/13 … 2020/21. */
@@ -95,7 +96,7 @@ test('the impact report opens with the board: a column per year class, the water
 	await expect(b.getByText('Neither run has a Reserve rule table at the outlet, so the board counts days below the pragmatic EWR.')).toBeVisible();
 	await expectNoViolations(page, { include: '[data-testid="licence-impact-board"]' });
 	// On a phone the board stacks or scrolls inside itself, never the page.
-	await page.setViewportSize({ width: 390, height: 844 });
+	await resizeTo(page, { width: 390, height: 844 });
 	expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 	await page.emulateMedia({ colorScheme: 'dark' });
 	await expectNoViolations(page, { include: '[data-testid="licence-impact-board"]' });

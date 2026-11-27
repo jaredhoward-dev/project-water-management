@@ -40,6 +40,7 @@ async function checkPage(page: Page, projectId: string, { tab, ready, level, min
 	// Open every fold (each opened in turn, so a fold inside another is reached once its parent is open).
 	for (;;) {
 		const shut = page.locator('details.fold:visible:not([open]) > summary');
+		// settled: a native <details> opens in the click itself and a fold inside it is already in the DOM, so this count sees every fold the last click showed.
 		if (!(await shut.count())) break;
 		await shut.first().click();
 	}

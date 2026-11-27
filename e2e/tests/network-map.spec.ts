@@ -12,6 +12,7 @@ import { expect, test } from '../support/fixtures.ts';
 import { closeModal, doneThenClick, openNodeForm, openNodeSection, openNodeTable } from '../support/network.ts';
 import { answerConfirm } from '../support/confirm.ts';
 import { expectAbove } from '../support/reflow.ts';
+import { scrollToEnd } from '../support/scroll.ts';
 import { showHeaderControls } from '../support/sectionHeader.ts';
 
 const nodeList = (page: Page) => page.getByRole('list', { name: 'All hydrological units' });
@@ -530,7 +531,7 @@ test('the node sheet runs in the order water moves, with the section menu fixed 
 	await expect(menu).toBeInViewport();
 	expect(await page.evaluate(() => document.documentElement.style.scrollPaddingTop)).toBe('');
 	// Scrolling the form by hand moves the mark: the last section, once the form is at its end.
-	await sheet.locator('.body').evaluate((el) => el.scrollTo(0, el.scrollHeight));
+	await scrollToEnd(sheet.locator('.body'));
 	if (kept === legends.length) await expect(menu.getByRole('link', { name: 'Bed losses in the reach below' })).toHaveAttribute('aria-current', 'location');
 	else await expect(more).toHaveAccessibleName(/including the one being read/);
 	await expectNoViolations(page);

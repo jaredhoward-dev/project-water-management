@@ -189,6 +189,7 @@ test('a link with data-sveltekit-reset="false" keeps the scroll and the focus (H
 	const older = historyDetail(page).getByRole('link', { name: 'Older', exact: true });
 	// Older sits near the top of the detail, in view on load: scroll the page until it is 150 px from the top, so
 	// the page is scrolled and Older is still on screen to click without Playwright scrolling to it.
+	// settled: where it lands only has to be scrolled; the poll below waits for that before `before` is read.
 	await older.evaluate((el) => window.scrollBy(0, el.getBoundingClientRect().top - 150));
 	// The precondition: the page is scrolled, so a reset would move it.
 	await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
