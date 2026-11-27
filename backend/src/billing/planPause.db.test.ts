@@ -355,3 +355,87 @@ describe('409: the schema owner’s subscription writes, enforced', () => {
 		expect(await paused(acct)).toEqual([]);
 	});
 });
+
+// 417: the tick visits only the accounts app_plan_pause_sync can change. Its set-based "live" is
+// app_project_live_except written out, so each of the four ways a catchment goes live must still start the grace of
+// an ended plan with two of them (the control: one live catchment, within Free, starts none). And an ended account
+// with no stamp and no marker is no longer visited at all: the tick never waits on its billing lock (before 417 it
+// took every such account's lock, every tick).
+describe('417: the tick visits only the accounts it can change', () => {
+	const endedAccount = async (name: string, count: number) => {
+		const u = await signUp(name);
+		const ids: string[] = [];
+		for (let i = 0; i < count; i++) ids.push(await newProject(u, `${name} ${i}`));
+		const acct = await accountOf(ids[0]!);
+		await asOwner(`INSERT INTO subscription (billing_account_id, plan_code, status, provider) VALUES ($1, 'pro', 'canceled', 'mock')`, [acct]);
+		return { u, ids, acct };
+	};
+	const goLive: Record<string, (u: User, pid: string) => Promise<void>> = {
+		feed: async (u, pid) => {
+			const f = await u.call('POST', `/projects/${pid}/feeds`, feedBody);
+			expect(f.status, JSON.stringify(f.body)).toBe(201);
+		},
+		alert: async (u, pid) => {
+			expect((await u.call('PUT', `/projects/${pid}/alert-rules`, alertBody)).status).toBe(200);
+		},
+		publication: async (u, pid) => {
+			const run = ((await asOwner(
+				`INSERT INTO model_run (project_id, created_by, engine_version, start_date, end_date, inputs) VALUES ($1, $2, 'x', '2020-01-01', '2020-02-29', '{}') RETURNING id::text`,
+				[pid, u.id]
+			)) as { id: string }[])[0]!.id;
+			await asOwner(`INSERT INTO run_publication (project_id, run_id) VALUES ($1, $2)`, [pid, run]);
+		},
+		autoRun: async (u, pid) => {
+			expect((await u.call('PATCH', `/projects/${pid}`, { settings: { autoRun: { enabled: true } } })).status).toBe(200);
+		}
+	};
+
+	for (const [way, live] of Object.entries(goLive)) {
+		it(`an ended plan with two catchments live by ${way} starts its grace, enforced; one live by ${way} starts none (control)`, async () => {
+			const over = await endedAccount(`Tick417Over${way}`, 2);
+			const within = await endedAccount(`Tick417Within${way}`, 2);
+			for (const pid of over.ids) await live(over.u, pid);
+			await live(within.u, within.ids[0]!);
+			enforce();
+			await tick();
+			expect(await overSince(over.acct)).not.toBeNull();
+			expect(await overSince(within.acct)).toBeNull();
+			expect(await paused(over.acct)).toEqual([]);
+		});
+	}
+
+	it('an ended account with no grace and no marker is not visited: the tick never waits on its billing lock, shadow or enforced', async () => {
+		const quiet = await endedAccount('Tick417Quiet', 1);
+		await goLive.alert(quiet.u, quiet.ids[0]!);
+		const holder = new pg.Client({ connectionString: OWNER_URL });
+		await holder.connect();
+		try {
+			await holder.query(`SELECT pg_advisory_lock(hashtext('billing:' || $1::text))`, [quiet.acct]);
+			for (const enforced of [false, true]) {
+				const n = await withoutUser(async (db) => {
+					await db.query(`SELECT set_config('lock_timeout', '3s', true), set_config('app.billing_enforced', $1, true)`, [enforced ? 'on' : '']);
+					return (await db.query<{ n: number }>('SELECT app_plan_pause_tick() AS n')).rows[0]!.n;
+				});
+				expect(n).toBe(0);
+			}
+		} finally {
+			await holder.query('SELECT pg_advisory_unlock_all()');
+			await holder.end();
+		}
+		// Positive control: an account the tick does visit (a grace stamp) waits on the same lock and times out.
+		await backdateGrace(quiet.acct, 1);
+		const holder2 = new pg.Client({ connectionString: OWNER_URL });
+		await holder2.connect();
+		try {
+			await holder2.query(`SELECT pg_advisory_lock(hashtext('billing:' || $1::text))`, [quiet.acct]);
+			const blocked = withoutUser(async (db) => {
+				await db.query(`SELECT set_config('lock_timeout', '1s', true), set_config('app.billing_enforced', 'on', true)`);
+				return db.query('SELECT app_plan_pause_tick()');
+			});
+			expect(await failure(blocked)).toBe('55P03');
+		} finally {
+			await holder2.query('SELECT pg_advisory_unlock_all()');
+			await holder2.end();
+		}
+	});
+});
