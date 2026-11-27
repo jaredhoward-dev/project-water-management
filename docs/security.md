@@ -178,7 +178,10 @@ falls through to the first when it was the last. Neither is granted to
   a recovery code) for the session and the trusted-device cookie. The challenge is a
   JWT under the session key with **its own issuer**, so it never passes as
   a session nor a session as it; it is good once (its `jti` goes into
-  `revoked_session`), and a password reset voids it like a session (the
+  `revoked_session` through `app_claim_session`, 412, which says whether
+  this request recorded it: of two sent at once with two right codes, the
+  second rolls back, its code unspent, and gets `401 mfa_challenge_expired`;
+  `auth/mfa.db.test.ts` "one challenge sent twice at once"), and a password reset voids it like a session (the
   watermark). `auth/token-confusion.security.db.test.ts` presents it in the
   session's slot and as a bearer key (refused) and at the code step with a
   code (accepted).
@@ -289,7 +292,7 @@ falls through to the first when it was the last. Neither is granted to
   ever giving the owner's factor's code. At …/confirm the check runs before
   the code throttle counts (and again inside the confirm), so a refusal is
   never counted as a code guess (issue #881). The same rule holds for
-  changing the email address and deleting the account (`403 mfa_step_up`,
+  changing the email address, changing the password and deleting the account (`403 mfa_step_up`,
   `auth/stepUp.ts` `requireCodeIfEnrolled`, before the password is checked).
   Turning a factor off needs a code (from
   the app, by email, or a recovery code). Tests:
@@ -2055,9 +2058,6 @@ In short:
   request they could change at once. A removed viewer reads no row and
   changes none, their own note included. The owner's and the editor's
   sweeps reaching those tables are the positive controls.
-- **Irrigation systems** (`198_irrigation_systems.sql`,
-  `200_irrigation_system_seed_invoker.sql`,
-  `201_irrigation_system_viewer_read.sql`). `irrigation_system` is read from
   **413_rls_sweep_closes** closed three loose ends the sweep's review found
   (`backend/src/db/migration-413.security.db.test.ts`, each with a positive
   control): a queued `delineation_request` keeps its project and maker (an
@@ -2068,6 +2068,9 @@ In short:
   the rule moved to the owner-only `share_allowed_rule` that the share
   triggers call; and `report_delete` needs the requester to still be a
   viewer, as `report_update` does.
+- **Irrigation systems** (`198_irrigation_systems.sql`,
+  `200_irrigation_system_seed_invoker.sql`,
+  `201_irrigation_system_viewer_read.sql`). `irrigation_system` is read from
   viewer up and written by editors. A farmer or an applicant reads none of
   it (201; 198 had let every role read it): its rows are the project's,
   an "Imported, NN %" row was made from a farm's own efficiency, and the
