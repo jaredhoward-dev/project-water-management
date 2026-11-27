@@ -224,11 +224,13 @@ class EwrPivot(Case):
             ("Grand Total", None, None, -1500.5, 3),
             (2012.0, 3, "", -1.0, 1),
             (2012, 3, " Farm\nB ", None, "2"),
+            (2013, None, "Farm A", -5.0, 1),  # a year but no month: skipped like the rest, not a TypeError
+            (2013, "Total", "Farm A", -5.0, 1),
         ]
         for i, row in enumerate(rows):
             for j, v in enumerate(row):
                 ws.cell(row=1 + i, column=1 + j, value=v)
-        b.name("zEWRshortPivotData_DataTbl", "'EWR shortfalls Pivot Data'!$A$1:$E$5")
+        b.name("zEWRshortPivotData_DataTbl", "'EWR shortfalls Pivot Data'!$A$1:$E$7")
         self.assertEqual(
             ep.read_ewr_pivot(b.open()),
             [
