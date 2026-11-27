@@ -176,6 +176,7 @@ pnpm dev:ingest:run [rnl|sat|era5l|imerg_late|ecmwf|agera5_et0|power_et0|c3s]  #
 
 pnpm dev:db:up              # Postgres 17 in docker on :5434
 pnpm dev:db:down
+pnpm dev:db:recreate        # recreate the shared Postgres container on purpose (after an image bump; the up scripts never do, issue #945)
 pnpm dev:db:status | dev:db:logs
 pnpm dev:db:migrate         # apply backend/migrations as `water`
 pnpm dev:db:reset           # drop and recreate only this checkout's dev database (water, or a worktree's water_w<tag>), then migrate; refuses any other database, a non-local URL and open connections

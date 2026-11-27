@@ -175,7 +175,7 @@ serves_fonts() { curl -fsS -o /dev/null "http://localhost:9002/tiles/fonts/Noto%
 
 case "${1:-}" in
 	up)
-		(cd "$ROOT" && docker compose up -d --wait minio)
+		(cd "$ROOT" && docker compose up -d --no-recreate --wait minio)
 		if serves_tiles; then
 			echo "MinIO serves $URL"
 		elif [ -f "$FILE" ]; then
@@ -329,7 +329,7 @@ case "${1:-}" in
 		[[ "$dem" =~ ^(https?://|s3://|/)[^[:space:]]*$ ]] || die "CHANNELS_DEM must be an absolute path or a URL (got: $dem)"
 		echo "Precomputing the channels of $dem ${area[*]} …"
 		(cd "$ROOT/backend" && pnpm exec tsx scripts/channels-build.ts --dem "$dem" --out "$CHANNELS_FILE" "${area[@]}")
-		(cd "$ROOT" && docker compose up -d --wait minio)
+		(cd "$ROOT" && docker compose up -d --no-recreate --wait minio)
 		(cd "$ROOT/backend" && pnpm exec tsx scripts/tiles-upload.ts --channels "$CHANNELS_FILE")
 		echo "Now: pnpm dev:tiles:up (sets PUBLIC_CHANNELS_URL in frontend/.env.development.local), then restart pnpm dev. The DEM must be the one DEM_URL names, or the Map ignores the file."
 		;;
