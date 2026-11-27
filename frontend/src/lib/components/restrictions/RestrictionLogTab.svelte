@@ -9,6 +9,7 @@
 	// left off, a line saying what the paper holds).
 	import { untrack } from 'svelte';
 	import { api, type RestrictionDecision } from '#lib/api/index.js';
+	import { restrictionLogLoader } from './logLoad';
 	import LoadState from '#lib/components/common/LoadState.svelte';
 	import { forceLightForPrint, restoreThemeAfterPrint } from '#lib/components/report/printTheme.js';
 	import { fillHeader } from '#lib/components/workspace/headerSlot.svelte.js';
@@ -24,16 +25,22 @@
 	let loadingMore = $state(false);
 	let moreError = $state<string | null>(null);
 
+	// Latest wins (./logLoad.ts): the first page and the older pages share one sequencer, so a slow read never
+	// lands over a newer first page (another project's, or Try again's). A superseded read leaves the state to the newer one.
+	const read = restrictionLogLoader();
 	async function load() {
 		loading = true;
 		error = null;
+		loadingMore = false;
+		moreError = null;
 		try {
-			const page = await api.publication.log(projectId);
-			items = page.items;
-			next = page.next;
+			const r = await read(projectId, null);
+			if (!r.current) return;
+			items = r.value.items;
+			next = r.value.next;
+			loading = false;
 		} catch (e) {
 			error = e instanceof Error ? e.message : String(e);
-		} finally {
 			loading = false;
 		}
 	}
@@ -42,13 +49,14 @@
 		loadingMore = true;
 		moreError = null;
 		try {
-			const page = await api.publication.log(projectId, next);
+			const r = await read(projectId, next);
+			if (!r.current) return;
 			const seen = new Set((items ?? []).map((d) => d.id));
-			items = [...(items ?? []), ...page.items.filter((d) => !seen.has(d.id))];
-			next = page.next;
+			items = [...(items ?? []), ...r.value.items.filter((d) => !seen.has(d.id))];
+			next = r.value.next;
+			loadingMore = false;
 		} catch (e) {
 			moreError = e instanceof Error ? e.message : String(e);
-		} finally {
 			loadingMore = false;
 		}
 	}

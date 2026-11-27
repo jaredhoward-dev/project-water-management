@@ -5,13 +5,14 @@
 	or deleted in any drawer).
 -->
 <script lang="ts">
-	import { api, type Note } from '#lib/api/index.js';
+	import type { Note } from '#lib/api/index.js';
 	import { followRetry } from '#lib/components/common/loadState.js';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { fmtDate } from '#lib/format/number.js';
 	import { noteCounts } from './counts.svelte';
 	import NotesDrawer from './NotesDrawer.svelte';
 	import { noteAbout, noteHref } from './notes';
+	import { recentNotesLoader } from './recentLoad';
 
 	const RECENT = 8;
 	let { projectId }: { projectId: string } = $props();
@@ -28,13 +29,15 @@
 		attempt++;
 	}
 
+	// Latest wins (./recentLoad.ts): a read started before a note changed must not land over the read after it.
+	const read = recentNotesLoader();
 	$effect(() => {
 		void counts.counts; // reload after any change the counts pick up
 		void attempt;
-		api.notes
-			.list(projectId, { limit: RECENT })
-			.then((n) => {
-				notes = n;
+		read(projectId, RECENT)
+			.then((r) => {
+				if (!r.current) return;
+				notes = r.value;
 				error = null;
 			})
 			.catch((err) => (error = err instanceof Error ? err.message : String(err)));
