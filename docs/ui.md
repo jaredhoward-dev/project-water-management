@@ -1318,7 +1318,9 @@ grid modal's `grid=`, the farm drawer's `farm=`) asks before it shuts:
 Done, Close, Esc and the ✕ put the same question (`confirmLeave`, the
 Dialog's `beforeclose`), so **Stay** keeps it open with the URL still
 naming it, and **Leave without saving** shuts it and drops the parameter in
-place. Removing a node from its own sheet asks the same after the remove
+place. Esc is the innermost dialog's: in a dialog opened inside the grid
+modal (its **Paste from a spreadsheet…**) it closes that dialog alone, and
+the grid modal neither asks nor shuts (`common/dialogEscape.ts`). Removing a node from its own sheet asks the same after the remove
 question; Stay removes nothing. On the Network, a `node=` naming no node in the model (removed, or a
 stale link) is replaced out of the URL. A tab change
 within the project keeps the page's own edits and doesn't ask. Only closing
