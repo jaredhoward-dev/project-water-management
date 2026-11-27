@@ -42,6 +42,30 @@
 	// i18n-section: account.two-step
 
 	const inFarmFrame = farmFrameReader();
+
+	// Focus in and out of the forms (WCAG 2.4.3; ui-playbook § "focus going into the card and back to the
+	// head's button"). The row's button that opens a form hides while it is open, so the focus fell to <body>
+	// on opening one, and again on Cancel or once it was done: into the form's first field, and back to the
+	// button that opened it (shown again), else the panel's title.
+	let panelEl: HTMLElement | undefined = $state();
+	let panelHeading: HTMLHeadingElement | undefined = $state();
+	/** Where a closed form hands the focus back: a way's row, the recovery codes' row, or the waiting reset's warning. */
+	type Back = MfaMethod | 'recovery' | 'reset';
+	const BACK_SELECTOR: Record<Back, string> = {
+		totp: '[data-method="totp"] .method-head .actions button',
+		email: '[data-method="email"] .method-head .actions button',
+		recovery: '.recovery .actions button',
+		reset: '[data-pending-reset] button'
+	};
+	async function focusField(id: string) {
+		await tick();
+		document.getElementById(id)?.focus();
+	}
+	async function focusBack(back: Back) {
+		await tick();
+		(panelEl?.querySelector<HTMLElement>(BACK_SELECTOR[back]) ?? panelHeading)?.focus();
+	}
+
 	let status = $state<MfaStatus | null>(null);
 	let loadError = $state<string | null>(null);
 	const on = (m: MfaMethod) => status?.methods.includes(m) ?? false;
@@ -141,13 +165,16 @@
 		// Codes by email waiting for their code: carry on from the code step (Send again is there).
 		setup = method === 'email' && status?.emailPending ? { method, stage: 'code' } : { method, stage: 'password' };
 		sentNote = null;
+		void focusField(setup.stage === 'code' ? 'setup-code' : 'setup-password');
 	}
 
 	function cancel() {
+		const back = setup?.method ?? stepUp;
 		setup = null;
 		stepUp = null;
 		password = code = '';
 		error = null;
+		if (back) void focusBack(back);
 	}
 
 	async function sendPassword(e: SubmitEvent) {
@@ -195,6 +222,8 @@
 				password = '';
 				resend.start(Number(err.params?.seconds) || 60);
 				setup = { method: 'email', stage: 'code' };
+				// The Continue button that had the focus is gone with the password step.
+				void focusField('setup-code');
 			}
 			error = setupRefusal(err) === 'wrong-password' ? t('Your current password is wrong.') : errorText(err);
 		} finally {
@@ -212,8 +241,9 @@
 		busy = true;
 		error = null;
 		try {
-			const made = setup.method === 'email' ? await api.auth.mfa.email.confirm(code.trim()) : await api.auth.mfa.confirm(code.trim());
-			done = setup.method === 'email' ? t('Codes by email are on.') : t('The authenticator app is on.');
+			const method = setup.method;
+			const made = method === 'email' ? await api.auth.mfa.email.confirm(code.trim()) : await api.auth.mfa.confirm(code.trim());
+			done = method === 'email' ? t('Codes by email are on.') : t('The authenticator app is on.');
 			setup = null;
 			code = '';
 			await load();
@@ -221,7 +251,7 @@
 				codes = made;
 				await tick();
 				codesHeading?.focus();
-			}
+			} else await focusBack(method);
 		} catch (err) {
 			// Started before the other way went on: joining it needs a sign-in with a code.
 			if (setup && setupRefusal(err) === 'step-up') {
@@ -252,6 +282,15 @@
 		actionError = null;
 		done = null;
 		sentNote = null;
+		void focusField('action-code');
+	}
+
+	/** Where each action's form hands the focus back. */
+	const ACTION_BACK: Record<Action, Back> = { regenerate: 'recovery', 'disable-totp': 'totp', 'disable-email': 'email', keep: 'reset' };
+	function cancelAction() {
+		const back = action ? ACTION_BACK[action] : null;
+		action = null;
+		if (back) void focusBack(back);
 	}
 
 	const ACTION_BUTTON: Record<Action, () => string> = {
@@ -282,6 +321,8 @@
 				action = null;
 				done = t('The removal is cancelled. Two-step sign-in stays on.');
 				await load();
+				// The warning and its button are gone: the panel's title.
+				await focusBack('reset');
 			} else {
 				const removing = action;
 				if (removing === 'disable-totp') await api.auth.mfa.disable(actionCode.trim());
@@ -294,6 +335,8 @@
 						? t('The authenticator app is removed.')
 						: t('Codes by email are off.')
 					: t('Two-step sign-in is off.');
+				// The removed way's row offers to turn it on again.
+				await focusBack(removing === 'disable-totp' ? 'totp' : 'email');
 			}
 			actionCode = '';
 		} catch (err) {
@@ -348,11 +391,11 @@
 	const sendLabel = () => (sending ? t('Sending…') : resend.left > 0 ? t('Send again (in {n} s)', { n: resend.left }) : t('Email me a code'));
 </script>
 
-<section class="panel two-step" id="two-step" aria-labelledby="two-step-h" data-two-step={status ? (status.enrolled ? 'on' : 'off') : 'loading'}>
+<section class="panel two-step" id="two-step" bind:this={panelEl} aria-labelledby="two-step-h" data-two-step={status ? (status.enrolled ? 'on' : 'off') : 'loading'}>
 	<!-- The state in the heading row; each way below gets one head row (name, tag, state, action) and one short
 	     line, and the full wording sits in "How the two ways differ" (issue #521). -->
 	<div class="panel-head">
-		<h2 id="two-step-h">{t('Two-step sign-in')}</h2>
+		<h2 id="two-step-h" tabindex="-1" bind:this={panelHeading}>{t('Two-step sign-in')}</h2>
 		{#if status}<span class="badge {status.enrolled ? 'badge-owner' : ''}" data-testid="two-step-state">{stateWord(status)}</span>{/if}
 	</div>
 	{#if loadError}
@@ -584,7 +627,7 @@
 					{#if on('email')}
 						<button type="button" class="btn" onclick={() => sendCode((m) => (actionError = m))} disabled={sending || resend.left > 0}>{sendLabel()}</button>
 					{/if}
-					<button type="button" class="btn" onclick={() => (action = null)}>{t('Cancel')}</button>
+					<button type="button" class="btn" onclick={cancelAction}>{t('Cancel')}</button>
 				</div>
 			</form>
 		{/if}
