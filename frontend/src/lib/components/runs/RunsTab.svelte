@@ -27,7 +27,7 @@
 	import WaterBalanceTable from './WaterBalanceTable.svelte';
 	import Lazy from '#lib/components/common/Lazy.svelte';
 	import RunNotes from './RunNotes.svelte';
-	import { elapsedSeconds, withCreatedRun, type RunInFlight } from './runInFlight';
+	import { elapsedSeconds, isFlight, withCreatedRun, type RunInFlight } from './runInFlight';
 	import ValidationPanel from '#lib/components/liability/ValidationPanel.svelte';
 	import NotesDrawer from '#lib/components/notes/NotesDrawer.svelte';
 	import { currentNomination, evidenceLine, modelDriftWarning } from './evidence';
@@ -444,7 +444,7 @@
 		} catch (err) {
 			if (!destroyed) actionError = msg(err);
 		} finally {
-			if (ownRun === started) ownRun = null;
+			if (isFlight(ownRun, started)) ownRun = null;
 		}
 	}
 
