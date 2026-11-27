@@ -114,6 +114,27 @@ describe('the 0.1° products through the cell cache', () => {
 		expect(await fill()).toEqual({ status: 'cached', merged: 0, revised: 0 });
 	});
 
+	it('leaves no re-check claim behind while the copy is not ready, so the next fill reads the day at once', async () => {
+		const store = copy();
+		const { owner, feed, job } = await feedJob();
+		const cells = uniqueCells(CELLS, 'era5l');
+		const window = { start: '2024-12-30', end: '2025-01-03' };
+		const fill = async (from = store) => {
+			const jobId = await job();
+			return withUser(owner.id, (db) => fillProductCache(db, { feedId: feed, jobId, product: 'era5l', cells, window, today: TODAY, store: from, origin }));
+		};
+		expect((await fill()).status).toBe('filled');
+		// A cached final whose file's tag isn't known: the re-check claims it (a 30-minute lease) to read it again.
+		await asOwner(`UPDATE chirps_file SET tag = NULL, checked_at = NULL WHERE product = 'era5l' AND day = '2025-01-01'`);
+		const empty = openStore(pathToFileURL(`${mkdtempSync(join(tmpdir(), 'wm-empty-'))}/`).href);
+		expect(await fill(empty)).toEqual({ status: 'not_ready', merged: 0, revised: 0 });
+		// Nothing read, so nothing claimed: the lease would hold the day back from every fetch for 30 minutes.
+		expect(await asOwner(`SELECT claim_job, claim_until, tag FROM chirps_file WHERE product = 'era5l' AND day = '2025-01-01'`)).toEqual([{ claim_job: null, claim_until: null, tag: null }]);
+		// Positive control: once the copy holds it, the next fill claims and reads the day, and records its tag.
+		expect((await fill()).status).toBe('filled');
+		expect(await asOwner(`SELECT claim_job, claim_until, tag FROM chirps_file WHERE product = 'era5l' AND day = '2025-01-01'`)).toEqual([{ claim_job: null, claim_until: null, tag: 'mirror' }]);
+	});
+
 	it('writes nothing while the copy has no such product, and only from a CHIRPS feed’s running fetch', async () => {
 		const { owner, feed, job } = await feedJob();
 		const empty = openStore(pathToFileURL(`${mkdtempSync(join(tmpdir(), 'wm-empty-'))}/`).href);

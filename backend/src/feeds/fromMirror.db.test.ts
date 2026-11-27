@@ -230,6 +230,30 @@ describe('a CHIRPS feed reads our copy (CHIRPS_SOURCE=mirror)', () => {
 		expect(sent).toEqual([]);
 	});
 
+	it('a copy gone not ready leaves no re-check claim behind: the next fetch from a ready copy reads the day at once', async () => {
+		liveCopy();
+		const url = process.env.MIRROR_URL!;
+		const owner = await signUp('MirrorClaim');
+		const f = await feed(owner, { cells: [{ ...FIXTURE_CELL(), weight: 1 }], product: 'rnl', startDate: '2024-01-01' });
+		expect((await tick()).done).toBe(1);
+		// A cached final whose file's tag isn't known (a row the file path cached): the re-check claims it to read it again.
+		await asOwner(`UPDATE chirps_file SET tag = NULL, checked_at = NULL WHERE origin = 'chc' AND product = 'rnl' AND day = '2024-02-10'`);
+		const claim = async () =>
+			(await asOwner(`SELECT claim_job, claim_until, tag FROM chirps_file WHERE origin = 'chc' AND product = 'rnl' AND day = '2024-02-10'`))[0] as Record<string, unknown>;
+		// The copy is not ready (no manifest): nothing read, so nothing claimed (a 30-minute lease would hold the day back).
+		const dir = mkdtempSync(join(tmpdir(), 'wm-mirror-empty-'));
+		tmp.push(dir);
+		vi.stubEnv('MIRROR_URL', pathToFileURL(`${dir}/`).href);
+		await fetchAgain(owner, f);
+		expect(await feedRow(f.feedId)).toMatchObject({ consecutive_failures: 0, last_error: null });
+		expect(await claim()).toEqual({ claim_job: null, claim_until: null, tag: null });
+		// Positive control: the copy back, the next fetch claims and reads the day, and records its tag.
+		vi.stubEnv('MIRROR_URL', url);
+		await fetchAgain(owner, f);
+		expect(await claim()).toEqual({ claim_job: null, claim_until: null, tag: MIRROR_TAG });
+		expect((await feedRow(f.feedId)).last_meta).toMatchObject({ recheckDaysRead: 1 });
+	});
+
 	it('refuses a cell outside the copy’s region, naming the region, as a failure of the feed’s config; nothing is read or cached', async () => {
 		liveCopy();
 		const owner = await signUp('MirrorOutside');
