@@ -1340,7 +1340,7 @@ runs in production as `JOB_TRANSPORT=sqs` (infra/jobs.tf):
   the plan code the worker shares with a route lives apart from it:
   `delineation/start.ts` and `divide.ts` beside `startRoutes.ts` and
   `divideRoutes.ts`), and
-  `infra/tests/guardrails.tftest.hcl` if the worker's environment gets either
+  `infra/tests/guardrails_jobs.tftest.hcl` if the worker's environment gets either
   setting back.
 - **Worker Lambda** (`backend/src/lambda-worker.ts`, handler
   `lambda-worker.handler`): in the private VPC, 1024 MB (2 048 with
@@ -3397,7 +3397,7 @@ environment. Under `manual` Terraform leaves both out of the secret, even when
 they are in sops, since the API refuses a key it doesn't expect
 (`config/runtimeSecrets.ts`). Plan refuses `stripe` without both, with a
 test-mode key or with a webhook secret under 32 characters, and refuses `mock`
-outright (`infra/tests/guardrails.tftest.hcl`).
+outright (`infra/tests/guardrails_baseline.tftest.hcl`).
 
 Enforcement and the reverse trial are two more Terraform switches, both
 `false` by default (shadow mode: usage is counted and shown, nothing

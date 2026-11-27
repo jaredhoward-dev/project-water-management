@@ -67,7 +67,7 @@ locals {
 # backend/src/config/runtimeSecrets.ts reads it once per cold start, refuses a
 # missing or extra key, and puts the values in process.env; its RUNTIME_SECRETS
 # lists the same keys, and backend/src/config/production.security.test.ts and
-# the guardrails tftest keep the two in step.
+# the guardrails_baseline tftest keep the two in step.
 #
 # One secret per Lambda rather than one shared: each role can read only its
 # own, so the worker never holds the CloudFront header secret, the API never

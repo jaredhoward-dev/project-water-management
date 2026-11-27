@@ -145,7 +145,7 @@ What changes in the existing system:
 | Engine | Scenario transforms, seeded stochastic generator, ensemble statistics, `bucket-v1` flow generator | `packages/engine/src/runoff/` (`flow.ts` went in engine 1.0.0), new `packages/engine/src/scenario/`, `packages/engine/src/flow/bucket.ts` |
 | Public API | `/v1` sub-app with `@hono/zod-openapi`, API-client principal in RLS, webhooks on the queue | `backend/src/app.ts`, new `backend/src/v1/` |
 | Frontend | Org switcher, org settings and billing pages, SSO/MFA pages, onboarding wizard and tour, i18n catalogues, unit preferences | `frontend/src/routes/+layout.svelte`, new `frontend/src/routes/orgs/`, `frontend/src/lib/format/number.ts` (hard-coded `'en-US'` today) |
-| Infra | S3 runs bucket, SQS (Step 2), egress (D4), KMS key for app-level encryption, region-parameterised stack | `infra/*.tf`, `infra/variables.tf`, `infra/tests/guardrails.tftest.hcl` |
+| Infra | S3 runs bucket, SQS (Step 2), egress (D4), KMS key for app-level encryption, region-parameterised stack | `infra/*.tf`, `infra/variables.tf`, `infra/tests/guardrails_*.tftest.hcl` |
 | Local | Keycloak (OIDC IdP), MinIO (S3), a billing mock, all in `docker-compose.yml`, each with `dev:<svc>:up/down/status/logs` | `docker-compose.yml`, root `package.json`, `scripts/check_root_scripts.mjs` |
 
 **Why shared schema + RLS, not database-per-tenant (feohledger's model).**

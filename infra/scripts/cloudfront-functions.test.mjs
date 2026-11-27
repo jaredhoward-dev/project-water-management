@@ -1,5 +1,5 @@
 // The CloudFront Functions in infra/s3_cloudfront.tf, run as code: the
-// Terraform test (guardrails.tftest.hcl) can only look for strings in them,
+// Terraform test (guardrails_*.tftest.hcl) can only look for strings in them,
 // so here each function's heredoc is extracted (cloudfront-functions.mjs, which the
 // e2e site server also routes through) and its handler called with
 // viewer-request events. spa_rewrite's lists of where the build keeps files

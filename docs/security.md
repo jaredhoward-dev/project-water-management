@@ -582,7 +582,7 @@ token, a malformed or unknown one, a live invite for another address) is
 - **To open or close it:** `signup_open = true` or `false` in the
   tfvars, plan and apply (no release needed). Tests: `auth/signupOpen.test.ts`,
   `auth/signupClosed.security.db.test.ts`, and the `signup_open` runs in
-  `infra/tests/guardrails.tftest.hcl`.
+  `infra/tests/guardrails_map.tftest.hcl`.
 
 ## Changing the email address
 
@@ -4959,7 +4959,7 @@ key there would let any read-only principal forge any user's session.
   Billing (issue #641): the API refuses a `BILLING_PROVIDER` that is unset,
   `mock` or unknown (only `manual` or `stripe`; Terraform's
   `billing_provider` defaults to `manual` and refuses anything else at plan
-  time, `tests/guardrails.tftest.hcl`), and with `stripe` a
+  time, `tests/guardrails_baseline.tftest.hcl`), and with `stripe` a
   `BILLING_WEBHOOK_SECRET` shorter than 32 characters or a `dev-only-`
   placeholder, or a `STRIPE_SECRET_KEY` that isn't a live key (`sk_live_…`
   or `rk_live_…`: a test-mode key in production would take no real
@@ -5150,7 +5150,7 @@ key there would let any read-only principal forge any user's session.
   the two named exceptions: `series-pick-moves`' series names and
   `dws-coverage`'s station codes, which stay off public issues.
 - **No role can write either bucket** but the operator's own SSO session;
-  the deploy role touches neither, and a guardrail test (`guardrails.tftest.hcl`) fails if any other role policy names either bucket. Uploading to the tiles bucket is itself
+  the deploy role touches neither, and a guardrail test (`guardrails_map.tftest.hcl`) fails if any other role policy names either bucket. Uploading to the tiles bucket is itself
   publishing (the behaviour serves what is there), so the licence steps come
   before the upload (deployment.md § Map tiles).
 

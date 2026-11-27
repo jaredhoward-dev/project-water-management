@@ -3,7 +3,7 @@
 # header (and that it is the value the API's runtime secret carries), the
 # frontend bucket's 404-not-403 policy and the SPA function's 404 page, the
 # subnets' zone-ID selection, and the direct-traffic alarm. Same mocks as
-# guardrails.tftest.hcl (copied, so each file stands alone); the CloudFront
+# guardrails_*.tftest.hcl (copied, so each file stands alone); the CloudFront
 # Functions themselves are run as code in infra/scripts/cloudfront-functions.test.mjs.
 #
 #   pnpm check:infra          (bin/check-infra.sh: fmt + validate + test)

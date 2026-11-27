@@ -306,7 +306,7 @@ browser ──HTTPS──► CloudFront + WAF (us-east-1 ACL)      icwbt.jaredho
 | `certs/rds-global-bundle.pem` | RDS CA bundle shipped in every zip |
 | `prod.sops.yaml.example` | The key list for the private secrets file |
 | `tests/iam.tftest.hcl` | Plan-only IAM tests (issue #126): each role's own log group, the ENI policy, the SQS endpoint's send-only policy, the ECR repository policy and the renderer's pull grant, the deploy policy's reads, the migrate role, the Secrets Manager endpoint and the alert topics' policies |
-| `tests/guardrails.tftest.hcl` | Plan-only `terraform test` against mocked providers (89 runs, among them `full_tier`, the full tier's tfvars; see [Validating locally](#validating-locally)) |
+| `tests/guardrails_*.tftest.hcl` | Plan-only `terraform test` against mocked providers (115 runs in six files, split so they run in parallel, each with the same copied mocks, overrides and variables, which `scripts/guardrails-preamble.test.mjs` keeps identical; see [Validating locally](#validating-locally)): `guardrails_baseline` (the production baseline, redirect domains, runtime secrets, billing switches; 26 runs), `guardrails_edge` (WAF, S3, TLS, headers + CSP, SES, alarms and budgets, among them `full_tier`, the full tier's tfvars; 25), `guardrails_jobs` (background jobs, SES bounces, data feeds, the deploy role's trust pin; 13), `guardrails_reports` (reports, report downloads, evidence packs; 4), `guardrails_map` (the map's data, the download key rotation, the renderer image, mail failures and log privacy; 16), `guardrails_network` (Lambda concurrency caps, WAF rate rules, the sign-in CAPTCHA, the private-only network; 31) |
 | `tests/data.tftest.hcl` | The database's and frontend bucket's data-protection controls (5 runs; [Validating locally](#validating-locally)) |
 | `tests/ingest.tftest.hcl` | Plan-only: the mirror bucket is private, versioned and TLS only; the ingest Lambda, its schedule targets and freshness alarms exist only with `ingest_image_tag`; its role is scoped to the mirror; the worker and the S3 endpoint policy name the mirror; the freshness alarms breach on missing data |
 | `tests/logging.tftest.hcl` | Plan-only: every Lambda's JSON log format and levels, and every log metric filter matching `$.message.event` (see [Logs](#logs)) |
@@ -1211,11 +1211,16 @@ prints its path; arguments go to `terraform test`
 test files run in parallel, each in its own copy of the checked tree, `CHECK_INFRA_JOBS` at a
 time (default: the CPUs), longest first; each file's output prints in name order and the run
 fails when any file does. One file at a time the suite outgrew CI's 10-minute job (2026-10-31:
-about 590 s, `guardrails.tftest.hcl` alone 240 s); in parallel it takes about 2.5 minutes on a
-12-core laptop and the longest file plus setup in CI. `pnpm test:guards` tests the script against a fake
+about 590 s, the single `guardrails.tftest.hcl` alone 240 s). In parallel that one file was still
+the long pole (2026-11-27: 248 s of a 4-minute run at four jobs on a 20-core laptop, 7 to 10 minutes
+in CI), so the guardrails are split by topic into `guardrails_*.tftest.hcl`; keep each file
+under about 30 plan runs, and start a new file rather than grow one past the others. Split, the
+same laptop takes 3.5 minutes at four jobs, no guardrails file past 90 s, but pinned to four CPUs
+(CI's runner) it still takes 8 minutes: the suite is now bound by its total CPU (about 30
+CPU-minutes, every run a full plan of the root module), not by one file. `pnpm test:guards` tests the script against a fake
 `terraform` (`infra/scripts/check-infra.test.mjs`).
 
-The test suite (`tests/*.tftest.hcl`: `guardrails.tftest.hcl`, plus `observability.tftest.hcl`
+The test suite (`tests/*.tftest.hcl`: the `guardrails_*.tftest.hcl` files, plus `observability.tftest.hcl`
 for the failures that don't fail a Lambda: every DLQ's new-arrival alarm, the
 `feed_fetch_failed` and `report_render_failed` log metric filters on the
 fetcher's and renderer's log groups and their alarms, the fetch-requests and
