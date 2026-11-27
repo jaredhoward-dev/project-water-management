@@ -617,6 +617,9 @@ export const authRoutes = new Hono<AuthEnv>()
 	.post('/change-password', requireUser, async (c) => {
 		const body = ChangePasswordBody.parse(await readJson(c));
 		const userId = c.get('userId');
+		// With a second factor on, only a session that gave a code may change the password (stepUp.ts requireCodeIfEnrolled):
+		// otherwise a password-only session from before the factor, with the password, signs out every session of the owner.
+		await withUser(userId, (db) => requireCodeIfEnrolled(db, userId, c.get('amr') ?? [], 'to change your password'));
 		const row = await checkPasswordAgain(c, '/auth/change-password', body.currentPassword);
 		const newHash = await hashPassword(body.newPassword);
 		const watermark = new Date();

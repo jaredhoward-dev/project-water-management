@@ -109,8 +109,9 @@ export async function hasConfirmedFactor(db: Db, userId: string): Promise<boolea
 /**
  * The account-level actions a password-only session must not take once the
  * account has a second factor: changing the email address (it would send the
- * emailed codes, the factor-reset links and every notice to a new inbox) and
- * deleting the account (it can't be undone). Such a session is one from
+ * emailed codes, the factor-reset links and every notice to a new inbox),
+ * deleting the account (it can't be undone) and changing the password (it
+ * signs every session of the owner out). Such a session is one from
  * before the first factor went on, which lives its 7 days; with the password
  * it could otherwise act without ever giving the owner's factor's code, as
  * adding another factor can't (mfa-routes.ts requireCodeForAnotherFactor).

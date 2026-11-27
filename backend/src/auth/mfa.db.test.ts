@@ -198,6 +198,18 @@ describe('signing in with two steps', () => {
 		expect(amrOf(r.session!)).toEqual(['pwd']);
 	});
 
+	it('a password-only session from before the factor can’t change the password (mfa_step_up, not counted on the lockout)', async () => {
+		const v = await enrolled('MfaChangePwStale');
+		expect(amrOf(v.cookie)).toEqual(['pwd']);
+		const before = (await asOwner('SELECT password_hash FROM app_user WHERE id = $1', [v.id]))[0];
+		const r = await anon('POST', '/auth/change-password', { currentPassword: 'correct horse', newPassword: 'battery staple' }, v.cookie);
+		expect(r).toMatchObject({ status: 403, body: { code: 'mfa_step_up' } });
+		expect((await asOwner('SELECT password_hash FROM app_user WHERE id = $1', [v.id]))[0]).toEqual(before);
+		expect(await asOwner('SELECT failures FROM login_throttle WHERE email = $1 AND failures > 0', [v.email])).toEqual([]);
+		// Positive control: the two-step session still works, and changes it (the next test).
+		expect((await anon('GET', '/auth/me', undefined, v.twoStep)).status).toBe(200);
+	});
+
 	it('changing the password keeps the session two-step', async () => {
 		const v = await enrolled('MfaChangePw');
 		const r = await anon('POST', '/auth/change-password', { currentPassword: 'correct horse', newPassword: 'battery staple' }, v.twoStep);
