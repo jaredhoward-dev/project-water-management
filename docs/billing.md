@@ -109,8 +109,30 @@ so a count commits or rolls back with it (`backend/src/billing/entitlements.ts`
 `countUsage`):
 
 - **Server PDF reports**: one per report queued, on demand or by a schedule
-  (`reports/store.ts` `createReport`). A schedule fire that was already queued
-  (its dedupe key) counts nothing.
+  (`reports/store.ts` `createReport`, through `app_report_count_usage`, 408).
+  A schedule fire that was already queued (its dedupe key) counts nothing.
+  - **Which account.** A report counts against the account its project is
+    billed to **when the report is queued**, in that SAST month; the report
+    records both (`report.usage_account_id`, `usage_month`). A project moved
+    to another account afterwards (into or out of a team) leaves the reports
+    already queued on the old account, and its refunds go back there; reports
+    queued after the move count against the new one. This is the rule a
+    limit is checked by: when the report is asked for, against the account it
+    would use up. (A moved project's runs and assistant spend in the metrics
+    report are read through its current account, since those aren't
+    counters.)
+  - **A report that ends failed gives its count back** (408, issue #939), so
+    a renderer outage doesn't use up anyone's allowance once limits are
+    enforced. Each of the three ways a report ends failed (`reportState` in
+    `reports/store.ts`) refunds it, once (`report.usage_refunded_at`): its
+    status set `failed` (the renderer's failure) or its job gone while
+    unfinished, by the trigger `report_usage_refund`; its job `dead` (attempts
+    used up), by `job_report_usage_refund`; the renderer silent past the
+    hour's answer window, by the worker tick's
+    `app_report_usage_refund_silent()` (`reportsRefunded`). The refund goes
+    to the account and month that were counted, never below 0, even after
+    the month has passed. A refunded report that finishes after all (a late
+    answer) is counted again. `billing/reportUsage.db.test.ts`.
 - **Issued evidence packs**: one per issue (`evidence/packs.ts`, the issue
   route). Drafts, sign-offs, withdrawals and verify never count.
 - **Catchments**: not a counter; `app_account_plan` counts the account's
@@ -377,7 +399,7 @@ output never goes into an issue, a PR, a chat or an agent's transcript.
 | Metric | How it is worked out | Threshold (the issue's) |
 | --- | --- | --- |
 | Orphans past the retries (printed first) | Rows of `billing_event` still `orphan_pending` (352) more than 3 days after they were received, whatever the month: the provider, its event id, type and age, oldest first. Stripe has stopped redelivering them, so nothing will cancel or refund them but the operator ([deployment.md § Billing alarms](./deployment.md#billing-alarms)). No account or person: the account is gone | any one → finish it in Stripe's dashboard |
-| Activation | Verified sign-ups of the month (SAST) with a model run of their own (`model_run.trigger` `manual`: the live model, a scenario or a calibration they asked for, never a live catchment's automatic or forecast run; 402) within 7 days of signing up. Sign-ups under 7 days old are left out and counted as pending | < 30% → fix onboarding first |
+| Activation | Verified sign-ups of the month (SAST) with a model run of their own (`model_run.trigger` `manual`: the live model, a scenario or a calibration they asked for, never a live catchment's automatic or forecast run; 402) within 7 days of signing up. The first run is read from `first_manual_run` (407, issue #939), written by a trigger when the person's first manual run is saved and kept when runs are trimmed by the run cap or deleted (owner only; in the person's data export as `firstManualRun`; deleted with the account). Sign-ups under 7 days old are left out and counted as pending | < 30% → fix onboarding first |
 | Active Free accounts near / at each limit | Active = a run someone asked for (`manual`, as above: an account whose only runs this month are automatic is idle, 402), a server report or assistant use this month on the account's projects. Near ≥ 80% of the limit, at ≥ 100%, for reports (5), the assistant's dollars ($1), catchments (Free has no limit, so none) and live catchments (1: the share at the live-catchment limit). Catchments and live catchments are counted **today**; live is 338's count (`app_live_catchments_in_use`: an enabled feed or alert rule, automatic runs on, or a publication; [§ Live catchments](#live-catchments-free)), so an account past its limit from before enforcement counts as at it, and an idle account with a live catchment isn't in the share | > 15% at reports → 10 a month; < 3% at the monthly assistant cap → room to raise |
 | Reverse trial → paid within 30 days | The reverse trials (342) that **began in the report's SAST month**: `billing_grant_log` `grant` rows by `reverse trial`, one per account (one trial per canonical email). Paid = the account's first paid plan at or after the trial's start: a subscription from a payment provider (`stripe`, or `mock` locally) whose first payment was taken: `active`, `past_due` or `canceled` (so a plan bought and later cancelled counts; not `trialing`, and not `expired`, Stripe's `incomplete_expired`, a first payment never made), or a paid B2B invoice's grant (`billing_grant_log` `grant` by `invoice`, 335); a staff grant is not paid. Converted when it came at most 30 days after the start. A trial under 30 days old is left out and counted as pending (with how many of those already pay). A deleted account's trial goes with it (`billing_grant_log` cascades) | |
 | Assistant spend per account | p50 and p90 (nearest rank) per plan over the accounts that spent this month, with the total and any unpriced turns (then a floor) | Paid: > 20% at $15 → top-up packs sooner |
@@ -688,8 +710,11 @@ a monthly period (≤ 31 days) is never picked, and a trial isn't either (it is
 
 **When.** Each worker tick (after the jobs, [architecture.md § Background
 work](./architecture.md)) takes today's date in South Africa and queues every
-such subscription whose period ends on a date with **45 to 60** business days
-strictly between today and it (neither day counts). So the notice is queued
+such subscription whose **last paid day** has **45 to 60** business days
+strictly between today and it (neither day counts). The last paid day is the
+SAST date of the instant before the period ends (`period_end − 1 µs`, 408,
+issue #930), so a period ending exactly at SAST midnight is filed under the
+day before, the last day paid for, not the day after it. So the notice is queued
 on the first tick 60 business days out; a missed day (an outage, a
 subscription recorded late) still sends, down to 45. The floor is 45, not
 the Act's 40, to leave room for up to five public holidays declared after
@@ -1791,7 +1816,9 @@ defaults to the operator's login.
   on Free again, with nothing deleted. "Live" stays 323's status test, so a
   grant can outlive its end by one tick (5 minutes in production; locally,
   until a worker runs). A new grant first expires the account's lapsed one,
-  so a late tick never blocks it. Since 387 the tick (and the reverse
+  and, since 408 (issue #930), a reverse trial past its `trial_end`, logged
+  as the trial's tick logs it (`expire`, `the trial reached its end`), so a
+  late tick never blocks it. Since 387 the tick (and the reverse
   trial's, `app_reverse_trial_expire()`) goes account by account in id
   order, taking the account's billing lock (334's advisory lock) before it
   writes the rows, as every other subscription writer does; before, it met

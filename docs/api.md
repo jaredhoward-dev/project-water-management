@@ -227,7 +227,7 @@ stored only as SHA-256 hashes. Links point at `SITE_URL`:
   document, `{ format: 'water-management.subject-export', version: 1,
   exportedAt, account, pendingEmailChange, projectMemberships, teamMemberships, scenarioMemberships, scenarios, farms, notes,
   signoffs, invites, alertSubscriptions, alertDeliveries, alertFeedback, packNotices, erratumNotices, preferences,
-  billing, reverseTrialClaim, reportSubscriptions, auditEvents, auditEventsTruncated }`. `alertFeedback`
+  billing, reverseTrialClaim, firstManualRun, reportSubscriptions, auditEvents, auditEventsTruncated }`. `alertFeedback`
   is their "Was this useful?" rows on alert emails, answered or not,
   `[{ projectId, kind, sentAt, useful, comment, answeredAt }]` (151; never
   the token's hash or nonce). `alertDeliveries` is the alert emails and
@@ -255,7 +255,7 @@ stored only as SHA-256 hashes. Links point at `SITE_URL`:
   (`'team'`), as metadata, `[{ scenarioId, projectId, projectName, name,
   origin, status, outcome, createdAt, submittedAt, decidedAt }]`
   (`app_subject_scenarios()`, 396; never the ops or description, the
-  project's model record). `reverseTrialClaim` is `{ emailHash, claimedAt }`
+  project's model record). `firstManualRun` is `{ firstRunAt }` or null (407); `reverseTrialClaim` is `{ emailHash, claimedAt }`
   when their current address had the Pro reverse trial (342; the SHA-256
   of its canonical form, as `reverse_trial_claim` keeps it, found by
   `app_subject_reverse_trial()`, 396), or `null`; a claim made under an

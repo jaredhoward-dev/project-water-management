@@ -294,6 +294,8 @@ export interface TickResult {
 	staffGrantsExpired: number;
 	/** Reverse trials past their end moved to expired, the account back to Free (342_reverse_trial). */
 	reverseTrialsExpired: number;
+	/** Reports with the renderer past the hour's answer window whose count was given back (408). */
+	reportsRefunded: number;
 	/** Live catchments newly paused past Free's limit after the grace (341 app_plan_pause_tick; 0 unless billing is enforced). */
 	catchmentsPaused: number;
 	claimed: number;
@@ -378,6 +380,7 @@ export async function runTick(o: TickOptions = {}): Promise<TickResult> {
 		billingEventsPurged: 0,
 		staffGrantsExpired: 0,
 		reverseTrialsExpired: 0,
+		reportsRefunded: 0,
 		catchmentsPaused: 0,
 		claimed: 0,
 		done: 0,
@@ -415,6 +418,9 @@ export async function runTick(o: TickOptions = {}): Promise<TickResult> {
 	result.staffGrantsExpired = await withoutUser(async (db) => (await db.query<{ n: number }>('SELECT app_staff_grant_expire() AS n')).rows[0]?.n ?? 0);
 	// A reverse trial past its end (342): expired (never deleted), the account back to Free.
 	result.reverseTrialsExpired = await withoutUser(async (db) => (await db.query<{ n: number }>('SELECT app_reverse_trial_expire() AS n')).rows[0]?.n ?? 0);
+	// A report the renderer never answered (shown failed after the hour): its count given back (408; the other two ways a
+	// report ends failed refund it by trigger).
+	result.reportsRefunded = await withoutUser(async (db) => (await db.query<{ n: number }>('SELECT app_report_usage_refund_silent() AS n')).rows[0]?.n ?? 0);
 	// After the expiry: an account that lost its paid plan starts its 14-day grace, and past it (billing enforced) its live
 	// catchments beyond Free's are paused, or resumed once it is back on a plan or within Free (341).
 	result.catchmentsPaused = await withoutUser(async (db) => (await db.query<{ n: number }>('SELECT app_plan_pause_tick() AS n')).rows[0]?.n ?? 0);

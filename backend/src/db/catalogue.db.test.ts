@@ -28,8 +28,10 @@ const NO_RLS = new Set(['schema_migrations']);
 // assistant_reservation (264): a turn's reserved budget, read and written only by the assistant's definer functions.
 // billing_event (326): the billing webhook's de-duplication, written only by app_billing_apply from a session with no user.
 // email_gate_refusal (348): the verified-email gate's daily refusal counts, written only by app_email_gate_refused, read by the owner's report.
+// first_manual_run (407): each person's first manual run, written only by the model_run trigger, read by the owner's
+// metrics and the person's export through definer functions.
 // render_slot (353): render requests in flight to the renderer and those waiting, only through app_render_slot_take / _free.
-const OWNER_ONLY = new Set(['render_slot', 'assistant_reservation', 'assistant_month_counter', 'assistant_pool_counter', 'assistant_pool_member', 'reverse_trial_claim', 'billing_event', 'erasure_log', 'reference_load', 'mfa_reset_cancel', 'mfa_reset_quota', 'allocation_holder_salt', 'run_allocation_holder', 'dam_observation_load_mark', 'et_observation_load_mark', 'email_gate_refusal', 'report_pdf_erasure']);
+const OWNER_ONLY = new Set(['render_slot', 'assistant_reservation', 'assistant_month_counter', 'assistant_pool_counter', 'assistant_pool_member', 'reverse_trial_claim', 'billing_event', 'erasure_log', 'reference_load', 'mfa_reset_cancel', 'mfa_reset_quota', 'allocation_holder_salt', 'run_allocation_holder', 'dam_observation_load_mark', 'et_observation_load_mark', 'email_gate_refusal', 'report_pdf_erasure', 'first_manual_run']);
 /**
  * Views that may run with their owner's rights (security_invoker off), each
  * with why. An owner-rights view reads its tables as the schema owner, so RLS
@@ -366,6 +368,8 @@ const APP_USER_ON_DELETE: Record<string, 'cascade' | 'set null' | 'restrict'> = 
 	'billing_account.user_id': 'cascade',
 	// A person's renewal notices go with them (329); they go with the subscription anyway.
 	'renewal_notice.user_id': 'cascade',
+	// 407: when the person's first manual run was saved (the activation metric's record): goes with the account.
+	'first_manual_run.user_id': 'cascade',
 	// A person's plan emails go with them (346); a team's with its account.
 	'billing_notice.user_id': 'cascade',
 	// Who acts for the authority (229): the delegation goes with the account; who proposed or confirmed it is cleared.
@@ -480,7 +484,8 @@ const JOB_REFERENCES: Record<string, { updateTrigger: false } | { updateTrigger:
 	'assessment_yield.job_id': { updateTrigger: true, purgeTest: 'src/assessments/yields.db.test.ts' },
 	'auto_calibration.job_id': { updateTrigger: true, purgeTest: 'src/calibration/calibration.db.test.ts' },
 	'delineation_request.job_id': { updateTrigger: true, purgeTest: 'src/delineation/requests.db.test.ts' },
-	'report.job_id': { updateTrigger: false },
+	// 408: report_usage_refund gives a report's count back when its job goes while it is unfinished; never refuses.
+	'report.job_id': { updateTrigger: true, purgeTest: 'src/billing/reportUsage.db.test.ts' },
 	'scenario_sweep.job_id': { updateTrigger: true, purgeTest: 'src/sweeps/sweeps.db.test.ts' },
 	'seasonal_outlook.job_id': { updateTrigger: true, purgeTest: 'src/outlooks/outlooks.db.test.ts' },
 	'yield_result.job_id': { updateTrigger: false },

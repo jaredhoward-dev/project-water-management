@@ -253,6 +253,67 @@ describe('orphans past the provider\'s retries (352)', () => {
 	});
 });
 
+// 407: the first run is a record kept when runs go (the run cap trims them, a person deletes one, a project is deleted).
+// Before 407 it was min(created_at) over the runs still stored, so a person whose runs were deleted stopped counting as
+// activated. August 2001, a month no other test writes to.
+describe('the first manual run is kept when runs are deleted (407)', () => {
+	const NOW = new Date('2026-11-23T00:00:00Z');
+	let keeper: User;
+	let keeperProject: string;
+	const run = (trigger: string, at: string) =>
+		asOwner(
+			`INSERT INTO model_run (project_id, created_by, engine_version, start_date, end_date, inputs, created_at, trigger)
+			 VALUES ($1, $2, '1.0.0', '2000-10-01', '2001-09-30', '{}', $3, $4) RETURNING id`,
+			[keeperProject, keeper.id, at, trigger]
+		);
+	const recorded = async (id: string) =>
+		((await asOwner('SELECT first_run_at FROM first_manual_run WHERE user_id = $1', [id])) as { first_run_at: Date }[])[0]?.first_run_at ?? null;
+
+	beforeAll(async () => {
+		keeper = await signUp('MetricsKeeper');
+		keeperProject = (await keeper.call('POST', '/projects', { name: 'Metrics keeper synthetic' })).body.project.id;
+		await asOwner(`UPDATE app_user SET created_at = '2001-08-02T08:00:00Z' WHERE id = $1`, [keeper.id]);
+	});
+
+	it('records the first manual run when it is saved, not an automatic one, and a later run never moves it', async () => {
+		await run('auto', '2001-08-02T09:00:00Z');
+		expect(await recorded(keeper.id)).toBeNull();
+		await run('manual', '2001-08-03T04:00:00Z');
+		expect(await recorded(keeper.id)).toEqual(new Date('2001-08-03T04:00:00Z'));
+		await run('manual', '2001-08-04T04:00:00Z');
+		expect(await recorded(keeper.id)).toEqual(new Date('2001-08-03T04:00:00Z'));
+	});
+
+	it('still activates the person after every run of theirs is deleted', async () => {
+		await asOwner('DELETE FROM model_run WHERE project_id = $1', [keeperProject]);
+		expect((await asOwner('SELECT count(*)::int AS n FROM model_run WHERE created_by = $1', [keeper.id]))[0]!.n).toBe(0);
+		const [person] = (await asOwner('SELECT first_run_at FROM billing_metrics_people($1::date) WHERE user_id = $2', ['2001-08-01', keeper.id])) as {
+			first_run_at: Date | null;
+		}[];
+		expect(person!.first_run_at).toEqual(new Date('2001-08-03T04:00:00Z'));
+		const r = await gatherReport(process.env.TEST_MIGRATION_DATABASE_URL!, '2001-08', NOW);
+		expect(r.activation).toMatchObject({ cohort: 1, activated: 1 });
+	});
+
+	it('is owner only: the app role reads and writes nothing of it, signed in or not', async () => {
+		const app = new pg.Client({ connectionString: APP_URL });
+		await app.connect();
+		try {
+			for (const sql of ['SELECT * FROM first_manual_run', `INSERT INTO first_manual_run (user_id, first_run_at) VALUES ('${keeper.id}', now())`, 'DELETE FROM first_manual_run']) {
+				const code = await app.query(sql).then(
+					() => 'ok',
+					(e: { code?: string }) => e.code
+				);
+				expect(code, sql).toBe('42501');
+			}
+		} finally {
+			await app.end();
+		}
+		// Positive control: the row is there for the owner.
+		expect(await recorded(keeper.id)).not.toBeNull();
+	});
+});
+
 describe('owner only', () => {
 	it('water_app can neither execute nor call them; the owner can (positive control)', async () => {
 		const grants = (await asOwner(

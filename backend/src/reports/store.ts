@@ -6,7 +6,6 @@ import { enqueueJob, type JobStatus } from '../jobs/queue.js';
 import { reportReadyMail, sitePage } from '../mail/templates.js';
 import { trySendMail } from '../mail/transport.js';
 import { reportKey } from './storage.js';
-import { countUsage } from '../billing/entitlements.js';
 
 /** A report job is worth a couple of retries (a browser crash), not the default five. */
 export const REPORT_MAX_ATTEMPTS = 3;
@@ -43,8 +42,9 @@ export async function createReport(db: Db, o: CreateReport): Promise<{ jobId: st
 		[reportId, o.projectId, o.runId, job.id, o.scheduleId ?? null, [...new Set(o.emailTo)], o.againstRunId !== undefined, o.againstRunId ?? null]
 	);
 	// Counted against the project's billing account in this transaction (issue #641 Phase 1, shadow mode: never refused).
-	// A deduplicated schedule fire returned above, so one report counts once.
-	await countUsage(db, o.projectId, 'reports');
+	// A deduplicated schedule fire returned above, so one report counts once. The report records the account and month
+	// it was counted against (408): a project moved later leaves the count there, and a report that ends failed gives it back.
+	await db.query('SELECT app_report_count_usage($1)', [reportId]);
 	return { jobId: job.id, created };
 }
 
