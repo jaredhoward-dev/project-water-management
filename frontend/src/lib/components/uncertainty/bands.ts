@@ -110,6 +110,15 @@ export function historyRows(list: readonly Ensemble[], shown: Ensemble | null): 
 		}));
 }
 
+/**
+ * "stored 3 Sep 2026 14:05 by Ann": when the shown ensemble was stored, in the
+ * viewer's time and day first like the history under it. The header read
+ * the UTC stamp year first ("2026-09-03 12:05") beside a history in local time.
+ */
+export function storedText(e: Pick<Ensemble, 'completedAt' | 'createdAt' | 'createdBy'>): string {
+	return `stored ${fmtDate(e.completedAt ?? e.createdAt, true)} by ${e.createdBy ?? FORMER_MEMBER}`;
+}
+
 /** "2 of the 5 ensembles started for this run were never stored" (null when every one was). */
 export function abandonedText(list: readonly Ensemble[]): string | null {
 	const own = list.filter((e) => !e.baselineId);
@@ -136,7 +145,7 @@ export interface FdcChart {
 /**
  * Geometry of one month's flow-duration band against the EWR: exceedance %
  * on x (linear), flow on a log y axis (m³/day) covering the band and the EWR.
- * Zero flows sit on the axis floor (a tenth of the smallest positive value).
+ * Zero flows sit on the axis floor (the smallest positive value ÷ 1.5).
  */
 export function fdcChart(points: readonly Band[], exceedance: readonly number[], ewr: number, w: number, h: number, pad = { l: 56, r: 10, t: 8, b: 26 }): FdcChart {
 	const vals = points.flatMap((b) => [b.p5, b.p95]).filter((v): v is number => v !== null);
@@ -170,6 +179,22 @@ export function fdcChart(points: readonly Band[], exceedance: readonly number[],
 /** How many of a month's exceedance points have a median flow below the EWR. */
 export function pointsBelowEwr(points: readonly Band[], ewr: number): number {
 	return points.filter((b) => b.p50 !== null && b.p50 < ewr).length;
+}
+
+/**
+ * The flow-duration chart's accessible name: the month's band against its EWR
+ * and how many exceedance points have a median below it. A point without a
+ * median (a gated band) is not counted as above the EWR: when any is missing
+ * the sentence says how many points have one, never "below at 0 of 19" for
+ * a band it can't judge.
+ */
+export function fdcSummary(month: string, points: readonly Band[], exceedanceCount: number, ewr: number): string {
+	const head = `${month} flow-duration band of simulated outflow against the EWR of ${sig(ewr)} m³/day`;
+	const judged = points.filter((b) => b.p50 !== null).length;
+	if (judged === 0) return `${head}: no median to compare, the band is not drawn.`;
+	const below = pointsBelowEwr(points, ewr);
+	const of = judged < exceedanceCount ? `${judged} exceedance points with a median (of ${exceedanceCount})` : `${exceedanceCount} exceedance points`;
+	return `${head}: the median lies below the EWR at ${below} of ${of}.`;
 }
 
 /**

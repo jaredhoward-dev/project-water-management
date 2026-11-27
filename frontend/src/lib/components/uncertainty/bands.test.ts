@@ -1,7 +1,8 @@
 import { band, type Band, type ResolvedEnsembleOptions } from '@water-management/engine';
 import { describe, expect, it } from 'vitest';
 import type { Ensemble } from '#lib/api/index.js';
-import { abandonedText, bandCells, coverageText, fdcChart, historyRows, isPaired, pct, pointsBelowEwr, rangeText, rejectedText, reproducedText, shownEnsemble, sig, withheldNote } from './bands';
+import { abandonedText, bandCells, coverageText, fdcChart, fdcSummary, historyRows, isPaired, pct, pointsBelowEwr, rangeText, rejectedText, reproducedText, shownEnsemble, sig, storedText, withheldNote } from './bands';
+import { fmtStamp } from '#lib/format/number.js';
 
 const gated: Band = { n: 5, p5: null, p50: null, p95: null, min: 1, max: 9 };
 const b = band(Array.from({ length: 40 }, (_, i) => i + 1));
@@ -116,6 +117,13 @@ describe('the history of a run’s ensembles', () => {
 		expect(rows.find((r) => r.id === 'g')!.by).toBe('a former member');
 		expect(rows.find((r) => r.id === 'b')!.by).toBe(shown.createdBy);
 	});
+	it("says when the shown ensemble was stored in the viewer's time, day first, as the history does", () => {
+		// The skewed test TZ moves the clock: the UTC stamp's own digits ("2026-09-03 23:30") must not show.
+		const e = { completedAt: '2026-09-03T23:30:00.000Z', createdAt: '2026-09-03T23:00:00.000Z', createdBy: 'Ann' };
+		expect(storedText(e)).toBe(`stored ${fmtStamp(e.completedAt)} by Ann`);
+		expect(storedText(e)).not.toContain('2026-09-03');
+		expect(storedText({ ...e, completedAt: null, createdBy: null })).toBe(`stored ${fmtStamp(e.createdAt)} by a former member`);
+	});
 	it('counts the starts never stored', () => {
 		expect(abandonedText(list)).toBe(
 			'1 of the 3 ensembles started for this run was never stored (cancelled or abandoned). Every start is kept, with its seed and rule.'
@@ -150,6 +158,14 @@ describe('the monthly flow-duration chart', () => {
 		const zero = fdcChart([bands[0]!, bands[1]!, band(Array.from({ length: 30 }, () => 0))], pts, 0, 520, 240);
 		expect(zero.ewrY).toBeNull();
 		expect(zero.band).not.toMatch(/NaN|Infinity/);
+	});
+	it('names how often the median falls below the EWR, never counting a missing median as above it', () => {
+		expect(fdcSummary('Oct', bands, 3, 100)).toBe('Oct flow-duration band of simulated outflow against the EWR of 100 m³/day: the median lies below the EWR at 1 of 3 exceedance points.');
+		// A gated band has no medians: "below at 0 of 3" would read as compliance it can't judge.
+		expect(fdcSummary('Oct', [gated, gated, gated], 3, 100)).toBe('Oct flow-duration band of simulated outflow against the EWR of 100 m³/day: no median to compare, the band is not drawn.');
+		expect(fdcSummary('Oct', [bands[0]!, gated, bands[2]!], 3, 100)).toBe(
+			'Oct flow-duration band of simulated outflow against the EWR of 100 m³/day: the median lies below the EWR at 1 of 2 exceedance points with a median (of 3).'
+		);
 	});
 });
 

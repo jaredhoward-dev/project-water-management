@@ -6,6 +6,7 @@
 // sensitivity runs (CR-21) sit in a card after the bands: run in the worker, never stored.
 import { expectNoViolations } from '../support/a11y.ts';
 import { createRun, putModel, seedRunnableProject, updateSettings } from '../support/api.ts';
+import { checkDiagramLabels } from '../support/diagrams.ts';
 import { expect, test } from '../support/fixtures.ts';
 
 test('an ensemble is stored with its rule, reproduces, and pairs with another run in compare', async ({ page, owner }) => {
@@ -58,6 +59,39 @@ test('an ensemble is stored with its rule, reproduces, and pairs with another ru
 	await expect(panel.getByTestId('kept')).toHaveText('31 of 31');
 	await panel.getByRole('button', { name: 'Reproduce in this browser' }).click();
 	await expect(panel.getByTestId('reproduced')).toHaveText('Reproduced: the same 31 members, verdicts, outputs and coverage.');
+
+	// The monthly curve's numbers are a table behind "Show the numbers" (the chart's text equivalent).
+	await panel.getByText('Show the numbers').click();
+	await expect(panel.getByRole('table', { name: /^Oct simulated outflow at each exceedance point, m³\/day/ }).getByRole('row')).toHaveCount(1 + 10);
+	// On a phone the drawing keeps its labels at 9.5 px or more and scrolls in its box (ui-playbook § 3); it scaled them to 7 px.
+	await page.setViewportSize({ width: 390, height: 844 });
+	const fdcSvg = panel.getByRole('img', { name: /^Oct flow-duration band/ });
+	await fdcSvg.scrollIntoViewIfNeeded();
+	expect((await checkDiagramLabels(fdcSvg)).smallestPx).toBeGreaterThanOrEqual(9.49);
+	expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+	await page.setViewportSize({ width: 1440, height: 900 });
+
+	// A viewer kept from the registered volumes reads a cap run's ensemble as EWR counts and rates only (#523 I): the
+	// server sends no curves or annual volumes. The panel says why and leaves both out; the empty curves threw until then.
+	const errors: string[] = [];
+	page.on('pageerror', (e) => errors.push(e.message));
+	await page.route(`**/runs/${baseline}/uncertainty`, async (route) => {
+		const res = await route.fetch();
+		const body = (await res.json()) as { ensembles: { verdictsOnlyRuns?: string[]; summary: { bands: Record<string, unknown> } | null }[] };
+		for (const e of body.ensembles) {
+			e.verdictsOnlyRuns = [baseline];
+			if (e.summary) e.summary.bands = { ...e.summary.bands, shortfallMm3: null, marNaturalMm3: null, marOutflowMm3: null, annual: [], curtailment: [], fdc: [], supply: [], reserveFdc: [] };
+		}
+		await route.fulfill({ response: res, json: body });
+	});
+	await page.reload();
+	await expect(panel.getByTestId('uncertainty-withheld')).toContainText('shows EWR counts and rates only');
+	await expect(panel.getByTestId('kept')).toHaveText('31 of 31');
+	await expect(panel.getByTestId('band-ewr-days')).toBeVisible();
+	await expect(panel.getByTestId('band-annual')).toHaveCount(0);
+	await expect(panel.getByRole('heading', { name: /^Monthly flow-duration curves/ })).toHaveCount(0);
+	expect(errors).toEqual([]);
+	await page.unroute(`**/runs/${baseline}/uncertainty`);
 
 	// The application: a bigger dam on the upper farm, then a run of it.
 	const model = project.model;
@@ -115,4 +149,11 @@ test('sensitivity runs: a verdict per EWR site, the tornado with its table, and 
 	await panel.getByLabel('Threshold: days the EWR is met (%)').fill('0');
 	await expect(verdicts.first()).toHaveText(/^Meets the threshold\. /);
 	await expectNoViolations(page, { include: '[data-testid="sensitivity-panel"]' });
+
+	// On a phone the tornado keeps its labels at 9.5 px or more and scrolls in its box (ui-playbook § 3); it scaled them to 6.5 px.
+	await page.setViewportSize({ width: 390, height: 844 });
+	const tornado = panel.getByTestId('tornado');
+	await tornado.scrollIntoViewIfNeeded();
+	expect((await checkDiagramLabels(tornado)).smallestPx).toBeGreaterThanOrEqual(9.49);
+	expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 });
