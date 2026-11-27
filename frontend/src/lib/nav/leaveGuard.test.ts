@@ -211,7 +211,8 @@ describe('the leave guard', () => {
 // module but the guard itself imports SvelteKit's goto.
 describe('no raw goto outside the guard (issue #931)', () => {
 	const SRC = join(__dirname, '..', '..');
-	const ALLOWED = new Set(['lib/nav/leaveGuard.ts']);
+	// /share is public and stays off the workspace's code (i18n/boundary.test.ts); it never installs the guard and has no unsaved work.
+	const ALLOWED = new Set(['lib/nav/leaveGuard.ts', 'routes/share/+page.svelte']);
 	const RAW = /import\s*\{[^}]*\bgoto\b[^}]*\}\s*from\s*['"]\$app\/navigation['"]/;
 
 	function* sources(dir: string): Generator<string> {

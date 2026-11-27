@@ -67,7 +67,7 @@ test('‹ › in the sheet after Leave still replaces: Back goes to before the s
 
 	const next = sheet.getByRole('button', { name: 'Next hydrological unit' });
 	const prev = sheet.getByRole('button', { name: 'Previous hydrological unit' });
-	const step = (await next.isEnabled()) ? next : prev;
+	const step = (await next.isEnabled()) ? next : prev; // settled: the sheet is drawn (its field was just filled), and its ‹ › state is drawn with it from the fixed seeded network
 	await step.click();
 	await answerConfirm(page, true, QUESTION);
 	await expect.poll(() => param(page, 'edit')).not.toBe(first);

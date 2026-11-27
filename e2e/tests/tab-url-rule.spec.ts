@@ -45,7 +45,8 @@ test('removing a unit from its sheet hands the focus to the list row now in its 
 	const sheet = await openNodeForm(page, 'Lower farm');
 	await sheet.getByRole('button', { name: 'Remove Lower farm' }).click();
 	const box = page.getByRole('alertdialog', { name: 'Remove “Lower farm”?' });
-	if (await box.isVisible()) await box.getByRole('button', { name: 'Remove hydrological unit' }).click();
+	// Lower farm has a crop area and a transfer in sampleModel(), so removing it always asks.
+	await box.getByRole('button', { name: 'Remove hydrological unit' }).click();
 	await expect(page.getByRole('dialog', { name: /^Edit / })).toHaveCount(0);
 	await expect(nodeList(page).getByRole('button', { name: /^Upper farm/ })).toBeFocused();
 });

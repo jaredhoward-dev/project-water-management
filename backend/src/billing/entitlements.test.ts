@@ -195,7 +195,8 @@ describe('a server report counts against its account (reports/store.ts createRep
 		expect(await createReport(db as never, report)).toEqual({ jobId: 'j1', created: true });
 		const sqls = db.queries.map((q) => q.sql);
 		expect(sqls[0]).toContain('INSERT INTO report');
-		expect(db.queries[1]).toEqual({ sql: 'SELECT app_usage_add($1, $2, $3)', params: [P, 'reports', 1] });
+		// 408: counted against the account billed now, by the report's id (refunded if it ends failed; reportUsage.db.test.ts).
+		expect(db.queries[1]).toEqual({ sql: 'SELECT app_report_count_usage($1)', params: [expect.stringMatching(/^[0-9a-f-]{36}$/)] });
 	});
 
 	it('counts nothing for a deduplicated schedule fire (the report was queued and counted already)', async () => {

@@ -19,7 +19,9 @@
 	// is chosen on the page (SummaryControls), and in print only
 	// MemberSummary shows, on A4, black on white.
 	import { flushSync, onMount } from 'svelte';
-	import { guardedGoto } from '#lib/nav/leaveGuard.js';
+	// /share stays off the workspace's code (boundary.test.ts) and has no unsaved work for the leave guard to keep,
+	// so it uses SvelteKit's goto (leaveGuard.test.ts allows this file).
+	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { api } from '#lib/api/index.js';
 	import NoticeCard from '#lib/components/farm/NoticeCard.svelte';
@@ -100,7 +102,7 @@
 		const hash = location.hash || returning();
 		token = readShareToken(hash);
 		kind = readShareKind(hash);
-		if (location.hash) void guardedGoto(resolve('share'), { replace: true, reset: false });
+		if (location.hash) void goto(resolve('share'), { replace: true, reset: false });
 		load();
 	}
 

@@ -59,6 +59,8 @@ const SAFE_SCHEMES = new Set(['http', 'https', 'mailto', 'tel']);
  */
 const REVIEWED: Record<string, { why: string; in: string[] }> = {
 	// App URL builders: each returns "?tab=…", "#…" or the base path + "/…" with its ids encoded (BUILDER).
+	workspaceHref: { why: 'FarmStatus prop: FarmPage passes resolve("projects/" + encoded project id + "?tab=network")', in: ['lib/components/farm/FarmStatus.svelte'] },
+	nodeSheetHref: { why: 'BUILDER (lib/nav/tabUrl.ts): hrefWith(page.url, …), "?" + URLSearchParams of the current page', in: ['lib/components/network/NetworkTab.svelte'] },
 	withParam: { why: 'BUILDER: "?" + URLSearchParams of the current page', in: ['lib/components/allocations/AllocationsTab.svelte', 'lib/components/allocations/AllocationUnitTotals.svelte', 'lib/components/allocations/AllocationUseMap.svelte', 'lib/components/crops/CropsTab.svelte', 'lib/components/scenarios/ApplicantView.svelte', 'lib/components/dams/DamsTab.svelte', 'lib/components/ewr/EwrUnitMap.svelte', 'lib/components/map/MapTab.svelte', 'lib/components/network/NetworkTab.svelte', 'lib/components/settings/SettingsTab.svelte', 'lib/components/supply/SupplyTab.svelte'] },
 	runHref: { why: 'BUILDER: "?tab=runs&run=" + encoded id', in: ['lib/components/dams/DamsTab.svelte', 'lib/components/overview/LatestRun.svelte', 'lib/components/overview/OverviewTab.svelte', 'lib/components/overview/PublishedBaseline.svelte', 'lib/components/calibration/CalibrationResults.svelte', 'lib/components/river/RiverTab.svelte', 'lib/components/outputs/OutputsTab.svelte', 'lib/components/supply/SupplyTab.svelte', 'routes/projects/[id]/reports/[jobId]/+page.svelte'] },
 	riverHref: { why: 'BUILDER: "?tab=river…"', in: ['lib/components/overview/OverviewTab.svelte', 'lib/components/river/RiverTab.svelte', 'lib/components/runs/RunsTab.svelte', 'lib/components/scenarios/ScenarioCompare.svelte'] },
@@ -190,7 +192,7 @@ const REVIEWED: Record<string, { why: string; in: string[] }> = {
 		in: ['lib/components/landing/Landing.svelte', 'lib/components/pricing/Pricing.svelte']
 	},
 	pricingHref: { why: 'Landing: `<base>` + pricingPath(the page’s Locale prop or wordsLang()), "/welcome/pricing" or "/welcome/pricing/<code>" for a code of the language table (auth/session.svelte.ts; #641 Phase 4)', in: ['lib/components/landing/Landing.svelte'] },
-	homeHref: { why: 'Pricing: `<base>` + landingPath(its Locale prop, the route’s locale-matched param), "/welcome" or "/welcome/<code>" (auth/session.svelte.ts; #641 Phase 4)', in: ['lib/components/pricing/Pricing.svelte'] },
+	homeHref: { why: 'Pricing: `<base>` + landingPath(its Locale prop, the route’s locale-matched param), "/welcome" or "/welcome/<code>" (auth/session.svelte.ts; #641 Phase 4); /share: resolve("welcome"), a literal route', in: ['lib/components/pricing/Pricing.svelte', 'routes/share/+page.svelte'] },
 	// Objects built in code from the builders above.
 	'done.href': { why: 'the invitations page: `<base>/teams/`, `/farm/` or `/projects/` + the encoded id of what was joined', in: ['routes/account/invitations/+page.svelte'] },
 	'back.href': { why: 'FarmShell prop: callers pass `<base>/farm`, farmHref(…), or (the words page) `<base>` + a ?from= farmReturn accepted', in: ['lib/components/farm/FarmShell.svelte'] },
