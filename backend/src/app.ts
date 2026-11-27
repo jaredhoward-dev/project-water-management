@@ -23,6 +23,7 @@ import { handleError } from './http/errors.js';
 import { logEvent } from './logging/logEvent.js';
 import { clientErrorRoutes } from './logging/clientErrors.js';
 import { refuseAmbiguousPaths } from './http/rawPath.js';
+import { noStoreByDefault } from './http/noStore.js';
 import { myInviteRoutes, projectInviteRoutes, teamInviteRoutes } from './invites/invites.js';
 import { feedFromBoundaryRoutes } from './feeds/fromBoundary.js';
 import { feedFromUnitsRoutes } from './feeds/fromUnits.js';
@@ -99,6 +100,10 @@ export function assertEdgeSecret(env: NodeJS.ProcessEnv = process.env) {
 
 export function createApp() {
 	const app = new Hono<AuthEnv>();
+
+	// First, so it sees every answer, refusals included: no-store unless the
+	// route set its own Cache-Control (http/noStore.ts).
+	app.use('*', noStoreByDefault);
 
 	// CloudFront-stamped shared secret. In prod, CloudFront stamps every
 	// /api/* request with X-CloudFront-Shared-Secret via the origin's
