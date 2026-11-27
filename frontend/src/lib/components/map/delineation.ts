@@ -17,6 +17,25 @@ export const POLL_MS = 2000;
 export const POLL_GIVE_UP = 5;
 
 /**
+ * How long the Map keeps asking about a background delineation while its sheet is closed (issue #938): 15
+ * minutes of POLL_MS asks, counted from when the Map started waiting, not from the server's clock. A
+ * job takes a minute or two; one still queued or running after this is stuck (its worker died) or waiting
+ * on a queue that has stalled, and asking every 2 s for as long as the tab stays open only costs requests.
+ * The sheet, reopened from the notice, asks again for itself.
+ */
+export const BACKGROUND_POLL_LIMIT_MS = 15 * 60_000;
+export const BACKGROUND_POLL_LIMIT = BACKGROUND_POLL_LIMIT_MS / POLL_MS;
+
+/** Whether the Map stops asking about a background delineation after `asks` asks (BACKGROUND_POLL_LIMIT). */
+export const backgroundPollStops = (asks: number): boolean => asks >= BACKGROUND_POLL_LIMIT;
+
+/** The Map's notice once it stops asking (backgroundPollStops), and its link's label (it opens the sheet). */
+export const BACKGROUND_POLL_STOPPED = {
+	text: `The background delineation is still not done after ${BACKGROUND_POLL_LIMIT_MS / 60_000} minutes, so the map has stopped checking on it. Open Delineate to check again, or draw or import the boundary.`,
+	label: 'Check again'
+} as const;
+
+/**
  * After a failed ask about a waiting delineation (`failures` in a row,
  * counting this one; `status` the HTTP status, if there was an answer): ask
  * again, since a dropped connection or a 5xx says nothing about the job,

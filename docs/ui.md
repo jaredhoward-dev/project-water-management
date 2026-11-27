@@ -5051,7 +5051,11 @@ map" card) stays the schematic; this is the geography.
   catchment, over about 100 km across: work it out in the background**
   above the dataset line sends the point straight there. A reload shows a
   waiting one again (the state's `request`); a sheet closed while it waits
-  shows the proposal once the Map's state reloads. The proposal is drawn dashed in teal
+  shows the proposal once the Map's state reloads. With the sheet closed the
+  Map asks about it every 2 s for at most 15 minutes of asks
+  (`delineation.ts` `BACKGROUND_POLL_LIMIT_MS`); past that it stops and its
+  notice says so, with **Check again**, which opens the sheet (the open sheet
+  asks for itself). The proposal is drawn dashed in teal
   with its outlet over the features (`mapStyle.ts` `proposalLayers`, framed
   when it arrives) and the sheet becomes **The delineated catchment**, its
   title taking the focus: Area, The point is, Outlet ("128 m from the

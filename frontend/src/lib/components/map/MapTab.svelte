@@ -113,7 +113,7 @@
 	import { ClickDivider, clickShape } from './clickPieces.svelte';
 	import { ChannelLayer } from './channelLayer.svelte';
 	import { openChannelArchive, staticChannels } from './channelArchive';
-	import { afterPollError, backgroundOutcome, isWaiting, openProposal, outcomeShown, POLL_MS } from './delineation';
+	import { afterPollError, BACKGROUND_POLL_STOPPED, backgroundOutcome, backgroundPollStops, isWaiting, openProposal, outcomeShown, POLL_MS } from './delineation';
 	import { ApiError } from '#lib/api/client.js';
 	import { openDivide, openStart, type StartDraft } from './startFlow';
 	import type { DivideChoice, DivideDraft } from './divideFlow';
@@ -420,10 +420,26 @@
 	let delineateFromNotice = $state(false);
 	const backgroundRequest = $derived(!delineateSheet.open && delineation?.request && isWaiting(delineation.request) ? delineation.request : null);
 	let backgroundFailures = 0;
+	// Asks about one request while the sheet is closed; past the bound (delineation.ts BACKGROUND_POLL_LIMIT_MS)
+	// the map stops and says so, with a link that opens the sheet (which asks for itself).
+	let backgroundAsks = { id: '', n: 0 };
 	$effect(() => {
 		const r = backgroundRequest;
 		if (!r) return;
-		const timer = setTimeout(() => void untrack(() => pollBackground(r.id)), POLL_MS);
+		if (backgroundAsks.id !== r.id) backgroundAsks = { id: r.id, n: 0 };
+		if (backgroundPollStops(backgroundAsks.n)) {
+			untrack(() => {
+				backgroundAsks = { id: '', n: 0 };
+				if (delineation) delineation = { ...delineation, request: null };
+				notice = BACKGROUND_POLL_STOPPED.text;
+				noticeNext = { text: BACKGROUND_POLL_STOPPED.text, step: { sheet: 'delineate', label: BACKGROUND_POLL_STOPPED.label } };
+			});
+			return;
+		}
+		const timer = setTimeout(() => {
+			backgroundAsks.n++;
+			void untrack(() => pollBackground(r.id));
+		}, POLL_MS);
 		return () => clearTimeout(timer);
 	});
 	async function pollBackground(id: string) {

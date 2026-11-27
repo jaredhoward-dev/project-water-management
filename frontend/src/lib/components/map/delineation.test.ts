@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { DelineationProposal, DelineationRequest, LargerChannel } from '#lib/api/types.js';
-import { afterPollError, backgroundOutcome, outcomeShown, COPERNICUS_NOTICE, datasetNotice, failedText, POLL_GIVE_UP, isWaiting, openProposal, panFacts, proposalFacts, provenanceFacts, waitingText } from './delineation';
+import { afterPollError, BACKGROUND_POLL_LIMIT, BACKGROUND_POLL_LIMIT_MS, BACKGROUND_POLL_STOPPED, backgroundPollStops, backgroundOutcome, outcomeShown, COPERNICUS_NOTICE, datasetNotice, failedText, POLL_GIVE_UP, isWaiting, openProposal, panFacts, proposalFacts, provenanceFacts, waitingText } from './delineation';
 
 const proposal = (over: Partial<DelineationProposal> = {}): DelineationProposal => ({
 	id: 'p1',
@@ -159,5 +159,19 @@ describe('a delineation the background worker has', () => {
 		expect(afterPollError(5, undefined)).toBe('give_up');
 		expect(afterPollError(5, 500)).toBe('give_up');
 		expect(afterPollError(1, 404)).toBe('give_up');
+	});
+});
+
+describe('the Map stops asking about a background delineation (issue #938)', () => {
+	it('stops after 15 minutes of asks, not before', () => {
+		expect(BACKGROUND_POLL_LIMIT_MS).toBe(15 * 60_000);
+		expect(BACKGROUND_POLL_LIMIT).toBe(450);
+		expect(backgroundPollStops(0)).toBe(false);
+		expect(backgroundPollStops(BACKGROUND_POLL_LIMIT - 1)).toBe(false);
+		expect(backgroundPollStops(BACKGROUND_POLL_LIMIT)).toBe(true);
+	});
+	it('says so in the notice, with the bound', () => {
+		expect(BACKGROUND_POLL_STOPPED.text).toContain('after 15 minutes');
+		expect(BACKGROUND_POLL_STOPPED.text).toContain('stopped checking');
 	});
 });
