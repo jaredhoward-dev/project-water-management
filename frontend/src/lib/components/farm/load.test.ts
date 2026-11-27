@@ -1,17 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { ApiError } from '#lib/api/client.js';
+import { ApiError, createApi } from '#lib/api/client.js';
 import { cardOnFailure, classify, farmHref, farmReturn, farmReturnPage, pickNode, savedForPublication, wordsHref, worstFirst } from './load';
 
+/** An error the API wrote itself (its JSON error shape), as the client builds it. */
+const api = (status: number) => new ApiError(status, 'x', undefined, null, {}, true);
+
 describe('what a failed request means', () => {
-	it('403 and 404 mean access removed; 0 means no signal; the rest a failure', () => {
-		expect(classify(new ApiError(403, 'x'))).toBe('removed');
-		expect(classify(new ApiError(404, 'x'))).toBe('removed');
+	it('the API’s own 403 and 404 mean access removed; 0 means no signal; the rest a failure', () => {
+		expect(classify(api(403))).toBe('removed');
+		expect(classify(api(404))).toBe('removed');
 		// A WUA viewer's preview withheld while a cap or full-allocation run is published: its own state, by its code (#523 I).
 		expect(classify(new ApiError(403, 'x', undefined, 'farm_preview_withheld'))).toBe('withheld');
 		expect(classify(new ApiError(404, 'x', undefined, 'farm_preview_withheld'))).toBe('removed');
 		expect(classify(new ApiError(403, 'x', undefined, 'note_audience_denied'))).toBe('removed');
 		expect(classify(new ApiError(0, 'x'))).toBe('offline');
-		expect(classify(new ApiError(500, 'x'))).toBe('failed');
+		expect(classify(api(500))).toBe('failed');
 		expect(classify(new ApiError(401, 'x'))).toBe('failed');
 		expect(classify(new Error('boom'))).toBe('failed');
 		expect(classify(null)).toBe('failed');
@@ -114,14 +117,37 @@ describe('the farms list puts the worst notice first', () => {
 	});
 });
 
+describe('classify: a 403 or 404 the API didn’t write', () => {
+	it('is a failure, not a removed farm: a WAF block page or a CloudFront error says nothing about access', () => {
+		expect(classify(new ApiError(403, 'Forbidden'))).toBe('failed');
+		expect(classify(new ApiError(404, 'Not Found'))).toBe('failed');
+		// Positive control: the same statuses from the API are removed.
+		expect(classify(api(403))).toBe('removed');
+		expect(classify(new ApiError(404, 'not found', undefined, null, {}, true))).toBe('removed');
+	});
+	it('reads it from what the client builds from a real answer: an HTML 403 vs the API’s JSON 403', async () => {
+		const answer = (body: string, type: string) => async () => new Response(body, { status: 403, headers: { 'Content-Type': type } });
+		const waf = await createApi('', answer('<html><body>Request blocked</body></html>', 'text/html') as typeof fetch).farm.index('p1').catch((e: unknown) => e);
+		expect(waf).toBeInstanceOf(ApiError);
+		expect((waf as ApiError).fromApi).toBe(false);
+		expect(classify(waf)).toBe('failed');
+		const own = await createApi('', answer('{"error":"forbidden"}', 'application/json') as typeof fetch).farm.index('p1').catch((e: unknown) => e);
+		expect((own as ApiError).fromApi).toBe(true);
+		expect(classify(own)).toBe('removed');
+	});
+});
+
 describe('cardOnFailure (/farm: a card whose figures fail)', () => {
 	const saved = { farm: 'saved copy' };
 	it('drops a farm unlinked since the list loaded (403/404) without reading its saved copy', () => {
 		for (const status of [403, 404]) {
 			let read = false;
-			expect(cardOnFailure(new ApiError(status, 'x'), () => ((read = true), saved))).toEqual({ drop: true });
+			expect(cardOnFailure(api(status), () => ((read = true), saved))).toEqual({ drop: true });
 			expect(read).toBe(false);
 		}
+	});
+	it('keeps the card and falls back to its saved copy on a 403 the API didn’t write (a WAF block)', () => {
+		expect(cardOnFailure(new ApiError(403, 'Forbidden'), () => saved)).toEqual({ drop: false, withheld: false, view: saved });
 	});
 	it('falls back to the saved copy on no signal or a server failure, else nothing', () => {
 		expect(cardOnFailure(new ApiError(0, 'x'), () => saved)).toEqual({ drop: false, withheld: false, view: saved });
@@ -134,7 +160,7 @@ describe('cardOnFailure (/farm: a card whose figures fail)', () => {
 		expect(next).toEqual({ drop: false, withheld: true, view: null });
 		expect(read).toBe(false);
 		// Positive control: the same status without the code is still a removed farm, dropped.
-		expect(cardOnFailure(new ApiError(403, 'x'), () => saved)).toEqual({ drop: true });
+		expect(cardOnFailure(api(403), () => saved)).toEqual({ drop: true });
 		// A 404 carrying the code is still removed (classify reads the code only on a 403).
 		expect(cardOnFailure(new ApiError(404, 'x', undefined, 'farm_preview_withheld'), () => saved)).toEqual({ drop: true });
 	});

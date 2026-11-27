@@ -10,23 +10,29 @@ export type Failure = 'removed' | 'withheld' | 'offline' | 'failed';
  * 403 coded `farm_preview_withheld`: a WUA viewer kept from registered volumes
  * previewing a farm while a cap or full-allocation run is published (#523 I);
  * the farm is still in the catchment, so the page says why and keeps the
- * saved copies. Any other 403 or 404: the farm (or the project) is no longer
- * this user's, so the page says so and the saved copy goes. Status 0: no
- * signal. Anything else: the server had a problem; the page offers Try
+ * saved copies. Any other 403 or 404 the API wrote itself (a code, or its JSON
+ * error shape: ApiError `fromApi`): the farm (or the project) is no longer
+ * this user's, so the page says so and the saved copy goes. A 403 or 404 from
+ * anything in front of the API (a WAF block page, a CloudFront error) says
+ * nothing about access, so it is `failed` and the saved copy stays. Status 0:
+ * no signal. Anything else: the server had a problem; the page offers Try
  * again. Never the raw error text.
  */
 export function classify(e: unknown): Failure {
-	const status = e && typeof e === 'object' && 'status' in e ? (e as { status: unknown }).status : null;
-	const code = e && typeof e === 'object' && 'code' in e ? (e as { code: unknown }).code : null;
+	const field = (name: string): unknown => (e && typeof e === 'object' && name in e ? (e as Record<string, unknown>)[name] : null);
+	const status = field('status');
+	const code = field('code');
 	if (status === 403 && code === 'farm_preview_withheld') return 'withheld';
-	if (status === 403 || status === 404) return 'removed';
+	const fromApi = field('fromApi') === true || (typeof code === 'string' && code !== '');
+	if ((status === 403 || status === 404) && fromApi) return 'removed';
 	if (status === 0) return 'offline';
 	return 'failed';
 }
 
 /**
  * A card's figures on /farm when asking for them failed: a farm unlinked (or
- * a project lost) between loading the list and its figures (403/404) is
+ * a project lost) between loading the list and its figures (the API's own
+ * 403/404; a WAF block keeps the card and its copy, `classify`) is
  * dropped from the list, as the list's own 403/404 leaves a project out, and
  * its saved copy goes. A preview withheld (403 `farm_preview_withheld`) keeps
  * the card and the phone's saved copy, as the farm page does, but shows no
