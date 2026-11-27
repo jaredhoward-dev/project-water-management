@@ -22,6 +22,7 @@ import { requireUser, type AuthEnv } from './middleware.js';
 import { checkPasswordAgain, takenAddressMail } from './routes.js';
 import { issueDevice } from './device.js';
 import { issueSession, readSessionClaims } from './session.js';
+import { requireCodeIfEnrolled } from './stepUp.js';
 import { ACCOUNT_MAIL_CAP, ACCOUNT_MAIL_WINDOW, newToken, parseToken, RESEND_COOLDOWN, TOKEN_TTL } from './tokens.js';
 
 const ChangeEmailBody = z.object({
@@ -49,6 +50,8 @@ export const emailChangeRoutes = new Hono<AuthEnv>()
 	.post('/change-email', requireUser, async (c) => {
 		const body = ChangeEmailBody.parse(await readJson(c));
 		const userId = c.get('userId');
+		// With a second factor on, only a session that gave a code may move the address (stepUp.ts requireCodeIfEnrolled).
+		await withUser(userId, (db) => requireCodeIfEnrolled(db, userId, c.get('amr') ?? [], 'to change your email address'));
 		const account = await checkPasswordAgain(c, '/auth/change-email', body.currentPassword);
 		if (account.email.toLowerCase() === body.newEmail) {
 			throw ApiError.coded(400, 'email_change_same', 'that is already your email address');

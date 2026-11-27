@@ -13,7 +13,7 @@ export function needsStepUpToAdd(status: Pick<MfaStatus, 'methods' | 'sessionVer
 	return status.methods.length > 0 && !status.methods.includes(method) && !status.sessionVerified;
 }
 
-/** What a refused step of turning a way on means: sign in again with a code, a wrong password (the enrol's other 403), or anything else. */
+/** What a refused step of turning a way on (or of changing the email address, ChangeEmail.svelte) means: sign in again with a code, a wrong password (the other 403), or anything else. */
 export function setupRefusal(err: unknown): 'step-up' | 'wrong-password' | 'other' {
 	if (!(err instanceof ApiError) || err.status !== 403) return 'other';
 	return err.code === 'mfa_step_up' ? 'step-up' : 'wrong-password';

@@ -288,7 +288,10 @@ falls through to the first when it was the last. Neither is granted to
   add a factor of its own and, by confirming it, become two-step without
   ever giving the owner's factor's code. At …/confirm the check runs before
   the code throttle counts (and again inside the confirm), so a refusal is
-  never counted as a code guess (issue #881). Turning a factor off needs a code (from
+  never counted as a code guess (issue #881). The same rule holds for
+  changing the email address and deleting the account (`403 mfa_step_up`,
+  `auth/stepUp.ts` `requireCodeIfEnrolled`, before the password is checked).
+  Turning a factor off needs a code (from
   the app, by email, or a recovery code). Tests:
   `auth/mfa-email.db.test.ts` "adding a second factor needs a session that
   gave a code" (each order, a pending app or pending codes by email,
@@ -589,7 +592,14 @@ token, a malformed or unknown one, a live invite for another address) is
 Issue #641 item 5 (347_email_change, `auth/email-change-routes.ts`). A
 signed-in person asks with the new address and their **current password**
 (checked through the sign-in lockout, as changing the password is, so a
-stolen session alone can't move the account). A link goes to the **new**
+stolen session alone can't move the account). With a second factor on, the
+session must also have signed in (or stepped up) with a code (`403
+mfa_step_up`, checked before the password so it never counts on the lockout),
+as adding another factor needs: a password-only session from before the first
+factor lives its 7 days, and with the password it could otherwise send the
+emailed codes, the factor-reset links and every later notice to its own inbox
+(test: `auth/email-change.db.test.ts` "with a second factor on, a
+password-only session can't change the address"). A link goes to the **new**
 address (the email-token pattern: 32 random bytes, only the SHA-256 stored in
 `email_change`, single use, 48 h, one pending change per account, a newer one
 replaces it); the account's address switches **only** when that link is used,
@@ -640,8 +650,12 @@ the owner secures the account", with a positive control).
   answer: a fresh confirmation link if it was never confirmed, else "you
   already have an account" with a password-reset link, both under the
   address's cooldown and daily cap, so sign-up can't be used to flood an
-  inbox. The one exception is sign-up through an invite link, which names its
-  address already: `409 account_exists` there tells the holder nothing new.
+  inbox. The one exception is sign-up through a **live** invite for exactly
+  that address, which names it already: `409 account_exists` there tells the
+  holder nothing new. Any other token (made up, expired, withdrawn, or another
+  address's invite) gets the ordinary `202`, so carrying one can't tell a
+  taken address from a free one (`auth/auth.db.test.ts` "a made-up, or
+  another address's, invite token doesn't tell a taken address from a free one").
   **Timing too** (issue #51): `forgot-password` and `resend-confirmation`
   never wait for the send (it is started and left to finish), and answer
   after one fixed floor of 200 ms from the start of the request, known
@@ -2021,20 +2035,6 @@ In short:
   covered automatically; the owner's positive controls prove they aren't
   vacuous. The two layers are tested apart: `requireRole` answers 404 at
   the route, and RLS alone must hold if a route forgets it.
-- **Irrigation systems** (`198_irrigation_systems.sql`,
-  `200_irrigation_system_seed_invoker.sql`,
-  `201_irrigation_system_viewer_read.sql`). `irrigation_system` is read from
-  viewer up and written by editors. A farmer or an applicant reads none of
-  it (201; 198 had let every role read it): its rows are the project's,
-  an "Imported, NN %" row was made from a farm's own efficiency, and the
-  farm view takes the systems from the published run's inputs server side,
-  not from the table (the table sweeps in `farmer-privacy.security.db.test.ts`
-  and `applicant.security.db.test.ts`). A new project gets its six SABI rows from an insert trigger;
-  the seed function it calls runs with its caller's rights and `water_app`
-  can't execute it, so it can't be used to write rows into a project the
-  caller has no role on (`irrigationSystems.db.test.ts`).
-- **Billing** (`323_billing.sql`, issue #641; [billing.md](./billing.md)). A
-  plan and its usage are read by the account's person, and a team's by the
   Every table sweep's UPDATE sets a column the app role may update to
   itself (`backend/src/__tests__/rlsProbe.ts`). Until 2026-11-27 they all
   wrote `SET project_id = project_id`, which twenty tables whose grants are
@@ -2055,6 +2055,20 @@ In short:
   request they could change at once. A removed viewer reads no row and
   changes none, their own note included. The owner's and the editor's
   sweeps reaching those tables are the positive controls.
+- **Irrigation systems** (`198_irrigation_systems.sql`,
+  `200_irrigation_system_seed_invoker.sql`,
+  `201_irrigation_system_viewer_read.sql`). `irrigation_system` is read from
+  viewer up and written by editors. A farmer or an applicant reads none of
+  it (201; 198 had let every role read it): its rows are the project's,
+  an "Imported, NN %" row was made from a farm's own efficiency, and the
+  farm view takes the systems from the published run's inputs server side,
+  not from the table (the table sweeps in `farmer-privacy.security.db.test.ts`
+  and `applicant.security.db.test.ts`). A new project gets its six SABI rows from an insert trigger;
+  the seed function it calls runs with its caller's rights and `water_app`
+  can't execute it, so it can't be used to write rows into a project the
+  caller has no role on (`irrigationSystems.db.test.ts`).
+- **Billing** (`323_billing.sql`, issue #641; [billing.md](./billing.md)). A
+  plan and its usage are read by the account's person, and a team's by the
   team's admins only: `GET /teams/:id/plan` answers `404` to anyone else
   (a member, an outsider), and no project role (editor, viewer, farmer) reads
   another person's account. `water_app` has SELECT only on `plan`,
@@ -3185,7 +3199,15 @@ In short:
     fetcher could write plausible wrong values for the cells it was asked
     about, now into every project over them rather than one series. That
     is the same trust as before, wider in reach; the fetcher's role still
-    only receives requests and sends answers. A fixture database's
+    only receives requests and sends answers. The worker reads each kind of
+    message only from its own queue (`lambda-worker.ts` `MESSAGE_QUEUES`,
+    the ARNs in `JOBS_QUEUE_ARN`, `INGEST_RESULTS_QUEUE_ARN` and
+    `RENDER_RESULTS_QUEUE_ARN`): a fetch result only from `ingest-results`,
+    a render's answer only from `render-results`, a wake only from `jobs`.
+    So the fetcher can't answer for a report or a pack, nor the renderer
+    (headless Chromium) for a fetch; a message on the wrong queue is logged
+    (`job_message_wrong_queue`, its type, no body) and dropped
+    (`lambda-worker.test.ts`). A fixture database's
     synthetic values carry `origin = 'fixtures'` and are never read by a
     live feed.
   - **Re-checking finals** (`210_chirps_final_recheck`). The re-check adds
@@ -3207,6 +3229,11 @@ In short:
     key) may call: it validates the manifest and day bounds, only ever
     *marks* cached finals stale (never writes a value), and records the
     revision in `mirror_manifest`, which `water_app` can read but not write.
+    The copy's Zarr chunks are written by Lambdas that read the internet, so
+    the worker and API inflate each gzip chunk only up to what its shape and
+    type can hold (`mirror/store.ts` `gzipDecodedLimit`, never past 64 MiB): a
+    chunk that inflates further (a gzip bomb, a corrupt object) fails that
+    read as a format error instead of exhausting the reader's memory.
     Since 246 it does so in parts (at most 4000 days a call, logged in
     `mirror_change`, also read-only to `water_app`), and the worker records
     how far each product of the copy runs in `mirror_copy` through
@@ -3258,7 +3285,8 @@ In short:
     client's `FEED_HOSTS` gained `deafrica-services.s3.af-south-1.amazonaws.com`
     and, for the Waterbodies API (2026-10-30), `api.digitalearth.africa`
     and `geoserver.digitalearth.africa`, each kept by `FEED_HOST_PATHS` to
-    the one path we read (`/waterbodies/`, `/geoserver/wfs`), since both
+    the one path we read (`/waterbodies/` and its tree, the `/geoserver/wfs`
+    endpoint itself and nothing longer), since both
     serve far more; the WFS filter is built only from uids that match
     `WATERBODY_UID` (no quote can reach the CQL), and its JSON answer is
     checked per feature (`parseWbIds`). The log lines carry counts and a
@@ -3369,7 +3397,19 @@ In short:
   text, and ` +1`, ` -1` and ` @SUM(…)` stayed text either way). OWASP's page
   doesn't mention leading spaces, and Excel, Google Sheets and Numbers weren't
   tested; the rule doesn't depend on them. The apostrophe keeps ` =1+1` text
-  in the same test. Numbers are written as
+  in the same test. A trigger after a `;` gets the same apostrophe
+  (`csv.ts` `SEPARATOR_FORMULA`, the frontend's `names.ts` `defuseCsv`:
+  `Farm;=SUM(4)` is written `Farm;'=SUM(4)`): Excel in a comma-decimal
+  locale, South Africa's among them, splits a CSV on `;`, and so does
+  LibreOffice with `;` as its separator, which in a headless test on
+  2026-11-27 evaluated `q;=9+9` to 18 and `ok;=SUM(4;5)` to 4; RFC 4180
+  quotes don't stop it (that reader doesn't see the quote that opened the
+  field, and a quoted `"q;=5+5"` still opened a formula). A `;`
+  before ordinary text is left alone; `undefuse` drops the apostrophe again
+  when our readers (the paste grids' name matching, the invite CSV, the daily
+  table) read a file back, and the workbook's summary sheets, the summary
+  CSV's cells, keep it as the CSV has it. The workbook's own string cells
+  use `defuse` only, since a workbook isn't split on `;`. Numbers are written as
   numbers. Export file names are ASCII slugs, so `Content-Disposition` can't be
   injected. `export/export.security.db.test.ts` sweeps every `GET … .csv`
   route in the live route table over a project seeded with formula-looking
@@ -3391,7 +3431,8 @@ In short:
   its commas still split it into cells. Whatever a user typed in it (a unit's
   name, a run's label) has its `%`, commas, quotes and control characters
   percent-encoded first, so a name like `x,=HYPERLINK(…)` can't open a cell of
-  its own that a spreadsheet runs: the server's provenance lines
+  its own that a spreadsheet runs (the server's and the actual ET CSV's encode
+  `;` too, for a reader that splits on it): the server's provenance lines
   (`export/csv.ts` `provenanceValue`), the grouped series CSV
   (`series/groupedCsv.ts` `commentLine`) and the observed actual ET CSV
   (`crops/etObserved.ts` `etCsv`). Each has a unit test with such a name.
@@ -4529,7 +4570,9 @@ same way.
   account** (`DELETE /auth/me`, issue #112, [api.md § Auth](./api.md#auth))
   says what goes, what stays without the name and what keeps it, asks for
   the password again (through the sign-in lockout, as a password change
-  does), and deletes the account straight away. It runs as the person under
+  does; with a second factor on, from a session that signed in or stepped
+  up with a code, else `403 mfa_step_up` before the password is checked,
+  `requireCodeIfEnrolled`), and deletes the account straight away. It runs as the person under
   RLS: the up-front refusal reads their own memberships, the audit events
   (one per project and team they belonged to, `accountDeleted: true`) are
   written as them while they are still a member, and the row goes through

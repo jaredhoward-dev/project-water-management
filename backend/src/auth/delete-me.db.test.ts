@@ -11,6 +11,7 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { anon, app, asOwner, lastMailTo, node, signUp } from '../__tests__/helpers.js';
 import { withoutUser, withUser } from '../db/tx.js';
+import { base32Decode, totp } from './totp.js';
 
 // A provider whose cancel the test controls: `race.onCancel`, when set, runs in place of the configured
 // provider's cancelSubscriptions (the mock's), as a checkout completing at the provider meanwhile would.
@@ -77,6 +78,27 @@ describe('DELETE /auth/me: the checks before anything is deleted', () => {
 		expect(await exists(u)).toBe(true);
 		// Positive control: the session still works.
 		expect((await u.call('GET', '/auth/me')).status).toBe(200);
+	});
+
+	// A password-only session lives its 7 days after the account's first factor goes on (session.ts). With the
+	// password it must not delete the account, which can't be undone, without ever giving the owner's code.
+	it('with a second factor on, a password-only session is refused with mfa_step_up; a session that gave a code deletes', async () => {
+		const u = await signUp('Dstepup');
+		const { secret } = (await u.call('POST', '/auth/mfa/totp/enrol', { password: 'correct horse' })).body;
+		const confirmed = await anon('POST', '/auth/mfa/totp/confirm', { code: totp(base32Decode(secret)!, Date.now()) }, u.cookie);
+		expect(confirmed.status).toBe(200);
+		const twoStep = confirmed.headers.getSetCookie().find((c) => c.startsWith('wm_session='))!.split(';')[0]!;
+		// u.cookie, from before the factor went on, is still a valid session.
+		expect((await u.call('GET', '/auth/me')).status).toBe(200);
+		const refused = await deleteMe(u);
+		expect(refused.status).toBe(403);
+		expect(refused.body.code).toBe('mfa_step_up');
+		expect(await exists(u)).toBe(true);
+		// Refused before the password is checked: nothing counted on the sign-in lockout.
+		expect(await asOwner('SELECT failures FROM login_throttle WHERE email = $1 AND failures > 0', [u.email])).toEqual([]);
+		// Positive control: the two-step session the confirm gave deletes the account.
+		expect((await deleteMe({ ...u, cookie: twoStep })).status).toBe(204);
+		expect(await exists(u)).toBe(false);
 	});
 
 	it('counts a wrong password against the sign-in lockout, as changing the password does', async () => {
