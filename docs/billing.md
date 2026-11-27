@@ -1700,9 +1700,16 @@ Built but off: nothing is paused unless `BILLING_ENFORCED` is on.
   grant) and now has none live (canceled, expired, a lapsed grant) is on
   Free. If it then holds more live catchments than Free's
   `live_catchments` (338's derived "live"), `billing_account.over_free_since`
-  records when that was first seen: the subscription trigger stamps it as
-  the plan ends, and the job tick (`app_plan_pause_tick`, every 5 minutes)
-  catches any path the trigger misses. An account that never had a plan is
+  records when that was first seen **with billing enforced**: the
+  subscription trigger stamps it as the plan ends, and the job tick
+  (`app_plan_pause_tick`, every 5 minutes) catches any path the trigger
+  misses. In shadow mode no grace clock runs (409): nothing stamps it, and
+  the tick clears any stamp it finds (one from before 409, or from
+  enforcement switched off again), so a plan that ended in shadow mode (a
+  staff grant's end, a lapsed trial) starts its 14 days, and its grace
+  email, at the first tick after enforcement is switched on, never pausing
+  at once. The schema owner's scripts don't carry the setting, so a
+  subscription change made through them leaves an existing stamp alone. An account that never had a plan is
   never paused (its extra live catchments predate enforcement). A reverse
   trial's end (342, `app_reverse_trial_expire`) is a lapse like any other,
   so it starts the same grace. Auto-calibration on new data isn't paused:
@@ -1762,6 +1769,14 @@ Built but off: nothing is paused unless `BILLING_ENFORCED` is on.
   ends. Everything runs again as it was.
 - **The owners are told** when the grace starts and when the pause lands
   ([§ Plan emails](#plan-emails)).
+- **A failing sweep never stops the tick.** The tick's five billing sweeps
+  (staff grant and reverse trial expiry, the dunning lapse, the silent report
+  refund and this pause sweep) each run in their own transaction before the
+  feeds, alerts and jobs (`billingStep` in `jobs/runner.ts`). One that throws
+  is logged as `billing_tick_step_failed` with its `step` and the error's
+  class and SQLSTATE only (never its message, which can carry row values),
+  listed in the tick result's `billingFailed`, and tried again next tick;
+  the rest of the tick runs as usual.
 - **In the workspace.** A paused catchment's section header says so in its
   notice line, an information note, not an error (`project.planPausedAt` on
   `GET /projects/:id`; `billing/planPause.ts`): its feeds, alerts and
@@ -1776,7 +1791,12 @@ Built but off: nothing is paused unless `BILLING_ENFORCED` is on.
   (positive control); *Fetch now* refused on the paused one and fetching on
   the kept one; members read the marker, strangers don't; the owner's
   choice moves the pause and a stranger's is refused; an upgrade resumes
-  everything; a never-paid account isn't paused; only the worker sweeps.
+  everything; a never-paid account isn't paused; only the worker sweeps; a
+  staff grant ending in shadow mode starts no grace and a shadow tick clears
+  an old one, then enforcement switched on starts the grace that tick, queues
+  its email and pauses nothing for 14 days (409; positive control: past them
+  the pause lands). `jobs/runner.test.ts`: a billing sweep that throws doesn't
+  stop the tick (below).
   `feeds/feeds.db.test.ts` (a fetch queued before the pause ends without
   fetching, and fetches after a resume), `ingest/ingest.db.test.ts` (a key's
   readings accepted into a paused catchment, no re-run until it resumes) and
@@ -1850,7 +1870,9 @@ team's name, the count, Afrikaans), `mail/outbound.security.test.ts`.
   /teams/:id/plan/live-catchments` (a team admin; 404 to anyone else) read
   `app_billing_live_catchments(account)`: Free's live limit, when the account
   went past it with its plan ended (`overFreeSince`, the grace's start; null
-  within it or never on a plan) and `pausesFrom` (14 days on), and each live
+  within it, never on a plan, or in shadow mode, where no grace runs) and
+  `pausesFrom` (14 days on), `planEnded` (409: a plan has ended and the
+  account is past Free's live catchments, enforced or not), and each live
   catchment in 341's order with its name, whether the owner chose it, whether
   it stays live and when it was paused. It names every catchment billed to
   the account, whoever's project it is: the account pays for them, and its
@@ -1870,7 +1892,8 @@ team's name, the count, Afrikaans), `mail/outbound.security.test.ts`.
   *Keep live* on each other one, asked through the app's confirm dialog. An
   account that never had a plan sees no card.
 - **Tests.** `backend/src/billing/keepPicker.db.test.ts` (the owner lists and
-  chooses and the pause moves, enforced past the grace; a stranger, a team
+  chooses and the pause moves, enforced past the grace; in shadow mode
+  `planEnded` with no grace dates; a stranger, a team
   member and a project that isn't live all get 404; a bad body 400; every
   member reads `planPausedAt`); `plan.test.ts` and `planPause.test.ts`; e2e
   `billing-keep-live.spec.ts` (the API answered with `page.route`, since e2e
