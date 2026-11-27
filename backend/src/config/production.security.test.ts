@@ -192,7 +192,8 @@ const PROD: Record<Role, Record<string, string>> = {
 		...runtimeSecret('migrate'),
 		NODE_EXTRA_CA_CERTS: CA,
 		REFERENCE_BUCKET: 'water-management-reference-000000000000',
-		NODE_OPTIONS: '--max-old-space-size=2556'
+		NODE_OPTIONS: '--max-old-space-size=2556',
+		BILLING_ENFORCED: 'false'
 	},
 	assistant: {
 		...runtimeSecret('assistant'),

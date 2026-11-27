@@ -462,6 +462,12 @@ resource "aws_lambda_function" "migrate" {
       # to the runtime's default, so a load's parse (geo/referenceLoad.ts
       # MAX_TEXT_BYTES) has the room the caps were measured against.
       NODE_OPTIONS = "--max-old-space-size=${floor(var.migrate_memory_mb * 0.85)}"
+      # Owner actions that change a subscription (billing-grant, -revoke,
+      # -invoice) set app.billing_enforced from it on their session
+      # (billing/enforced.ts setOwnerBillingEnforced), so the pause sync their
+      # writes fire doesn't drop the pause markers (docs/billing.md § Pausing
+      # after a downgrade). The same value as the API's.
+      BILLING_ENFORCED = var.billing_enforced ? "true" : "false"
     }
   }
 

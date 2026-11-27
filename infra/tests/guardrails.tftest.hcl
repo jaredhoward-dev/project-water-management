@@ -1210,21 +1210,23 @@ run "billing_enforcement_off_by_default" {
       aws_lambda_function.backend.environment[0].variables["BILLING_ENFORCED"] == "false" &&
       aws_lambda_function.backend.environment[0].variables["REVERSE_TRIAL"] == "false" &&
       aws_lambda_function.worker.environment[0].variables["BILLING_ENFORCED"] == "false" &&
-      aws_lambda_function.assistant[0].environment[0].variables["BILLING_ENFORCED"] == "false"
+      aws_lambda_function.assistant[0].environment[0].variables["BILLING_ENFORCED"] == "false" &&
+      aws_lambda_function.migrate.environment[0].variables["BILLING_ENFORCED"] == "false"
     )
-    error_message = "By default BILLING_ENFORCED is \"false\" on the API, the worker and the assistant, and REVERSE_TRIAL \"false\" on the API."
+    error_message = "By default BILLING_ENFORCED is \"false\" on the API, the worker, the assistant and the migrate Lambda (its owner actions), and REVERSE_TRIAL \"false\" on the API."
   }
   assert {
     # Only the API grants a trial; the Lambdas that never open a withUser
-    # transaction read neither.
+    # transaction or change a subscription read neither.
     condition = (
       !contains(keys(aws_lambda_function.worker.environment[0].variables), "REVERSE_TRIAL") &&
       !contains(keys(aws_lambda_function.assistant[0].environment[0].variables), "REVERSE_TRIAL") &&
-      alltrue([for vars in concat([aws_lambda_function.migrate.environment[0].variables, aws_lambda_function.fetcher.environment[0].variables], [for r in aws_lambda_function.renderer : r.environment[0].variables]) :
+      !contains(keys(aws_lambda_function.migrate.environment[0].variables), "REVERSE_TRIAL") &&
+      alltrue([for vars in concat([aws_lambda_function.fetcher.environment[0].variables], [for r in aws_lambda_function.renderer : r.environment[0].variables]) :
         !contains(keys(vars), "BILLING_ENFORCED") && !contains(keys(vars), "REVERSE_TRIAL")
       ])
     )
-    error_message = "REVERSE_TRIAL is on the API alone, and neither setting is on the migrate, fetcher or renderer Lambda."
+    error_message = "REVERSE_TRIAL is on the API alone, and neither setting is on the fetcher or renderer Lambda."
   }
 }
 
@@ -1242,9 +1244,10 @@ run "billing_enforcement_on_with_the_reverse_trial" {
       aws_lambda_function.backend.environment[0].variables["BILLING_ENFORCED"] == "true" &&
       aws_lambda_function.backend.environment[0].variables["REVERSE_TRIAL"] == "true" &&
       aws_lambda_function.worker.environment[0].variables["BILLING_ENFORCED"] == "true" &&
-      aws_lambda_function.assistant[0].environment[0].variables["BILLING_ENFORCED"] == "true"
+      aws_lambda_function.assistant[0].environment[0].variables["BILLING_ENFORCED"] == "true" &&
+      aws_lambda_function.migrate.environment[0].variables["BILLING_ENFORCED"] == "true"
     )
-    error_message = "billing_enforced and reverse_trial set BILLING_ENFORCED=\"true\" on the API, the worker and the assistant, and REVERSE_TRIAL=\"true\" on the API."
+    error_message = "billing_enforced and reverse_trial set BILLING_ENFORCED=\"true\" on the API, the worker, the assistant and the migrate Lambda, and REVERSE_TRIAL=\"true\" on the API."
   }
 }
 

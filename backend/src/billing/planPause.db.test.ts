@@ -11,7 +11,10 @@
 //  - the app role can't run the sweep outside the worker;
 //  - the owner's choice racing a sync on the same account waits for it rather than deadlocking (334's lock order);
 //  - 409: a plan ending in shadow mode starts no grace (and a shadow tick clears one); once enforced, the grace starts
-//    then, with its email, and nothing pauses for 14 days (positive control: past them, enforced, the pause lands).
+//    then, with its email, and nothing pauses for 14 days (positive control: past them, enforced, the pause lands);
+//  - the schema owner's connections (scripts, owner actions) carry the enforced setting (setOwnerBillingEnforced), so
+//    their subscription writes don't drop a paused account's markers (control: a bare owner connection does, and the
+//    tick puts them back); an owner action's grant resumes, and its revoke starts a new grace at once.
 import pg from 'pg';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { asOwner, disableFeedsAfterFile, retirePendingJobs, signUp } from '../__tests__/helpers.js';
@@ -19,6 +22,9 @@ import { alertsOn } from '../alerts/evaluate.js';
 import { cellCentre } from '../feeds/cellCache.js';
 import { withoutUser, withUser } from '../db/tx.js';
 import { runTick } from '../jobs/runner.js';
+import { OWNER_URL } from '../__tests__/test-db.js';
+import { ownerAction } from '../lambda-migrate.js';
+import { setOwnerBillingEnforced } from './enforced.js';
 import { enqueueForecastRun, enqueueRerun } from '../runs/autoRun.js';
 
 type User = Awaited<ReturnType<typeof signUp>>;
@@ -302,5 +308,50 @@ describe('409: the grace starts when enforcement does', () => {
 		expect((await tick()).catchmentsPaused).toBeGreaterThanOrEqual(1);
 		expect((await paused(acct)).length).toBe(1);
 		expect(await kinds()).toContain('paused');
+	});
+});
+
+describe('409: the schema owner’s subscription writes, enforced', () => {
+	it('an owner write on a paused account keeps its pause; an owner grant resumes it and the revoke starts a new grace', async () => {
+		const owner = await signUp('PauseOwnerPath');
+		const [x, y] = [await newProject(owner, 'Owner X'), await newProject(owner, 'Owner Y')];
+		// Both live before enforcement (on, Free's limit would refuse the second).
+		for (const p of [x, y]) expect((await owner.call('PUT', `/projects/${p}/alert-rules`, alertBody)).status).toBe(200);
+		const acct = await accountOf(x);
+		await asOwner(`INSERT INTO subscription (billing_account_id, plan_code, status, provider) VALUES ($1, 'pro', 'canceled', 'mock')`, [acct]);
+		enforce();
+		await tick();
+		await backdateGrace(acct, 15);
+		await tick();
+		const before = await paused(acct);
+		expect(before.length).toBe(1);
+		const touch = `UPDATE subscription SET status = status WHERE billing_account_id = $1`;
+
+		// The owner's connection as the scripts and owner actions open it: the sync its write fires sees enforcement on.
+		const client = new pg.Client({ connectionString: OWNER_URL });
+		await client.connect();
+		try {
+			await setOwnerBillingEnforced(client);
+			await client.query(touch, [acct]);
+		} finally {
+			await client.end();
+		}
+		expect(await paused(acct)).toEqual(before);
+
+		// Control: a bare owner connection (no setting) drops the markers until the next tick puts them back.
+		await asOwner(touch, [acct]);
+		expect(await paused(acct)).toEqual([]);
+		await tick();
+		expect(await paused(acct)).toEqual(before);
+
+		// Through the migrate Lambda's owner actions: a grant resumes everything (a live plan) ...
+		const [u] = (await asOwner('SELECT email FROM app_user WHERE id = $1', [owner.id])) as { email: string }[];
+		await ownerAction({ action: 'billing-grant', email: u!.email, plan: 'pro', until: '2099-03-31', reason: 'Pilot', by: 'octocat' }, undefined, async () => OWNER_URL);
+		expect(await paused(acct)).toEqual([]);
+		expect(await overSince(acct)).toBeNull();
+		// ... and its revoke is a lapse under enforcement: the new grace starts at once, nothing paused yet.
+		await ownerAction({ action: 'billing-revoke', email: u!.email, reason: 'Pilot ended', by: 'octocat' }, undefined, async () => OWNER_URL);
+		expect(await overSince(acct)).toBeInstanceOf(Date);
+		expect(await paused(acct)).toEqual([]);
 	});
 });

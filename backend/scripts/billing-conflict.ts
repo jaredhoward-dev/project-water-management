@@ -14,6 +14,7 @@
 import os from 'node:os';
 import pg from 'pg';
 import { conflictLine, listConflicts, resolveConflict } from '../src/billing/conflicts.js';
+import { setOwnerBillingEnforced } from '../src/billing/enforced.js';
 import { loadDevEnv } from '../src/config/devEnv.js';
 
 export type ConflictArgs = { mode: 'list'; all: boolean } | { mode: 'resolve'; id: number; reason: string; by: string };
@@ -54,6 +55,8 @@ export async function runConflict(url: string, args: ConflictArgs): Promise<stri
 	const client = new pg.Client({ connectionString: url });
 	await client.connect();
 	try {
+		// Enforced as the app is, should a resolution touch a subscription and fire the pause sync (409).
+		await setOwnerBillingEnforced(client);
 		if (args.mode === 'list') {
 			const rows = await listConflicts(client, args.all);
 			return rows.length ? rows.map(conflictLine) : [args.all ? 'No billing conflicts.' : 'No open billing conflicts.'];
