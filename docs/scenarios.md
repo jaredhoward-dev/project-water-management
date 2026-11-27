@@ -490,7 +490,10 @@ R1](./design/planning-outputs.md#31-r1-a-demandscale-scenario-op-foundation-s)).
   2021, so it would change no day`, `no day the run can cover (1 Oct 2020 –
   12 Feb 2022) falls in 1 Jan 2030 – its end, so it would change no day`,
   `none of its months (Jun) falls on a day the run can cover between …`;
-  engine ≥ 1.119.0); a node id the input
+  engine ≥ 1.119.0; the days the run can cover are its rain series' span, so
+  a window only on blank days at the end of the rain, past the last rained
+  day the run's end moves in to, is accepted and changes nothing:
+  `demandWindows.invariants.test.ts`); a node id the input
   doesn't have (`node … not found`); a node of another kind (`"Town" is an
   other water user, not a farm`); no node of the category at all when
   `nodeIds` is left out (`the model has no other water user to scale`). The

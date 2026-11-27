@@ -9,6 +9,8 @@
 // D2's anonymising is for what an applicant holds, ER10). Contributors and
 // farmers get 403 from requireRole.
 import {
+	declaredRuleOf,
+	declaredRuleScope,
 	DISCLAIMER,
 	diffInputs,
 	ENGINE_ERRATA,
@@ -57,6 +59,7 @@ import { resolveOutcomes } from '../projects/outcomeSettings.js';
 import type { RunScenarioSnapshot } from '../runs/execute.js';
 import { loadBaseInput, type ScenarioOrigin } from '../scenarios/execute.js';
 import { loadAuthorisedImpact } from './authorisedImpact.js';
+import { runModelInput } from '../runs/uncertainty.js';
 import { loadAlternatives } from '../scenarios/alternatives.js';
 import { verifiedRuns } from '../runs/stamp.js';
 import { loadDamObservations } from './damObservations.js';
@@ -729,6 +732,7 @@ export async function loadEvidenceInput(db: Db, projectId: string, runId: string
 		authority: await projectAuthority(db, projectId),
 		baselineEndorsement: await loadEndorsement(db, projectId, baseline.id),
 		ensembles: await loadEnsembles(db, projectId, baseline.id, application?.id ?? null, application?.scenario.ownedNodeIds ?? []),
+		...(await loadDeclaredScope(db, projectId, baseline)),
 		changes,
 		applicationRuns,
 		...others,
@@ -753,6 +757,30 @@ export async function loadEvidenceInput(db: Db, projectId: string, runId: string
 		// Page 1's mitigation alternatives (evidence-26, 298): the scenario's, as it cites them now (frozen once submitted).
 		alternatives: recorded && application ? await loadAlternativeInputs(db, projectId, recorded.id, baseline.id) : []
 	};
+}
+
+/**
+ * The rain sources and observed records the declared rule's ensemble varies on the baseline run (ER-38): its inputs
+ * loaded as the uncertainty route loads them, the rule's request resolved there. When they can't be (the run's inputs
+ * no longer load, 409: series changed since an older hash-only run; or they don't resolve the rule's request), the
+ * rule can't be checked: `unavailable` says why, and the report then cites no ensemble.
+ */
+export async function loadDeclaredScope(
+	db: Db,
+	projectId: string,
+	baseline: EvidenceRunInput
+): Promise<Pick<EvidenceInput, 'declaredScope' | 'declaredScopeUnavailable'>> {
+	const rule = declaredRuleOf(baseline);
+	if (!rule) return { declaredScope: null, declaredScopeUnavailable: null };
+	let input: ModelInput;
+	try {
+		input = await runModelInput(db, projectId, baseline.id);
+	} catch (e) {
+		if (e instanceof ApiError && e.status === 409) return { declaredScope: null, declaredScopeUnavailable: 'its inputs no longer load as the run used them' };
+		throw e;
+	}
+	const scope = declaredRuleScope(input, rule);
+	return scope ? { declaredScope: scope, declaredScopeUnavailable: null } : { declaredScope: null, declaredScopeUnavailable: 'its inputs don’t resolve the rule’s ensemble options' };
 }
 
 const sha256 = (text: string) => createHash('sha256').update(text, 'utf8').digest('hex');
