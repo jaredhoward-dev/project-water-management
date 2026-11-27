@@ -253,9 +253,14 @@ stored only as SHA-256 hashes. Links point at `SITE_URL`:
   past RLS; a drop below contributor deletes the share itself, 049). `scenarios` is the scenarios they own, their
   licence applications (`origin: 'applicant'`) and modelling scenarios
   (`'team'`), as metadata, `[{ scenarioId, projectId, projectName, name,
-  origin, status, outcome, createdAt, submittedAt, decidedAt }]`
-  (`app_subject_scenarios()`, 396; never the ops or description, the
-  project's model record). `reverseTrialClaim` is `{ emailHash, claimedAt }`
+  origin, status, outcome, createdAt, submittedAt, decidedAt,
+  objectionAddress, objectionClosingDate }]` (`app_subject_scenarios()`,
+  396; the application's notice details since 415, as the applicant typed
+  them, `null` on a team scenario; never the ops or description, the
+  project's model record). `authorityDelegations` carries each
+  delegation's `reference`, the letter it rests on (229; `''` while only
+  proposed), and each of `signoffs` its `kind` (`specialist` or `review`,
+  167; 415). `reverseTrialClaim` is `{ emailHash, claimedAt }`
   when their current address had the Pro reverse trial (342; the SHA-256
   of its canonical form, as `reverse_trial_claim` keeps it, found by
   `app_subject_reverse_trial()`, 396), or `null`; a claim made under an
