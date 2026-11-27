@@ -37,7 +37,7 @@ export const USE_GUIDES: Guide[] = [
 					},
 					{
 						type: 'p',
-						text: 'Each run shows its run notes in the full comparison, and the page says when either run is, or was, the project’s evidence run. The page’s address holds every run on it, so a comparison can be bookmarked or shared with anyone who can see the projects.'
+						text: 'Each run shows its run notes in the full comparison, and the page says when either run is, or was, the project’s evidence run. The page’s address holds every run on it, so a comparison can be bookmarked or shared with anyone who can see the projects. **Back to runs** returns to Runs & results on the run you were looking at: the what-if when it belongs to the baseline’s project, else the baseline.'
 					}
 				]
 			}
@@ -240,7 +240,11 @@ export const USE_GUIDES: Guide[] = [
 					},
 					{
 						type: 'p',
-						text: 'Once a team has a subscription, the Plan card says what it costs (the price for its seats, monthly or yearly) and how many editor seats it has. To change them, type the new count under **Change seats** in the card and press **Change seats**: the question says the difference a month or a year, that the rest of this period is prorated on the next invoice, and how many editors would have no seat if you go below them. The new count shows once the payment provider confirms it, usually within seconds. Limits aren’t enforced yet: usage is counted, and nothing is refused.'
+						text: 'Once a team has a subscription, the Plan card says what it costs (the price for its seats, monthly or yearly) and how many editor seats it has. To change them, type the new count under **Change seats** in the card and press **Change seats**: the question says the difference a month or a year, that the rest of this period is prorated on the next invoice, and how many editors would have no seat if you go below them. The new count shows once the payment provider confirms it, usually within seconds. A team with more editors than seats says so on the card: everyone keeps their access, and it names how many seats to add or editors to make viewers.'
+					},
+					{
+						type: 'p',
+						text: 'While the page says limits aren’t enforced yet, usage is counted against the plan so you can see where you stand, but nothing is refused or paused. When a plan ends (a trial or a cancellation), or a payment is overdue past 14 days (**Payment overdue; paid features paused until it is paid**), the account falls back to Free, which keeps fewer catchments live, and the page lists the catchments so you can choose which stay live. Once limits apply, data feeds, alerts and automatic runs pause on the others after a 14-day grace (each row says from when); nothing is deleted, everyone can still open, run, edit and export them, and they carry on as before on a plan again.'
 					}
 				]
 			}
@@ -487,6 +491,7 @@ export const USE_GUIDES: Guide[] = [
 							'For an application with registered volumes, press **Run at full authorised use**, so page 1 carries the [[full-authorised-use|impact against full authorised use]].',
 							'Press **Create evidence pack**. The pack’s page opens: a draft, with its checklist under **Where this pack stands**.',
 							'In Appendix B.2, the applicant’s specialist presses **Sign off this evidence pack…**, fills in their registration and ticks every confirmation. An assessor may add a second sign-off as a review.',
+							'A line not yet ticked links to where it is done: **Go to Appendix B.2** for the sign-off, the Project page’s **Registration checks** for a signer’s check. When the frozen report itself can’t be issued, draft again from the evidence report once it passes: a draft no one has signed can simply be deleted, a signed one is withdrawn.',
 							'Once every line of the checklist is ticked, an editor presses **Issue pack** and confirms. Signing and issuing ask for a fresh code, from the authenticator app or by email.',
 							'The server then prints the pack’s PDF, builds its [[reproduction-bundle]] and re-runs it; the pack page shows each as it lands. Hand the [[pack-short-code|short code]] to whoever needs to check the pack, use **Send to the authority…** for the full pack, and **Share link…** for the public.'
 						]
