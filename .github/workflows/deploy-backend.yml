@@ -46,11 +46,21 @@ name: Deploy backend
 #   attach     `contents: write` only: attaches the zips to the Release, so
 #              the exact artifact that shipped is kept with its notes.
 #
-# Rollback / redeploy: run it manually with an older published tag
+# Redeploy: run it manually with a published tag
 #   gh workflow run deploy-backend.yml -f tag=backend@0.1.0
-# which goes through the same preflight and approval. Migrations are
-# forward-only, so a rollback ships old API code against the current schema;
-# expand/contract is what keeps that safe.
+# which goes through the same preflight and approval, migrate included.
+#
+# Rollback: an older tag with `rollback`
+#   gh workflow run deploy-backend.yml -f tag=backend@0.1.0 -f rollback=true
+# deploys only the tag's code (API, worker, fetcher, assistant, renderer,
+# ingest) and leaves the migrate Lambda alone: neither updated nor invoked.
+# An older release's migrate refuses a database holding migrations it has no
+# file for, and releases up to backend@0.26.2 can't be changed to skip them.
+# The preflight allows it only for a tag older than the latest published
+# backend release whose migration files that release ships unchanged, so a
+# database the latest release migrated has all of them. The database stays at
+# the newer schema, which the old code tolerates (expand/contract, CLAUDE.md
+# rule 2; docs/deployment.md § Rollback).
 #
 # No static AWS keys anywhere: AWS_DEPLOY_ROLE_ARN is assumed via OIDC.
 
@@ -63,6 +73,11 @@ on:
         description: 'Published backend@X.Y.Z release to deploy (an older tag rolls back)'
         required: true
         type: string
+      rollback:
+        description: 'Rollback: skip the migrate Lambda and deploy only the code of a tag older than the latest release (docs/deployment.md § Rollback)'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -93,6 +108,9 @@ jobs:
       deploy: ${{ steps.preflight.outputs.deploy }}
       sha: ${{ steps.preflight.outputs.sha }}
       version: ${{ steps.preflight.outputs.version }}
+      # 'true' only when ROLLBACK was asked for AND the preflight's rollback
+      # rule held; the deploy job reads this, never the raw input.
+      rollback: ${{ steps.preflight.outputs.rollback }}
     steps:
       - name: Checkout (full history + tags, to check the tag is on main)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -125,6 +143,7 @@ jobs:
           INGEST_FUNCTION_NAME: ${{ vars.INGEST_FUNCTION_NAME }}
           INGEST_ECR_REPOSITORY: ${{ vars.INGEST_ECR_REPOSITORY }}
           PUBLIC_SITE_URL: ${{ vars.PUBLIC_SITE_URL }}
+          ROLLBACK: ${{ github.event_name == 'workflow_dispatch' && inputs.rollback }}
         run: node scripts/release/preflight.mjs backend
 
   build:
@@ -304,8 +323,11 @@ jobs:
 
       # Migrations run BEFORE the new API code ships, so they must stay
       # backwards-compatible with the code still serving for that window
-      # (expand/contract — CLAUDE.md rule 2).
+      # (expand/contract — CLAUDE.md rule 2). A rollback the preflight cleared
+      # skips both migrate steps: the migrate Lambda keeps the newer release's
+      # code, and the database its newer schema.
       - name: Update migrate Lambda code
+        if: needs.preflight.outputs.rollback != 'true'
         env:
           MIGRATE_FUNCTION_NAME: ${{ vars.MIGRATE_FUNCTION_NAME }}
         run: |
@@ -317,6 +339,7 @@ jobs:
           aws lambda wait function-updated --function-name "$MIGRATE_FUNCTION_NAME"
 
       - name: Run migrations
+        if: needs.preflight.outputs.rollback != 'true'
         env:
           MIGRATE_FUNCTION_NAME: ${{ vars.MIGRATE_FUNCTION_NAME }}
         run: |
@@ -360,6 +383,10 @@ jobs:
             exit 1
           fi
           jq -r "$names"'"Applied: \(.applied | names)", "water_app role: \(.appRole | safe("^(created|updated)$"))"' migrate-result.json
+
+      - name: Rollback, migrations skipped
+        if: needs.preflight.outputs.rollback == 'true'
+        run: echo "::notice::Rollback to ${RELEASE_TAG}: the migrate Lambda was neither updated nor run; the database keeps the latest release's schema (docs/deployment.md § Rollback)."
 
       - name: Update API Lambda code
         env:

@@ -6303,13 +6303,17 @@ ids are rejected.
   sha256 of its contents, and runs each file in its own transaction.
 - **Forward-only is enforced.** Before applying anything, the runner refuses
   (a non-zero exit, or a failed deploy) and names the file when an applied
-  file's contents changed, an applied file is missing (deleted or renamed),
-  or a pending file sorts before the latest applied one (two branches took
+  file's contents changed, an applied file at or below the release's highest
+  file is missing (deleted or renamed), or a pending file sorts before the latest applied one (two branches took
   numbers out of order: renumber the late one after the latest), or two
   files share a number (two branches each took the next free one; each
   passes its own CI, so the rule is the runner's, and
   `scripts/migrate.test.ts` checks the checked-in files on every PR's
-  merge ref: renumber the later one after the highest). Rows
+  merge ref: renumber the later one after the highest). An applied name
+  that sorts after the highest file is a newer release's migration (a
+  rollback deploy runs older code against a newer schema): it is skipped
+  with a `skipping N applied migration(s) newer than …` log line, not
+  refused ([deployment.md § Rollback](./deployment.md#rollback)). Rows
   recorded before checksums existed get theirs from the current file on the
   first run, and are held to it from then on. The `checksum` column is added
   by the runner's own bootstrap (it creates `schema_migrations`), not by a
