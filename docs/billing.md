@@ -174,7 +174,7 @@ gate ([§ Verified email on Free](#verified-email-on-free)); everything else sti
 `"false"` on the API, the worker and the assistant: every Lambda that opens a
 `withUser` transaction, since `db/tx.ts` sets `app.billing_enforced` from it
 and the SQL limits read that (`infra/lambda.tf`, `jobs.tf`, `assistant.tf`;
-pinned by `infra/tests/guardrails.tftest.hcl`). The operator turns it on
+pinned by `infra/tests/guardrails_baseline.tftest.hcl`). The operator turns it on
 through [deployment.md § Turning on enforcement](./deployment.md#turning-on-enforcement).
 
 ## Assistant dollar caps
@@ -1245,7 +1245,7 @@ granting it then would spend the person's once-per-email trial for nothing.
 default `false`), set as the exact string `"true"` or `"false"` on the API,
 the only Lambda that grants a trial (`infra/lambda.tf`). Plan refuses
 `reverse_trial = true` without `billing_enforced = true` (a validation in
-`infra/variables.tf`, tested in `infra/tests/guardrails.tftest.hcl`), so the
+`infra/variables.tf`, tested in `infra/tests/guardrails_baseline.tftest.hcl`), so the
 pair can't ship as a switch that grants nothing. The steps, with the web
 release that sets `PUBLIC_REVERSE_TRIAL`: [deployment.md § Turning on
 enforcement](./deployment.md#turning-on-enforcement).

@@ -27,7 +27,7 @@ repo-security-auditor: …").
    § Alert emails, § Reports, § Runbooks).
 3. `infra/variables.tf` and `infra/terraform.tfvars.example`: the knobs and
    their defaults.
-4. `infra/tests/guardrails.tftest.hcl`: what is already pinned by a test.
+4. `infra/tests/guardrails_*.tftest.hcl` (and the other `infra/tests/*.tftest.hcl`): what is already pinned by a test.
    A control that exists but isn't tested is worth a Low; a control that's
    tested is only a finding if the test itself is wrong.
 

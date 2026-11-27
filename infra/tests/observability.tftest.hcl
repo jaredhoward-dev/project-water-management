@@ -4,7 +4,7 @@
 # the fetcher's and renderer's answered failures, stuck queues and throttles
 # alarm (feeds.tf, reports.tf).
 #
-# Same mocked providers, overrides and variables as guardrails.tftest.hcl
+# Same mocked providers, overrides and variables as guardrails_*.tftest.hcl
 # (copied, since a test file can't share them): no AWS credentials, no state.
 #
 #   pnpm check:infra          (bin/check-infra.sh: fmt + validate + test)

@@ -2,7 +2,7 @@
 # so the rule stays on for everything else. All reviewed 2026-09-24:
 #   - generic-api-key on object keys named after m³/day fields;
 #   - fixed fake tokens in emailAuth.test.ts / templates.test.ts;
-#   - placeholder secrets in infra/tests/guardrails.tftest.hcl (mocked providers).
+#   - placeholder secrets in infra/tests/guardrails_*.tftest.hcl (mocked providers).
 #   - generic-api-key on a node field named after an m³/day value (nodePaste.ts).
 # Reviewed 2026-09-30:
 #   - vault-service-token on a user-summary field read in the engine self-check

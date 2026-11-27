@@ -6,7 +6,7 @@
 # CPU-credit alarms, and the frontend bucket's TLS-only rule.
 #
 # The mocks, overrides and variables below are copied from
-# guardrails.tftest.hcl (each test file needs its own); keep them in step.
+# guardrails_*.tftest.hcl (each test file needs its own); keep them in step.
 #
 #   pnpm check:infra          (bin/check-infra.sh: fmt + validate + test)
 

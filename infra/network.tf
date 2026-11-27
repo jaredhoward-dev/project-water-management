@@ -38,7 +38,7 @@
 #
 # Security groups: API, migrate and worker Lambdas; RDS (5432 from those
 # three only); one per interface endpoint (Secrets Manager here, SQS in
-# jobs.tf, SES in ses.tf). tests/guardrails.tftest.hcl (run "network")
+# jobs.tf, SES in ses.tf). tests/guardrails_network.tftest.hcl (run "network")
 # pins all of this, and every security group's description.
 #
 # A NAT gateway would be ~$33/month + data before any traffic; an interface

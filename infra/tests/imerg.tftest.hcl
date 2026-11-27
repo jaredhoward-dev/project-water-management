@@ -7,7 +7,7 @@
 # data.
 #
 # The mocks, overrides and variables below are copied from
-# ingest.tftest.hcl (itself from guardrails.tftest.hcl; a test file can't
+# ingest.tftest.hcl (itself from guardrails_*.tftest.hcl; a test file can't
 # share them); keep them in step.
 #
 #   pnpm check:infra          (bin/check-infra.sh: fmt + validate + test)
