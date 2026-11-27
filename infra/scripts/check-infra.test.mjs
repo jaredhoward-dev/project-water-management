@@ -237,3 +237,49 @@ test('CHECK_INFRA_JOBS=1 and an explicit filter keep the single terraform test',
 	assert.equal(runSync(ctx, { CHECK_INFRA_JOBS: '1' }).status, 0);
 	assert.deepEqual(calls(ctx).filter((x) => x.args[0] === 'test').map((x) => x.args), [['test']]);
 });
+
+// CI's matrix (terraform.yml): CHECK_INFRA_SHARD=<i>/<n> runs only that
+// shard's files, packed by infra/scripts/terraform-shards.mjs.
+const withPacker = (ctx) => {
+	mkdirSync(join(ctx.repo, 'infra', 'scripts'), { recursive: true });
+	copyFileSync(join(here, 'terraform-shards.mjs'), join(ctx.repo, 'infra', 'scripts', 'terraform-shards.mjs'));
+};
+
+test('CHECK_INFRA_SHARD runs each file in exactly one shard, file by file', () => {
+	const ctx = setup();
+	withPacker(ctx);
+	withFiles(ctx, ['b', 'c', 'd', 'e']);
+	const ran = [];
+	for (const i of [1, 2, 3]) {
+		writeFileSync(ctx.log, '');
+		const r = runSync(ctx, { CHECK_INFRA_JOBS: '1', CHECK_INFRA_SHARD: `${i}/3` });
+		assert.equal(r.status, 0, r.stderr);
+		const tests = calls(ctx).filter((x) => x.args[0] === 'test');
+		// Never the bare `terraform test`, which would run every file, even at one job.
+		for (const x of tests) assert.match(x.args[1] ?? '', /^-filter=tests\/[a-e]\.tftest\.hcl$/);
+		assert.ok(tests.length >= 1, `shard ${i}/3 ran nothing`);
+		ran.push(...tests.map((x) => x.args[1]));
+	}
+	assert.deepEqual(ran.sort(), ['a', 'b', 'c', 'd', 'e'].map((f) => `-filter=tests/${f}.tftest.hcl`));
+});
+
+test('a shard with no files passes without running terraform test', () => {
+	const ctx = setup();
+	withPacker(ctx);
+	const r = runSync(ctx, { CHECK_INFRA_SHARD: '2/2' });
+	assert.equal(r.status, 0, r.stderr);
+	assert.match(r.stdout, /shard 2\/2 has no test files/);
+	assert.deepEqual(calls(ctx).filter((x) => x.args[0] === 'test'), []);
+	assert.ok(calls(ctx).some((x) => x.args[0] === 'validate'), 'fmt and validate still run');
+});
+
+test('a bad shard spec, or a shard with terraform test arguments, fails', () => {
+	const ctx = setup();
+	withPacker(ctx);
+	const bad = runSync(ctx, { CHECK_INFRA_SHARD: '3/2' });
+	assert.notEqual(bad.status, 0);
+	assert.match(bad.stderr, /past the 2 shards/);
+	const mixed = runSync(ctx, { CHECK_INFRA_SHARD: '1/2' }, ['-filter=tests/a.tftest.hcl']);
+	assert.equal(mixed.status, 2);
+	assert.deepEqual(calls(ctx).filter((x) => x.args[0] === 'test'), []);
+});
