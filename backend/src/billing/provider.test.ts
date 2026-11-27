@@ -13,10 +13,23 @@ const NOW = 1_800_000_000_000;
 const signed = (body = BODY, secret = SECRET) => ({ 'stripe-signature': signPayload(secret, body, NOW / 1000) });
 
 describe('billingProviderName', () => {
-	it('is the mock when unset or blank (the code default), else the name given', () => {
+	it('is the mock when unset or blank off Lambda (the code default), else the name given', () => {
 		expect(billingProviderName({})).toBe('mock');
 		expect(billingProviderName({ BILLING_PROVIDER: ' ' })).toBe('mock');
 		for (const n of ['mock', 'manual', 'stripe'] as const) expect(billingProviderName({ BILLING_PROVIDER: n })).toBe(n);
+	});
+
+	// A backend released before the Terraform apply that sets BILLING_PROVIDER starts with it unset
+	// (config/production.ts takes that): it must serve manual there, never the mock and its committed key.
+	it('is manual when unset or blank on Lambda, and a name given still wins', () => {
+		const lambda = { AWS_LAMBDA_FUNCTION_NAME: 'water-management-api' };
+		expect(billingProviderName(lambda)).toBe('manual');
+		expect(billingProviderName({ ...lambda, BILLING_PROVIDER: '  ' })).toBe('manual');
+		const p = billingProvider(lambda)!;
+		expect(p.acceptsWebhooks).toBe(false);
+		for (const n of ['manual', 'stripe'] as const) expect(billingProviderName({ ...lambda, BILLING_PROVIDER: n })).toBe(n);
+		// Named explicitly it is still the mock (production.ts refuses that value at cold start).
+		expect(billingProviderName({ ...lambda, BILLING_PROVIDER: 'mock' })).toBe('mock');
 	});
 
 	it('is null for a name that isn’t ours, never a fallback to the mock', () => {

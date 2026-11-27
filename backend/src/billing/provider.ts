@@ -1,11 +1,14 @@
 // The billing provider seam (issue #641 Phase 3, docs/billing.md § Webhooks and
 // providers). BILLING_PROVIDER picks one of three:
 //
-//   mock   (the code default, local-first) — Stripe-shaped events signed with the
-//          committed dev-only key (backend/.env.development BILLING_WEBHOOK_SECRET),
+//   mock   (the code default off Lambda, local-first) — Stripe-shaped events signed
+//          with the committed dev-only key (backend/.env.development BILLING_WEBHOOK_SECRET),
 //          so the whole webhook path runs with no Stripe account. Production refuses
 //          it (config/production.ts).
 //   manual — subscriptions the operator records by hand (B2B invoices); accepts no webhooks.
+//          The code default on Lambda (AWS_LAMBDA_FUNCTION_NAME set), so a backend
+//          released before the Terraform apply that sets BILLING_PROVIDER serves no
+//          mock (the same pattern as auth/signupOpen.ts).
 //   stripe — Stripe's signed events, checked over the raw body with node:crypto
 //          (provider/signature.ts) and normalised (provider/stripe.ts); checkout and
 //          the portal call Stripe's API over fetch (provider/stripeApi.ts), no
@@ -306,9 +309,12 @@ export interface OrphanRequest {
 }
 export type { OrphanResult };
 
-/** BILLING_PROVIDER as one of ours (unset is the mock, the code default), or null for a value that names none. */
+/**
+ * BILLING_PROVIDER as one of ours, or null for a value that names none. Unset (or blank) is the
+ * mock off Lambda (dev, the tests, the e2e server) and manual on Lambda, never the mock there.
+ */
 export function billingProviderName(env: NodeJS.ProcessEnv = process.env): BillingProviderName | null {
-	const v = env.BILLING_PROVIDER?.trim() || 'mock';
+	const v = env.BILLING_PROVIDER?.trim() || (env.AWS_LAMBDA_FUNCTION_NAME ? 'manual' : 'mock');
 	return (BILLING_PROVIDERS as readonly string[]).includes(v) ? (v as BillingProviderName) : null;
 }
 

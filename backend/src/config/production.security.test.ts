@@ -23,6 +23,8 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fakeRuntime } from '../__tests__/lambdaRuntime.js';
+import { assistantConfig } from '../assistant/config.js';
+import { billingProviderName } from '../billing/provider.js';
 import { generateFeedCredentialKeys } from '../feeds/credential.js';
 import { assertLambdaEnv, assertProductionEnv, COMMITTED_FEED_CREDENTIAL_PUBLIC_KEYS, productionEnvProblems, ROLES, type Role, SETTINGS } from './production.js';
 import { RUNTIME_SECRETS } from './runtimeSecrets.js';
@@ -549,9 +551,10 @@ describe('each Lambda refuses a missing or local-default setting', () => {
 			['worker', 'PASSWORD_HASH_FAST', '1'],
 			['api', 'SIGNUP_THROTTLE', 'off'],
 			['api', 'SIGNUP_OPEN', 'yes'],
-			// The billing webhook (issue #641 Phase 3): the code default is the mock, whose dev key is committed.
-			['api', 'BILLING_PROVIDER', undefined],
+			// The billing webhook (issue #641 Phase 3): the mock, whose dev key is committed, is refused by name.
+			// Unset is manual on Lambda (billing/provider.ts), so it is taken (the release-before-apply test below).
 			['api', 'BILLING_PROVIDER', 'mock'],
+			['api', 'BILLING_PROVIDER', ' mock '],
 			['api', 'BILLING_PROVIDER', 'stripe_billing'],
 			['api', 'DB_POOL_MAX', 'two'],
 			['api', 'DB_POOL_MAX', '0'],
@@ -612,10 +615,10 @@ describe('each Lambda refuses a missing or local-default setting', () => {
 			['assistant', 'ASSISTANT_MAX_OUTPUT_TOKENS', '100000'],
 			['assistant', 'ASSISTANT_MAX_TOOL_RESULT_CHARS', '999'],
 			['assistant', 'ASSISTANT_MAX_INPUT_CHARS', '1000000'],
-			// The dollar caps (336): required on the assistant, since Terraform sets them (round 8).
-			['assistant', 'ASSISTANT_FREE_USD_PER_DAY', undefined],
-			['assistant', 'ASSISTANT_FREE_MESSAGES_PER_DAY', undefined],
-			['assistant', 'ASSISTANT_FREE_POOL_USD_PER_MONTH', undefined],
+			// The dollar caps (336): checked when set (unset is the code default, the figures Terraform writes).
+			['assistant', 'ASSISTANT_FREE_USD_PER_DAY', '16'],
+			['assistant', 'ASSISTANT_FREE_MESSAGES_PER_DAY', '1.5'],
+			['assistant', 'ASSISTANT_FREE_POOL_USD_PER_MONTH', '-1'],
 			['assistant', 'ASSISTANT_FREE_USD_PER_DAY', '-0.3'],
 			['assistant', 'ASSISTANT_FREE_USD_PER_DAY', 'lots'],
 			['assistant', 'ASSISTANT_FREE_MESSAGES_PER_DAY', '0'],
@@ -722,6 +725,43 @@ describe('each Lambda refuses a missing or local-default setting', () => {
 		for (const role of ['worker', 'api'] as const) expect(problemNames(role, prod(role, { ...before, CHIRPS_SOURCE: 'live' })), role).toContain('CHIRPS_SOURCE');
 	});
 
+	// Release before apply (docs/deployment.md § Releasing): deploy-backend.yml updates function code only, so a
+	// backend release starts on the env the last apply wrote. ADDED_SINCE_RELEASE is what this branch's Terraform
+	// sets that backend@0.26.2's didn't (each Lambda's environment block and runtime secret, from
+	// `git diff backend@0.26.2 -- infra/`): without them every Lambda must still start. Move the tag and empty the
+	// lists once a release ships with the apply that sets them.
+	const ADDED_SINCE_RELEASE: Record<Role, readonly string[]> = {
+		api: ['BILLING_PROVIDER', 'BILLING_ENVIRONMENT', 'BILLING_ENFORCED', 'REVERSE_TRIAL', 'STATION_API_FEEDS', 'FEED_CREDENTIAL_PUBLIC_KEY', 'STRIPE_SECRET_KEY', 'BILLING_WEBHOOK_SECRET'],
+		worker: ['BILLING_ENFORCED', 'RENDER_CONCURRENCY', 'STATION_API_FEEDS', 'STATION_FETCH_REQUESTS_QUEUE_URL'],
+		fetcher: ['STATION_API_FEEDS', 'FEED_CREDENTIAL_PUBLIC_KEY', 'RUNTIME_SECRET_ARN', 'RUNTIME_SECRET_VERSION', 'FEED_CREDENTIAL_PRIVATE_KEY'],
+		renderer: [],
+		migrate: [],
+		assistant: ['BILLING_ENFORCED', 'ASSISTANT_FREE_USD_PER_DAY', 'ASSISTANT_FREE_MESSAGES_PER_DAY', 'ASSISTANT_FREE_POOL_USD_PER_MONTH']
+	};
+	it.each(ROLES)('%s: starts on the env the last release’s Terraform wrote (none of the keys added since)', (role) => {
+		for (const k of ADDED_SINCE_RELEASE[role]) expect(k in PROD[role] || k in PROD_SECRETS[role], `${role} ${k} is not in the fixture`).toBe(true);
+		const tagShaped = prod(role, Object.fromEntries(ADDED_SINCE_RELEASE[role].map((k) => [k, undefined])));
+		expect(productionEnvProblems(role, tagShaped)).toEqual([]);
+	});
+	it('unset BILLING_PROVIDER on the API is manual, never the mock (what the release-before-apply env serves)', () => {
+		const tagShaped = prod('api', Object.fromEntries(ADDED_SINCE_RELEASE.api.map((k) => [k, undefined])));
+		expect(billingProviderName(tagShaped)).toBe('manual');
+	});
+	// Unset must mean what Terraform writes by default, or the apply would change behaviour the release already shipped.
+	it('the code defaults for those settings are Terraform’s defaults (infra/variables.tf)', () => {
+		const vars = readFileSync(`${INFRA}variables.tf`, 'utf8');
+		const tfDefault = (name: string) => {
+			const m = new RegExp(`^variable "${name}" \\{$[\\s\\S]*?^  default\\s*=\\s*(.+)$`, 'm').exec(vars);
+			expect(m, `infra/variables.tf has no default for var.${name}`).not.toBeNull();
+			return m![1]!.trim().replace(/^"(.*)"$/, '$1');
+		};
+		expect(billingProviderName({ AWS_LAMBDA_FUNCTION_NAME: 'water-management-api' })).toBe(tfDefault('billing_provider'));
+		const code = assistantConfig({});
+		expect(code.freeUsdMicrosPerDay).toBe(Math.round(Number(tfDefault('assistant_free_usd_per_day')) * 1e6));
+		expect(code.freeMessagesPerDay).toBe(Number(tfDefault('assistant_free_messages_per_day')));
+		expect(code.poolUsdMicrosPerMonth).toBe(Math.round(Number(tfDefault('assistant_free_pool_usd_per_month')) * 1e6));
+	});
+
 	// Issue #604 R3-C: per-feed fetching retires once CHIRPS reads the copy and DWS the store.
 	it('the worker hands fetches to the fetcher (FEED_FETCHER=sqs, with its queue) while any feed fetches per feed, and needs neither once none does', () => {
 		const cutover = { CHIRPS_SOURCE: 'mirror', DWS_SOURCE: 'store', STATION_API_FEEDS: 'off' };
@@ -806,6 +846,9 @@ describe('each Lambda refuses a missing or local-default setting', () => {
 
 	it('takes manual or stripe for the billing provider, and needs the webhook secret only with stripe (positive control for the BILLING_PROVIDER refusals)', () => {
 		expect(problemNames('api', prod('api', { BILLING_PROVIDER: 'manual', BILLING_WEBHOOK_SECRET: undefined }))).not.toContain('BILLING_WEBHOOK_SECRET');
+		// Unset (or blank) is manual on Lambda (billing/provider.ts): taken, and it needs no Stripe secrets either.
+		for (const v of [undefined, '', '  '])
+			expect(problemNames('api', prod('api', { BILLING_PROVIDER: v, BILLING_WEBHOOK_SECRET: undefined, STRIPE_SECRET_KEY: undefined })), String(v)).toEqual([]);
 		// Checkout's API key (issue #641 Phase 3): needed, and live, only with stripe.
 		expect(problemNames('api', prod('api', { BILLING_PROVIDER: 'manual', STRIPE_SECRET_KEY: undefined }))).not.toContain('STRIPE_SECRET_KEY');
 		for (const v of [undefined, '', 'sk_test_' + 'a'.repeat(24), 'pk_live_' + 'a'.repeat(24), 'sk_live_short'])
