@@ -137,7 +137,7 @@ is listed as "not read", never guessed.
   authorisation or water source, a missing volume, a volume or storage that
   isn't a number ≥ 0, a date that isn't a real `YYYY-MM-DD` (or `YYYY/MM/DD`)
   from year 1 (the database's date has no year 0000, so hand entry refuses
-  it too, with a 400; `parse.ts` `storableDate`), valid
+  it too, with a 400; the engine's `isIsoDate`), valid
   from after valid to, no registration number, property or farm to match by,
   more cells than the header (a delimiter inside an unquoted cell: `1,500`
   in a comma file would read as a volume of 1 and a storage of 500, so the

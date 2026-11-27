@@ -13,7 +13,7 @@
 // The app never decides whether a use is lawful: every response and screen
 // says "modelled use" against "registered volume".
 import { createHash } from 'node:crypto';
-import { ALLOCATION_MODES, compareAllocations, DEFAULT_ALLOCATION_TOLERANCE, type AllocationMode, type PlantedArea, type RunAllocations, dayText, withIrrigatedAreas } from '@water-management/engine';
+import { ALLOCATION_MODES, compareAllocations, DEFAULT_ALLOCATION_TOLERANCE, type AllocationMode, type PlantedArea, type RunAllocations, dayText, isIsoDate, withIrrigatedAreas } from '@water-management/engine';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import type { AuthEnv } from '../auth/middleware.js';
@@ -47,8 +47,7 @@ import {
 	type MatchedBy,
 	type MatchNode,
 	type ParsedRow,
-	idNumberProblem,
-	storableDate
+	idNumberProblem
 } from './parse.js';
 import { runUseNodes, type RunUseTransfer } from './runUse.js';
 import { allocationUnitsHidden, comparisonTotals, loadVolumes, readsAllocationHolders, readsAllocationUnits, volumeTotals } from './viewerUnits.js';
@@ -58,11 +57,10 @@ export const ALLOCATIONS_PER_PROJECT_MAX = 5000;
 
 const noNul = (s: string) => !s.includes('\u0000');
 const text = (max: number) => z.string().trim().max(max).refine(noNul, 'cannot contain NUL characters');
-// storableDate, not the engine's isIsoDate: that takes year 0000, which the date column refuses (a 500).
 const isoDate = z
 	.string()
 	.regex(/^\d{4}-\d{2}-\d{2}$/, 'use YYYY-MM-DD')
-	.refine((s) => storableDate(s), 'not a date (from year 1)');
+	.refine((s) => isIsoDate(s), 'not a date');
 const volume = z.number().finite().min(0).lt(1e12);
 
 /**

@@ -73,6 +73,19 @@ describe('the licence record', () => {
 		expect((await owner.call('PUT', at(), { outcome: 'approved', outcomeOn: '2026-03-01', reason: 'x' })).status).toBe(400);
 	});
 
+	it('refuses a date in year 0000, which the date column can’t store: a 400, not the insert’s 500; year 0001 is stored (positive control)', async () => {
+		for (const body of [
+			{ outcome: 'licence_refused', outcomeOn: '0000-03-01', reason: 'x' },
+			{ outcome: 'licence_issued', outcomeOn: '2026-03-01', expiresOn: '0000-12-31', reason: 'x' }
+		]) {
+			const res = await owner.call('PUT', at(), body);
+			expect(res.status, JSON.stringify(res.body)).toBe(400);
+		}
+		const res = await owner.call('PUT', at(), { outcome: 'licence_refused', outcomeOn: '0001-03-01', reason: 'the authority’s letter' });
+		expect(res.status, JSON.stringify(res.body)).toBe(200);
+		expect(res.body.licenceRecord).toMatchObject({ outcome: 'licence_refused', outcomeOn: '0001-03-01' });
+	});
+
 	// 303 (the contract step of 233): 161's words are no longer taken, by the route or the database function.
 	it('refuses 161’s words, from the route and from the database function', async () => {
 		const before = (await owner.call('GET', at())).body.licenceRecord;

@@ -17,7 +17,6 @@ import {
 	parseWaterUse,
 	parseWaterSource,
 	splitCsv,
-	storableDate,
 	TEMPLATE_HEADERS
 } from './parse.js';
 
@@ -95,10 +94,6 @@ describe('cell parsers', () => {
 		expect(parseDate('0000/12/31')).toBeUndefined();
 		expect(parseDate('0001-01-01')).toBe('0001-01-01');
 		expect(parseDate('9999-12-31')).toBe('9999-12-31');
-		expect(storableDate('0000-06-15')).toBe(false);
-		expect(storableDate('2024-02-29')).toBe(true);
-		expect(storableDate('2023-02-29')).toBe(false);
-		expect(storableDate('2024-2-29')).toBe(false);
 	});
 
 	it('maps authorisation, purpose and source words', () => {

@@ -328,7 +328,9 @@ in; `404` = not found **or** not a member (RLS hides the project — the API nev
 reveals that a project exists); `403` = member without the needed role (also a
 cross-origin form post rejected by the CSRF check, a write RLS refused, or, in
 production, a request that didn't come through CloudFront); `400` =
-validation (`details` = zod issues), `{ error: "invalid JSON" }` for a
+validation (`details` = zod issues; every date field is a real calendar
+date `YYYY-MM-DD` from year 0001, the engine's `isIsoDate`, since Postgres's
+date has no year 0000), `{ error: "invalid JSON" }` for a
 body that isn't JSON (`backend/src/http/body.ts`), or `{ error: "bad request
 path" }` on any route for a path with an escaped unreserved character
 (`%61`), an escaped `/`, `\` or `%`, a malformed escape or a dot segment

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dayText, daysInText, fromEpochDay, monthOfEpochDay, toEpochDay, waterYearIndex, waterYearOf } from './calendar';
+import { dayText, daysInText, fromEpochDay, isIsoDate, monthOfEpochDay, toEpochDay, waterYearIndex, waterYearOf } from './calendar';
 
 describe('waterYearIndex', () => {
 	it('maps October to 0 and September to 11', () => {
@@ -20,6 +20,18 @@ describe('epoch days', () => {
 		}
 		expect(toEpochDay('1970-01-02')).toBe(1);
 		expect(monthOfEpochDay(toEpochDay('2002-04-24'))).toBe(4);
+	});
+});
+
+describe('isIsoDate', () => {
+	it('takes a real YYYY-MM-DD from year 1 to 9999', () => {
+		for (const d of ['0001-01-01', '1999-12-31', '2024-02-29', '9999-12-31']) expect(isIsoDate(d), d).toBe(true);
+	});
+	it('refuses an impossible day, another form, and anything not a string', () => {
+		for (const d of ['2023-02-29', '2001-04-31', '2001-13-01', '2001-1-01', '2001/01/01', ' 2001-01-01', '', 20010101, null, undefined]) expect(isIsoDate(d), String(d)).toBe(false);
+	});
+	it('refuses year 0000: Date takes it (ISO 8601’s 1 BC), but Postgres’s date has no year 0, so a date accepted here must be one the database can store', () => {
+		for (const d of ['0000-01-01', '0000-02-29', '0000-12-31']) expect(isIsoDate(d), d).toBe(false);
 	});
 });
 
