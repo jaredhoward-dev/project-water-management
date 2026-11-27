@@ -24,7 +24,7 @@ failing test that shows the wrong figure, not a suspicion.
 | When | What |
 | --- | --- |
 | **At once**, when it is confirmed | Add its row to [engine-errata.md](../engine-errata.md): a new `ER-<n>`, keyed on `run` or `fit`, the first affected engine version, `open` for the fix, the severity, the conditions under which results change, and the source. Run `pnpm gen:liability`. Ship it in the next backend release, with or without the fix: the row, not the fix, is what tells people. |
-| **Automatically**, on the first worker tick after that release | The app flags every run the erratum may affect (below) and emails each affected project's owners once (below). Nothing for the operator to send. |
+| **Automatically**, on the first worker tick after that release | The app flags every run the erratum may affect (below) and emails each affected project's owners once (below): one email per owner and project, listing every erratum that release adds. Nothing for the operator to send. |
 | **As soon as practical** | Fix it, bump `ENGINE_VERSION`, and set the row's *Fixed in*. The flag then stops at the fixed version; nobody is emailed again for the same projects. |
 | **Where an evidence pack was issued** from an affected run | Its verify page already lists the erratum under "Errata found since issue" ([evidence-pack.md § Verification](../evidence-pack.md)). If the severity is High and the conditions plausibly apply, also tell the client in writing (its contact under the [operator agreement](./operator-agreement.md)), so it can decide whether to withdraw or supersede the pack. The client decides; the operator informs. |
 | **Record** | Keep a dated note with the erratum: when it was confirmed, the release that carried the row, the release that fixed it, and any client told by hand. The `erratum_notice` rows record who was emailed and when, for 30 days. |
@@ -50,11 +50,16 @@ failing test that shows the wrong figure, not a suspicion.
   each tick the worker hands the list to `app_erratum_sweep`, which looks at
   the runs only for an erratum it hasn't swept with that range (an
   unchanged list costs a lookup per erratum). For each project with a run in
-  range it queues one email to each **owner** (a project owner, or an admin
+  range it queues a notice to each **owner** (a project owner, or an admin
   of the project's team) with a confirmed address that isn't suppressed. The
-  tick sends them, each built as its recipient (still an owner, address
-  still good). The email names the erratum, its severity, the conditions,
-  how many runs may be affected, whether it is fixed, and what to do (check
+  tick sends **one email per owner and project, listing every erratum
+  queued for them** (411: a release that adds five errata sends an owner of
+  three catchments three emails, not fifteen), each built as its recipient
+  (still an owner, address still good). Each erratum keeps its own notice
+  record, so a later sweep never re-sends one already told, and a failed
+  send retries the whole email. For each erratum the email gives its name,
+  its severity, the conditions, how many runs may be affected, whether it
+  is fixed, and what to do (check
   the conditions; re-run on the current engine and compare; consider telling
   whoever relies on a published, signed or packed run), with a link to the
   project's runs. It never says the results *are* wrong. Each erratum emails

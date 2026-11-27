@@ -510,39 +510,62 @@ export function packSentMail(to: string, f: PackSentFacts): Mail {
 export type ErratumNoticeFacts = {
 	projectId: string;
 	projectName: string;
-	/** The erratum (docs/engine-errata.md, the engine's ENGINE_ERRATA): its id and what the table says. */
-	erratum: { id: string; keyedOn: 'run' | 'fit'; firstAffected: string; fixedIn: string | null; severity: string; appliesWhen: string; summary: string };
-	/** How many of the project's runs were made by an affected engine (or with an affected fit) when it was swept. */
-	runCount: number;
+	/**
+	 * Every erratum the owner is told about in this email, oldest id first: each
+	 * with what docs/engine-errata.md says (the engine's ENGINE_ERRATA) and how
+	 * many of the project's runs were made by an affected engine (or with an
+	 * affected fit) when it was swept. At least one.
+	 */
+	errata: {
+		erratum: { id: string; keyedOn: 'run' | 'fit'; firstAffected: string; fixedIn: string | null; severity: string; appliesWhen: string; summary: string };
+		runCount: number;
+	}[];
 };
 
+/** One erratum's paragraphs: what goes wrong, when, which runs, and what to do. */
+function erratumParagraphs(projectName: string, e: ErratumNoticeFacts['errata'][number]['erratum'], runCount: number): string[] {
+	const runs = `${runCount} ${runCount === 1 ? 'run' : 'runs'}`;
+	const range = `${e.firstAffected}${e.fixedIn ? ` up to (not including) ${e.fixedIn}` : ' or later'}`;
+	const made =
+		e.keyedOn === 'fit'
+			? `${runs} in ${projectName} ${runCount === 1 ? 'uses' : 'use'} parameters from an automatic calibration made by engine ${range}, which had this bug.`
+			: `${runs} in ${projectName} ${runCount === 1 ? 'was' : 'were'} made by engine ${range}, which had this bug.`;
+	return [
+		`We confirmed a bug in the model engine (${e.id}, severity ${e.severity.toLowerCase()}): ${e.summary}.`,
+		`It changes results only when: ${e.appliesWhen}.`,
+		made,
+		e.fixedIn
+			? `It is fixed in engine ${e.fixedIn}. Check whether the conditions apply to your catchment; if they do, re-run on the current engine and compare the two runs. The affected runs are marked in the app, and their validation statement, sign-off and evidence report list ${e.id}.`
+			: `It is not fixed yet. Check whether the conditions apply to your catchment; if they do, treat the affected figures with care until it is. The affected runs are marked in the app, and their validation statement, sign-off and evidence report list ${e.id}.`
+	];
+}
+
 /**
- * A confirmed engine bug may affect results in a project (issue #103, the
- * known-defect procedure; docs/legal/known-defect-procedure.md). Sent once
- * per erratum, project and owner by the worker (errata/notices.ts), built as
- * its recipient. It says what goes wrong, when it changes results, how many
- * runs may be affected and what to do; it never says the results *are*
+ * Confirmed engine bugs may affect results in a project (issue #103, the
+ * known-defect procedure; docs/legal/known-defect-procedure.md). Sent by the
+ * worker (errata/notices.ts) once per owner and project for each sweep,
+ * listing every erratum newly found to touch the project's runs (411: a
+ * release that adds five errata sends one email, not five), built as its
+ * recipient. Each erratum says what goes wrong, when it changes results, how
+ * many runs may be affected and what to do; it never says the results *are*
  * wrong, since a run is affected only when the erratum's conditions hold.
  * English, as the workspace is.
  */
 export function erratumNoticeMail(to: string, f: ErratumNoticeFacts): Mail {
-	const e = f.erratum;
-	const runs = `${f.runCount} ${f.runCount === 1 ? 'run' : 'runs'}`;
-	const made =
-		e.keyedOn === 'fit'
-			? `${runs} in ${f.projectName} ${f.runCount === 1 ? 'uses' : 'use'} parameters from an automatic calibration made by engine ${e.firstAffected}${e.fixedIn ? ` up to (not including) ${e.fixedIn}` : ' or later'}, which had this bug.`
-			: `${runs} in ${f.projectName} ${f.runCount === 1 ? 'was' : 'were'} made by engine ${e.firstAffected}${e.fixedIn ? ` up to (not including) ${e.fixedIn}` : ' or later'}, which had this bug.`;
-	return render('erratum_notice', to, `Known engine bug ${e.id} may affect ${f.projectName} — ${PRODUCT}`, {
-		heading: `A known engine bug may affect results in ${f.projectName}`,
-		paragraphs: [
-			`We confirmed a bug in the model engine (${e.id}, severity ${e.severity.toLowerCase()}): ${e.summary}.`,
-			`It changes results only when: ${e.appliesWhen}.`,
-			made,
-			e.fixedIn
-				? `It is fixed in engine ${e.fixedIn}. Check whether the conditions apply to your catchment; if they do, re-run on the current engine and compare the two runs. The affected runs are marked in the app, and their validation statement, sign-off and evidence report list ${e.id}.`
-				: `It is not fixed yet. Check whether the conditions apply to your catchment; if they do, treat the affected figures with care until it is. The affected runs are marked in the app, and their validation statement, sign-off and evidence report list ${e.id}.`,
-			'If a run you published, signed or put in an evidence pack is affected, consider telling the people who rely on it. An issued pack keeps its own record, and its verify page lists the errata found since it was issued.'
-		],
+	if (f.errata.length === 0) throw new Error('an erratum notice lists at least one erratum');
+	const ids = f.errata.map((x) => x.erratum.id);
+	const one = f.errata.length === 1;
+	const closing =
+		'If a run you published, signed or put in an evidence pack is affected, consider telling the people who rely on it. An issued pack keeps its own record, and its verify page lists the errata found since it was issued.';
+	const paragraphs = one
+		? erratumParagraphs(f.projectName, f.errata[0]!.erratum, f.errata[0]!.runCount)
+		: [
+				`We confirmed ${f.errata.length} bugs in the model engine that may affect runs in ${f.projectName}: ${listText(ids)}. Each is described below.`,
+				...f.errata.flatMap((x, i) => [`${i + 1} of ${f.errata.length}: ${x.erratum.id}`, ...erratumParagraphs(f.projectName, x.erratum, x.runCount)])
+			];
+	return render('erratum_notice', to, one ? `Known engine bug ${ids[0]} may affect ${f.projectName} — ${PRODUCT}` : `${f.errata.length} known engine bugs may affect ${f.projectName} — ${PRODUCT}`, {
+		heading: one ? `A known engine bug may affect results in ${f.projectName}` : `Known engine bugs may affect results in ${f.projectName}`,
+		paragraphs: [...paragraphs, closing],
 		action: { label: 'Open the runs', url: sitePage(`/projects/${encodeURIComponent(f.projectId)}?tab=runs`) },
 		footer: [`You get this email because you own ${f.projectName}. The list of known engine bugs is published with the methodology (docs/engine-errata.md).`]
 	});
