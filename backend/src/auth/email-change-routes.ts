@@ -135,6 +135,9 @@ export const emailChangeRoutes = new Hono<AuthEnv>()
 				);
 				// Links mailed to the old address die with it.
 				await db.query('DELETE FROM email_token WHERE user_id = $1', [change.user_id]);
+				// So does an unconfirmed second-factor reset's confirmation link (414): whoever kept the old inbox can't start
+				// the factor's removal. A confirmed reset keeps waiting; its emails go to the current address.
+				await db.query('SELECT app_mfa_reset_end_unconfirmed()');
 				if (!before[0].verified) await markVerified(db, change.user_id);
 				return { userId: change.user_id, email: change.new_email, old: before[0].email, locale: before[0].locale };
 			});

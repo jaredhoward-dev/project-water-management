@@ -477,7 +477,11 @@ falls through to the first when it was the last. Neither is granted to
     challenge is what only a right password buys). It changes nothing: it
     emails a confirmation link to the account's address (its own token
     kind, SHA-256 in `mfa_reset.confirm_hash`, single use, 1 hour; a new
-    request voids an unused one). Following it starts a **3-day wait**
+    request voids an unused one, and so does a change of address, since the
+    link went to the old one: `POST /auth/confirm-email-change` ends the
+    account's unconfirmed reset through `app_mfa_reset_end_unconfirmed`, 414,
+    as it deletes the other links mailed there; a confirmed reset keeps
+    waiting, its emails going to the new address). Following it starts a **3-day wait**
     (`effective_at = now + 72 h`, the constant `MFA_RESET_WAIT`: no
     environment can shorten it). During the wait the factor keeps working;
     the start, a reminder every 24 hours (none in the last 2 hours) and the
@@ -1689,9 +1693,15 @@ and nothing else.
   app_enqueue_rerun`; the key itself gets no job policy. The re-run runs as
   that person under RLS and fails closed if they are no longer an editor, so
   a key never makes a run its creator couldn't. If the creator's account was
-  deleted (`created_by` NULL), the re-run is **skipped** (no job,
+  deleted (`created_by` NULL), or the creator was removed from the project
+  or holds less than editor there now (414, `app_rerun_acting_user`, direct
+  or through the team), the re-run is **skipped** (no job,
   `rerunQueuedFor: null`) and the ingest still commits: never a run as
-  nobody, never lost data.
+  nobody, never a job queued as someone the runner would refuse, never a
+  `rerunQueuedFor` time for a run that won't happen, and never lost data
+  (`ingest.db.test.ts`, a creator still an editor as the positive control).
+  The key itself keeps working: it belongs to the project, and its other
+  owners see and revoke it.
 - **A push that looks wrong holds the automatic runs** (WP-2.16, the
   "leaked or mis-configured gateway key" abuse case; `series/hold.ts`). A
   key's days that the engine's data-quality rules flag (a negative rain or
