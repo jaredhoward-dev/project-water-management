@@ -15,6 +15,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { asOwner, disableFeedsAfterFile, lastMailTo, mailCount, retirePendingJobs, signUp } from '../__tests__/helpers.js';
 import { cellCentre } from '../feeds/cellCache.js';
 import { runTick } from '../jobs/runner.js';
+import { PLAN_NOTICES_PER_TICK, runPlanNotices } from './planNotices.js';
 import { gatherReport } from '../../scripts/billing-report.js';
 import { formatReport, type Report } from './metrics.js';
 
@@ -262,5 +263,44 @@ describe('turning BILLING_ENFORCED on over existing users', () => {
 		expect(pausesOf(r, acct.granted!)).toMatchObject({ state: 'paused', paused: 2, live: 3 });
 		// The other accounts: still in their grace, never paid, or on a plan, nothing paused.
 		expect(await pausedIn([...p.trialist!, ...p.legacy!, ...p.pilot!])).toEqual([]);
+	});
+});
+
+describe('the first enforced tick’s email volume: capped per tick, the rest drain on later ticks', () => {
+	it('sends at most the cap each tick, keeps the rest pending in order, and sends each once', async () => {
+		expect(PLAN_NOTICES_PER_TICK).toBe(100);
+		// Seeded in shadow mode, as the accounts stood before the switch.
+		vi.stubEnv('BILLING_ENFORCED', 'false');
+		const owners: Person[] = [];
+		const accounts: string[] = [];
+		for (const n of ['DrainA', 'DrainB', 'DrainC']) {
+			const o = await person(`TurnOn${n}`);
+			const ids = [await liveProject(o, `${n} Alpha`), await liveProject(o, `${n} Bravo`)];
+			const a = await accountOf(ids[0]!);
+			await asOwner(`INSERT INTO subscription (billing_account_id, plan_code, status, provider) VALUES ($1, 'pro', 'canceled', 'mock')`, [a]);
+			// The grace started at the switch (what the enforced pause sweep stamps).
+			await asOwner('UPDATE billing_account SET over_free_since = now() WHERE id = $1', [a]);
+			owners.push(o);
+			accounts.push(a);
+		}
+		const mine = async () =>
+			(await asOwner(`SELECT status FROM billing_notice WHERE billing_account_id = ANY($1::uuid[]) AND kind = 'grace'`, [accounts])) as { status: string }[];
+		const before = owners.map((o) => mailCount(o.email));
+		vi.stubEnv('BILLING_ENFORCED', 'true');
+		// A cap of 2 stands in for 100 over three accounts.
+		const first = await runPlanNotices({ limit: 2 });
+		expect(first.queued).toBeGreaterThanOrEqual(3);
+		expect(first.sent + first.skipped + first.failed).toBeLessThanOrEqual(2);
+		expect((await mine()).filter((r) => r.status === 'pending').length).toBeGreaterThanOrEqual(1);
+		for (let i = 0; i < 10 && (await mine()).some((r) => r.status !== 'sent'); i++) {
+			const r = await runPlanNotices({ limit: 2 });
+			expect(r.sent + r.skipped + r.failed).toBeLessThanOrEqual(2);
+		}
+		expect((await mine()).map((r) => r.status)).toEqual(['sent', 'sent', 'sent']);
+		for (const [i, o] of owners.entries()) {
+			expect(mailCount(o.email)).toBe(before[i]! + 1);
+			expect(lastMailTo(o.email)!.kind).toBe('plan_notice');
+		}
+		await asOwner(`UPDATE billing_account SET over_free_since = NULL WHERE id = ANY($1::uuid[])`, [accounts]);
 	});
 });
