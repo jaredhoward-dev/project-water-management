@@ -107,7 +107,7 @@
 	import { headerSlot } from '#lib/components/workspace/headerSlot.svelte.js';
 	import { sectionContext } from '#lib/components/workspace/context.js';
 	import { GRID_TAB, isGridId, isTabGridId, movedGridHref, withParam, withoutParam } from '#lib/workspace/overlays.js';
-	import { failureForPage, inFlightFor, withCreatedRun, type RunFailure, type RunInFlight } from '#lib/components/runs/runInFlight.js';
+	import { failureForPage, inFlightFor, isFlight, withCreatedRun, type RunFailure, type RunInFlight } from '#lib/components/runs/runInFlight.js';
 	import {
 		ALL_TABS,
 		addsData,
@@ -374,7 +374,7 @@
 		tabRun = flight;
 		tabRunFailure = null;
 		const clear = () => {
-			if (tabRun === flight) tabRun = null;
+			if (isFlight(tabRun, flight)) tabRun = null;
 		};
 		flight.done.then(clear, (err: unknown) => {
 			clear();

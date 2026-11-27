@@ -32,6 +32,15 @@ export function elapsedSeconds(startedAt: number, now: number): number {
 	return Math.max(0, Math.floor((now - startedAt) / 1000));
 }
 
+/**
+ * Whether the run kept in `kept` is `flight`, the one that just ended. Compared by its request, not by the object:
+ * a run kept in `$state` is Svelte's proxy of the object, never `===` the object the ending code holds, so an
+ * identity check left a finished run in flight and Run model disabled for good.
+ */
+export function isFlight(kept: RunInFlight | null, flight: RunInFlight): boolean {
+	return kept !== null && kept.done === flight.done;
+}
+
 /** The run in flight the project's Runs tab should show: only one started on this project. */
 export function inFlightFor(flight: RunInFlight | null, projectId: string): RunInFlight | null {
 	return flight && flight.projectId === projectId ? flight : null;
