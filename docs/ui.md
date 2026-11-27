@@ -7121,7 +7121,13 @@ before its first or after its last, so a missed reading inside the first or
 last day keeps the day and counts it among those short of whole. The summary
 says how many readings, how many a day, the days left out and how many kept
 days are short of whole. Each
-timestamp closes its interval. A time is HH:MM (seconds optional) or a
+timestamp closes its interval. A file whose readings run from the day
+boundary to one interval before it (00:00 … 23:00, a logger stamping the start
+of each interval) has both edge days read as part days; the refusal of such a
+one-day file, and the summary line naming the days left out of a longer one,
+say that the readings may mark the start of each interval and to move every
+timestamp one interval later (`csv.ts` `looksStartStamped`); the rule itself
+doesn't change. A time is HH:MM (seconds optional) or a
 12-hour time with its AM/PM (7:00 PM is 19:00, 12:00 AM midnight); a time
 followed by anything else (a zone, `Z`) is refused, not trimmed. The series records the choice
 (`dayBoundary`), shown as *08:00–08:00 days, added up from sub-daily
@@ -7166,7 +7172,8 @@ missing-data quality code (151, 165, 170, 172, 246, 247, 255), a blank value or
 a negative placeholder such as -999 is a gap, never a value. The summary adds a
 *DWS export* line (rows, the value column as the file's format block describes
 it, and how many rows were read as gaps and why) and the quality codes met.
-When that block states the values in m³/s (`dws.ts` `unit`), the form's
+When that block states the values in m³/s (`dws.ts` `unit`: cubic metres
+per second or /sec, m3/s, m³/s, m^3/s, m3/sec, cumec or cumecs), the form's
 *Unit* is set to m³/s for a flow kind, so a unit left at l/s or ML/day from
 an earlier file can't scale the export by 1 000 or 86.4; a
 sub-daily DWS export (a TIME column) is refused. So is an export whose block
@@ -7175,6 +7182,8 @@ level in m" in a primary export and "Monthly volumes in million cubic metres"
 in a monthly one; the daily reservoir wording isn't known, so `dws.ts` matches
 level, stage, height, volume, storage and million m³ loosely), naming what it
 holds and its unit, since no series kind is a level or a volume. A block that
+states mm, rain or evaporation is never read as a level or a volume, so
+*Daily rainfall in mm (storage gauge)* loads as rain. A block that
 states no flow unit at all can still go in as a flow kind, but only after the
 person ticks *These values are daily flows in (the chosen unit)* under *Not said to
 be a flow* (`dwsFlowCheck`; the upload stays disabled until then, and a new

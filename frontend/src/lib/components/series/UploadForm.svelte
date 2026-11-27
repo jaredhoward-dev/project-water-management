@@ -710,7 +710,7 @@
 								>; left out as only partly recorded: {[sd.partialEdges.first, sd.partialEdges.last]
 									.filter((d) => d !== undefined)
 									.map((d) => fmtDay(d))
-									.join(' and ')}</span
+									.join(' and ')}{#if sd.startStamped}. The readings may mark the start of each interval: move every timestamp one interval later and upload it again{/if}</span
 							>{/if}{#if sd.incompleteDays}
 							<span class="warn-text"
 								>; {fmtNum(sd.incompleteDays)} days have fewer readings, so {sd.aggregate === 'mean' ? 'their averages lean on the hours recorded' : 'their totals may be short'}</span

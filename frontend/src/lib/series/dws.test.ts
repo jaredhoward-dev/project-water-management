@@ -55,6 +55,10 @@ describe('parseDwsExport on other exports', () => {
 		const spec = (what: string) => `POS. 10-18 = ${what}\nDATE     D AVG F/R  QUAL\n20210101     1.500     1\n`;
 		expect(parseDwsExport(spec('Daily avg flow rate in cubic metres/sec')).dws!.unit).toBe('m³/s');
 		expect(parseDwsExport(spec('Daily average flow in m3/s')).dws!.unit).toBe('m³/s');
+		for (const unit of ['m3/sec', 'm³/sec', 'm^3/s', 'm^3/sec', 'cumec', 'cumecs', 'Cumecs', 'm3 / s'])
+			expect(parseDwsExport(spec(`Daily average flow in ${unit}`)).dws, unit).toMatchObject({ unit: 'm³/s', quantity: 'flow' });
+		// Positive control: m³ alone (a volume) is not a flow unit.
+		expect(() => parseDwsExport(spec('Daily volume in m3'))).toThrow(/holds a volume/);
 		expect(parseDwsExport(spec('Daily rainfall in mm')).dws!.unit).toBeUndefined();
 		expect(parseDwsExport('20210101  1.5  1\n').dws!.unit).toBeUndefined();
 	});
@@ -125,6 +129,16 @@ describe('a DWS export of a water level or a volume (issue #909)', () => {
 
 	it('still reads a flow, also one that says cubic metres per second', () => {
 		expect(parseDwsExport(spec('Daily avg flow rate in cubic metres per second')).dws).toMatchObject({ unit: 'm³/s', quantity: 'flow' });
+	});
+
+	it('reads a rain or evaporation column that says "storage" (a storage rain gauge) as a depth, not a volume', () => {
+		expect(parseDwsExport(spec('Daily rainfall in mm (storage gauge)')).dws).toMatchObject({ column: 'Daily rainfall in mm (storage gauge)', quantity: 'unstated' });
+		expect(parseDwsExport(spec('Storage gauge rain')).values).toEqual([102.345]);
+		expect(parseDwsExport(spec('Evaporation, storage pan, in mm')).values).toEqual([102.345]);
+		// Positive controls: a volume in Mm³ (a million cubic metres, not mm) and a plain storage are still refused.
+		expect(() => parseDwsExport(spec('Storage in Mm³'))).toThrow(/holds a volume \(million m³\)/);
+		expect(() => parseDwsExport(spec('Storage in Mm3'))).toThrow(/holds a volume \(million m³\)/);
+		expect(() => parseDwsExport(spec('Daily storage'))).toThrow(/holds a volume/);
 	});
 });
 

@@ -40,8 +40,17 @@ export interface DwsImport {
 
 const NO_READING = /^(na|nan|null|-)$/i;
 const VALUE_SPEC = /^\s*POS\.\s*10\s*-\s*18\s*=\s*/i;
-/** A stated unit of m³/s (the automatic feed's own check, backend feeds/sources/dws.ts M3S). */
-const M3S = /cubic met(re|er)s?\s*(\/|per)\s*s(ec(ond)?)?\b|\bm(3|³)\s*\/\s*s\b|\bcumecs\b/i;
+/**
+ * A stated unit of m³/s (the automatic feed's own check, backend feeds/sources/dws.ts M3S), as DWS and
+ * others write it: "cubic metres/sec", "m3/s", "m³/s", "m^3/s", "m3/sec", "cumec" or "cumecs".
+ */
+const M3S = /cubic met(re|er)s?\s*(\/|per)\s*s(ec(ond)?)?\b|\bm(3|³|\^3)\s*\/\s*s(ec)?\b|\bcumecs?\b/i;
+/**
+ * A column that states a depth: mm (not "Mm³", a million cubic metres), rain or evaporation. Such a
+ * column is never a level or a volume, though it may say "storage gauge" (a rain gauge that stores the
+ * catch until it is read) or "pan".
+ */
+const DEPTH = /\bmm\b(?!\s*[³3])|\b(rain\w*|precip\w*|evap\w*)\b/i;
 // A water level or a volume, as HyData's format blocks word them: a primary (point) export's
 // "POS. 27-35 = Corrected level in m", a monthly export's "Monthly volumes in million cubic metres"
 // (both as DWS prints them; the daily wording for a reservoir isn't known here, so these are
@@ -71,7 +80,7 @@ export const isReservoirStation = (code: string | undefined): boolean => !!code 
 
 /** Which unit a level or volume column is in, for the refusal ("in m", "in million m³"); undefined when the block doesn't say. */
 function levelOrVolume(column: string): { what: 'level' | 'volume'; unit?: string } | null {
-	if (M3S.test(column)) return null;
+	if (M3S.test(column) || DEPTH.test(column)) return null;
 	if (VOLUME.test(column)) {
 		const unit = /million\s+cubic|\b(m|h)m(3|³)(?!\w)/i.test(column) ? 'million m³' : /cubic\s+met|\bm(3|³)(?!\w)/i.test(column) ? 'm³' : undefined;
 		return { what: 'volume', unit };
