@@ -1712,7 +1712,13 @@ Built but off: nothing is paused unless `BILLING_ENFORCED` is on.
   enforcement switched off again), so a plan that ended in shadow mode (a
   staff grant's end, a lapsed trial) starts its 14 days, and its grace
   email, at the first tick after enforcement is switched on, never pausing
-  at once. The schema owner's own connections (`pnpm dev:billing:grant`,
+  at once. The tick visits only the accounts it can change (417): those
+  with a stamp or a pause marker and, enforced, those whose plan has ended
+  with more live catchments than Free allows, found in one set-based query
+  (338's "live" written out; `planPause.db.test.ts` checks each of its four
+  ways). Before 417 it took the billing lock of, and synced, every account
+  with an ended plan, which is every Free account past its reverse trial:
+  2.3-2.5 s a tick in shadow mode on 10,000 of them, now about 50 ms. The schema owner's own connections (`pnpm dev:billing:grant`,
   `dev:billing:invoice`, `dev:billing:conflict` and the migrate Lambda's
   owner actions) set `app.billing_enforced` on their session from
   `BILLING_ENFORCED` (`setOwnerBillingEnforced` in
