@@ -485,6 +485,18 @@ describe('the data-subject export carries every row USER_FK_COVERAGE files under
 		else expect(got).toHaveLength(stored);
 	});
 
+	it('gives what a row count can’t see: which statement each sign-off is and the reference a delegation rests on (415)', async () => {
+		const signed = await db.query<{ id: string; kind: string }>('SELECT id, kind FROM signoff WHERE user_id = $1 ORDER BY id', [subject.id]);
+		// Positive control: the fixture signed, as the responsible specialist.
+		expect(signed.rows.map((r) => r.kind)).toContain('specialist');
+		const byId = (rows: { id: string; kind: string }[]) => rows.map((r) => ({ id: r.id, kind: r.kind })).sort((a, b) => a.id.localeCompare(b.id));
+		expect(byId(doc.signoffs)).toEqual(byId(signed.rows));
+		const delegated = await db.query<{ note: string }>('SELECT confirmation_note AS note FROM authority_delegate WHERE user_id = $1', [subject.id]);
+		expect(delegated.rows).toHaveLength(1);
+		expect(delegated.rows[0]!.note).not.toBe('');
+		expect(doc.authorityDelegations.map((d: Doc) => d.reference)).toEqual([delegated.rows[0]!.note]);
+	});
+
 	it('gives every APP_USER_EXPORTED column, with the value stored', async () => {
 		const { rows } = await db.query(`SELECT ${APP_USER_EXPORTED.map((c) => `"${c}"`).join(', ')} FROM app_user WHERE id = $1`, [subject.id]);
 		const stored = rows[0] as Record<string, unknown>;
