@@ -302,15 +302,26 @@ export function separatorHint(cell: string, delimiter: ',' | ';'): string {
 	return '';
 }
 
-/** YYYY-MM-DD or YYYY/MM/DD, a real calendar date; null for empty; undefined for anything else. */
+/**
+ * A YYYY-MM-DD date the allocation columns can store: a real calendar date
+ * from year 1. JavaScript's Date takes year 0000 (ISO 8601's 1 BC), but
+ * Postgres's date has no year 0 and refuses it, so without this a valid-from
+ * of 0000-01-01 passed every check here and failed the insert as a 500.
+ */
+export function storableDate(iso: string): boolean {
+	if (!/^\d{4}-\d{2}-\d{2}$/.test(iso) || iso.startsWith('0000')) return false;
+	const t = Date.parse(`${iso}T00:00:00Z`);
+	return !Number.isNaN(t) && new Date(t).toISOString().slice(0, 10) === iso;
+}
+
+/** YYYY-MM-DD or YYYY/MM/DD, a real calendar date the database can store (storableDate); null for empty; undefined for anything else. */
 export function parseDate(cell: string): string | null | undefined {
 	const v = cell.trim();
 	if (v === '') return null;
 	const m = /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/.exec(v);
 	if (!m) return undefined;
 	const iso = `${m[1]}-${m[2]!.padStart(2, '0')}-${m[3]!.padStart(2, '0')}`;
-	const t = Date.parse(`${iso}T00:00:00Z`);
-	return Number.isNaN(t) || new Date(t).toISOString().slice(0, 10) !== iso ? undefined : iso;
+	return storableDate(iso) ? iso : undefined;
 }
 
 const MONTH_NAMES = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
