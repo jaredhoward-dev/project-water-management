@@ -20,7 +20,7 @@
 	let busy = $state(false);
 	let error = $state<string | null>(null);
 	let errorField = $state<'email' | 'password' | null>(null);
-	/** The address the link went to, once sent. */
+	/** The address the link went to, once sent; cleared as soon as the address is edited, since it names the old one. */
 	let sentTo = $state<string | null>(null);
 
 	async function submit(e: SubmitEvent) {
@@ -71,6 +71,7 @@
 				aria-invalid={errorField === 'email' ? 'true' : undefined}
 				aria-describedby={errorField === 'email' ? 'change-email-error' : undefined}
 				bind:value={newEmail}
+				oninput={() => (sentTo = null)}
 			/>
 		</div>
 		<div class="field">

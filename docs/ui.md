@@ -100,7 +100,9 @@ server's `429` message in an alert; under it, outside the farm frame, a
 **Email address** card (`components/account/ChangeEmail.svelte`, 347: the new
 address and the current password; it says only that a link is on its way to
 the new address if it can take the change, since the server answers the same
-for a taken one; the link opens `/verify-email/change`, which switches the
+for a taken one, and clears that line once the address is edited; with a
+second factor on, a password-only session is told to sign in again with a
+code (`mfa_step_up`), as the **Password** form is; the link opens `/verify-email/change`, which switches the
 account and says the new address, signed in or out, [security.md § Changing
 the email address](./security.md#changing-the-email-address)) and a
 **Password** form
