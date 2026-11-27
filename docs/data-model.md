@@ -1925,7 +1925,7 @@ were swept and who was mailed.
   with (`keyed_on`, `first_affected`, `fixed_in`). Public facts; a signed-in
   person reads it (`erratum_sweep_read`; never an API key, which sees only its
   own series), only `app_erratum_sweep` writes it.
-- **`erratum_notice`**: one email per erratum, project and recipient, ever
+- **`erratum_notice`**: one notice per erratum, project and recipient, ever (411: the notices a sweep claims for one owner and project go out as one email listing every erratum, each keeping its own outcome)
   (the primary key), with `run_count` (the project's runs in range when
   swept) and pack_notice's life (pending → sending → sent | skipped |
   failed). Personal: cascades with the account, in the data export
