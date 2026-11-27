@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CSV_DISCLAIMER_COMMENT, rainCredits } from '@water-management/engine';
 import { localDate } from '../projects/timeZone.js';
@@ -12,6 +13,8 @@ import {
 	csvRow,
 	dailyCsvLines,
 	dayRange,
+	FORMULA_START,
+	SEPARATOR_FORMULA,
 	exportFilename,
 	LEGACY_RUN_CSV_COMMENT,
 	numCell,
@@ -52,6 +55,26 @@ describe('csv cells', () => {
 		expect(textCell('＝1+1')).toBe("'＝1+1");
 		expect(textCell(' Upper farm')).toBe(' Upper farm');
 		expect(textCell('Farm -2')).toBe('Farm -2');
+	});
+
+	it("defuses a formula after a ';', which Excel in a comma-decimal locale reads as a separator", () => {
+		// LibreOffice with `;` as the separator evaluated `ok;=SUM(4;5)` and `q;=9+9` (docs/security.md).
+		expect(textCell('q;=9+9')).toBe("q;'=9+9");
+		expect(textCell('a; @SUM(A1);+1')).toBe("a;' @SUM(A1);'+1");
+		expect(textCell('=a;-b')).toBe("'=a;'-b");
+		expect(textCell('x;=HYPERLINK("u")')).toBe(`"x;'=HYPERLINK(""u"")"`);
+		expect(textCell('x;＝1')).toBe("x;'＝1");
+		// Every `;`-split piece of the written cell is inert.
+		for (const v of ['q;=9+9', 'a;\t=1', 'b; ;=c', 'n;\n@x']) for (const piece of textCell(v).replace(/^"|"$/g, '').split(';')) expect(piece).not.toMatch(FORMULA_START);
+		// A `;` before ordinary text is left alone.
+		expect(textCell('Upper; lower')).toBe('Upper; lower');
+		expect(textCell('a;b')).toBe('a;b');
+	});
+
+	it("keeps one rule with the frontend's CSV writers (names.ts)", () => {
+		const names = readFileSync(new URL('../../../frontend/src/lib/spreadsheet/export/names.ts', import.meta.url), 'utf8');
+		expect(names).toContain(`const FORMULA_START = ${FORMULA_START};`);
+		expect(names).toContain(`const SEPARATOR_FORMULA = ${SEPARATOR_FORMULA};`);
 	});
 
 	it('writes numbers as numbers and missing values as empty', () => {

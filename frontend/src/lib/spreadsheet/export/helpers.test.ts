@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseCsv } from './csv';
 import { cellFormat, numberFormat, unitOf } from './formats';
-import { defuse, FORMULA_START, sheetNamer, undefuse } from './names';
+import { defuse, defuseCsv, FORMULA_START, sheetNamer, undefuse } from './names';
 import { splitSummary } from './summary';
 
 describe('parseCsv', () => {
@@ -43,6 +43,26 @@ describe('defuse', () => {
 		for (const s of ['=cmd', ' =1+1', '\tx', '\nx', '＝1', 'Upper farm', "'quoted", "'", '']) expect(undefuse(defuse(s))).toBe(s);
 		expect(undefuse("'Upper farm")).toBe("'Upper farm");
 		expect(FORMULA_START.test("' =1")).toBe(false);
+	});
+});
+
+describe('defuseCsv', () => {
+	it("guards a formula after a ';' too, which Excel in a comma-decimal locale splits a CSV on", () => {
+		// LibreOffice with `;` as its separator evaluated `q;=9+9` to 18 (docs/security.md).
+		expect(defuseCsv('q;=9+9')).toBe("q;'=9+9");
+		expect(defuseCsv('=a; @b;+c')).toBe("'=a;' @b;'+c");
+		expect(defuseCsv('n;\t-1')).toBe("n;'\t-1");
+		expect(defuseCsv('x;＝1')).toBe("x;'＝1");
+		for (const s of ['Upper; lower', 'a;b', 'Dam = full', '']) expect(defuseCsv(s)).toBe(s);
+		for (const s of ['q;=9+9', 'b; ;=c', '=a;-b;@c']) for (const piece of defuseCsv(s).split(';')) expect(piece).not.toMatch(FORMULA_START);
+	});
+
+	it('undefuse reads a defuseCsv cell back exactly', () => {
+		for (const s of ['q;=9+9', '=a; @b;+c', 'n;\t-1', 'Upper; lower', "a;'b", "'quoted", '=cmd']) expect(undefuse(defuseCsv(s))).toBe(s);
+	});
+
+	it('leaves the workbook guard alone: defuse adds nothing after a semicolon', () => {
+		expect(defuse('q;=9+9')).toBe('q;=9+9');
 	});
 });
 

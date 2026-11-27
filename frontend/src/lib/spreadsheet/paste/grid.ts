@@ -5,7 +5,7 @@
 // whether it applies is the grid's business: components/network/nodePaste.ts
 // and components/crops/areaPaste.ts.
 import type { FileFormat } from '#lib/components/common/formatHelp.js';
-import { defuse, undefuse } from '#lib/spreadsheet/export/names.js';
+import { defuseCsv, undefuse } from '#lib/spreadsheet/export/names.js';
 import { blockCommas, DECIMAL_COMMA_NOTE, GROUPING_COMMA_NOTE, numberReader, readPastedBlock } from './read';
 
 /** A row of the grid, matched by its name. */
@@ -231,7 +231,7 @@ export function mapPaste(text: string, rows: readonly GridRow[], cols: readonly 
 export function csvCell(v: string | number | null | undefined): string {
 	if (typeof v === 'number') return Number.isFinite(v) ? String(Number(v.toPrecision(12))) : '';
 	if (v === null || v === undefined) return '';
-	const s = defuse(v);
+	const s = defuseCsv(v);
 	return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 

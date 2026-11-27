@@ -182,6 +182,10 @@ describe('CSV', () => {
 		// normalName reads the defused name back as the name (issue #902).
 		for (const n of [' =Farm', '＝Farm', '-Farm']) expect(normalName(csvCell(n))).toBe(normalName(n));
 		expect(normalName("'Farm")).toBe("'farm");
+		// A trigger after a `;` too: Excel in a comma-decimal locale splits on it (docs/security.md).
+		expect(csvCell('Farm;=SUM(4)')).toBe("Farm;'=SUM(4)");
+		expect(csvCell('Smit, J;@x')).toBe(`"Smit, J;'@x"`);
+		expect(normalName(csvCell('Farm;=SUM(4)'))).toBe(normalName('Farm;=SUM(4)'));
 		expect(csvCell(0.7 * 100)).toBe('70');
 		expect(csvCell(-5)).toBe('-5');
 		expect(csvCell(null)).toBe('');
