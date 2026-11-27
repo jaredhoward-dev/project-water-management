@@ -202,7 +202,7 @@ describe('406: a price conflict is kept for the operator', () => {
 			 FROM billing_conflict WHERE provider = 'mock' AND external_ref = $1 ORDER BY id`,
 			[r]
 		)) as { reason: string; amount: number | null; expected: number | null; held: boolean; resolved_at: Date | null }[];
-	
+
 	beforeAll(async () => {
 		owner = await signUp('PriceConflict');
 		account = (await owner.call('GET', '/account/plan')).body.account.id;

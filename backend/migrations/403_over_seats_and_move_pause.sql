@@ -238,4 +238,3 @@ CREATE OR REPLACE FUNCTION app_account_plan(p_account uuid) RETURNS jsonb
 	END
 	$$;
 GRANT EXECUTE ON FUNCTION app_account_plan(uuid) TO water_app;
-
