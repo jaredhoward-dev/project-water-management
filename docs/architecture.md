@@ -1129,7 +1129,9 @@ flowchart LR
    the mails then say the firing event's forecast is out of date), the data feeds (staleness per feed, each at its own level) and
    the dead jobs. `alerts/rules.ts` decides
    with hysteresis: open an event on crossing, clear it only after recovery
-   past the margin. A restriction notice is an event per change. Each newly
+   past the margin. A restriction notice is an event per change, new words
+   under no restriction included; the notices standing when that shipped
+   were recorded as already announced, unmailed (411). Each newly
    opened event is fanned out (`app_alert_fan_out`) to one delivery per
    recipient, `pending` or `digest` by their choice. Nothing is mailed here:
    the job holds no network I/O, and its writes commit with its "done".
