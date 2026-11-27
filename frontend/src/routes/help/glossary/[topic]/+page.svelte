@@ -313,6 +313,10 @@
 	.meta dd {
 		margin: 0;
 	}
+	/* The global underline doesn't reach a link inside this list, and colour alone fails WCAG 1.4.1 in dark mode (1.67:1 against the text). */
+	.meta dd a {
+		text-decoration: underline;
+	}
 	@media (max-width: 480px) {
 		.meta div {
 			grid-template-columns: 1fr;
