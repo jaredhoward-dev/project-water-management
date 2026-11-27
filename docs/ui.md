@@ -197,7 +197,9 @@ again (a wrong one is *Your current password is wrong.*; an empty one is
 refused before any request). The only owner of a project or only admin of
 a team gets an alert naming each, linked to its page (the `409
 account_sole_holder` details), which takes the focus; Cancel closes the
-dialog with nothing changed. On success the browser forgets the account as
+dialog with nothing changed. While the delete is out, Cancel is disabled
+and Escape doesn't close the dialog either, so its answer isn't hidden
+(`account-delete.spec.ts`). On success the browser forgets the account as
 signing out does (the farm view's saved copies, the note counts) and lands
 on `/login?deleted=1`, whose notice says the account was deleted and that
 an email says what was deleted and what was kept. The History reads such a
