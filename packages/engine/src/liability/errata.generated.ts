@@ -372,5 +372,15 @@ export const ENGINE_ERRATA: readonly Erratum[] = [
 		"appliesWhen": "A scenario run (an application or any other scenario, alone or in a cumulative impact) whose node.remove removes a unit that a river off-take's returned seepage rejoined the river below (lossReturnNodeId), where the off-take itself stays (it neither comes from nor goes to that unit)",
 		"summary": "The removal set the off-take's seepage return to none (share 0) instead of re-pointing it above the removed unit, so that seepage left the catchment: the scenario carried less flow below where the unit was than it should, and in an application or a run comparison that drop was scored as the proposal's impact, even for another party's off-take the applicant can't see. What to do: re-run the scenario on the current engine and compare, and re-issue (supersede) any evidence pack made from it. A plain run is unaffected",
 		"source": "scenarios.md § Op catalogue (node.remove of a unit a seepage return rejoins below); model.md §2.6a (the seepage return) (issue #853)"
+	},
+	{
+		"id": "ER-38",
+		"keyedOn": "run",
+		"firstAffected": "1.30.0",
+		"fixedIn": "1.123.2",
+		"severity": "Medium",
+		"appliesWhen": "An evidence report on a project with a declared uncertainty rule (settings.evidenceUncertaintyRule) whose baseline has a complete ensemble started through the API with fewer rain sources (rainSources) or observed records (records) than the baseline run offers, and otherwise the rule's options",
+		"summary": "declaredRuleMismatches didn't compare the rain sources or records varied (it took them as the project's), so that ensemble could be cited as the declared rule's: the pack printed a band over fewer rain sources or records, narrower than the rule's, as the declared rule's band, and listed it as not departing from the rule. What to do: check which ensemble the pack cites; if it varied fewer rain sources or records than the baseline run offers, run the baseline's ensemble with the rule's options and re-issue (supersede) the pack. A plain run is unaffected",
+		"source": "model.md §2.10e (the declared rule and the cited ensemble; Rain sources, Observed records)"
 	}
 ];

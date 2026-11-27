@@ -18,8 +18,8 @@ import { Rng } from '../random';
 import { ENGINE_VERSION } from '../version';
 import { blankEwrRuleTable } from '../reserve/rules';
 import { runModel } from '../run';
-import { resolveEnsembleOptions, runEnsemble, summariseEnsemble } from '../uncertainty/ensemble';
-import type { DeclaredUncertaintyRule } from '../uncertainty/options';
+import { declaredRuleScope, resolveEnsembleOptions, runEnsemble, summariseEnsemble } from '../uncertainty/ensemble';
+import { declaredRuleRequest, type DeclaredUncertaintyRule } from '../uncertainty/options';
 import { runPairedEnsemble, summarisePaired } from '../uncertainty/paired';
 import { band as bandOf } from '../uncertainty/bands';
 import { licenceImpactByYearClass } from '../views/licenceImpact';
@@ -840,6 +840,28 @@ describe('the cited ensemble (G4) and the declared rule (ER3)', () => {
 		expect(citedEnsemble([offRule, started], RULE)).toBeNull();
 	});
 
+	it('doesn’t cite an ensemble started through the API with fewer rain sources or records than the rule’s (ER-38)', () => {
+		const scope = declaredRuleScope(base, RULE)!;
+		expect(scope).toEqual({ rainSources: options.rainSources, records: options.records });
+		// The fixture offers more than one of something to narrow, or the test proves nothing.
+		expect(scope.rainSources.length + scope.records.length).toBeGreaterThan(2);
+		const narrow = resolveEnsembleOptions(base, { ...declaredRuleRequest(RULE), rainSources: [scope.rainSources[0]!], records: [scope.records[0]!] }).options;
+		const narrower = ens({ id: 'e0', options: { ...narrow, seed: 11 }, createdAt: '2026-09-01T00:00:00.000Z' });
+		const rows = [ens({}), narrower];
+		// Before ER-38 the narrower one, being older, was cited; without the scope it still is (a caller that can't load the run).
+		expect(citedEnsemble(rows, RULE)?.id).toBe('e0');
+		expect(citedEnsemble(rows, RULE, scope)?.id).toBe('e1');
+		const r = evidenceReport(input({ ensembles: { baseline: rows, paired: [PAIRED] }, declaredScope: scope }));
+		expect(r.uncertainty.ledger.filter((e) => e.cited).map((e) => e.id)).toEqual(['e1']);
+		expect(r.uncertainty.ledger.find((e) => e.id === 'e0')!.departsFromDeclared.map((d) => d.label)).toEqual(
+			[scope.rainSources.length > 1 ? 'Rain sources' : null, scope.records.length > 1 ? 'Observed records' : null].filter(Boolean)
+		);
+		// Control: the rule's own ensemble departs in nothing.
+		expect(r.uncertainty.ledger.find((e) => e.id === 'e1')!.departsFromDeclared).toEqual([]);
+		// Alone, the narrower one is never cited.
+		expect(citedEnsemble([narrower], RULE, scope)).toBeNull();
+	});
+
 	it('without a declared rule: nothing is cited, no change carries a band, and the report can’t be issued', () => {
 		const i = input();
 		const r = evidenceReport(input({ baseline: { ...i.baseline, inputs: { ...i.baseline.inputs, settings: { ...i.baseline.inputs.settings, evidenceUncertaintyRule: null } } } }));
@@ -1056,12 +1078,13 @@ describe('errata', () => {
 		// (the engine end-to-end tests' findings, each from 1.30.0 or earlier until 1.69.0), ER-33 (node.remove's classing,
 		// from the first engine until 1.121.0; not ER-32, from 1.42.0), ER-34 (paired bands across engines, from the first
 		// engine until 1.123.0), ER-35 (the declared rule's parameters varied, 1.30.0 until 1.123.0; not ER-36, from
-		// 1.59.0), and no other run erratum.
+		// 1.59.0), ER-38 (its rain sources and records, 1.30.0 until 1.123.2), and no other run erratum.
 		expect(evidenceReport(i).verification.errata.filter((e) => e.keyedOn === 'run').map((e) => e.id)).toEqual([
 			...Array.from({ length: 20 }, (_, k) => `ER-${k + 10}`),
 			'ER-33',
 			'ER-34',
-			'ER-35'
+			'ER-35',
+			'ER-38'
 		]);
 		// Runs by the current engine carry none.
 		const now = evidenceReport(input({ baseline: { ...i.baseline, engineVersion: ENGINE_VERSION }, application: { ...i.application!, engineVersion: ENGINE_VERSION } }));

@@ -10461,10 +10461,15 @@ it never changes a run's results.
   `settings.evidenceUncertaintyRule` (members, bounds, pan shift and the
   four thresholds). An evidence report cites the **first** complete, unpaired
   ensemble on its baseline whose resolved options match that rule exactly
-  (`declaredRuleMismatches` empty; seed, records and rain sources are not
-  part of the rule; the parameters varied are, from engine 1.123.0, the
-  model's default free set, so an ensemble started through the API with its own `free`, a narrower
-  band over fewer parameters, departs from the rule as *Parameters varied*),
+  (`declaredRuleMismatches` empty; the seed is not part of the rule; the
+  parameters varied are, from engine 1.123.0, the model's default free set,
+  so an ensemble started through the API with its own `free`, a narrower
+  band over fewer parameters, departs from the rule as *Parameters varied*;
+  and from engine 1.123.2 (ER-38) the rain sources and observed records are
+  the ones the rule's request resolves to on the baseline run, every one it
+  offers (`declaredRuleScope`, which the backend works out from the run's
+  inputs), so one started with fewer departs as *Rain sources* or *Observed
+  records*; when the run's inputs no longer load, those two aren't compared),
   and the first complete paired ensemble on it. First,
   not newest or kindest: the database draws each seed, so once one ensemble
   on the rule has completed, starting more changes nothing the report cites,

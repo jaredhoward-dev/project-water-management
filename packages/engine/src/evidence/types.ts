@@ -21,7 +21,7 @@ import type { Band } from '../uncertainty/bands';
 import type { EnsembleSummary } from '../uncertainty/ensemble';
 import type { LicenceImpact } from '../views/licenceImpact';
 import type { YearClassMethod } from '../views/yearClasses';
-import type { DeclaredUncertaintyRule, OptionChange, ResolvedEnsembleOptions } from '../uncertainty/options';
+import type { DeclaredRuleScope, DeclaredUncertaintyRule, OptionChange, ResolvedEnsembleOptions } from '../uncertainty/options';
 import type { PairedSummary } from '../uncertainty/paired';
 import type { ApplicantPrompts } from './prompts';
 import type { LocalityGeometry, LocalityMapData } from '../geo/localityMap';
@@ -493,6 +493,12 @@ export interface EvidenceInput {
 	baselineEndorsement?: EvidenceEndorsement | null;
 	/** Every ensemble started on the baseline, and every paired ensemble on the application run, newest first. */
 	ensembles: { baseline: EvidenceEnsembleInput[]; paired: EvidenceEnsembleInput[] };
+	/**
+	 * The rain sources and observed records the declared rule's ensemble varies on the baseline run (declaredRuleScope
+	 * of its inputs; engine ≥ 1.123.2, ER-38): an ensemble that narrowed them is not on the rule, so not cited. Null or
+	 * absent when there is no rule or the run's inputs don't resolve it; they are then not compared.
+	 */
+	declaredScope?: DeclaredRuleScope | null;
 	/** diffInputs(baseline, application), with stored values; [] for baseline evidence. */
 	changes: InputChange[];
 	/** Revisions between the previous publication's run and the baseline (C20); null when there is no earlier publication. */

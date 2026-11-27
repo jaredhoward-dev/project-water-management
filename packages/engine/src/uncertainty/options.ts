@@ -237,13 +237,29 @@ export function declaredRuleText(v: unknown): string {
 }
 
 /**
+ * The rain sources and observed records the declared rule's own ensemble
+ * varies on the baseline run: what resolveEnsembleOptions gives the rule's
+ * request on that run's inputs (every rain source and record the run offers;
+ * uncertainty/ensemble.ts declaredRuleScope). An ensemble posted with fewer
+ * varies fewer things, so its band is narrower than the rule's (issue ER-38).
+ */
+export interface DeclaredRuleScope {
+	rainSources: readonly RainSource[];
+	records: readonly CalibrationFlowKind[];
+}
+
+/**
  * Where an ensemble's resolved options depart from the declared rule, as
  * rows `{ label, a: declared, b: the ensemble's }`; empty when it follows the
- * rule. The ensemble's own seed, records and rain sources are not part of the
- * rule (the database draws the seed; the records are the project's). The
- * parameters varied are: the rule's are the model's default free set.
+ * rule. The ensemble's own seed is not part of the rule (the database draws
+ * it). The parameters varied are: the rule's are the model's default free set.
+ * So, given `scope` (the rule's resolved on the baseline run, engine ≥
+ * 1.123.2, ER-38), are the rain sources and observed records: the rule's are
+ * every one the run offers, and an ensemble started through the API with
+ * fewer varies fewer things. Without `scope` they aren't compared (a caller
+ * that can't load the run's inputs).
  */
-export function declaredRuleMismatches(rule: DeclaredUncertaintyRule, o: ResolvedEnsembleOptions): OptionChange[] {
+export function declaredRuleMismatches(rule: DeclaredUncertaintyRule, o: ResolvedEnsembleOptions, scope?: DeclaredRuleScope | null): OptionChange[] {
 	const asRule: DeclaredUncertaintyRule = { members: o.members, bounds: o.bounds, panOffset: o.panOffset, thresholds: o.thresholds };
 	const rows: OptionChange[] = ruleRows.flatMap(([label, f]) => {
 		const a = f(rule);
@@ -257,6 +273,12 @@ export function declaredRuleMismatches(rule: DeclaredUncertaintyRule, o: Resolve
 		const want = specs.filter((s) => !s.fixedByDefault).map((s) => s.key).join(', ');
 		const got = (o.free ?? []).join(', ');
 		if (want !== got) rows.push({ label: 'Parameters varied', a: want, b: got });
+	}
+	if (scope) {
+		const rain = (x: readonly RainSource[]) => x.map((r) => RAIN_SOURCE_LABELS[r]).join(', ');
+		const rec = (x: readonly CalibrationFlowKind[]) => x.map((k) => RECORD_LABELS[k]).join(', ');
+		if (rain(scope.rainSources) !== rain(o.rainSources ?? [])) rows.push({ label: 'Rain sources', a: rain(scope.rainSources), b: rain(o.rainSources ?? []) });
+		if (rec(scope.records) !== rec(o.records ?? [])) rows.push({ label: 'Observed records', a: rec(scope.records), b: rec(o.records ?? []) });
 	}
 	return rows;
 }

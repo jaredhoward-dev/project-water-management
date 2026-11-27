@@ -47,6 +47,7 @@ import { defaultScale, latinHypercube, pickUnit, scaleUnit } from './sample';
 import {
 	CHIRPS_ONLY_MIN_COVERAGE,
 	COVERAGE_WARNING,
+	declaredRuleRequest,
 	ENSEMBLE_DEFAULTS,
 	ENSEMBLE_MEMBERS_MAX,
 	ENSEMBLE_MEMBERS_MIN,
@@ -59,6 +60,8 @@ import {
 	REJECT_LABELS,
 	WR2012_LEVELS,
 	type AcceptanceThresholds,
+	type DeclaredRuleScope,
+	type DeclaredUncertaintyRule,
 	type EnsembleDimension,
 	type EnsembleRequest,
 	type RainSource,
@@ -442,6 +445,21 @@ export function resolveEnsembleOptions(input: ModelInput, req: EnsembleRequest =
 		},
 		notes
 	};
+}
+
+/**
+ * The rain sources and records the declared rule's ensemble varies on `input`
+ * (the baseline run's inputs): the rule's request resolved there (ER-38,
+ * declaredRuleMismatches' scope). Null when the run can't resolve it (an
+ * ensemble couldn't run on it either).
+ */
+export function declaredRuleScope(input: ModelInput, rule: DeclaredUncertaintyRule): DeclaredRuleScope | null {
+	try {
+		const { options } = resolveEnsembleOptions(input, { ...declaredRuleRequest(rule), seed: 0 });
+		return { rainSources: options.rainSources, records: options.records };
+	} catch {
+		return null;
+	}
 }
 
 /** The members an ensemble runs: member 0 (the project's own) then the Latin hypercube. Deterministic for the options. */

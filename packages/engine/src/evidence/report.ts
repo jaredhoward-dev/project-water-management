@@ -30,7 +30,7 @@ import type { NetworkNode, ProjectModel, RunSummary } from '../project';
 import { canonicalJson } from '../manifest';
 import type { CumulativeReport } from '../scenario/cumulative';
 import { demandSourceShares, type DemandSourceShare } from '../network/demandSources';
-import { declaredRuleError, declaredRuleMismatches, type DeclaredUncertaintyRule } from '../uncertainty/options';
+import { declaredRuleError, declaredRuleMismatches, type DeclaredRuleScope, type DeclaredUncertaintyRule } from '../uncertainty/options';
 import { ENGINE_VERSION, ENSEMBLE_MEASURES_SINCE } from '../version';
 import { licenceImpactSection } from './impact';
 import { authorisedUnavailable } from './authorised';
@@ -126,10 +126,12 @@ const fitVersion = (run: EvidenceRunInput): string | null => ((headlineFitRecord
  * ensemble on the baseline that followed the declared rule. Not the newest or
  * the kindest: with the seed drawn by the database, citing the first one
  * leaves nothing to re-roll. Every other start is listed in the ledger.
+ * `scope` (EvidenceInput.declaredScope, ER-38): the rule's rain sources and
+ * records on the baseline run, so an ensemble that narrowed them isn't cited.
  */
-export function citedEnsemble(rows: readonly EvidenceEnsembleInput[], rule: DeclaredUncertaintyRule | null): EvidenceEnsembleInput | null {
+export function citedEnsemble(rows: readonly EvidenceEnsembleInput[], rule: DeclaredUncertaintyRule | null, scope?: DeclaredRuleScope | null): EvidenceEnsembleInput | null {
 	if (!rule) return null;
-	const ok = rows.filter((r) => r.baselineId === null && r.status === 'complete' && r.summary && declaredRuleMismatches(rule, r.options).length === 0);
+	const ok = rows.filter((r) => r.baselineId === null && r.status === 'complete' && r.summary && declaredRuleMismatches(rule, r.options, scope).length === 0);
 	return oldestFirst(ok)[0] ?? null;
 }
 
@@ -333,7 +335,7 @@ export function evidenceChecks(input: EvidenceInput): EvidenceCheck[] {
 		blocksIssue: true,
 		fix: 'An editor declares the rule under Model settings → Evidence, runs the model again and nominates that run.'
 	});
-	const cited = citedEnsemble(input.ensembles.baseline, rule);
+	const cited = citedEnsemble(input.ensembles.baseline, rule, input.declaredScope);
 	add({
 		id: 'citedEnsemble',
 		label: 'An ensemble on the declared rule is cited',
@@ -424,7 +426,7 @@ export function evidenceReport(input: EvidenceInput): EvidenceReport {
 	const a = input.application;
 	const checks = evidenceChecks(input);
 	const rule = declaredRuleOf(b);
-	const cited = citedEnsemble(input.ensembles.baseline, rule);
+	const cited = citedEnsemble(input.ensembles.baseline, rule, input.declaredScope);
 	const pairedRow = a ? citedPaired(input.ensembles.paired, cited) : null;
 	const paired = pairedRow?.paired ?? null;
 	const baseSum = cited?.summary ?? null;
@@ -445,7 +447,7 @@ export function evidenceReport(input: EvidenceInput): EvidenceReport {
 			seed: e.seed,
 			members: e.members,
 			accepted: e.accepted,
-			departsFromDeclared: rule ? declaredRuleMismatches(rule, e.options) : [],
+			departsFromDeclared: rule ? declaredRuleMismatches(rule, e.options, input.declaredScope) : [],
 			cited: e.id === cited?.id
 		}));
 
