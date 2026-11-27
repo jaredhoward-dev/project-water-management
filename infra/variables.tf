@@ -191,7 +191,7 @@ variable "feed_credential_private_key" {
 }
 
 variable "stripe_secret_key" {
-  description = "Stripe's API key for checkout and the Customer Portal (STRIPE_SECRET_KEY; backend/src/billing/provider/stripeApi.ts). The API only, in its runtime secret (secrets.tf), and only while billing_provider is stripe. sops key stripe_secret_key: a live restricted key (rk_live_…) with the permissions docs/billing.md lists. Empty (the default) while billing is manual (docs/deployment.md § Turning on Stripe)."
+  description = "Stripe's API key for checkout and the Customer Portal (STRIPE_SECRET_KEY; backend/src/billing/provider/stripeApi.ts). The API only, in its runtime secret (secrets.tf), and only while billing_provider is stripe. sops key stripe_secret_key: a live restricted key (rk_live_…) with the permissions docs/deployment.md § Turning on Stripe (step 2) lists. Empty (the default) while billing is manual (docs/deployment.md § Turning on Stripe)."
   type        = string
   default     = ""
   sensitive   = true

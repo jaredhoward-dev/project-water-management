@@ -481,10 +481,13 @@ export const SETTINGS: Record<string, Setting> = {
 		}
 	},
 	BILLING_ENFORCED: {
-		why: 'Whether plan limits refuse anything. Phase 1 is shadow mode: the code default (false) counts and shows usage and refuses nothing, and the API only reports the value.'
+		why: 'Whether plan limits refuse anything. Phase 1 is shadow mode: the code default (false) counts and shows usage and refuses nothing, and the API only reports the value.',
+		// Only the exact string "true" turns it on, so "True" or "1" would quietly mean off: refuse anything else (infra writes "true"/"false").
+		checks: { api: optional(oneOf('true', 'false')), worker: optional(oneOf('true', 'false')), assistant: optional(oneOf('true', 'false')) }
 	},
 	REVERSE_TRIAL: {
-		why: 'Whether a newly verified person gets the 14-day Pro reverse trial (billing/reverseTrial.ts, 342_reverse_trial). Only `true` with BILLING_ENFORCED `true` grants one; the code default (off) grants none and records no claim, and the API only reports the value.'
+		why: 'Whether a newly verified person gets the 14-day Pro reverse trial (billing/reverseTrial.ts, 342_reverse_trial). Only `true` with BILLING_ENFORCED `true` grants one; the code default (off) grants none and records no claim, and the API only reports the value.',
+		checks: { api: optional(oneOf('true', 'false')) }
 	},
 
 	// --- Background jobs -------------------------------------------------------------------

@@ -1298,7 +1298,7 @@ subscription) and nothing is deleted. The Plan page already reads
 `subscription.trialEnd` and shows "Trial ends 7 Dec 2026" for a trialing
 subscription (`components/billing/plan.ts` `subscriptionLine`).
 
-**The pricing page and the trial** (decided 2026-11-24). The public
+<a id="the-pricing-page-and-the-trial"></a>**The pricing page and the trial** (decided 2026-11-24). The public
 pricing page ([ui.md § Pricing page](./ui.md#pricing-page)) says "14 days
 of Pro free when you sign up, no card needed. Then Free, unless you choose
 a plan." on Pro, the number from `PLAN_FIGURES`' `trialDays`
