@@ -148,10 +148,11 @@ export function installLeaveGuard(): void {
 			return;
 		}
 		agreedHref = null;
-		const dropped = unsavedDroppedBy(page.url, to);
-		if (!dropped.length) return;
 		// Read before the cancel settles the goto, which forgets them.
 		const opts = !to ? undefined : nav.type === 'goto' ? gotoOptions.get(to.href) : nav.type === 'link' && lastLink?.href === to.href ? lastLink.opts : undefined;
+		// Only a goto's own `replace` counts as the app tidying its URL (unsaved.ts invalidFieldsLeave), not a link's.
+		const dropped = unsavedDroppedBy(page.url, to, undefined, { replace: nav.type === 'goto' && opts?.replace === true });
+		if (!dropped.length) return;
 		nav.cancel();
 		if (asking) return;
 		void ask(dropped, to).then((ok) => {

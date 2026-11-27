@@ -1292,7 +1292,10 @@ project details and the settings (the workspace page; the header's
 half-filled **Add a change** form or a typed but unsaved scenario rename,
 a name typed into the **New scenario** dialog, and a number field holding
 text it can't take ("fields that need fixing", a number or a day field: any change of page or tab
-drops it, since the field unmounts; a `#fragment` doesn't). A navigation that would
+drops it, since the field unmounts; a `#fragment` doesn't, and neither does the app tidying its own
+URL, a replacing goto that only drops query parameters on the same page and tab, such as a stale
+`node=` replaced out or the closed Data feeds card's `rain=` and `feed=`: those never ask,
+`lib/nav/unsaved.ts` `invalidFieldsLeave`). A navigation that would
 drop any of it (another page for the page-level work; another tab or
 scenario for a scenario's) is cancelled and the app's own dialog asks,
 naming what is unsaved and where the link goes: "You have unsaved changes

@@ -63,7 +63,7 @@
 	import Lazy from '#lib/components/common/Lazy.svelte';
 	import { prefetch } from '#lib/components/common/lazy.js';
 	import { provideUnsaved } from '#lib/components/common/chunkFailed.js';
-	import { guardUnsaved, listAnd } from '#lib/nav/unsaved.js';
+	import { guardUnsaved, invalidFieldsLeave, listAnd } from '#lib/nav/unsaved.js';
 	import { confirmDialog } from '#lib/components/common/confirm.svelte.js';
 	import { provideInvalidFields } from '#lib/components/common/invalidFields.svelte.js';
 	import type { PageDraft } from '#lib/components/model/pageDraft.js';
@@ -229,11 +229,12 @@
 		what: () => (fit.busy ? 'an automatic fit still running' : 'an automatic fit not yet applied to the form')
 	});
 	// A number field holding text it can't take (common/invalidFields) is gone with its page or its
-	// tab (the field unmounts), so any change of page or of the URL's query asks; a #fragment doesn't.
+	// tab (the field unmounts), so a change of page or of the URL's query asks; a #fragment doesn't, and
+	// neither does a replacing goto that only drops parameters on the same tab (lib/nav/unsaved.ts invalidFieldsLeave).
 	guardUnsaved({
 		dirty: () => invalidFields.count > 0,
 		what: 'fields that need fixing',
-		leaves: (from, to) => from.pathname !== to.pathname || from.search !== to.search
+		leaves: invalidFieldsLeave
 	});
 	// The save bar's other drafts besides the model (components/model/pageDraft.ts): the project
 	// details and the settings, each an adapter here and a step in saveAll.

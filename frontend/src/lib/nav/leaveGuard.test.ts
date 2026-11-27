@@ -24,7 +24,7 @@ vi.mock('#lib/components/common/confirm.svelte.js', () => ({ confirmDialog: h.co
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { confirmLeave, guardedGoto, installLeaveGuard, linkOptions, noteLinkClick, type LinkOptionSource } from './leaveGuard';
-import { registerUnsaved } from './unsaved';
+import { invalidFieldsLeave, onlyDropsParams, registerUnsaved } from './unsaved';
 
 function nav(to: string, extra: Partial<BeforeNavigate> = {}): BeforeNavigate & { cancel: ReturnType<typeof vi.fn> } {
 	return { from: null, to: { url: new URL(to) }, type: 'goto', willUnload: false, shallow: false, cancel: vi.fn(), complete: Promise.resolve(), ...extra } as unknown as BeforeNavigate & { cancel: ReturnType<typeof vi.fn> };
@@ -102,6 +102,63 @@ describe('the leave guard', () => {
 			const again = nav('https://app.test/projects/p1?tab=map');
 			h.handler!(again);
 			expect(again.cancel).not.toHaveBeenCalled();
+			expect(h.confirm).toHaveBeenCalledOnce();
+		});
+	});
+
+	describe('a replacing goto that only drops query parameters, with a bad value elsewhere on the tab', () => {
+		// The workspace's guard for a number field holding text it can't take (routes/projects/[id]/+page.svelte).
+		beforeEach(() => {
+			unregister();
+			unregister = registerUnsaved({ dirty: () => true, what: 'fields that need fixing', leaves: invalidFieldsLeave });
+			vi.mocked(goto).mockClear();
+		});
+		afterEach(() => {
+			h.url = new URL('https://app.test/projects/p1?tab=network');
+		});
+
+		it('lets a stale node= replaced out of the URL through, unasked', () => {
+			h.url = new URL('https://app.test/projects/p1?tab=network&layer=supply&node=gone');
+			void guardedGoto('/projects/p1?tab=network&layer=supply', { replace: true, reset: false });
+			const n = nav('https://app.test/projects/p1?tab=network&layer=supply');
+			h.handler!(n);
+			expect(n.cancel).not.toHaveBeenCalled();
+			expect(h.confirm).not.toHaveBeenCalled();
+		});
+
+		it('lets the closed Data feeds card drop rain= and feed=, unasked, so rain= never stays behind', () => {
+			h.url = new URL('https://app.test/projects/p1?tab=series&series=a&rain=units&feed=dws#data-feeds');
+			void guardedGoto('/projects/p1?tab=series&series=a#data-feeds', { replace: true, reset: false });
+			const n = nav('https://app.test/projects/p1?tab=series&series=a#data-feeds');
+			h.handler!(n);
+			expect(n.cancel).not.toHaveBeenCalled();
+			expect(h.confirm).not.toHaveBeenCalled();
+		});
+
+		it('positive control: a real navigation from the same URL still asks (another tab, a pushed goto, a link, a new parameter)', async () => {
+			// Its own URLs: a goto the mocked SvelteKit never finishes keeps its noted options for that href.
+			h.url = new URL('https://app.test/projects/p1?tab=network&layer=pos&node=gone');
+			const cases: [string, Partial<BeforeNavigate>, boolean][] = [
+				['https://app.test/projects/p1?tab=dams&layer=pos', {}, true], // another tab, even replacing
+				['https://app.test/projects/p1?tab=network&layer=pos', {}, false], // the same drop, but pushed: a step the person took
+				['https://app.test/projects/p1?tab=network&layer=pos', { type: 'link' } as Partial<BeforeNavigate>, false], // a link click
+				['https://app.test/projects/p1?tab=network&layer=pos&node=n2', {}, true], // a value changed, not only dropped
+				['https://app.test/teams', {}, true] // another page
+			];
+			for (const [to, extra, replace] of cases) {
+				h.confirm.mockClear();
+				if (replace) void guardedGoto(to, { replace: true });
+				const n = nav(to, extra);
+				h.handler!(n);
+				expect(n.cancel, to).toHaveBeenCalledOnce();
+				await vi.waitFor(() => expect(h.confirm).toHaveBeenCalledOnce());
+			}
+		});
+
+		it('still asks before a URL-backed sheet shuts (confirmLeave carries no replace)', async () => {
+			h.url = new URL('https://app.test/projects/p1?tab=network&edit=n1&node=n1');
+			h.confirm.mockResolvedValue(false);
+			expect(await confirmLeave('/projects/p1?tab=network&node=n1')).toBe(false);
 			expect(h.confirm).toHaveBeenCalledOnce();
 		});
 	});
@@ -259,5 +316,25 @@ describe('no SvelteKit 2 link options left in src', () => {
 	it('no source file uses the old noscroll or keepfocus link option', () => {
 		const old = [...sources(SRC)].filter((p) => OLD.test(readFileSync(p, 'utf8'))).map((p) => relative(SRC, p));
 		expect(old).toEqual([]);
+	});
+});
+
+describe('onlyDropsParams and invalidFieldsLeave', () => {
+	const u = (s: string) => new URL(s, 'https://app.test');
+	it('is true only for the same page and tab with parameters removed and none changed or added', () => {
+		expect(onlyDropsParams(u('/projects/p1?tab=series&rain=units&series=a'), u('/projects/p1?tab=series&series=a'))).toBe(true);
+		expect(onlyDropsParams(u('/projects/p1?tab=series&rain=units'), u('/projects/p1?tab=series&rain=units'))).toBe(false);
+		expect(onlyDropsParams(u('/projects/p1?tab=series&rain=units'), u('/projects/p1?tab=network'))).toBe(false);
+		expect(onlyDropsParams(u('/projects/p1?tab=series&rain=units'), u('/projects/p1?rain=units'))).toBe(false);
+		expect(onlyDropsParams(u('/projects/p1?tab=series&series=a&rain=units'), u('/projects/p1?tab=series&series=b'))).toBe(false);
+		expect(onlyDropsParams(u('/projects/p1?tab=series&rain=units'), u('/projects/p2?tab=series'))).toBe(false);
+	});
+	it('lets only a replacing drop through; any other query change or a page change leaves', () => {
+		const from = u('/projects/p1?tab=network&node=gone');
+		expect(invalidFieldsLeave(from, u('/projects/p1?tab=network'), { replace: true })).toBe(false);
+		expect(invalidFieldsLeave(from, u('/projects/p1?tab=network'))).toBe(true);
+		expect(invalidFieldsLeave(from, u('/projects/p1?tab=crops'), { replace: true })).toBe(true);
+		expect(invalidFieldsLeave(from, u('/teams'), { replace: true })).toBe(true);
+		expect(invalidFieldsLeave(from, u('/projects/p1?tab=network&node=gone#x'))).toBe(false);
 	});
 });
