@@ -7,7 +7,7 @@
 // Synthetic data only.
 import type { Page } from '@playwright/test';
 import { createProject, putModel, sampleModel, seedRunnableProject } from '../support/api.ts';
-import { answerConfirm } from '../support/confirm.ts';
+import { answerConfirm, answerConfirmThenAsk } from '../support/confirm.ts';
 import { expect, test } from '../support/fixtures.ts';
 import { historyDetail, historyEntries, openHistory, seedLongHistory } from '../support/history.ts';
 import { openNodeForm, openNodeTable } from '../support/network.ts';
@@ -158,7 +158,7 @@ test('removing a node from its sheet asks the leave guard too: Stay keeps the no
 
 	// The remove question, then the leave guard's: Stay removes nothing.
 	await sheet.getByRole('button', { name: 'Remove Upper farm' }).click();
-	await answerConfirm(page, true, 'Remove “Upper farm”?');
+	await answerConfirmThenAsk(page, true, 'Remove “Upper farm”?');
 	await answerConfirm(page, false, QUESTION);
 	await expect(sheet).toBeVisible();
 	await expect(sheet.getByLabel('Initial (%)')).toHaveValue('150');
@@ -167,7 +167,7 @@ test('removing a node from its sheet asks the leave guard too: Stay keeps the no
 
 	// Leave: the node goes, and the sheet with `edit=` and its `node=` pick, in place.
 	await sheet.getByRole('button', { name: 'Remove Upper farm' }).click();
-	await answerConfirm(page, true, 'Remove “Upper farm”?');
+	await answerConfirmThenAsk(page, true, 'Remove “Upper farm”?');
 	await answerConfirm(page, true, QUESTION);
 	await expect(sheet).toBeHidden();
 	await urlSettled(page);
@@ -179,14 +179,17 @@ test('removing a node from its sheet asks the leave guard too: Stay keeps the no
 test('a link with data-sveltekit-reset="false" keeps the scroll and the focus (History’s Older)', async ({ page, owner }) => {
 	void owner;
 	test.setTimeout(90_000);
-	// Narrower than the card-fills-the-window layout (1100 × 620), so the page itself scrolls.
-	await page.setViewportSize({ width: 1024, height: 600 });
+	// Wide enough for the list beside the picked change (a 60rem column), but shorter than the
+	// card-fills-the-window layout (1100 × 620), so the page itself scrolls.
+	await page.setViewportSize({ width: 1280, height: 600 });
 	const p = await seedLongHistory(page.request, 'Reset false', 12);
 	await openHistory(page, p.id);
 	await historyEntries(page).nth(2).getByRole('link').click();
 	await expect(page).toHaveURL(/entry=revision\d+/);
 	const older = historyDetail(page).getByRole('link', { name: 'Older', exact: true });
-	await older.scrollIntoViewIfNeeded();
+	// Older sits near the top of the detail, in view on load: scroll the page until it is 150 px from the top, so
+	// the page is scrolled and Older is still on screen to click without Playwright scrolling to it.
+	await older.evaluate((el) => window.scrollBy(0, el.getBoundingClientRect().top - 150));
 	// The precondition: the page is scrolled, so a reset would move it.
 	await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
 	const before = await page.evaluate(() => window.scrollY);

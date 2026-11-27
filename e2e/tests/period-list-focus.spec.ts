@@ -11,6 +11,7 @@
 // deleted rain series goes with its last period, add button and all: the
 // group's heading takes the focus. Synthetic data.
 import { createProject, seedRunnableProject, updateSettings } from '../support/api.ts';
+import { API_URL, WEB_URL } from '../support/env.ts';
 import { expect, test } from '../support/fixtures.ts';
 import { openCalibration, openFold, openSettings } from '../support/settings.ts';
 
@@ -91,8 +92,13 @@ test('a rain record’s unreliable periods move the focus into a new row and bac
 test('a deleted rain series’ last period removed puts the focus on the group’s heading', async ({ page, owner }) => {
 	void owner;
 	const project = await seedRunnableProject(page.request, 'Period focus deleted series');
-	// A series id no record has: the list shows it as a deleted series, so its periods can still be removed.
-	await updateSettings(page.request, project.id, { rainStations: { unreliable: { '00000000-0000-0000-0000-00000000dead': [['2021-01-01', '2021-01-31']] } } });
+	// Periods on the rain record, then the record deleted: the list shows it as a deleted series, so its periods
+	// can still be removed. (The API refuses periods on an id the project has never had, rainStationSettings.ts.)
+	const listed = await page.request.get(`${API_URL}/projects/${project.id}/series`);
+	expect(listed.status()).toBe(200);
+	const rain = ((await listed.json()) as { series: { id: string; kind: string }[] }).series.find((s) => s.kind === 'rain_catchment_mm')!;
+	await updateSettings(page.request, project.id, { rainStations: { unreliable: { [rain.id]: [['2021-01-01', '2021-01-31']] } } });
+	expect((await page.request.delete(`${API_URL}/projects/${project.id}/series/${rain.id}`, { headers: { Origin: WEB_URL } })).status()).toBe(204);
 	await openSettings(page, project.id);
 	await openFold(page, 'rain-defaults');
 	const group = page.getByRole('group', { name: /^Unreliable periods of a rain record/ });

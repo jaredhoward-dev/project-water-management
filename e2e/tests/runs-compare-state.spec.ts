@@ -168,7 +168,7 @@ test('Back on Compare runs drops a project picked for a card that had no run to 
 	await expect(runSelect(page, 'What-if 1')).toHaveValue(second);
 	// A step in history: what-if 1 becomes the baseline's run.
 	await runSelect(page, 'What-if 1').selectOption(first);
-	await expect(page).toHaveURL(new RegExp(`b=${project.id}%3A${first}`));
+	await expect.poll(() => new URL(page.url()).searchParams.get('b')).toBe(`${project.id}:${first}`);
 
 	// What-if 1 picks a project with no runs: the card waits, the URL unchanged.
 	const whatIfProject = runCard(page, 'What-if 1').getByRole('combobox', { name: 'Project' });
@@ -176,9 +176,10 @@ test('Back on Compare runs drops a project picked for a card that had no run to 
 	await expect(runSelect(page, 'What-if 1')).toBeDisabled();
 	await expect(runSelect(page, 'What-if 1').getByRole('option', { name: 'This project has no runs' })).toBeAttached();
 
-	// Back to the first pair: the card names the URL's project and run, not the project left waiting.
+	// Back to the first pair: the card names the URL's project and run, not the project left waiting. (Read
+	// decoded: the first address has a raw `:`, the ones the page writes `%3A`.)
 	await page.goBack();
-	await expect(page).toHaveURL(new RegExp(`b=${project.id}%3A${second}`));
+	await expect.poll(() => new URL(page.url()).searchParams.get('b')).toBe(`${project.id}:${second}`);
 	await expect(whatIfProject).toHaveValue(project.id);
 	await expect(runSelect(page, 'What-if 1')).toBeEnabled();
 	await expect(runSelect(page, 'What-if 1')).toHaveValue(second);
@@ -198,7 +199,7 @@ test('while a card waits on a project with no runs, the comparison says it is st
 	await runCard(page, 'What-if 1').getByRole('combobox', { name: 'Project' }).selectOption(empty.id);
 	await expect(runSelect(page, 'What-if 1')).toBeDisabled();
 	// The URL keeps the pair, and the comparison below is marked as of it, not of the card's empty project.
-	await expect(page).toHaveURL(new RegExp(`b=${project.id}%3A${second}`));
+	await expect.poll(() => new URL(page.url()).searchParams.get('b')).toBe(`${project.id}:${second}`);
 	await expect(page.getByTestId('compare-stale')).toHaveText(
 		"What-if 1's project, Compare stale empty, has no runs, so the comparison below is still of the runs chosen before. Pick a project with runs, or go Back."
 	);

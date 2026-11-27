@@ -41,8 +41,8 @@ test('a dead or cut-short share link offers the home page, signed out on a phone
 	const stranger = await browser.newContext({ viewport: PHONE, locale: 'en-ZA', timezoneId: 'UTC' });
 	const shared = await stranger.newPage();
 
-	// A token no link has: dead.
-	await shared.goto('/share#t=not-a-real-token');
+	// A well-formed token no link has: dead. (A malformed one reads as cut short, readShareToken.)
+	await shared.goto(`/share#t=${'d'.repeat(43)}`);
 	await expect(shared.getByRole('heading', { level: 1, name: 'This link doesn’t open anything' })).toBeVisible();
 	await expect(shared.getByRole('alert')).toHaveText(/^This link has expired or was withdrawn\./);
 	await expect(shared.getByRole('link', { name: 'Go to the home page' })).toHaveAttribute('href', /\/welcome$/);

@@ -72,6 +72,8 @@ test('columns hidden in the preview belong to their view: another view shows its
 	await openData(page, project.id);
 	await page.getByRole('button', { name: 'Preview all data' }).click();
 	const dialog = page.getByRole('dialog');
+	// The column checkboxes are in the Columns disclosure, closed until opened; it stays open across views.
+	await dialog.locator('summary', { hasText: 'Columns' }).click();
 	const logger = dialog.getByRole('checkbox', { name: /Logger L1/ }).first();
 	await expect(logger).toBeChecked();
 	await logger.uncheck();
