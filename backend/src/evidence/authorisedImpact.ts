@@ -53,17 +53,29 @@ import { resolveOutcomes } from '../projects/outcomeSettings.js';
 import { checkScenario, loadBaseInput, type ScenarioOrigin } from '../scenarios/execute.js';
 import { allocationHolderKeys, allocationKindsAsAtRun } from '../allocations/holders.js';
 import { bundleHash } from './bundle.js';
+import { logEvent } from '../logging/logEvent.js';
+import { safeError, stackFrames } from '../logging/safeError.js';
 import { z } from 'zod';
 
 /** The registered volumes a full-allocation run of `input` holds holders to: those that take (not s21b storage only). */
 const takes = authorisedTakes;
 
-/** The engine's own words, or a plain line: never DB text. */
-function engineRun(input: ModelInput, which: string): ModelOutput {
+/** The full-allocation runs an editor asks for: the baseline, then the application. */
+export type FullAllocationRun = 'baseline' | 'application';
+
+/**
+ * Run one of the pair. A failure answers a fixed line, never the thrown
+ * error's text (CLAUDE.md rule 6: an engine or runtime message can carry
+ * internals, a node's values or, through a helper, database text). Where it
+ * failed goes to the log as one line (`authorised_impact_run_failed`): the
+ * error's name, code and stack frames, never its message (logging/safeError.ts).
+ */
+export function engineRun(input: ModelInput, which: FullAllocationRun): ModelOutput {
 	try {
 		return runModelChecked(input);
 	} catch (err) {
-		throw new ApiError(409, `the full-allocation ${which} couldn’t be run: ${(err as Error).message}`);
+		logEvent('warn', { event: 'authorised_impact_run_failed', which, ...safeError(err), at: stackFrames(err) });
+		throw new ApiError(409, `the full-allocation ${which} couldn’t be run: check the model and the application run, then try again`);
 	}
 }
 
