@@ -159,8 +159,16 @@ async function deliver(c: Claimed, r: PlanNoticeResult): Promise<void> {
 	r.sent++;
 }
 
-/** Queue what is due, then send every pending email. Every transport's tick ends here (jobs/runner.ts). */
-export async function runPlanNotices({ limit = 100 }: { limit?: number } = {}): Promise<PlanNoticeResult> {
+/**
+ * The emails one tick sends at most, as the errata emails (errata/notices.ts). The first tick after enforcement is
+ * switched on queues a grace email for every account whose plan ended in shadow mode at once; the rest stay pending,
+ * in queue order, and drain 100 a tick (every 5 minutes). The grace's dates are fixed by over_free_since, so a later
+ * send says the same thing.
+ */
+export const PLAN_NOTICES_PER_TICK = 100;
+
+/** Queue what is due, then send up to `limit` pending emails. Every transport's tick ends here (jobs/runner.ts). */
+export async function runPlanNotices({ limit = PLAN_NOTICES_PER_TICK }: { limit?: number } = {}): Promise<PlanNoticeResult> {
 	const r: PlanNoticeResult = { queued: 0, sent: 0, skipped: 0, failed: 0 };
 	try {
 		r.queued = await withoutUser(async (db) => (await db.query<{ n: number }>('SELECT app_billing_notice_queue() AS n')).rows[0]?.n ?? 0);

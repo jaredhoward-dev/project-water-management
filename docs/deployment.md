@@ -3586,7 +3586,23 @@ secret is involved: both switches are plain variables in
    BILLING_ENFORCED](./billing.md#billing_enforced)). Read the billing report
    first (`billing-admin.yml`, `billing-report`) for the accounts already past
    a limit, and grant or email them before the switch ([billing.md § Staff
-   grants](./billing.md#staff-grants)). No grace clock runs in shadow mode,
+   grants](./billing.md#staff-grants)). Check, in that report:
+   - **Accounts past Free's live catchments with no live plan.** Each
+     `plan ended, no grace yet` line is an account that gets its grace email
+     at the first tick after the switch and pauses that many catchments 14
+     days later (a staff grant or a trial that ended in shadow mode); grant
+     the ones that should keep everything. Each `never had a plan` line pauses
+     nothing, but can't switch a further catchment live once it is on.
+   - **Teams over their paid editor seats.** They keep every member's access,
+     but no one can be made an editor (`402 plan_limit`) until they buy seats
+     or make editors viewers. `since before it was recorded` is a team that
+     went over before the seat marker existed.
+   - **The verified-email gate** has no line before the switch (it counts
+     only refusals): a Free member with an unconfirmed or temporary-mail
+     address keeps the feeds already on, but is refused a new feed and the
+     assistant (`403 email_unverified` / `email_disposable`), worded in the
+     panel, not on the Plan page.
+   Rehearsed end to end by `backend/src/billing/turnOn.db.test.ts`. No grace clock runs in shadow mode,
    so nothing needs resetting: an account whose plan already ended past
    Free's live catchments starts its 14-day grace, with its grace email, at
    the first worker tick after the switch, and nothing pauses before those
@@ -3616,7 +3632,10 @@ secret is involved: both switches are plain variables in
 5. **Check it.** `GET /api/account/plan` (signed in, from the browser's
    network tab) answers `"enforced": true`; with the trial, a newly verified
    test account's plan answers its reverse trial (`subscription.reverseTrial`
-   true), and the next billing report counts the trial.
+   true), and the next billing report counts the trial. After the first
+   tick (5 minutes), the report's `plan ended, no grace yet` lines have become
+   `in its grace since …, pauses N from <date>`, and each of those owners
+   has one grace email in `billing_notice` (kind `grace`, status `sent`).
 
 To turn either off: set it back to `false` (the trial first, or both
 together) and apply; with the trial, `gh variable delete

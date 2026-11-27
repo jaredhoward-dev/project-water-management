@@ -404,8 +404,34 @@ export interface OverSeatsRow {
 	teamId: string;
 	seats: number;
 	editors: number;
-	since: string;
+	/** Null when no marker was ever written (a team that went over before 403/404 and hasn't changed since). */
+	since: string | null;
 }
+
+/**
+ * An account past Free's live catchments with no live plan (341's pause; round 2026-11-28, the enforcement
+ * rehearsal): who will pause and when. Ids and numbers only. `state`:
+ *  - `never_paid`: never had a plan, so nothing pauses (its extra live catchments predate enforcement), but no
+ *    further catchment can go live once limits are enforced;
+ *  - `grace_at_switch`: a plan ended with no grace running (shadow mode, 409): the 14 days, and the grace email,
+ *    start at the first worker tick with BILLING_ENFORCED on;
+ *  - `grace`: the 14 days are running; `pausesFrom` is when the tick pauses the extra catchments;
+ *  - `paused`: the pause has landed on `paused` catchments.
+ */
+export interface PlanPauseRow {
+	accountId: string;
+	kind: 'user' | 'team';
+	live: number;
+	limit: number;
+	state: 'never_paid' | 'grace_at_switch' | 'grace' | 'paused';
+	overFreeSince: string | null;
+	pausesFrom: string | null;
+	paused: number;
+	/** The owner chose the one to keep (345); else the most recently active stays live. */
+	keptChosen: boolean;
+}
+
+const PLAN_PAUSE_ORDER: Record<PlanPauseRow['state'], number> = { paused: 0, grace: 1, grace_at_switch: 2, never_paid: 3 };
 
 /**
  * An open price conflict (406, issue #928): a subscription event refused because its price wasn't the plan's. Not
@@ -446,6 +472,8 @@ export interface Report {
 	overSeats: OverSeatsRow[];
 	/** Open price conflicts, whatever the month (406), oldest first. */
 	billingConflicts: OpenConflict[];
+	/** Accounts past Free's live catchments with no live plan, today: paused first, then by pause date. */
+	planPauses: PlanPauseRow[];
 	notYetMeasurable: typeof NOT_YET_MEASURABLE;
 }
 
@@ -459,7 +487,8 @@ export function buildReport(
 	trials: ReverseTrialRow[] = [],
 	orphans: OrphanPendingRow[] = [],
 	overSeats: OverSeatsRow[] = [],
-	conflicts: OpenConflict[] = []
+	conflicts: OpenConflict[] = [],
+	planPauses: PlanPauseRow[] = []
 ): Report {
 	return {
 		month,
@@ -474,8 +503,13 @@ export function buildReport(
 		gateRefusals: gateRefusals(refusals),
 		reverseTrial: reverseTrialToPaid(trials, now),
 		staleOrphans: staleOrphans(orphans, now),
-		overSeats: [...overSeats].sort((a, b) => a.since.localeCompare(b.since) || a.accountId.localeCompare(b.accountId)),
+		// Unrecorded (null) first: those have been over the longest, since before the marker existed.
+		overSeats: [...overSeats].sort((a, b) => (a.since ?? '').localeCompare(b.since ?? '') || a.accountId.localeCompare(b.accountId)),
 		billingConflicts: conflicts,
+		planPauses: [...planPauses].sort(
+			(a, b) =>
+				PLAN_PAUSE_ORDER[a.state] - PLAN_PAUSE_ORDER[b.state] || (a.pausesFrom ?? '').localeCompare(b.pausesFrom ?? '') || a.accountId.localeCompare(b.accountId)
+		),
 		notYetMeasurable: NOT_YET_MEASURABLE
 	};
 }
@@ -518,7 +552,23 @@ export function formatReport(r: Report, showEmails: boolean): string {
 	if (r.overSeats.length === 0) out.push('Teams over their paid editor seats: none', '');
 	else {
 		out.push(`Teams over their paid editor seats: ${r.overSeats.length} (new editors refused until they add seats or make editors viewers)`);
-		for (const o of r.overSeats) out.push(`  account ${o.accountId}  team ${o.teamId}  ${o.editors} editors on ${o.seats} seats  since ${o.since}`);
+		for (const o of r.overSeats)
+			out.push(`  account ${o.accountId}  team ${o.teamId}  ${o.editors} editors on ${o.seats} seats  since ${o.since ?? 'before it was recorded (no marker)'}`);
+		out.push('');
+	}
+	// Who will pause and when (341, 409): read it before switching BILLING_ENFORCED on (deployment.md § Turning on enforcement).
+	if (r.planPauses.length === 0) out.push("Accounts past Free's live catchments with no live plan: none", '');
+	else {
+		out.push(`Accounts past Free's live catchments with no live plan: ${r.planPauses.length} (who will pause and when; nothing is deleted)`);
+		for (const p of r.planPauses) {
+			const head = `  account ${p.accountId}  ${p.kind}  ${p.live} live of ${p.limit}`;
+			const kept = p.keptChosen ? 'the owner chose the one to keep' : 'the most recently active stays live';
+			if (p.state === 'paused') out.push(`${head}  PAUSED ${p.paused} since the grace ended ${p.pausesFrom}  (${kept})`);
+			else if (p.state === 'grace') out.push(`${head}  in its grace since ${p.overFreeSince}, pauses ${p.live - p.limit} from ${p.pausesFrom}  (${kept})`);
+			else if (p.state === 'grace_at_switch')
+				out.push(`${head}  plan ended, no grace yet: the 14 days and the grace email start at the first enforced tick, then ${p.live - p.limit} pause  (${kept})`);
+			else out.push(`${head}  never had a plan: nothing pauses; with limits enforced no further catchment goes live`);
+		}
 		out.push('');
 	}
 	const a = r.activation;

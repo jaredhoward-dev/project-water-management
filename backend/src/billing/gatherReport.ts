@@ -1,11 +1,11 @@
 // The billing metrics report's rows (325_billing_metrics's owner-only
-// functions, 338's live count, 342's reverse trials in billing_grant_log, 352's orphans still pending, 403's teams over their seats) on a schema-owner connection, built into the report by
+// functions, 338's live count, 342's reverse trials in billing_grant_log, 352's orphans still pending, 403's teams over their seats, 341's accounts that will pause) on a schema-owner connection, built into the report by
 // metrics.ts (issue #641; docs/billing.md § Metrics and the abuse report).
 // Two callers: the local script (scripts/billing-report.ts) and the migrate
 // Lambda's billing-report action (ops/ownerActions.ts), which answers with
 // redact(report) only. No dotenv here: the migrate Lambda bundles this module.
 import type pg from 'pg';
-import { buildReport, type AccountRow, type GateRefusalRow, type OpenConflict, type OrphanPendingRow, type OverSeatsRow, type PersonRow, type PlanLimits, type Report, type ReverseTrialRow } from './metrics.js';
+import { buildReport, type AccountRow, type GateRefusalRow, type OpenConflict, type OrphanPendingRow, type OverSeatsRow, type PersonRow, type PlanPauseRow, type PlanLimits, type Report, type ReverseTrialRow } from './metrics.js';
 
 /** The month's report (YYYY-MM, or null for the current SAST month), addresses included: redact before it leaves the caller. */
 export async function gatherReportOn(client: pg.ClientBase, month: string | null, now = new Date()): Promise<Report> {
@@ -74,9 +74,11 @@ export async function gatherReportOn(client: pg.ClientBase, month: string | null
 			`SELECT provider, event_id, type, received_at FROM billing_event WHERE outcome = 'orphan_pending' ORDER BY received_at`
 		)
 	).rows.map((r): OrphanPendingRow => ({ provider: r.provider, eventId: r.event_id, type: r.type, receivedAt: r.received_at }));
-	// Teams over their paid seats today (403's over_seats_since, recounted now so a stale marker never lists): ids and numbers only.
+	// Teams over their paid seats today, recounted now (as app_account_plan's team.overSeats is), with 403's
+	// over_seats_since when it was recorded: a stale marker never lists, and a team that went over before 403/404
+	// wrote markers (and hasn't changed since) still does, its since null (round 2026-11-28). Ids and numbers only.
 	const overSeats = (
-		await client.query<{ account_id: string; team_id: string; seats: string; editors: string; since: Date }>(
+		await client.query<{ account_id: string; team_id: string; seats: string; editors: string; since: Date | null }>(
 			`SELECT * FROM (
 			   SELECT b.id AS account_id, b.team_id, b.over_seats_since AS since,
 			          greatest(coalesce((pl.limits ->> 'seats_included')::bigint, 1), coalesce(s.seats, 0)) AS seats,
@@ -84,10 +86,10 @@ export async function gatherReportOn(client: pg.ClientBase, month: string | null
 			   FROM billing_account b
 			   JOIN subscription s ON s.billing_account_id = b.id AND s.status IN ('trialing', 'active', 'past_due') AND s.plan_code = 'team'
 			   JOIN plan pl ON pl.code = s.plan_code
-			   WHERE b.over_seats_since IS NOT NULL AND b.team_id IS NOT NULL
+			   WHERE b.team_id IS NOT NULL
 			 ) o WHERE o.editors > o.seats`
 		)
-	).rows.map((r): OverSeatsRow => ({ accountId: r.account_id, teamId: r.team_id, seats: Number(r.seats), editors: Number(r.editors), since: r.since.toISOString() }));
+	).rows.map((r): OverSeatsRow => ({ accountId: r.account_id, teamId: r.team_id, seats: Number(r.seats), editors: Number(r.editors), since: r.since?.toISOString() ?? null }));
 	// Open price conflicts (406), whatever the month: billing_conflict is owner-only and holds ids and amounts, no person.
 	const conflicts = (
 		await client.query<{
@@ -116,5 +118,29 @@ export async function gatherReportOn(client: pg.ClientBase, month: string | null
 			createdAt: r.created_at.toISOString()
 		})
 	);
-	return buildReport(first.slice(0, 7), now, accounts, people, limits, refusals, trials, orphans, overSeats, conflicts);
+	// Who will pause and when (341, 409): every account past Free's live catchments with no live plan, today. Its
+	// grace from over_free_since (null in shadow mode, where no clock runs), the catchments already paused, and
+	// whether the owner chose the one to keep (345). Ids and numbers only.
+	const liveLimit = typeof limits.live_catchments === 'number' ? limits.live_catchments : null;
+	const pastFree = liveLimit === null ? [] : [...live].filter(([, n]) => n > liveLimit).map(([id]) => id);
+	const planPauses = (
+		await client.query<{ account_id: string; team: boolean; had_plan: boolean; since: Date | null; pauses_from: Date | null; paused: string; kept: boolean }>(
+			`SELECT b.id AS account_id, b.team_id IS NOT NULL AS team, b.over_free_since AS since,
+			        b.over_free_since + interval '14 days' AS pauses_from, b.kept_project_id IS NOT NULL AS kept,
+			        EXISTS (SELECT 1 FROM subscription s WHERE s.billing_account_id = b.id) AS had_plan,
+			        (SELECT count(*) FROM project_plan_pause pp JOIN project p ON p.id = pp.project_id WHERE p.billing_account_id = b.id) AS paused
+			 FROM billing_account b
+			 WHERE b.id = ANY($1::uuid[])
+			   AND NOT EXISTS (SELECT 1 FROM subscription s WHERE s.billing_account_id = b.id AND s.status IN ('trialing', 'active', 'past_due'))`,
+			[pastFree]
+		)
+	).rows.map((r): PlanPauseRow => {
+		const paused = Number(r.paused);
+		const state: PlanPauseRow['state'] = !r.had_plan ? 'never_paid' : paused > 0 ? 'paused' : r.since ? 'grace' : 'grace_at_switch';
+		return {
+			accountId: r.account_id, kind: r.team ? 'team' : 'user', live: live.get(r.account_id) ?? 0, limit: liveLimit!, state,
+			overFreeSince: r.since?.toISOString() ?? null, pausesFrom: r.pauses_from?.toISOString() ?? null, paused, keptChosen: r.kept
+		};
+	});
+	return buildReport(first.slice(0, 7), now, accounts, people, limits, refusals, trials, orphans, overSeats, conflicts, planPauses);
 }
