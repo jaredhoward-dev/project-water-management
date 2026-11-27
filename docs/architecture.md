@@ -2985,7 +2985,8 @@ worker tick: the status, then each unit due by its load mark (≤ 200 a tick, ol
 - **What the worker hands over.** Ids and geometry only: a unit's key is its
   node id, its parcels one MultiPolygon, its land cover a list of
   `[row, col, share]` cells (the default dataset's, real before synthetic,
-  as the proposals choose; at most 40 000 cells and a 1° box, else none).
+  as the proposals choose; at most 40 000 cells and a 1° box, else none;
+  none, without a lookup, for parcels with no vertex).
   No name, project or person crosses the bucket. The worker reads the
   parcels and the cells through `SECURITY DEFINER` functions (281), since it
   runs with no user and both tables' policies need one. The list is written

@@ -104,9 +104,15 @@ export function parcelsBox(p: ParcelsGeometry): [number, number, number, number]
 	return [w, s, e, n];
 }
 
-/** The cropland under a unit's parcels, or undefined when none is loaded there, the box passes 1°, or it holds more than MAX_CROPLAND_CELLS cells. */
+/**
+ * The cropland under a unit's parcels, or undefined when none is loaded there, the box passes 1°, it holds more than
+ * MAX_CROPLAND_CELLS cells, or the parcels have no box (no vertex: parcelsBox gives ±Infinity, which passed the 1°
+ * check, since −∞ ≤ 1, and was sent to the query).
+ */
 export async function croplandFor(db: Db, parcels: ParcelsGeometry): Promise<WantedCropland | undefined> {
-	const [w, s, e, n] = parcelsBox(parcels);
+	const box = parcelsBox(parcels);
+	if (!box.every(Number.isFinite)) return undefined;
+	const [w, s, e, n] = box;
 	if (!(e - w <= 1 && n - s <= 1)) return undefined;
 	const { rows } = await db.query<{ dataset: string; cell_deg: number; row_idx: number; col_idx: number; fraction: number }>(
 		'SELECT dataset, cell_deg, row_idx, col_idx, fraction FROM app_et_cropland($1, $2, $3, $4)',
