@@ -381,3 +381,63 @@ describe('403: a team’s deletion and a webhook on its account take their locks
 		}
 	}, 120_000);
 });
+
+describe('403: a person’s deletion and a webhook on their own account take their locks in one order', () => {
+	// The deletion path, in order: the DELETE locks the app_user row; app_user_pseudonymise (383) rewrites audit events,
+	// invites, reports, ensembles and draft applications, none of which a billing writer locks; 364's
+	// assistant_lock_account_first then locks the person's billing_account row, and 403 has it take the account's
+	// billing lock first; the cascades (the account and its subscriptions, assistant_usage's user, the projects' account
+	// set to null; here its subscription's delete) take 361's counter lock, and no later billing lock (403's triggers skip an account already deleted).
+	// So the order is billing lock, account row, counter lock: app_billing_apply's. Before 403 the deletion took no
+	// billing lock at all (row, then counter: still app_billing_apply's order without its first step), so this path
+	// could not deadlock even then; this test pins it, with a third session holding each lock in turn until both are
+	// queued behind it.
+	it('a subscription event and the person’s deletion at once both complete, with no deadlock (40P01)', async () => {
+		vi.stubEnv('BILLING_PROVIDER', 'mock');
+		vi.stubEnv('BILLING_WEBHOOK_SECRET', SECRET);
+		for (const counter of [false, true]) {
+			const person = await signUp(counter ? 'DeleteMeCounter' : 'DeleteMeBilling');
+			const account = ((await asOwner(`SELECT billing_account_ensure('user', $1) AS id`, [person.id])) as { id: string }[])[0]!.id;
+			const subRef = `sub_mock_${crypto.randomUUID().replaceAll('-', '')}`;
+			const now = new Date();
+			const end = new Date(now.getTime() + 30 * 86_400_000);
+			await asOwner(`INSERT INTO subscription (billing_account_id, plan_code, status, provider, external_ref, period_start, period_end) VALUES ($1, 'pro', 'active', 'mock', $2, $3, $4)`, [account, subRef, now, end]);
+			const sub = { planCode: 'pro', status: 'past_due', periodStart: now.toISOString(), periodEnd: end.toISOString(), cancelAtPeriodEnd: false };
+			const { body, signature } = signedDelivery(SECRET, seatsChangedEvent(account, subRef, sub, 1, 1));
+			const [blocker, deleter] = await Promise.all([ownerClient(), ownerClient()]);
+			try {
+				await blocker.query('BEGIN');
+				const deliver = () => app.request('/billing/webhook/mock', { method: 'POST', headers: { 'content-type': 'application/json', 'stripe-signature': signature }, body });
+				const deleteNow = () => deleter.query('DELETE FROM app_user WHERE id = $1', [person.id]);
+				let del: Promise<unknown>;
+				let hook: Promise<Response> | Response;
+				if (counter) {
+					// The counter lock: the deletion queued first (billing lock and row taken, waiting on the counter).
+					await blocker.query('SELECT assistant_counter_lock()');
+					del = deleteNow();
+					del.catch(() => {});
+					await Promise.race([waiting(1), del.then(() => { throw new Error('the deletion did not wait'); })]);
+					hook = deliver();
+				} else {
+					// The account's billing lock: the webhook queued first, then the deletion behind it.
+					await blocker.query(`SELECT pg_advisory_xact_lock(hashtext('billing:' || $1::text))`, [account]);
+					hook = deliver();
+					await waiting(1);
+					del = deleteNow();
+					del.catch(() => {});
+				}
+				await waiting(2);
+				await blocker.query('COMMIT');
+				const [deleted, hooked] = await Promise.allSettled([del, hook]);
+				expect(deleted.status === 'rejected' ? `${(deleted.reason as { code?: string }).code} ${(deleted.reason as Error).message} ${(deleted.reason as { constraint?: string }).constraint}` : 'ok').toBe('ok');
+				expect(hooked.status === 'fulfilled' ? hooked.value.status : String((hooked as PromiseRejectedResult).reason)).toBe(200);
+			} finally {
+				await blocker.end();
+				await deleter.end();
+			}
+			expect(await asOwner('SELECT 1 FROM billing_account WHERE id = $1', [account])).toEqual([]);
+		}
+		// (The person owns no project: a project's last owner can't be deleted, and their projects' account cascade takes
+		// the same counter lock as the subscription's.)
+	}, 120_000);
+});
