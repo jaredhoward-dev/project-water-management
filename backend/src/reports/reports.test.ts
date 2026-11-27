@@ -1,7 +1,19 @@
 // The pure parts of server-side reports: object keys and download names,
 // the status a viewer sees, PDF page counting and the render settings.
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { confinementArgs, countPdfPages, DEFAULT_RENDER_TIMEOUT_MS, RenderError, renderOptionsFromEnv, renderTimeZone, reportQuery, sessionRefusal, targetPath } from './render.js';
+import {
+	confinementArgs,
+	countPdfPages,
+	DEFAULT_RENDER_TIMEOUT_MS,
+	RENDER_REQUEST_MAX_AGE_MS,
+	RenderError,
+	renderOptionsFromEnv,
+	renderTimeZone,
+	reportQuery,
+	sessionRefusal,
+	staleRenderRequest,
+	targetPath
+} from './render.js';
 import { applicantPackFileName, applicantPackPdfKey, packFileName, packPdfKey, packsBucket, reportFileName, reportKey, storageKind } from './storage.js';
 import { RENDER_ANSWER_WITHIN_MS, reportState } from './store.js';
 
@@ -214,5 +226,18 @@ describe('sessionRefusal', () => {
 	it('ignores a body that isn’t an object', () => {
 		expect(sessionRefusal(403, 'render_token_refused')).toMatchObject({ retry: true });
 		expect(sessionRefusal(400, ['render_token_refused'])).toMatchObject({ retry: true });
+	});
+});
+
+describe('staleRenderRequest', () => {
+	const now = 1_800_000_000_000;
+	it('is stale only past RENDER_REQUEST_MAX_AGE_MS since SQS first had the request', () => {
+		expect(staleRenderRequest(String(now - RENDER_REQUEST_MAX_AGE_MS), now)).toBe(false);
+		expect(staleRenderRequest(String(now - RENDER_REQUEST_MAX_AGE_MS - 1), now)).toBe(true);
+		expect(staleRenderRequest(String(now), now)).toBe(false);
+	});
+
+	it('is never stale without a time: no attribute, a blank one (not 1970), or one that is not a number', () => {
+		for (const v of [undefined, '', '  ', 'soon']) expect(staleRenderRequest(v, now), String(v)).toBe(false);
 	});
 });
