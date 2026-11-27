@@ -232,6 +232,20 @@ describe('editing and deleting', () => {
 		expect((await rowsAs(owner, 'SELECT 1 FROM note WHERE id = ANY($1::uuid[])', [[team, farm]])).length).toBe(2);
 	});
 
+	it('takes an edit by the create rules: trimmed, 1 to 4 000 characters, no NUL, the body alone; a refused edit changes nothing', async () => {
+		const id = (await add(viewer, { body: 'Weir silted up' })).body.note.id;
+		for (const body of [{ body: '   ' }, { body: 'x'.repeat(4001) }, { body: 'a\u0000b' }, { body: 'ok', visibility: 'farm' }, { body: 'ok', nodeId: farmA.id }, {}])
+			expect((await viewer.call('PATCH', notesUrl(`/${id}`), body)).status, JSON.stringify(body).slice(0, 60)).toBe(400);
+		const [unchanged] = await rowsAs(viewer, 'SELECT body, edited_at FROM note WHERE id = $1', [id]);
+		expect(unchanged).toEqual({ body: 'Weir silted up', edited_at: null });
+		// Positive control: the longest body, sent with spaces round it, is stored trimmed.
+		const longest = 'y'.repeat(4000);
+		const res = await viewer.call('PATCH', notesUrl(`/${id}`), { body: `  ${longest}\n` });
+		expect(res.status).toBe(200);
+		expect(res.body.note.body).toBe(longest);
+		expect((await viewer.call('DELETE', notesUrl(`/${id}`))).status).toBe(204);
+	});
+
 	it("lets a viewer delete their own note", async () => {
 		const id = (await add(viewer, { body: 'mine to remove' })).body.note.id;
 		expect((await viewer.call('DELETE', notesUrl(`/${id}`))).status).toBe(204);
