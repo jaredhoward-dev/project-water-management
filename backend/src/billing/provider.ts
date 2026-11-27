@@ -53,6 +53,16 @@ export interface SubscriptionPayload {
 	interval?: BillingInterval | null;
 	/** When the provider created the event (ISO): app_billing_apply skips an update older than the last one applied as `stale` (327); absent or null applies in arrival order. */
 	eventCreated?: string | null;
+	/** What it costs each interval (405, issue #928): checked against the plan table for a live status; absent from an older sender (not checked). */
+	price?: SubscriptionPrice;
+}
+export interface SubscriptionPrice {
+	/** The items' unit_amount × quantity, summed, in minor units; null when an item's price can't be read. */
+	totalMinor: number | null;
+	/** Lower-case ISO 4217; null with a null total. */
+	currency: string | null;
+	/** A coupon or discount is attached: never accepted as the plan. */
+	discounted: boolean;
 }
 /** What a recorded-only event carries: whose it is, and the subscription it names when it names one. */
 export interface RecordPayload {

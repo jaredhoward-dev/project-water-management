@@ -407,6 +407,27 @@ export interface OverSeatsRow {
 	since: string;
 }
 
+/**
+ * An open price conflict (406, issue #928): a subscription event refused because its price wasn't the plan's. Not
+ * held: the provider may be charging for a subscription the app never granted (refund it or grant the plan). Held: a
+ * subscription whose price drifted keeps its last accepted state. Ids and amounts only, never a person.
+ */
+export interface OpenConflict {
+	provider: string;
+	accountId: string;
+	externalRef: string;
+	eventId: string;
+	reason: string;
+	planCode: string;
+	interval: string | null;
+	seats: number;
+	amountMinor: number | null;
+	currency: string | null;
+	expectedMinor: number | null;
+	held: boolean;
+	createdAt: string;
+}
+
 export interface Report {
 	month: string;
 	generatedAt: string;
@@ -423,6 +444,8 @@ export interface Report {
 	staleOrphans: StaleOrphan[];
 	/** Teams over their paid seats today, whatever the month (403), longest over first. */
 	overSeats: OverSeatsRow[];
+	/** Open price conflicts, whatever the month (406), oldest first. */
+	billingConflicts: OpenConflict[];
 	notYetMeasurable: typeof NOT_YET_MEASURABLE;
 }
 
@@ -435,7 +458,8 @@ export function buildReport(
 	refusals: GateRefusalRow[] = [],
 	trials: ReverseTrialRow[] = [],
 	orphans: OrphanPendingRow[] = [],
-	overSeats: OverSeatsRow[] = []
+	overSeats: OverSeatsRow[] = [],
+	conflicts: OpenConflict[] = []
 ): Report {
 	return {
 		month,
@@ -451,6 +475,7 @@ export function buildReport(
 		reverseTrial: reverseTrialToPaid(trials, now),
 		staleOrphans: staleOrphans(orphans, now),
 		overSeats: [...overSeats].sort((a, b) => a.since.localeCompare(b.since) || a.accountId.localeCompare(b.accountId)),
+		billingConflicts: conflicts,
 		notYetMeasurable: NOT_YET_MEASURABLE
 	};
 }
@@ -475,6 +500,18 @@ export function formatReport(r: Report, showEmails: boolean): string {
 	else {
 		out.push(`ACTION: ${r.staleOrphans.length} orphaned subscription(s) still pending past the provider's ${ORPHAN_RETRY_DAYS}-day retries; cancel and refund each in the provider's dashboard`);
 		for (const o of r.staleOrphans) out.push(`  ${o.provider}  ${o.eventId}  ${o.type}  received ${o.receivedAt} (${o.days} days ago)`);
+		out.push('');
+	}
+	// 406: a price conflict is an open action too (a charge with no plan, or a drifted price).
+	if (r.billingConflicts.length === 0) out.push('Subscription price conflicts open: none', '');
+	else {
+		out.push(`ACTION: ${r.billingConflicts.length} subscription price conflict(s) open; refund or grant each one not held, check each held one in the provider's dashboard`);
+		for (const c of r.billingConflicts) {
+			const amount = c.amountMinor === null ? 'unpriced' : `${c.amountMinor} ${c.currency ?? '?'}`;
+			out.push(
+				`  ${c.provider}  ${c.externalRef}  account ${c.accountId}  ${c.reason}  ${c.planCode}/${c.interval ?? '?'} × ${c.seats}  ${amount} (expected ${c.expectedMinor ?? 'n/a'})  ${c.held ? 'held' : 'NOT HELD'}  event ${c.eventId}  ${c.createdAt}`
+			);
+		}
 		out.push('');
 	}
 	// Teams over their paid seats (403): seats cut in the provider's portal; the seat guard refuses their new editors.

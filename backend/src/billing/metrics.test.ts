@@ -284,3 +284,20 @@ describe('teams over their paid seats (403, issue #926)', () => {
 		expect(formatReport(buildReport('2026-11', now, [], [], FREE), false)).toContain('Teams over their paid editor seats: none');
 	});
 });
+
+describe('open price conflicts (406)', () => {
+	const now = new Date('2026-11-24T00:00:00Z');
+	const conflict = {
+		provider: 'stripe', accountId: '11111111-1111-4111-8111-111111111111', externalRef: 'sub_x', eventId: 'evt_x', reason: 'amount',
+		planCode: 'pro', interval: 'month', seats: 1, amountMinor: 100, currency: 'zar', expectedMinor: 89900, held: false,
+		createdAt: '2026-11-20T00:00:00.000Z'
+	};
+	it('prints each as an action after the orphans, and none says so; redact keeps them (ids and amounts only)', () => {
+		const r = buildReport('2026-11', now, [], [], FREE, [], [], [], [], [conflict]);
+		const lines = formatReport(redact(r), false).split('\n');
+		expect(lines[4]).toMatch(/^ACTION: 1 subscription price conflict\(s\) open/);
+		expect(lines[5]).toBe('  stripe  sub_x  account 11111111-1111-4111-8111-111111111111  amount  pro/month × 1  100 zar (expected 89900)  NOT HELD  event evt_x  2026-11-20T00:00:00.000Z');
+		expect(redact(r).billingConflicts).toHaveLength(1);
+		expect(formatReport(buildReport('2026-11', now, [], [], FREE), false).split('\n')[4]).toBe('Subscription price conflicts open: none');
+	});
+});

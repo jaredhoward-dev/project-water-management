@@ -137,7 +137,7 @@ export async function issueInvoice(client: pg.ClientBase, provider: BillingProvi
 	if (seats > plan.seatsIncluded && extraPrice === null) throw new InvoiceError(`the ${plan.name} plan sells no extra seats`, 'invalid');
 
 	const { rows: live } = await client.query<{ provider: string }>(
-		`SELECT provider FROM subscription WHERE billing_account_id = $1 AND status IN ('trialing', 'active', 'past_due') AND provider = 'stripe'`,
+		`SELECT provider FROM subscription WHERE billing_account_id = $1 AND status IN ('trialing', 'active', 'past_due', 'lapsed') AND provider = 'stripe'`,
 		[accountId]
 	);
 	if (live[0]) throw new InvoiceError('the account has a live Stripe subscription; it already pays by card', 'live_subscription');

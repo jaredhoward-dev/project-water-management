@@ -85,6 +85,16 @@ export const PLAN_FIGURES: readonly PlanFigures[] = [
 	}
 ];
 
+/**
+ * The app's own dunning limit (issue #927; docs/billing.md § Dunning limit): a
+ * subscription past_due (Stripe's past_due or unpaid) for longer than this many
+ * days lapses (405's `lapsed`): not live, so the paid features pause as after a
+ * cancellation, and a payment lifts it. 14, matching the downgrade grace
+ * (341), pending the operator's confirmation. The job tick passes it to
+ * app_billing_dunning_lapse.
+ */
+export const DUNNING_GRACE_DAYS = 14;
+
 export const planFigures = (code: PlanCode): PlanFigures => PLAN_FIGURES.find((p) => p.code === code)!;
 
 /**

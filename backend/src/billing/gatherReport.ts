@@ -5,7 +5,7 @@
 // Lambda's billing-report action (ops/ownerActions.ts), which answers with
 // redact(report) only. No dotenv here: the migrate Lambda bundles this module.
 import type pg from 'pg';
-import { buildReport, type AccountRow, type GateRefusalRow, type OrphanPendingRow, type OverSeatsRow, type PersonRow, type PlanLimits, type Report, type ReverseTrialRow } from './metrics.js';
+import { buildReport, type AccountRow, type GateRefusalRow, type OpenConflict, type OrphanPendingRow, type OverSeatsRow, type PersonRow, type PlanLimits, type Report, type ReverseTrialRow } from './metrics.js';
 
 /** The month's report (YYYY-MM, or null for the current SAST month), addresses included: redact before it leaves the caller. */
 export async function gatherReportOn(client: pg.ClientBase, month: string | null, now = new Date()): Promise<Report> {
@@ -54,7 +54,7 @@ export async function gatherReportOn(client: pg.ClientBase, month: string | null
 			`SELECT g.created_at AS started_at,
 			        least(
 			          (SELECT min(s.created_at) FROM subscription s
-			           WHERE s.billing_account_id = g.billing_account_id AND s.provider IN ('stripe', 'mock') AND s.status IN ('active', 'past_due', 'canceled')
+			           WHERE s.billing_account_id = g.billing_account_id AND s.provider IN ('stripe', 'mock') AND s.status IN ('active', 'past_due', 'lapsed', 'canceled')
 			             AND s.created_at >= g.created_at),
 			          (SELECT min(l.created_at) FROM billing_grant_log l
 			           WHERE l.billing_account_id = g.billing_account_id AND l.action = 'grant' AND l.granted_by = 'invoice'
@@ -88,5 +88,33 @@ export async function gatherReportOn(client: pg.ClientBase, month: string | null
 			 ) o WHERE o.editors > o.seats`
 		)
 	).rows.map((r): OverSeatsRow => ({ accountId: r.account_id, teamId: r.team_id, seats: Number(r.seats), editors: Number(r.editors), since: r.since.toISOString() }));
-	return buildReport(first.slice(0, 7), now, accounts, people, limits, refusals, trials, orphans, overSeats);
+	// Open price conflicts (406), whatever the month: billing_conflict is owner-only and holds ids and amounts, no person.
+	const conflicts = (
+		await client.query<{
+			provider: string; billing_account_id: string; external_ref: string; event_id: string; reason: string; plan_code: string;
+			billing_interval: string | null; seats: number; amount_minor: string | null; currency: string | null; expected_minor: string | null;
+			held: boolean; created_at: Date;
+		}>(
+			`SELECT provider, billing_account_id, external_ref, event_id, reason, plan_code, billing_interval, seats, amount_minor, currency,
+			        expected_minor, held, created_at
+			 FROM billing_conflict WHERE resolved_at IS NULL ORDER BY created_at, id`
+		)
+	).rows.map(
+		(r): OpenConflict => ({
+			provider: r.provider,
+			accountId: r.billing_account_id,
+			externalRef: r.external_ref,
+			eventId: r.event_id,
+			reason: r.reason,
+			planCode: r.plan_code,
+			interval: r.billing_interval,
+			seats: r.seats,
+			amountMinor: r.amount_minor === null ? null : Number(r.amount_minor),
+			currency: r.currency,
+			expectedMinor: r.expected_minor === null ? null : Number(r.expected_minor),
+			held: r.held,
+			createdAt: r.created_at.toISOString()
+		})
+	);
+	return buildReport(first.slice(0, 7), now, accounts, people, limits, refusals, trials, orphans, overSeats, conflicts);
 }

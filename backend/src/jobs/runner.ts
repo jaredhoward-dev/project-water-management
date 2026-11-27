@@ -36,6 +36,7 @@ import { type MirrorTickResult, runMirrorTick } from './handlers/mirror-tick.js'
 import { type DwsTickResult, runDwsTick } from '../feeds/gaugeRecordLoad.js';
 import { type DamsTickResult, runDamsTick } from '../dams/observed/tick.js';
 import { type EtTickResult, runEtTick } from '../water-use/observed/tick.js';
+import { DUNNING_GRACE_DAYS } from '@water-management/engine/plans';
 
 /** Default lease: longer than any job may run (the worker Lambda's timeout is 300 s). */
 export const DEFAULT_LEASE_SECONDS = 360;
@@ -296,6 +297,8 @@ export interface TickResult {
 	reverseTrialsExpired: number;
 	/** Live catchments newly paused past Free's limit after the grace (341 app_plan_pause_tick; 0 unless billing is enforced). */
 	catchmentsPaused: number;
+	/** Subscriptions past_due past DUNNING_GRACE_DAYS, newly lapsed (405 app_billing_dunning_lapse). */
+	subscriptionsLapsed: number;
 	claimed: number;
 	done: number;
 	failed: number;
@@ -379,6 +382,7 @@ export async function runTick(o: TickOptions = {}): Promise<TickResult> {
 		staffGrantsExpired: 0,
 		reverseTrialsExpired: 0,
 		catchmentsPaused: 0,
+		subscriptionsLapsed: 0,
 		claimed: 0,
 		done: 0,
 		failed: 0,
@@ -415,6 +419,10 @@ export async function runTick(o: TickOptions = {}): Promise<TickResult> {
 	result.staffGrantsExpired = await withoutUser(async (db) => (await db.query<{ n: number }>('SELECT app_staff_grant_expire() AS n')).rows[0]?.n ?? 0);
 	// A reverse trial past its end (342): expired (never deleted), the account back to Free.
 	result.reverseTrialsExpired = await withoutUser(async (db) => (await db.query<{ n: number }>('SELECT app_reverse_trial_expire() AS n')).rows[0]?.n ?? 0);
+	// A subscription overdue past the dunning limit (405, issue #927): lapsed, so the account drops to Free as on a lapse.
+	result.subscriptionsLapsed = await withoutUser(
+		async (db) => (await db.query<{ n: number }>('SELECT app_billing_dunning_lapse($1) AS n', [DUNNING_GRACE_DAYS])).rows[0]?.n ?? 0
+	);
 	// After the expiry: an account that lost its paid plan starts its 14-day grace, and past it (billing enforced) its live
 	// catchments beyond Free's are paused, or resumed once it is back on a plan or within Free (341).
 	result.catchmentsPaused = await withoutUser(async (db) => (await db.query<{ n: number }>('SELECT app_plan_pause_tick() AS n')).rows[0]?.n ?? 0);

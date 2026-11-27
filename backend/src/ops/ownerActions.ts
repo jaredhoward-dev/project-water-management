@@ -13,6 +13,8 @@
 //   billing-grants     src/billing/staffGrant.ts grantLog / liveGrants (… --list; no target: every live grant)
 //   billing-report     src/billing/gatherReport.ts, redacted  (pnpm dev:billing:report; never --show-emails)
 //   authority-confirm  src/projects/authorityConfirm.ts       (pnpm dev:authority:confirm)
+//   billing-conflicts  src/billing/conflicts.ts listConflicts  (pnpm dev:billing:conflict --list [--all]; 406)
+//   billing-conflict-resolve  src/billing/conflicts.ts resolveConflict (… --resolve <id> --reason "…")
 //   billing-account    src/billing/staffGrant.ts lookupAccount (the ids the workflow takes; direct invoke only)
 //   billing-invoice    src/billing/invoice.ts issueInvoice     (pnpm dev:billing:invoice; direct invoke only: a PO number may identify a client)
 //
@@ -37,13 +39,14 @@ import { z } from 'zod';
 import { gatherReportOn } from '../billing/gatherReport.js';
 import { redact, type Report } from '../billing/metrics.js';
 import { grantLog, grantPlan, isCalendarDate, liveGrants, lookupAccount, revokeGrant, StaffGrantError, type LiveGrant, type LogRow, type Owner, type Target } from '../billing/staffGrant.js';
+import { ConflictError, listConflicts, resolveConflict, type ConflictRow } from '../billing/conflicts.js';
 import { confirmAuthorityDelegate, NoPersonError } from '../projects/authorityConfirm.js';
 import { InvoiceError, issueInvoice, MAX_INVOICE_SEATS, PO_NUMBER } from '../billing/invoice.js';
 import { BillingUnavailableError, BillingProviderError, type BillingProvider } from '../billing/provider.js';
 
-export const OWNER_ACTIONS = ['billing-grant', 'billing-revoke', 'billing-grants', 'billing-report', 'authority-confirm', 'billing-account', 'billing-invoice'] as const;
+export const OWNER_ACTIONS = ['billing-grant', 'billing-revoke', 'billing-grants', 'billing-report', 'authority-confirm', 'billing-account', 'billing-invoice', 'billing-conflicts', 'billing-conflict-resolve'] as const;
 /** What the billing-admin workflow may send (scripts/release/owner-action.mjs WORKFLOW_ACTIONS): every action but the address lookup and the invoice (its PO number may identify a client). */
-export const WORKFLOW_ACTIONS = ['billing-grants', 'billing-grant', 'billing-revoke', 'billing-report', 'authority-confirm'] as const;
+export const WORKFLOW_ACTIONS = ['billing-grants', 'billing-grant', 'billing-revoke', 'billing-report', 'authority-confirm', 'billing-conflicts', 'billing-conflict-resolve'] as const;
 /** The most seats a staff grant gives (app_staff_grant_plan's bound, migration 374). */
 export const MAX_GRANT_SEATS = 100000;
 export type OwnerActionName = (typeof OWNER_ACTIONS)[number];
@@ -101,6 +104,9 @@ export const ownerActionSchema = z.discriminatedUnion('action', [
 	z
 		.strictObject({ action: z.literal('authority-confirm'), via, projectId: uuid, email: email.optional(), userId: uuid.optional(), reference: text(200) })
 		.refine((v) => (v.email === undefined) !== (v.userId === undefined)),
+	// 406: the open price conflicts (all: the resolved ones too), and resolving one by its id; ids and amounts only.
+	z.strictObject({ action: z.literal('billing-conflicts'), via, all: z.boolean().optional() }),
+	z.strictObject({ action: z.literal('billing-conflict-resolve'), via, conflictId: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER), reason: text(500), by }),
 	// The lookup is the operator's alone, from their SSO session: no `via`, so the workflow can't send it.
 	z
 		.strictObject({ action: z.literal('billing-account'), email: email.optional(), userId: uuid.optional(), teamId: uuid.optional() })
@@ -127,6 +133,7 @@ export type OwnerActionErrorCode =
 	| 'no_billing_account'
 	| 'live_subscription'
 	| 'no_live_grant'
+	| 'no_conflict'
 	| 'invalid'
 	| 'not_editor'
 	| 'billing_unavailable'
@@ -140,6 +147,7 @@ const REASONS: Record<OwnerActionErrorCode, string> = {
 	no_billing_account: 'no such billing account, or the account has none, so no grant',
 	live_subscription: 'the account has a live subscription: a Stripe one is cancelled in Stripe first; a manual or mock one needs replace',
 	no_live_grant: 'the account has no live staff grant',
+	no_conflict: 'no billing conflict has that id',
 	invalid: 'the database refused a value (the plan, the seats, the end date, the reason or who acts)',
 	not_editor: 'the person is not an editor or owner of the project, or the reference is empty',
 	billing_unavailable: 'this function has no billing provider that sends invoices (BILLING_PROVIDER=stripe with its key; docs/deployment.md § Owner actions)',
@@ -174,6 +182,7 @@ export function ownerActionCode(err: unknown): OwnerActionErrorCode {
 	if (err instanceof StaffGrantError) return err.code;
 	if (err instanceof NoPersonError) return 'no_person';
 	if (err instanceof InvoiceError) return err.code;
+	if (err instanceof ConflictError) return err.code;
 	if (err instanceof BillingUnavailableError) return 'billing_unavailable';
 	if (err instanceof BillingProviderError) return 'billing_provider_error';
 	switch ((err as { code?: string })?.code) {
@@ -207,6 +216,8 @@ export type OwnerActionResult =
 	| { action: 'billing-grants'; kind: Owner['kind']; accountId: string | null; planNow: string; log: LogRow[] }
 	| { action: 'billing-grants'; kind: 'all'; grants: LiveGrant[] }
 	| { action: 'billing-report'; report: Report }
+	| { action: 'billing-conflicts'; conflicts: ConflictRow[] }
+	| { action: 'billing-conflict-resolve'; conflict: ConflictRow }
 	| { action: 'authority-confirm'; projectId: string; userId: string; confirmed: true }
 	| { action: 'billing-account'; kind: Owner['kind']; ownerId: string; accountId: string | null; planNow: string }
 	| {
@@ -251,6 +262,10 @@ export async function runOwnerAction(client: pg.ClientBase, a: OwnerAction, deps
 		case 'billing-report':
 			// Never the addresses: the script's default (no --show-emails), always.
 			return { action: a.action, report: redact(await gatherReportOn(client, a.month ?? null)) };
+		case 'billing-conflicts':
+			return { action: a.action, conflicts: await listConflicts(client, a.all ?? false) };
+		case 'billing-conflict-resolve':
+			return { action: a.action, conflict: await resolveConflict(client, { id: a.conflictId, reason: a.reason, by: a.by }) };
 		case 'authority-confirm': {
 			const person = a.email !== undefined ? { email: a.email } : { userId: a.userId! };
 			const { userId } = await confirmAuthorityDelegate(client, a.projectId, person, a.reference);

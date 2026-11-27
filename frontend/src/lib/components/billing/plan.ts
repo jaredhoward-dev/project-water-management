@@ -53,6 +53,8 @@ export function subscriptionLine(s: Subscription | null): { text: string; warn: 
 				: { text: `Renews ${fmtDate(s.periodEnd)}`, warn: false };
 		case 'past_due':
 			return { text: 'Payment overdue', warn: true };
+		case 'lapsed':
+			return { text: 'Payment overdue; paid features paused until it is paid', warn: true };
 		case 'canceled':
 			return { text: s.periodEnd ? `Cancelled; ended ${fmtDate(s.periodEnd)}` : 'Cancelled', warn: true };
 		case 'expired':

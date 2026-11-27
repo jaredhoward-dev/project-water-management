@@ -19,14 +19,14 @@
 					{
 						"id": "si_synthetic_team_extra",
 						"quantity": 2,
-						"price": { "id": "price_synthetic_extra", "unit_amount": 49900, "recurring": { "interval": "month" } },
+						"price": { "id": "price_synthetic_extra", "unit_amount": 49900, "currency": "zar", "recurring": { "interval": "month" } },
 						"current_period_start": 1796209600,
 						"current_period_end": 1798801600
 					},
 					{
 						"id": "si_synthetic_team_base",
 						"quantity": 1,
-						"price": { "id": "price_synthetic_base", "unit_amount": 249900, "recurring": { "interval": "month" } },
+						"price": { "id": "price_synthetic_base", "unit_amount": 249900, "currency": "zar", "recurring": { "interval": "month" } },
 						"current_period_start": 1796209600,
 						"current_period_end": 1798801600
 					}
