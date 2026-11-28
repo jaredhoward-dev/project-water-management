@@ -133,3 +133,18 @@ export function worstFirst<T extends { publication: { restriction: { level: stri
 		.sort((a, b) => rank(a.r) - rank(b.r) || a.i - b.i)
 		.map((x) => x.r);
 }
+
+/**
+ * What /farm does with the farms it could list (`listed`) when some
+ * catchment's list failed for a reason other than access going
+ * (`incomplete`): nothing listed and a failure is the error state, not "no
+ * farm linked"; one farm goes straight to its page only when every catchment
+ * answered, since otherwise the farms of the one that failed would be missing
+ * with no sign of them; anything else is the list, which says when it is
+ * incomplete and offers Try again.
+ */
+export function farmsLanding(listed: number, incomplete: boolean): 'error' | 'redirect' | 'list' {
+	if (!listed && incomplete) return 'error';
+	if (listed === 1 && !incomplete) return 'redirect';
+	return 'list';
+}

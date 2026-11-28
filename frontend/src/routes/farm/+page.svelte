@@ -19,7 +19,7 @@
 	import { t } from '#lib/i18n/locale.svelte.js';
 	import { ApiError } from '#lib/api/client.js';
 	import { errorText } from '#lib/i18n/apiError.js';
-	import { cardOnFailure, classify, farmHref, savedForPublication, worstFirst } from '#lib/components/farm/load.js';
+	import { cardOnFailure, classify, farmHref, farmsLanding, savedForPublication, worstFirst } from '#lib/components/farm/load.js';
 	import { clearSaved, readSaved } from '#lib/components/farm/savedCopy.js';
 
 	interface Row {
@@ -40,6 +40,8 @@
 
 	let rows = $state<Row[] | null>(null);
 	let hasOther = $state(false);
+	/** A catchment's list failed (not for access gone): its farms may be missing from the list, which says so. */
+	let incomplete = $state(false);
 	let failed = $state<{ offline: boolean; attempts: number } | null>(null);
 	/** Failed loads in a row: the error state adds a contact line after the second. */
 	let failures = 0;
@@ -50,6 +52,7 @@
 		const gen = ++generation;
 		failed = null;
 		rows = null;
+		incomplete = false;
 		try {
 			const projects = await api.projects.list();
 			const mine = projects.filter((p) => p.role === 'farmer');
@@ -77,12 +80,14 @@
 					});
 				}
 			});
-			if (!list.length && failure) throw (failure as PromiseRejectedResult).reason;
-			if (list.length === 1) {
+			const landing = farmsLanding(list.length, !!failure);
+			if (landing === 'error') throw (failure as PromiseRejectedResult).reason;
+			if (landing === 'redirect') {
 				await guardedGoto(farmHref(basePath(), list[0]!.projectId, list[0]!.nodeId, false), { replace: true });
 				return;
 			}
 			failures = 0;
+			incomplete = !!failure;
 			// The worst notice first (a restriction before an advisory, before none, before
 			// unpublished), each level in the projects' order: a restricted farm is never a screen down.
 			const ordered = worstFirst(list);
@@ -142,6 +147,13 @@
 		<!-- "Before you look at your farm" first, until acknowledged: this list carries figures too. -->
 		<FarmNoticeGate>
 			<h1>{t('Your hydrological units')}</h1>
+			<!-- A catchment's list failed: its units would be missing with no sign of them (farmsLanding). -->
+			{#if incomplete}
+				<div class="incomplete" role="status" data-testid="farms-incomplete">
+					<p>{t('Some of your catchments couldn’t be loaded, so their hydrological units aren’t listed here.')}</p>
+					<button type="button" class="btn" data-retry onclick={load}>{t('Try again')}</button>
+				</div>
+			{/if}
 			<ul class="farms">
 				{#each rows as r (r.projectId + '/' + r.nodeId)}
 					<li>
@@ -206,6 +218,20 @@
 		flex-wrap: wrap;
 		gap: 8px;
 		font-size: 17px;
+	}
+	.incomplete {
+		margin: 0 0 12px;
+		padding: 12px 16px;
+		border-radius: 8px;
+		border: 1px solid var(--warning);
+		background: var(--warning-soft);
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 8px;
+	}
+	.incomplete .btn {
+		min-height: var(--tap);
 	}
 	.pending {
 		color: var(--text-2);
