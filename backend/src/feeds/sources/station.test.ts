@@ -4,6 +4,8 @@ import { feedErrorMessage, FeedFormatError, FeedKeyError, FeedKeyRefusedError, F
 import type { StationHttp, StationRequest } from '../stationHttp.js';
 import { fixtureStationHttp, STATION_FIXTURE_KEY, stationFixtureRain } from '../stationFixtures.js';
 import { authorise, fetchStation, mergeReadings, scrubKey, STATION_KEY_PROBLEMS, stationChunks, stationLastDay, stationRequestUrl, type StationClient } from './station.js';
+import { type StationFormat, stationDays } from '@water-management/engine/station-format';
+import { fromEpochDay, toEpochDay } from '@water-management/engine/calendar';
 
 // 2026-03-10 12:00 in Johannesburg (UTC+2).
 const NOW = Date.parse('2026-03-10T10:00:00Z');
@@ -117,7 +119,32 @@ describe('stationLastDay', () => {
 	it('is the last rain day whose end (08:00 the next morning) has passed for sub-daily readings', () => {
 		const sub = { ...f, resolution: 'subdaily' as const };
 		expect(stationLastDay(sub, Date.parse('2026-03-10T05:59:00Z'), '2026-03-10')).toBe('2026-03-08');
-		expect(stationLastDay(sub, Date.parse('2026-03-10T06:00:00Z'), '2026-03-10')).toBe('2026-03-09');
+		// A reading stamped at a rain day's end (08:00) measured the moment before it: the day has ended just after.
+		expect(stationLastDay(sub, Date.parse('2026-03-10T06:00:00Z'), '2026-03-10')).toBe('2026-03-08');
+		expect(stationLastDay(sub, Date.parse('2026-03-10T06:00:00.001Z'), '2026-03-10')).toBe('2026-03-09');
+	});
+	it('agrees with the days stationDays writes, across a daylight-saving change and at a rain day’s exact end', () => {
+		// Europe/London: clocks go forward at 01:00 UTC on 29 March 2026 and back at 01:00 UTC on 25 October 2026. The
+		// window's end was the local date of (now − 8 h), an hour off the wall clock's 08:00 on those mornings: it lagged a
+		// day behind in spring and, in autumn, named a rain day that hadn't ended (08:00 GMT is 08:00 UTC on the 25th).
+		const london = { ...f, resolution: 'subdaily' as const, timeZone: 'Europe/London' };
+		const sa = { ...f, resolution: 'subdaily' as const };
+		const cases: [StationFormat, string][] = [
+			[london, '2026-03-29T07:30:00Z'],
+			[london, '2026-10-25T07:30:00Z'],
+			[london, '2026-10-25T08:30:00Z'],
+			[sa, '2026-03-10T06:00:00Z'],
+			[sa, '2026-03-10T06:00:00.001Z'],
+			[{ ...london, creditDayTo: 'end' as const, stampMarks: 'start' as const }, '2026-10-25T07:30:00Z']
+		];
+		for (const [fmt, at] of cases) {
+			const now = Date.parse(at);
+			const days = stationDays({ readings: [], records: 0 }, fmt, '2026-01-01', '2026-12-31', now);
+			const written = fromEpochDay(toEpochDay(days.startDate) + days.values.length - 1);
+			expect(stationLastDay(fmt, now, '2026-12-31'), at).toBe(written);
+		}
+		expect(stationLastDay(london, Date.parse('2026-03-29T07:30:00Z'), '2026-12-31')).toBe('2026-03-28');
+		expect(stationLastDay(london, Date.parse('2026-10-25T07:30:00Z'), '2026-12-31')).toBe('2026-10-23');
 	});
 	it('never passes the UTC day the ingest accepts', () => {
 		const ahead = { ...f, resolution: 'subdaily' as const, creditDayTo: 'end' as const, timeZone: 'Pacific/Kiritimati' };

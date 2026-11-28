@@ -1204,7 +1204,10 @@ row names a source, where to read it and the series it merges into:
   - *The window* (`fetch.ts` `stationWindow`): it ends on the newest rain day
     the station can have finished (`stationLastDay`: yesterday in the
     format's zone for daily totals, the last rain day whose end has passed
-    for sub-daily readings, never after UTC today), and the ingest counts a
+    for sub-daily readings, never after UTC today; the engine's
+    `stationLastEndedDay`, the day `stationDays` cuts the written days at, so
+    on a daylight-saving morning the window neither lags a day nor names one
+    that hasn't ended), and the ingest counts a
     feed caught up from the same function, so a caught-up feed queues no
     other fetch. A first fetch starts on `startDate` or 90 days back. A
     fetch makes at most `STATION_MAX_REQUESTS` (24) requests of
