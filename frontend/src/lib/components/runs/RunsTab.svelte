@@ -663,19 +663,22 @@
 {/snippet}
 <!-- The run form: in the section header, its main action; its status line opens the page. -->
 {#snippet runForm()}
+	<!-- While a run goes the buttons are aria-disabled (start() returns early) and the label readonly, not disabled:
+	     disabling the control that has the focus throws the keyboard's focus to the page (WCAG 2.4.3, ui-playbook § 4). -->
 	<form class="run-form" onsubmit={run} aria-busy={runBusy}>
 		<label class="run-label" for="run-label">Run label <span class="visually-hidden">(optional)</span></label>
-		<input id="run-label" maxlength="200" placeholder="optional, e.g. Baseline" bind:value={label} disabled={runBusy} />
+		<input id="run-label" maxlength="200" placeholder="optional, e.g. Baseline" bind:value={label} readonly={runBusy} />
 		{#if hasForecast}
 			<button
 				type="button"
 				class="btn"
-				disabled={runBusy || missing.length > 0}
+				disabled={missing.length > 0}
+				aria-disabled={runBusy || undefined}
 				aria-describedby="run-note"
 				onclick={() => start(true)}>Run forecast</button
 			>
 		{/if}
-		<button type="submit" class="btn btn-primary" disabled={runBusy || missing.length > 0} aria-describedby="run-note">
+		<button type="submit" class="btn btn-primary" disabled={missing.length > 0} aria-disabled={runBusy || undefined} aria-describedby="run-note">
 			{#if runBusy}<span class="spin" aria-hidden="true"></span>{/if}
 			{runBusy ? 'Running model…' : 'Run model'}
 		</button>
