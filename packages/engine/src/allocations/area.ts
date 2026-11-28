@@ -8,16 +8,17 @@
 // The modelled area is the unit's planted crop areas in the run's own inputs
 // (ProjectModel.cropAreas, m² → ha): every crop the engine models is
 // irrigated (docs/model.md §2.3). The registered area is the sum of the
-// irrigated areas stated on the unit's takes (s21a) in force on any of the
-// run's days, as the registered storage is counted (a row that lapsed
-// before the run, or starts after it, isn't the unit's now).
+// irrigated areas stated on the unit's takes (s21a) in force, the most on any
+// one of the run's days, as the registered storage is counted (a row that
+// lapsed before the run, or starts after it, isn't the unit's now; a take
+// renewed during the run counts once).
 
 import { toEpochDay } from '../calendar';
-import { allocationStatus, isStorageOnly, type AllocationComparison, type AllocationStatus, type AllocationWaterUse } from './compare';
+import { allocationStatus, isStorageOnly, mostInForce, type AllocationComparison, type AllocationStatus, type AllocationWaterUse } from './compare';
 
 /** One unit's irrigated area: registered (ha) against the run's planted crop areas (ha). */
 export interface IrrigatedAreaComparison {
-	/** Σ irrigated area stated on the unit's takes in force on any of the run's days, ha; null when none states one. */
+	/** Σ irrigated area stated on the unit's takes in force, the most on any one of the run's days, ha; null when none states one. */
 	registeredHa: number | null;
 	/** Σ the unit's planted crop areas in the run, ha (0 with none). */
 	modelledHa: number;
@@ -74,12 +75,16 @@ export function compareIrrigatedAreas(input: {
 	const start = toEpochDay(input.startDate);
 	const end = toEpochDay(input.endDate);
 	const planted = plantedHaByNode(input.cropAreas);
-	const registered = new Map<string, number>();
+	const stated = new Map<string, { value: number; validFrom?: string | null; validTo?: string | null }[]>();
 	for (const a of input.allocations) {
 		if (!a.nodeId || isStorageOnly(a) || a.irrigatedAreaHa === null || a.irrigatedAreaHa === undefined || !Number.isFinite(a.irrigatedAreaHa)) continue;
-		if (a.validTo && toEpochDay(a.validTo) < start) continue;
-		if (a.validFrom && toEpochDay(a.validFrom) > end) continue;
-		registered.set(a.nodeId, (registered.get(a.nodeId) ?? 0) + Math.max(0, a.irrigatedAreaHa));
+		stated.set(a.nodeId, [...(stated.get(a.nodeId) ?? []), { value: Math.max(0, a.irrigatedAreaHa), validFrom: a.validFrom, validTo: a.validTo }]);
+	}
+	// The most in force on any one day of the run, as the registered storage is counted (a take renewed during the run counts once).
+	const registered = new Map<string, number>();
+	for (const [id, rows] of stated) {
+		const most = mostInForce(rows, start, end);
+		if (most !== null) registered.set(id, most);
 	}
 	const out = new Map<string, IrrigatedAreaComparison>();
 	for (const id of input.nodeIds) {

@@ -36,7 +36,7 @@
 	import { appIsDark, watchAppTheme } from '#lib/components/map/appTheme.js';
 	import { glyphsUrl } from '#lib/components/map/mapStyle.js';
 	import { fmtNum } from '#lib/format/number.js';
-	import { waterYearLabel } from './allocations';
+	import { bandPercent, bandText, waterYearLabel } from './allocations';
 	import { registeredColours, registeredScheme, registeredShading, REGISTERED_STEPS, REGISTERED_TITLE, stepLabel, type RegisteredStep } from './registeredMap';
 	import type { RegisteredFigures } from './registeredUsers';
 	import {
@@ -300,7 +300,7 @@
 							</ul>
 							<p class="small muted">
 								Each unit carries its share of what is registered for it (“132 %”). These bands are fixed for this map. The comparison above judges against the
-								project’s ±{fmtNum((comparison?.tolerance ?? 0.1) * 100, 0)} % band, so 90–100 % counts as “within band” there and green here.
+								project’s {bandText(comparison?.tolerance ?? 0.1)} band, so {fmtNum(100 - bandPercent(comparison?.tolerance ?? 0.1), 2, true)}–100 % counts as “within band” there and green here.
 							</p>
 						{/if}
 					</div>

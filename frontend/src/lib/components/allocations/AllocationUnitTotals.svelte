@@ -17,7 +17,7 @@
 	import { withParam } from '#lib/workspace/overlays.js';
 	import { page } from '$app/state';
 	import { foldList } from '#lib/components/common/fold.js';
-	import { areaHa, MEASURE_STATUS_LABEL, unitMeasures, type MeasureCell } from './allocations';
+	import { areaHa, bandText, MEASURE_STATUS_LABEL, unitMeasures, type MeasureCell } from './allocations';
 
 	let { comparison, picked = null, onpick }: { comparison: AllocationComparison; picked?: string | null; onpick: (nodeId: string) => void } = $props();
 
@@ -27,7 +27,7 @@
 	const url = $derived(page.url);
 	const m = $derived(unitMeasures(comparison));
 	const fold = $derived(foldList(m.rows, (r) => r.nodeId, picked, all, CAP));
-	const band = $derived(`±${fmtNum(comparison.tolerance * 100, 0)} %`);
+	const band = $derived(bandText(comparison.tolerance));
 	const ha = (v: number | null) => (v === null ? '–' : areaHa(v));
 	const m3 = (v: number | null) => (v === null ? '–' : fmtNum(v));
 </script>

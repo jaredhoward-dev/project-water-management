@@ -90,7 +90,8 @@
 		unitStatusText,
 		volumeCell,
 		VIEWER_UNITS_NOTE,
-		waterYearLabel
+		waterYearLabel,
+		bandText
 	} from './allocations';
 
 	let {
@@ -593,7 +594,7 @@
 									{/if}
 									<!-- Under the picked unit's years since issue #175 (it was under every unit's table, now folded away). -->
 									<p class="hint muted" data-testid="allocation-band-note">
-										“Within band” is within ±{fmtNum(comparison.tolerance * 100, 0)} % of the registered volume. A part year compares the days the run covers with the
+										“Within band” is within {bandText(comparison.tolerance)} of the registered volume. A part year compares the days the run covers with the
 										registered volume prorated to them, and isn’t counted in the whole water years.
 										<HelpTip key="allocation-band" />
 									</p>

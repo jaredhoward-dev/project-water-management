@@ -82,3 +82,24 @@ describe('compareIrrigatedAreas: registered irrigated area against the planted c
 		expect(c.nodes[0]!.irrigatedArea).toBeUndefined();
 	});
 });
+
+describe('compareIrrigatedAreas: a take renewed during the run', () => {
+	it('counts its area once (the most in force on any one day), and rows in force together add up', () => {
+		const out = compareIrrigatedAreas({
+			...run,
+			nodeIds: ['renewed', 'together'],
+			cropAreas: [
+				{ nodeId: 'renewed', areaM2: 400_000 },
+				{ nodeId: 'together', areaM2: 400_000 }
+			],
+			allocations: [
+				{ nodeId: 'renewed', irrigatedAreaHa: 40, validTo: '2002-12-31' },
+				{ nodeId: 'renewed', irrigatedAreaHa: 40, validFrom: '2003-01-01' },
+				{ nodeId: 'together', irrigatedAreaHa: 25 },
+				{ nodeId: 'together', irrigatedAreaHa: 15, validFrom: '2002-06-01' }
+			]
+		});
+		expect(out.get('renewed')).toEqual({ registeredHa: 40, modelledHa: 40, differenceHa: 0, status: 'within' });
+		expect(out.get('together')).toEqual({ registeredHa: 40, modelledHa: 40, differenceHa: 0, status: 'within' });
+	});
+});

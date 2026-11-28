@@ -213,8 +213,9 @@ export interface AllocationNodeComparison {
 	surface: AllocationSourceComparison;
 	groundwater: AllocationSourceComparison;
 	/**
-	 * Registered storage (Σ storageM3 of this node's allocations in force on
-	 * any of the run's days, s21b rows included; null when none states one)
+	 * Registered storage (the most Σ storageM3 of this node's allocations in
+	 * force on any one of the run's days, s21b rows included, so a dam
+	 * registered again during the run counts once; null when none states one)
 	 * against the modelled dam capacity (`none` when the run models no dam
 	 * capacity for the node):
 	 * `differenceM3` = capacity − registered (null unless both are known), and
@@ -256,6 +257,24 @@ export function allocationStatus(modelledM3: number, registeredM3: number, toler
 	if (modelledM3 > registeredM3 * (1 + tolerance)) return 'over';
 	if (modelledM3 < registeredM3 * (1 - tolerance)) return 'under';
 	return 'within';
+}
+
+/**
+ * The most of `rows` in force on any one day of [start, end] (epoch days),
+ * summed over the rows in force that day; null when none is in force on any
+ * of them. A storage or an irrigated area registered again during the run (a
+ * renewal, a raised wall) counts once, not once per row the run overlaps;
+ * rows in force on the same day add up. The sum changes only on a row's first
+ * day, so the most is on one of those.
+ */
+export function mostInForce(rows: readonly { value: number; validFrom?: string | null; validTo?: string | null }[], start: number, end: number): number | null {
+	const spans = rows
+		.map((a) => ({ from: Math.max(start, a.validFrom ? toEpochDay(a.validFrom) : -Infinity), to: Math.min(end, a.validTo ? toEpochDay(a.validTo) : Infinity), v: a.value }))
+		.filter((a) => a.from <= a.to);
+	if (!spans.length) return null;
+	let most = -Infinity;
+	for (const d of spans) most = Math.max(most, spans.reduce((s, a) => (a.from <= d.from && a.to >= d.from ? s + a.v : s), 0));
+	return most;
 }
 
 /** First epoch day of a water year (1 October). */
@@ -412,15 +431,14 @@ export function compareAllocations(input: AllocationComparisonInput): Allocation
 				...(years.some((y) => y.damLossesM3 !== undefined) ? { meanDamLossesM3PerYear: mean((y) => y.damLossesM3 ?? 0) } : {})
 			};
 		};
-		// Storage registered for any of the run's days (an allocation that lapsed before the run, or starts after it, isn't the dam's now).
-		const stated = allocs.filter(
-			(a) =>
-				a.storageM3 !== null &&
-				a.storageM3 !== undefined &&
-				(!a.validTo || toEpochDay(a.validTo) >= start) &&
-				(!a.validFrom || toEpochDay(a.validFrom) <= end)
+		// Storage registered for the run's days (an allocation that lapsed before the run, or starts after it, isn't the dam's
+		// now): the most in force on any one day, so a dam registered again during the run (a renewal, a raised wall) counts
+		// once, not once per row the run overlaps. Rows in force on the same day (a 21b row and the storage on a take) add up.
+		const registeredStorage = mostInForce(
+			allocs.filter((a) => a.storageM3 !== null && a.storageM3 !== undefined).map((a) => ({ value: a.storageM3!, validFrom: a.validFrom, validTo: a.validTo })),
+			start,
+			end
 		);
-		const registeredStorage = stated.length ? stated.reduce((s, a) => s + (a.storageM3 ?? 0), 0) : null;
 		// A farm whose modelled dam holds 0 m³ has no dam to compare (engine ≥ 1.69.0): 'none', as a water user's.
 		const capacity = n.kind === 'farm' && typeof n.damCapacityM3 === 'number' && n.damCapacityM3 > 0 ? n.damCapacityM3 : null;
 		return {

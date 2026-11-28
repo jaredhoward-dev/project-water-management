@@ -88,9 +88,14 @@ template is downloadable from the Allocations page's Import sheet. The aliases a
 extract** from the client (followups.md): a column the importer doesn't know
 is listed as "not read", never guessed.
 
-- **File.** CSV, comma- or semicolon-separated, UTF-8, at most 2 MB, 5 000
+- **File.** CSV, comma- or semicolon-separated, UTF-8 (the import sheet
+  reads a file that isn't UTF-8 as Windows-1252, the code page Excel saves a
+  CSV in, and UTF-16 by its BOM: `decodeCsvFile`), at most 2 MB, 5 000
   rows and 200 columns. Quoted fields, doubled quotes and line breaks inside
-  quotes are read. XLSX is not read yet: save the sheet as CSV.
+  quotes are read. The delimiter is the one an Excel `sep=;` or `sep=,`
+  first line names (that line isn't the header), else read from the header,
+  the first line that isn't blank (`detectDelimiter`). XLSX is not read yet:
+  save the sheet as CSV.
 - **Numbers.** A `;` file reads a comma as the decimal mark and a point as a
   thousands separator; a `,` file the other way round. A thousands
   separator, or a space, must group the digits in threes (`1,500`,
@@ -270,9 +275,16 @@ For a run, per farm or water user, per water source and per **water year**
   hydrologist; `?tolerance=` on the API overrides it for one request):
   *above registered* (modelled > registered × 1.1),
   *within band*, *below registered* (< × 0.9), *no registered volume*
-  (modelled use with nothing in force), *no use, none registered*.
+  (modelled use with nothing in force), *no use, none registered*. The
+  band is written as set, up to two decimals (±12.5 %, never rounded to
+  ±13 %), and a year outside it states its difference with as many decimals
+  as it takes to read past the band (10.4 % above a ±10 % band, never
+  "10 % above, outside the ±10 % band"; `bandText`, `statusSentence`).
 - **Storage**: the sum of the farm's registered storage (21(b) rows and
-  storage stated on a take) beside the dam capacity the run modelled, with
+  storage stated on a take), the most in force on any one of the run's
+  days, so a dam registered again during the run (a renewal, a raised wall)
+  counts once (engine `mostInForce`, ENGINE_VERSION moves with it), beside
+  the dam capacity the run modelled, with
   the difference (capacity − registered) and a status banded like a year's
   use (issue #72): *over* is a dam larger than the storage registered for
   it, *under* a smaller one, *unregistered* a dam with none registered. The
@@ -280,7 +292,8 @@ For a run, per farm or water user, per water source and per **water year**
   s21(a) take is the hydrologist's question (issue #90). A 21(b) row is
   never part of the registered volume a year's use is compared with.
 - **Irrigated area**: the sum of the irrigated areas stated on the unit's
-  takes in force on any of the run's days (like the storage, a row that
+  takes in force, the most on any one of the run's days (a take renewed
+  during the run counts once; like the storage, a row that
   lapsed before the run or starts after it isn't counted; a 21(b) row has
   none) beside the crop areas the run planted on the unit (its stored
   inputs' `cropAreas`, m² → ha: every crop the engine models is irrigated),
