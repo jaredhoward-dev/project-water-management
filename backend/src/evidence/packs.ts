@@ -151,13 +151,12 @@ function toMeta(r: PackDbRow): PackMeta {
 /** One pack the caller can see, or 404. `lock`: FOR UPDATE, for a change to it. */
 async function loadPack(db: Db, projectId: string, packId: string, lock = false): Promise<PackMeta> {
 	if (!UUID.test(packId)) throw notFound();
-	const { rows } = await db.query<PackDbRow>(
-		lock
-			? // FOR UPDATE can't take the outer joins' nullable side: lock the pack alone first.
-				`WITH l AS (SELECT id FROM evidence_pack WHERE project_id = $1 AND id = $2 FOR UPDATE) SELECT ${COLUMNS} ${FROM} JOIN l ON l.id = p.id`
-			: `SELECT ${COLUMNS} ${FROM} WHERE p.project_id = $1 AND p.id = $2`,
-		[projectId, packId]
-	);
+	// FOR UPDATE can't take the outer joins' nullable side, so the pack alone is locked first, in its own statement:
+	// read in the locking statement, the row (and its sign-off count) would be the one that statement's snapshot saw
+	// before waiting for another transaction's lock, not the one that transaction committed (READ COMMITTED reads
+	// a fresh snapshot per statement). A withdrawal that waited for an issue then recorded it as withdrawn from draft.
+	if (lock) await db.query('SELECT 1 FROM evidence_pack WHERE project_id = $1 AND id = $2 FOR UPDATE', [projectId, packId]);
+	const { rows } = await db.query<PackDbRow>(`SELECT ${COLUMNS} ${FROM} WHERE p.project_id = $1 AND p.id = $2`, [projectId, packId]);
 	if (!rows[0]) throw notFound();
 	return toMeta(rows[0]);
 }

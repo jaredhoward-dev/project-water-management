@@ -1305,6 +1305,16 @@ Each step is in the project's history: `pack.drafted`, `pack.issued`,
 `pack.superseded`, `pack.withdrawn`, `pack.deleted`, and `signoff.created`
 naming the pack.
 
+**Two changes at once.** Every route that changes a pack locks its row
+first, in a statement of its own, and only then reads it, so a route that
+waited for another transaction (an issue, a withdrawal, a sign-off) decides
+from what that one committed: a withdrawal that waited for an issue is
+recorded as withdrawn from `issued`, a second withdrawal is "already
+withdrawn" and keeps the first reason, and a delete that waited for a
+sign-off keeps the signed draft. The database guards (`evidence_pack_guard`,
+`signoff_pack_draft`, `evidence_pack_one_issued`) refuse any move off the
+diagram either way. Tests: `backend/src/evidence/pack-lock-race.db.test.ts`.
+
 ## Signing
 
 `167_signers`; licensing positions item 9 (provisional position,
