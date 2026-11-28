@@ -1,7 +1,9 @@
 // Hysteresis (WP-2.13): a rule fires once on crossing, stays quiet while the
 // value hovers at the line, and re-arms only after recovering past the margin.
-import { describe, expect, it } from 'vitest';
-import { ALERT_KINDS, DAM_MARGIN, defaultMode, fires, recovered, step, THRESHOLD, type AlertKind } from './rules.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { ALERT_KINDS, DAM_MARGIN, dailyCap, DEFAULT_DAILY_CAP, defaultMode, fires, recovered, step, THRESHOLD, type AlertKind } from './rules.js';
+
+afterEach(() => vi.unstubAllEnvs());
 
 /** Run a value series through step(), returning each step and how many events opened. */
 function simulate(kind: AlertKind, threshold: number, values: (number | null)[]) {
@@ -111,3 +113,52 @@ describe('defaultMode (mirrors 051 alert_audience; alerts.db.test.ts checks the 
 		expect(defaultMode('farmer', 'farms_short')).toBeNull();
 	});
 });
+
+describe('a value that is not a number (a NaN or an infinity from a broken figure)', () => {
+	it('clears a firing rule and never opens a quiet one, for every kind', () => {
+		for (const kind of ALERT_KINDS) {
+			for (const v of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+				expect(step(true, kind, DEFAULT_TEST_THRESHOLD[kind], v), `${kind} firing, ${v}`).toBe('clear');
+				expect(step(false, kind, DEFAULT_TEST_THRESHOLD[kind], v), `${kind} quiet, ${v}`).toBe('keep');
+			}
+		}
+		// Positive control: a real value past the line opens it.
+		expect(step(false, 'dam_below', 0.3, 0.1)).toBe('open');
+		expect(step(false, 'job_dead', 1, 1)).toBe('open');
+	});
+});
+
+describe('dailyCap (ALERTS_DAILY_CAP: what the worker claims by and GET /me/alerts says)', () => {
+	it('is the default when unset or blank', () => {
+		vi.stubEnv('ALERTS_DAILY_CAP', undefined);
+		expect(dailyCap()).toBe(DEFAULT_DAILY_CAP);
+		for (const blank of ['', '   ']) {
+			vi.stubEnv('ALERTS_DAILY_CAP', blank);
+			expect(dailyCap(), JSON.stringify(blank)).toBe(DEFAULT_DAILY_CAP);
+		}
+	});
+
+	it('takes a whole number of 0 or more, 0 sending every alert to the digest', () => {
+		for (const [raw, n] of [['0', 0], ['2', 2], [' 12 ', 12], ['1000', 1000]] as const) {
+			vi.stubEnv('ALERTS_DAILY_CAP', raw);
+			expect(dailyCap(), raw).toBe(n);
+		}
+	});
+
+	it('falls back to the default on a negative, a fraction or words, rather than claiming by them', () => {
+		for (const raw of ['-1', '2.5', 'five', 'NaN', 'Infinity', '1e400']) {
+			vi.stubEnv('ALERTS_DAILY_CAP', raw);
+			expect(dailyCap(), raw).toBe(DEFAULT_DAILY_CAP);
+		}
+	});
+});
+
+const DEFAULT_TEST_THRESHOLD: Record<AlertKind, number> = {
+	dam_below: 0.3,
+	ewr_forecast_fail: 3,
+	data_stale: 3,
+	restriction_published: 0,
+	job_dead: 1,
+	feed_failing: 3,
+	farms_short: 1
+};

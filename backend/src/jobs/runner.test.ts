@@ -60,7 +60,7 @@ vi.mock('../feeds/gaugeRecordLoad.js', () => ({ runDwsTick: vi.fn(async () => nu
 vi.mock('../dams/observed/tick.js', () => ({ runDamsTick: vi.fn(async () => null) }));
 vi.mock('../water-use/observed/tick.js', () => ({ runEtTick: vi.fn(async () => null) }));
 
-const { runTick } = await import('./runner.js');
+const { envInt, runTick } = await import('./runner.js');
 
 beforeEach(() => {
 	failing.clear();
@@ -103,3 +103,29 @@ describe('runTick: the billing sweeps', () => {
 		expect(JSON.stringify(events)).not.toContain('example.com');
 	});
 });
+
+describe('runTick: every billing sweep is caught under its own name', () => {
+	it('all five failing: each recorded once, in the order they run, every count 0, and the tick still sends', async () => {
+		for (const fn of ['app_staff_grant_expire', 'app_reverse_trial_expire', 'app_billing_dunning_lapse', 'app_report_usage_refund_silent', 'app_plan_pause_tick'])
+			failing.add(fn);
+		const r = await runTick({ maxJobs: 1 });
+		expect(r.billingFailed).toEqual(['staff_grant_expire', 'reverse_trial_expire', 'dunning_lapse', 'report_refund', 'plan_pause']);
+		expect([r.staffGrantsExpired, r.reverseTrialsExpired, r.subscriptionsLapsed, r.reportsRefunded, r.catchmentsPaused]).toEqual([0, 0, 0, 0, 0]);
+		expect(sendAlerts).toHaveBeenCalledOnce();
+		expect(runPlanNotices).toHaveBeenCalledOnce();
+		expect(logged.filter((f) => f.event === 'billing_tick_step_failed')).toHaveLength(5);
+	});
+});
+
+describe('envInt (JOB_MAX_PER_TICK, JOB_LEASE_SECONDS, JOB_POLL_SECONDS)', () => {
+	it('takes a positive whole number, spaces round it allowed', () => {
+		expect(envInt('7', 25)).toBe(7);
+		expect(envInt(' 30 ', 25)).toBe(30);
+		expect(envInt('1', 25)).toBe(1);
+	});
+
+	it('falls back on unset, blank, zero, negative, fractional or non-numeric: never a lease of 0 or a tick that claims nothing', () => {
+		for (const v of [undefined, '', '  ', '0', '-5', '2.5', 'ten', 'NaN', 'Infinity']) expect(envInt(v, 25), String(v)).toBe(25);
+	});
+});
+

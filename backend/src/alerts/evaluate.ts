@@ -57,8 +57,13 @@ import type { RecentShortfall } from '../publish/recent.js';
 import { recordedRainUntil } from '../runs/autoRun.js';
 import { SERIES_STALE_ALERT_DAYS, SERIES_USUAL_DELAY_DAYS, step, type AlertKind } from './rules.js';
 
-/** ALERTS_ENABLED=false is the kill switch (docs/deployment.md § Runbooks): events still open and clear, nothing is sent. */
-export const alertsEnabled = () => process.env.ALERTS_ENABLED !== 'false';
+/**
+ * ALERTS_ENABLED=false is the kill switch (docs/deployment.md § Runbooks): events still open and clear, nothing is sent.
+ * Unset or anything else is on. An operator reaching for it in an incident may type `FALSE`, `0`, `off` or `no`, with
+ * stray spaces: each of those is off too, so the switch never fails open on how it was spelled.
+ */
+const OFF = new Set(['false', '0', 'off', 'no']);
+export const alertsEnabled = () => !OFF.has((process.env.ALERTS_ENABLED ?? '').trim().toLowerCase());
 
 interface RuleRow {
 	id: string;
