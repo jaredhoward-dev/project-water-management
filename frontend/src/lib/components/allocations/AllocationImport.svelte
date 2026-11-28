@@ -10,7 +10,7 @@
 	import Dialog from '#lib/components/common/Dialog.svelte';
 	import { fmtNum } from '#lib/format/number.js';
 	import FormatHelp from '#lib/components/common/FormatHelp.svelte';
-	import { ALLOCATIONS_FORMAT, AUTHORISATION_LABEL, MATCHED_BY_LABEL, previewOrder, SOURCE_LABEL, TEMPLATE_CSV, areaHa, volumeCell } from './allocations';
+	import { ALLOCATIONS_FORMAT, AUTHORISATION_LABEL, decodeCsvFile, MATCHED_BY_LABEL, previewOrder, SOURCE_LABEL, TEMPLATE_CSV, areaHa, volumeCell } from './allocations';
 
 	let { projectId, open = $bindable(false), onimported }: { projectId: string; open?: boolean; onimported: (message: string) => void } = $props();
 
@@ -56,7 +56,7 @@
 		}
 		phase = 'reading';
 		try {
-			const read = { name: f.name, text: await f.text() };
+			const read = { name: f.name, text: decodeCsvFile(new Uint8Array(await f.arrayBuffer())) };
 			// A file chosen while this one was read: drop it before asking for its preview.
 			if (run !== generation) return;
 			const answer = await api.allocations.preview(projectId, { kind, fileName: read.name, text: read.text, reference });
