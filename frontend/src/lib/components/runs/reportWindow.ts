@@ -4,7 +4,7 @@
 // and writes the `?window=` URL parameter and resolves a choice to day
 // indices into one run. Dates are calendar days (engine calendar helpers, UTC
 // epoch days), so no time zone can move a window by a day.
-import { fromEpochDay, toEpochDay, type ForecastRainDays, type ReportWindow } from '@water-management/engine';
+import { fromEpochDay, isIsoDate as engineIsIsoDate, toEpochDay, type ForecastRainDays, type ReportWindow } from '@water-management/engine';
 import { fmtDay } from '#lib/format/number.js';
 
 /** An epoch day as a person reads it, "6 Oct 2020". */
@@ -29,14 +29,12 @@ const LAST_DAYS: Partial<Record<WindowPreset, number>> = { last7: 7, last14: 14,
 
 export type WindowChoice = { preset: Exclude<WindowPreset, 'custom'> } | { preset: 'custom'; start: string; end: string };
 
-/** A strict ISO calendar date that exists (no 2023-02-30). */
+/**
+ * A strict ISO calendar date that exists (no 2023-02-30), from year 1: the
+ * engine's rule, so `?window=` refuses year 0000 as the run export route does.
+ */
 export function isIsoDate(s: string): boolean {
-	if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
-	try {
-		return fromEpochDay(toEpochDay(s)) === s;
-	} catch {
-		return false;
-	}
+	return engineIsIsoDate(s);
 }
 
 /**
