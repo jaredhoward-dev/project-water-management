@@ -1,0 +1,4 @@
+{
+	"addKb": 2,
+	"why": "Merging #950 into round 1 put 587ea3173 at 2586 KB against 2585 (+1 KB, both sides under alone); round 2's farmer-view, allocations, focus and date fixes add +1 KB beyond lane M's own entry (2588 KB measured at the merged head)"
+}
