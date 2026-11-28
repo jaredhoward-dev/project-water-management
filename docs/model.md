@@ -12720,8 +12720,12 @@ the days *D(y)* of *y* inside the run:
   without a dam, a water user and the groundwater side report none. The
   backend reads the two stored columns, so a run of any engine shows the
   line.
-- storage: Σ `storageM3` of the node's allocations, storage-only (s21b)
-  rows included (none when no allocation states one), beside the run's
+- storage: Σ `storageM3` of the node's allocations in force, the most on
+  any one of the run's days, storage-only (s21b) rows included (none when
+  no allocation states one; a dam registered again during the run, a
+  renewal or a raised wall, counts once: engine ≥ 1.123.3, `mostInForce`,
+  before which every row the run overlapped was summed, engine-errata.md
+  ER-41), beside the run's
   `damCapacityM3` for a farm, with the difference *C* − *S* and a status
   banded the same way with *C* for *M* and *S* for *R* (issue #72): **over**
   = a dam larger than the storage registered for it by more than *τ*,

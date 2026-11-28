@@ -283,7 +283,8 @@ For a run, per farm or water user, per water source and per **water year**
 - **Storage**: the sum of the farm's registered storage (21(b) rows and
   storage stated on a take), the most in force on any one of the run's
   days, so a dam registered again during the run (a renewal, a raised wall)
-  counts once (engine `mostInForce`, ENGINE_VERSION moves with it), beside
+  counts once (engine ≥ 1.123.3, `mostInForce`; before, every row
+  the run overlapped was summed, engine-errata.md ER-41), beside
   the dam capacity the run modelled, with
   the difference (capacity − registered) and a status banded like a year's
   use (issue #72): *over* is a dam larger than the storage registered for
@@ -293,7 +294,7 @@ For a run, per farm or water user, per water source and per **water year**
   never part of the registered volume a year's use is compared with.
 - **Irrigated area**: the sum of the irrigated areas stated on the unit's
   takes in force, the most on any one of the run's days (a take renewed
-  during the run counts once; like the storage, a row that
+  during the run counts once, engine ≥ 1.123.3, ER-41; like the storage, a row that
   lapsed before the run or starts after it isn't counted; a 21(b) row has
   none) beside the crop areas the run planted on the unit (its stored
   inputs' `cropAreas`, m² → ha: every crop the engine models is irrigated),
