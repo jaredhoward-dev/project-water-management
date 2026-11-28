@@ -322,7 +322,9 @@ round 5; there is no `<input type="date">` left, whose order is the
 browser's own: 12/30/2021 in a US browser, and `lib/uiPatterns.test.ts`
 refuses one). It is a text field read by `parseDay`: "15 Nov 2021", "15
 November 2021", "15/11/2021", "15.11.2021" and "2021-11-15" all read, never
-month first, and once typing ends it shows the day as "15 Nov 2021". A
+month first and never year 0000 (the engine's `isIsoDate`; Postgres's date
+has no year 0, and the Runs & results report window refuses such a custom
+range however it was built), and once typing ends it shows the day as "15 Nov 2021". A
 blank field's hint is an example, "e.g. 15 Nov 2021", never a bare day,
 which read as a stored one (Settings' blank Simulation start and end both
 seemed to say 15 Nov 2021); where blank means something the field says
