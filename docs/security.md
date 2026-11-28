@@ -3429,7 +3429,8 @@ In short:
   doesn't mention leading spaces, and Excel, Google Sheets and Numbers weren't
   tested; the rule doesn't depend on them. The apostrophe keeps ` =1+1` text
   in the same test. A trigger after a `;` gets the same apostrophe
-  (`csv.ts` `SEPARATOR_FORMULA`, the frontend's `names.ts` `defuseCsv`:
+  (`csv.ts` `SEPARATOR_FORMULA`, the frontend's `names.ts` `defuseCsv`, which
+  the grouped series CSV's `textCell` uses since issue #949:
   `Farm;=SUM(4)` is written `Farm;'=SUM(4)`): Excel in a comma-decimal
   locale, South Africa's among them, splits a CSV on `;`, and so does
   LibreOffice with `;` as its separator, which in a headless test on
@@ -3463,7 +3464,8 @@ In short:
   name, a run's label) has its `%`, commas, quotes and control characters
   percent-encoded first, so a name like `x,=HYPERLINK(…)` can't open a cell of
   its own that a spreadsheet runs (the server's and the actual ET CSV's encode
-  `;` too, for a reader that splits on it): the server's provenance lines
+  `;` too, for a reader that splits on it; the grouped series CSV, whose own
+  lines use `; `, encodes a `;` before a formula sign, issue #949): the server's provenance lines
   (`export/csv.ts` `provenanceValue`), the grouped series CSV
   (`series/groupedCsv.ts` `commentLine`) and the observed actual ET CSV
   (`crops/etObserved.ts` `etCsv`). Each has a unit test with such a name.
