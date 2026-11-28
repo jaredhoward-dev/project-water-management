@@ -177,6 +177,20 @@ and the SQL limits read that (`infra/lambda.tf`, `jobs.tf`, `assistant.tf`;
 pinned by `infra/tests/guardrails_baseline.tftest.hcl`). The operator turns it on
 through [deployment.md § Turning on enforcement](./deployment.md#turning-on-enforcement).
 
+**The switch, rehearsed** (`billing/turnOn.db.test.ts`, round 2026-11-28):
+existing users seeded in shadow mode (an account that never paid past Free's
+live catchments, a staff grant and a reverse trial that ended in shadow mode,
+a live staff grant, a team over its seats since before the marker, an
+unverified Free person with a feed on and assistant use), then enforcement on
+and the worker's tick. It pins: nothing paused at the switch nor a minute
+before the 14 days, the pause after them; one grace email per account, in its
+owner's language (Afrikaans and English), none to the never-paid or the live
+grant; each refusal (a further live catchment, a new editor, a new feed and
+the assistant for the unverified) answered with the code and numbers the Plan
+page or the panel's note words, every team member keeping access and every
+live catchment staying on; and the billing report naming who will pause and
+when, before the switch and after it.
+
 ## Assistant dollar caps
 
 Built, **off unless `BILLING_ENFORCED`** (issue #641 "Free AI allowance" and
@@ -411,7 +425,8 @@ output never goes into an issue, a PR, a chat or an agent's transcript.
 | --- | --- | --- |
 | Open price conflicts (printed second) | Rows of `billing_conflict` (406) not yet resolved, whatever the month, oldest first: the provider, subscription ref, account id, reason, plan, interval and seats, the amount carried and expected, held or not, the event id and when. Ids and amounts only, so `redact` keeps them ([§ Price check](#price-check)) | any one → not held: refund or grant it; held: check it in Stripe's dashboard |
 | Orphans past the retries (printed first) | Rows of `billing_event` still `orphan_pending` (352) more than 3 days after they were received, whatever the month: the provider, its event id, type and age, oldest first. Stripe has stopped redelivering them, so nothing will cancel or refund them but the operator ([deployment.md § Billing alarms](./deployment.md#billing-alarms)). No account or person: the account is gone | any one → finish it in Stripe's dashboard |
-| Teams over their paid seats (403) | Team accounts with `over_seats_since` set whose live Team plan pays for fewer seats than `app_team_seats_in_use` counts now (a stale marker is never listed), whatever the month: the account and team ids, editors, seats and since when, longest over first. Ids and numbers only, so redaction keeps them | any one → the team's new editors are refused; check the portal's quantity setting (§ Team seats) |
+| Teams over their paid seats (403) | Team accounts whose live Team plan pays for fewer seats than `app_team_seats_in_use` counts now (as the Plan page's `team.overSeats`; a stale marker is never listed), whatever the month: the account and team ids, editors, seats and since when (`over_seats_since`; "before it was recorded" for a team that went over before 403/404 wrote the marker and hasn't changed since, round 2026-11-28), longest over first. Ids and numbers only, so redaction keeps them | any one → the team's new editors are refused; check the portal's quantity setting (§ Team seats) |
+| Who will pause and when (341, 409) | Accounts past Free's live catchments (338's count) with no live plan, today, whatever the month: account id, kind, live count and limit, and a state: paused (how many), in its grace (`over_free_since` and the pause date 14 days on), plan ended with no grace yet (shadow mode: the grace and its email start at the first enforced tick), or never had a plan (nothing pauses). Paused first, then by pause date; whether the owner chose the one to keep. Ids and numbers only (round 2026-11-28) | read before turning enforcement on ([deployment.md § Turning on enforcement](./deployment.md#turning-on-enforcement)): grant the ones that should keep everything |
 | Activation | Verified sign-ups of the month (SAST) with a model run of their own (`model_run.trigger` `manual`: the live model, a scenario or a calibration they asked for, never a live catchment's automatic or forecast run; 402) within 7 days of signing up. The first run is read from `first_manual_run` (407, issue #939), written by a trigger when the person's first manual run is saved and kept when runs are trimmed by the run cap or deleted (owner only; in the person's data export as `firstManualRun`; deleted with the account). Sign-ups under 7 days old are left out and counted as pending | < 30% → fix onboarding first |
 | Active Free accounts near / at each limit | Active = a run someone asked for (`manual`, as above: an account whose only runs this month are automatic is idle, 402), a server report or assistant use this month on the account's projects. Near ≥ 80% of the limit, at ≥ 100%, for reports (5), the assistant's dollars ($1), catchments (Free has no limit, so none) and live catchments (1: the share at the live-catchment limit). Catchments and live catchments are counted **today**; live is 338's count (`app_live_catchments_in_use`: an enabled feed or alert rule, automatic runs on, or a publication; [§ Live catchments](#live-catchments-free)), so an account past its limit from before enforcement counts as at it, and an idle account with a live catchment isn't in the share | > 15% at reports → 10 a month; < 3% at the monthly assistant cap → room to raise |
 | Reverse trial → paid within 30 days | The reverse trials (342) that **began in the report's SAST month**: `billing_grant_log` `grant` rows by `reverse trial`, one per account (one trial per canonical email). Paid = the account's first paid plan at or after the trial's start: a subscription from a payment provider (`stripe`, or `mock` locally) whose first payment was taken: `active`, `past_due` or `canceled` (so a plan bought and later cancelled counts; not `trialing`, and not `expired`, Stripe's `incomplete_expired`, a first payment never made), or a paid B2B invoice's grant (`billing_grant_log` `grant` by `invoice`, 335); a staff grant is not paid. Converted when it came at most 30 days after the start. A trial under 30 days old is left out and counted as pending (with how many of those already pay). A deleted account's trial goes with it (`billing_grant_log` cascades) | |
@@ -1712,7 +1727,13 @@ Built but off: nothing is paused unless `BILLING_ENFORCED` is on.
   enforcement switched off again), so a plan that ended in shadow mode (a
   staff grant's end, a lapsed trial) starts its 14 days, and its grace
   email, at the first tick after enforcement is switched on, never pausing
-  at once. The schema owner's own connections (`pnpm dev:billing:grant`,
+  at once. The tick visits only the accounts it can change (417): those
+  with a stamp or a pause marker and, enforced, those whose plan has ended
+  with more live catchments than Free allows, found in one set-based query
+  (338's "live" written out; `planPause.db.test.ts` checks each of its four
+  ways). Before 417 it took the billing lock of, and synced, every account
+  with an ended plan, which is every Free account past its reverse trial:
+  2.3-2.5 s a tick in shadow mode on 10,000 of them, now about 50 ms. The schema owner's own connections (`pnpm dev:billing:grant`,
   `dev:billing:invoice`, `dev:billing:conflict` and the migrate Lambda's
   owner actions) set `app.billing_enforced` on their session from
   `BILLING_ENFORCED` (`setOwnerBillingEnforced` in

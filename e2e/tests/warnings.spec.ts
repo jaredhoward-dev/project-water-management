@@ -13,7 +13,7 @@ import { addMember, createRun, updateSettings } from '../support/api.ts';
 import { expectNoViolations } from '../support/a11y.ts';
 import { pinClockToProject } from '../support/clock.ts';
 import { sections } from '../support/data.ts';
-import { expectNoSidewaysScroll, squashedChecks } from '../support/reflow.ts';
+import { expectNoSidewaysScroll, resizeTo, squashedChecks } from '../support/reflow.ts';
 import { expect, test } from '../support/fixtures.ts';
 import {
 	bulkBar,
@@ -316,7 +316,7 @@ test.describe('390×844', () => {
 		expect(Math.abs(patch!.y - keep!.y)).toBeLessThan(1);
 		await expectNoViolations(page);
 		// And at 320 px (WCAG 1.4.10): no sideways scroll, no squashed tick box.
-		await page.setViewportSize({ width: 320, height: 640 });
+		await resizeTo(page, { width: 320, height: 640 });
 		await expectNoSidewaysScroll(page);
 		expect(await squashedChecks(page)).toEqual([]);
 	});

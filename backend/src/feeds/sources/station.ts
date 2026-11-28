@@ -28,6 +28,7 @@ import {
 	formatStationTime,
 	readStationAnswer,
 	stationDays,
+	stationLastEndedDay,
 	stationRange
 } from '@water-management/engine/station-format';
 import { fromEpochDay, toEpochDay } from '@water-management/engine/calendar';
@@ -60,24 +61,13 @@ export const stationWindowDays = (config: Pick<StationApiConfig, 'maxDaysPerRequ
  * The newest rain day a station can have finished by `nowMs`: a daily total once its date is past in the format's
  * zone, a sub-daily rain day once its end (dayStartHour the next morning) has passed. Never after `utcToday`, the
  * newest day the ingest accepts (ingest.ts latestDay). fetchWindow ends its window here and the ingest counts a
- * feed caught up from here, so the two never disagree about whether a backfill has more to read.
+ * feed caught up from here, so the two never disagree about whether a backfill has more to read; and it is the
+ * engine's stationLastEndedDay, the day stationDays cuts the written days at, so a window never ends on a day the
+ * fetch can't write yet (it was the local date of now less dayStartHour, an hour off the wall clock's day start on
+ * a daylight-saving morning).
  */
 export function stationLastDay(format: StationFormat, nowMs: number, utcToday: string): string {
-	const tz = format.timeZone ?? STATION_DEFAULT_TIME_ZONE;
-	const localDay = (t: number) => {
-		const parts = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(t));
-		return toEpochDay(parts);
-	};
-	let last: number;
-	if (format.resolution === 'daily') last = localDay(nowMs) - 1;
-	else {
-		// The rain day an instant falls in: the local date after shifting back to the day's start hour, plus one when
-		// the provider credits a rain day to the date it ends on (the engine's rainDay).
-		const shift = (format.dayStartHour ?? 8) * 3_600_000;
-		last = localDay(nowMs - shift) + (format.creditDayTo === 'end' ? 1 : 0) - 1;
-	}
-	const cap = toEpochDay(utcToday);
-	return fromEpochDay(Math.min(last, cap));
+	return fromEpochDay(Math.min(stationLastEndedDay(format, nowMs), toEpochDay(utcToday)));
 }
 
 /** One request's rain days, inclusive. */

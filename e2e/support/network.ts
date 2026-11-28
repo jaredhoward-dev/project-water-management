@@ -70,6 +70,7 @@ export async function openNodeSection(sheet: Locator, title: string) {
 export async function saveModelChanges(page: Page) {
 	const modal = page.locator('dialog[open]');
 	const saved = page.waitForResponse((r) => r.request().method() === 'PUT' && /\/projects\/[^/]+\/model$/.test(new URL(r.url()).pathname));
+	// settled: the caller's edits were made in the open sheet or on the page, both drawn; nothing here opens or closes a dialog.
 	if (await modal.count()) await modal.getByRole('button', { name: 'Save changes' }).click();
 	else await page.getByRole('region', { name: 'Unsaved model changes' }).getByRole('button', { name: 'Save changes' }).click();
 	return saved;

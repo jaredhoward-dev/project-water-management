@@ -63,7 +63,7 @@ In a git worktree both URLs point at that worktree's own dev database,
 | `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | `minioadmin` / `minioadmin` | MinIO's documented default login, for the local container only (`pnpm check:env` holds them to it) |
 | `ALERTS_TOKEN_SECRET` | a dev-only string (≥ 32 chars) | Signs alert emails' unsubscribe and "Was this useful?" links (the worker). Production gets a random one from Terraform. See [Alerts](#alerts) |
 | `API_PUBLIC_URL` | `http://localhost:3001` | Where a mail client posts an alert's one-click unsubscribe (production: `SITE_URL/api`, the default) |
-| `ALERTS_ENABLED` / `ALERTS_DAILY_CAP` | `true` / `5` | The alert kill switch, and immediate alert emails per person per day |
+| `ALERTS_ENABLED` / `ALERTS_DAILY_CAP` | `true` / `5` | The alert kill switch (`false`, `0`, `off` or `no`, any case, switches alert emails off; unset or anything else is on), and immediate alert emails per person per day (a whole number, 0 or more; anything else is the default 5) |
 | `BILLING_ENFORCED` | `false` (code default) | Whether plan limits refuse anything. Phase 1 is shadow mode: usage is counted and shown, nothing is refused, and the API only reports this as `enforced` ([billing.md](./billing.md#billing_enforced)) |
 | `REVERSE_TRIAL` | unset (off) | The 14-day Pro reverse trial on a first verification, once per canonical email; only `true` together with `BILLING_ENFORCED=true` grants one ([billing.md § The reverse trial](./billing.md#the-reverse-trial-built-off)) |
 | `BILLING_PROVIDER` | `mock` (code default) | The billing provider the webhook route serves: `mock` (events signed with the dev key below), `manual` (no webhooks) or `stripe` ([billing.md § Webhooks and providers](./billing.md#webhooks-and-providers)) |

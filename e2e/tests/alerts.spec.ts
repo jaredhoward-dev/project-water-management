@@ -23,7 +23,7 @@ import { plantAlertFeedback, plantAlertSubscription, plantEwrForecastAlert } fro
 import { API_URL } from '../support/env.ts';
 import { expect, test } from '../support/fixtures.ts';
 import { simulateBounce } from '../support/jobs.ts';
-import { expectNoSidewaysScroll } from '../support/reflow.ts';
+import { expectNoSidewaysScroll, resizeTo } from '../support/reflow.ts';
 
 const PHONE = { width: 360, height: 740 };
 const af = await words('af');
@@ -237,7 +237,7 @@ test('the alert emails page lays its catchments out as cards across the width', 
 	}
 	await page.emulateMedia({ colorScheme: 'light' });
 
-	await page.setViewportSize(PHONE);
+	await resizeTo(page, PHONE);
 	const a2 = (await page.getByRole('region', { name: 'Cards catchment A' }).boundingBox())!;
 	const b2 = (await page.getByRole('region', { name: 'Cards catchment B' }).boundingBox())!;
 	expect(Math.abs(a2.x - b2.x)).toBeLessThan(1);
@@ -295,7 +295,7 @@ test('thirty farms’ dam alerts read as two columns of rows in one wide card', 
 	expect(await p.evaluate(() => document.documentElement.scrollHeight)).toBeLessThan(1400);
 	await expectNoViolations(p);
 
-	await p.setViewportSize(PHONE);
+	await resizeTo(p, PHONE);
 	const first2 = (await card.getByRole('group').nth(0).boundingBox())!;
 	const second2 = (await card.getByRole('group').nth(1).boundingBox())!;
 	expect(second2.y).toBeGreaterThan(first2.y + first2.height - 1);

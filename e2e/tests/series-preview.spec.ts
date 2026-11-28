@@ -167,6 +167,7 @@ test('the preview fills the viewport and renders rows to the bottom of its talle
 	// Scroll to the middle: the row windowing must follow the measured height, so
 	// the cell just above the scroll box's bottom edge is a real date, not a spacer.
 	const scroller = dialog.locator('.scroll');
+	// settled: a fixed offset into the drawn virtual table; the row there is awaited with a web-first expect before the read.
 	await scroller.evaluate((el) => (el.scrollTop = 300 * 28));
 	await expect(dialog.getByRole('row').filter({ has: page.getByRole('cell', { name: '27 Oct 2020', exact: true }) })).toBeVisible();
 	const bottomCell = await scroller.evaluate((el) => {
@@ -206,6 +207,7 @@ for (const size of [
 		expect((await rows.nth(20).boundingBox())!.y - first.y).toBeCloseTo(20 * 28, 0);
 
 		// Scrolled to the end, the last day is the last row, at the foot of the scroll box.
+		// settled: the virtual table's height is its day count × 28 px, fixed once drawn, and the last row is awaited below.
 		await scroll.evaluate((d) => (d.scrollTop = d.scrollHeight));
 		const last = rows.last();
 		await expect(last.getByRole('cell').first()).toHaveText('31 Dec 2024');
@@ -213,6 +215,7 @@ for (const size of [
 		const bottomScrollbar = await scroll.evaluate((d) => (d as HTMLElement).offsetHeight - d.clientHeight);
 		expect(Math.abs((await last.boundingBox())!.y + 28 - (end.y + end.height - bottomScrollbar))).toBeLessThan(3);
 		// Far in, the row at the top of the box is the day that far in.
+		// settled: a fixed offset into the drawn virtual table; the row there is awaited with a web-first expect.
 		await scroll.evaluate((d) => (d.scrollTop = 4000 * 28));
 		await expect(dialog.getByRole('row', { name: /^14 Dec 2020 / })).toBeInViewport();
 

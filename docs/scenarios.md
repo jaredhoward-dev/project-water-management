@@ -59,10 +59,17 @@ are empty and nothing below changes.
     user, `trigger` without a dam, `runOfRiver` with one, a stop level
     below the trigger; WP-3.8),
     a catchment with no land left (`runModel` refuses 0 km²), or a
-    simulation, reporting or calibration window that ends before it starts.
+    simulation, reporting or calibration window that ends before it starts,
+    or a drought restriction naming a unit, dam or EWR site the network no
+    longer has (`droughtRestrictionNodeIssues`, which the Settings form blocks
+    a save on: removing or emptying the one dam the rule reads silently turned
+    the restriction off for every unit, scored as the op's effect; change the
+    rule with `settings.set droughtRestriction` first; a hidden unit's dam is
+    one of the masked rules; engine ≥ 1.123.3, before which the op applied
+    and the run left the id out with a warning, engine-errata.md ER-40).
     These are the model's save rules (`modelRuleIssues`,
     `packages/engine/src/modelRules.ts`, the one home the backend's
-    `modelProblems` also calls) plus the windows and the area, in
+    `modelProblems` also calls) plus the windows, the area and the drought restriction's ids, in
     `scenario/structure.ts`. So a scenario can only produce a model the
     backend would accept as a save. Only issues the op *introduces* count, so an
     old base that already has one can still take unrelated ops.
@@ -490,7 +497,10 @@ R1](./design/planning-outputs.md#31-r1-a-demandscale-scenario-op-foundation-s)).
   2021, so it would change no day`, `no day the run can cover (1 Oct 2020 –
   12 Feb 2022) falls in 1 Jan 2030 – its end, so it would change no day`,
   `none of its months (Jun) falls on a day the run can cover between …`;
-  engine ≥ 1.119.0); a node id the input
+  engine ≥ 1.119.0; the days the run can cover are its rain series' span, so
+  a window only on blank days at the end of the rain, past the last rained
+  day the run's end moves in to, is accepted and changes nothing:
+  `demandWindows.invariants.test.ts`); a node id the input
   doesn't have (`node … not found`); a node of another kind (`"Town" is an
   other water user, not a farm`); no node of the category at all when
   `nodeIds` is left out (`the model has no other water user to scale`). The
@@ -842,7 +852,7 @@ red **Baseline assumptions changed** callout shows whenever any op is
 | Op | Proposal when | Otherwise |
 | --- | --- | --- |
 | `settings.set`, `series.scale`, `climate.delta`, `ewrRule.set`, `ewrRule.remove` | never | baseline (settings, calibration, EWR and the Reserve's rule tables, climate) |
-| `node.set` | the node is owned and the field is not land (`areaKm2`; it sets the unit's natural MAR share), a gauge's `ewrSite`, a dam's `damSurveyDate` / `damSedimentPctPerYear` (engine ≥ 1.30.0), or the bed losses below it, `reachLossFrac` / `reachLossMaxM3Day` (engine ≥ 1.75.0, the river's own; by month `reachLossFracMonthly` / `reachLossMaxMonthlyM3Day`, engine 1.116.0), or a unit's base-flow loss and gain, `baseflowLossM3Day` / `baseflowGainM3Day` (engine 1.86.0, the groundwater's; by month `baseflowLossMonthlyM3Day` / `baseflowGainMonthlyM3Day`), or another unit's dam for its crops, `cropRemoteNodeId` (engine 1.118.0; an application refuses it, § Op catalogue); so the own farm's supply rule and river pump, and a dam or an abstraction from a date, are the proposal (how the farm takes water is what a licence to abstract asks for, like a new pump) | baseline: other parties' nodes, the catchment's partition of runoff, where the EWR is assessed, a dam's survey and sediment (the dam as it is), the river's bed losses and a unit's base-flow loss and gain |
+| `node.set` | the node is owned and the field is not land (`areaKm2`; it sets the unit's natural MAR share), a gauge's `ewrSite`, a dam's `damSurveyDate` / `damSedimentPctPerYear` (engine ≥ 1.30.0), or the bed losses below it, `reachLossFrac` / `reachLossMaxM3Day` (engine ≥ 1.75.0, the river's own; by month `reachLossFracMonthly` / `reachLossMaxMonthlyM3Day`, engine 1.116.0), or a unit's base-flow loss and gain, `baseflowLossM3Day` / `baseflowGainM3Day` (engine 1.86.0, the groundwater's; by month `baseflowLossMonthlyM3Day` / `baseflowGainMonthlyM3Day`), or another unit's dam for its crops, `cropRemoteNodeId` (engine 1.118.0; an application refuses it, § Op catalogue), or an other water user's `userPriority` set to Priority when it wasn't one (its upstream farms must then pass its demand, as with a `node.insert` of one; without `input`, any such set; engine ≥ 1.123.3, before which an own user's was classed the proposal, engine-errata.md ER-39); so the own farm's supply rule and river pump, and a dam or an abstraction from a date, are the proposal (how the farm takes water is what a licence to abstract asks for, like a new pump) | baseline: other parties' nodes, the catchment's partition of runoff, where the EWR is assessed, a user ranked above the farms upstream of it, a dam's survey and sediment (the dam as it is), the river's bed losses and a unit's base-flow loss and gain |
 | `node.add` | not a gauge, and no land of its own (a new dam, pump or user) | baseline: a gauge moves an EWR site; land re-partitions the catchment |
 | `node.remove` | owned, not a gauge, no land, no EWR rule table sited at it, and every transfer from or to it reaching only owned units, as `transfer.remove` asks (needs `input`) | baseline: the removal drops those rules, so another party's would otherwise go as the proposal. An off-take whose seepage alone rejoins below it doesn't count: an off-take with neither end theirs is hidden from an applicant, and classing by its seepage would tell them it exists. Its seepage rejoins at the nearest point above the removed unit after the removal (engine ≥ 1.122.0, issue #853, above), so the water reaches the unit below as before and isn't scored as the proposal's |
 | `node.insert` | as `node.add`: not a gauge, and no land of its own; and not a priority other water user (the default priority) | baseline. A priority user inserted above other farms curtails them (they must pass its demand, [model.md §2.7c](./model.md)), and whether a new use ranks above existing lawful use is the authority's call, pending the hydrologist ([engine-audit.md](./engine-audit.md) L1), so it is a changed assumption, not the proposal. A new structure on the reach is the proposal (an on-channel dam is what a licence to build one asks for); the nodes it re-points keep their values and their order along the river, so their water reaching it is the proposal's effect, not a changed assumption |

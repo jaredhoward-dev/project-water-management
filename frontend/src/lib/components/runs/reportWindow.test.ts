@@ -105,6 +105,11 @@ describe('resolveWindow', () => {
 			ok: false,
 			error: 'The window 1 Feb 2022 to 7 Feb 2022 is outside this run (1 Oct 2021 to 28 Jan 2022).'
 		});
+		// A day the engine's isIsoDate refuses (year 0000, which Postgres's date lacks; 30 Feb) is no window,
+		// however the choice was built, never one cut to the run.
+		for (const [start, end] of [['0000-01-01', '2021-12-07'], ['2021-12-01', '0000-12-31'], ['2021-02-30', '2021-12-07']]) {
+			expect(resolveWindow({ preset: 'custom', start, end }, run, own), `${start}..${end}`).toEqual({ ok: false, error: 'The window needs two calendar days.' });
+		}
 		// One day is a window.
 		expect(ok({ preset: 'custom', start: '2022-01-28', end: '2022-01-28' }).window.days).toBe(1);
 	});

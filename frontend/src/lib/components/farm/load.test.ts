@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ApiError, createApi } from '#lib/api/client.js';
-import { cardOnFailure, classify, farmHref, farmReturn, farmReturnPage, pickNode, savedForPublication, wordsHref, worstFirst } from './load';
+import { cardOnFailure, classify, farmHref, farmsLanding, farmReturn, farmReturnPage, pickNode, savedForPublication, wordsHref, worstFirst } from './load';
 
 /** An error the API wrote itself (its JSON error shape), as the client builds it. */
 const api = (status: number) => new ApiError(status, 'x', undefined, null, {}, true);
@@ -190,5 +190,20 @@ describe('savedForPublication (/farm: a saved copy from an older publication, #9
 	});
 	it('drops a copy whose publication has the same day but a later republish time', () => {
 		expect(savedForPublication(entry('2026-11-01T08:00:00Z'), { publishedAt: '2026-11-01T09:30:00Z' })).toBeNull();
+	});
+});
+
+describe('farmsLanding (/farm: what the list does when a catchment’s list failed)', () => {
+	it('goes straight to a lone farm only when every catchment answered', () => {
+		expect(farmsLanding(1, false)).toBe('redirect');
+		// Another catchment's list failed: its farms may be missing, so the list stays, saying so, rather than
+		// landing the farmer on one farm with no sign the others exist.
+		expect(farmsLanding(1, true)).toBe('list');
+	});
+	it('lists two or more farms either way, and says none are linked only when nothing failed', () => {
+		expect(farmsLanding(2, false)).toBe('list');
+		expect(farmsLanding(2, true)).toBe('list');
+		expect(farmsLanding(0, false)).toBe('list');
+		expect(farmsLanding(0, true)).toBe('error');
 	});
 });

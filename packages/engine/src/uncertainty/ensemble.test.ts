@@ -596,7 +596,44 @@ describe('rain-source members per gap-filling product (issue #834)', () => {
 		expect(resolveEnsembleOptions(input, { members: 30 }).options.rainSources).toEqual(['recorded', 'chirps']);
 		expect(() => resolveEnsembleOptions(input, { members: 30, rainSources: ['era5l'] })).toThrow(/ERA5-Land-only rain source is not available/);
 	});
+
+	// Invariants on the gap-filled ensemble (round 2026-11-28 lane A: no stored input exercised them).
+	describe('invariants with ERA5-Land members', () => {
+		const input = withEra5({ product: 'chirpsThenEra5l', imergLate: false });
+		const all = { minSkill: -10, maxLowFlowBiasPct: null, wr2012MaxLevel: 'unusable' } as const;
+		const { options } = resolveEnsembleOptions(input, { members: 33, thresholds: all });
+		const baseline = runEnsemble(input, options);
+
+		it('is deterministic under its seed, and another seed draws another sample', () => {
+			expect(fingerprint(runEnsemble(input, options).members)).toBe(fingerprint(baseline.members));
+			const other = resolveEnsembleOptions(input, { members: 33, seed: 2, thresholds: all }).options;
+			expect(fingerprint(runEnsemble(input, other).members)).not.toBe(fingerprint(baseline.members));
+		});
+
+		it('gives a paired band of exactly zero on the same inputs, ERA5-Land pairs included', () => {
+			const paired = runPairedEnsemble(input, baseline);
+			const byIndex = new Map(baseline.members.map((m) => [m.index, m]));
+			expect(paired.members.some((p) => byIndex.get(p.index)!.rain === 'era5l')).toBe(true);
+			// Each pair's other side is the baseline member's own figures, to the bit.
+			for (const p of paired.members) expect(p.metrics).toEqual(byIndex.get(p.index)!.metrics);
+			const s = summarisePaired(baseline, paired);
+			expect(s.members).toBe(pairedMembersOf(baseline));
+			for (const b of [s.ewrDaysNotMet, s.shortfallMm3, s.marOutflowMm3, s.marNaturalMm3, s.noFlowDays!, ...s.ewrDaysNotMetByMonth, ...s.annual.map((y) => y.outflow)]) {
+				expect([b.p5, b.p50, b.p95, b.min, b.max]).toEqual([0, 0, 0, 0, 0]);
+			}
+		});
+
+		it('leaves the natural flow unchanged in every pair when the application only adds a dam, and the dam lowers the outflow in every pair', () => {
+			const withDam = synthetic({ years: 4, dam: true });
+			const application: ModelInput = { ...input, model: withDam.model };
+			const s = summarisePaired(baseline, runPairedEnsemble(application, baseline));
+			expect([s.marNaturalMm3.min, s.marNaturalMm3.max]).toEqual([0, 0]);
+			expect(s.marOutflowMm3.max!).toBeLessThan(0);
+		});
+	});
 });
+
+const pairedMembersOf = (r: { members: readonly { accepted: boolean; metrics?: unknown }[] }) => r.members.filter((m) => m.accepted && m.metrics).length;
 
 describe('paired bands on the difference between a run and its baseline', () => {
 	const base = synthetic({ years: 5 });

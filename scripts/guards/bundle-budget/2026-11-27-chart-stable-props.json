@@ -1,0 +1,4 @@
+{
+	"addKb": 1,
+	"why": "Lane M perf: charts/stableProp.ts (content-stable LineChart props) and series/perValues.ts (per-record memo); measured about 0.6 KB gzipped in the LineChart and Data tab chunks; the build stood at 2587 KB against 2585 KB with it, so the rest of the gap predates this change"
+}

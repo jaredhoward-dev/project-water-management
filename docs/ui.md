@@ -322,7 +322,9 @@ round 5; there is no `<input type="date">` left, whose order is the
 browser's own: 12/30/2021 in a US browser, and `lib/uiPatterns.test.ts`
 refuses one). It is a text field read by `parseDay`: "15 Nov 2021", "15
 November 2021", "15/11/2021", "15.11.2021" and "2021-11-15" all read, never
-month first, and once typing ends it shows the day as "15 Nov 2021". A
+month first and never year 0000 (the engine's `isIsoDate`; Postgres's date
+has no year 0, and the Runs & results report window refuses such a custom
+range however it was built), and once typing ends it shows the day as "15 Nov 2021". A
 blank field's hint is an example, "e.g. 15 Nov 2021", never a bare day,
 which read as a stored one (Settings' blank Simulation start and end both
 seemed to say 15 Nov 2021); where blank means something the field says
@@ -7527,6 +7529,25 @@ that changes over the run) gets "Workbook
 failed: The audit workbook can't recompute *unit* yet: …" naming each, never a
 file whose numbers disagree.
 
+### Series tab performance
+
+The Data tab (`SeriesTab.svelte`) loads each series' values on its own
+request and replaces its `values` map as each one lands. Two things keep
+that from costing more as a project gains series:
+
+- Each record's coverage stats, coverage strip bins and data checks are
+  worked out once per values object (`series/perValues.ts`), not again for
+  every series on every arrival. Loading 30 series of 40 years did that work
+  N(N+1)/2 = 465 times, about 4.5 s of main-thread time; now 30 times, about
+  0.3 s (`perValues.test.ts` counts the passes).
+- `LineChart` holds its `series`, `shade`, `lanes` and `band` props through
+  `charts/stableProp.ts`: an inline prop that re-evaluates to the same
+  content keeps its identity, so the chart is not realigned and rebuilt in
+  uPlot. The Data tab's chart rebuilt once per arriving series; now once,
+  and again only when what it draws changes (`stableProp.svelte.test.ts`).
+  This holds for every chart, so a parent passing inline arrays costs a
+  content comparison, not a redraw.
+
 ### Data feeds
 
 On the Data page, after the series and their chart, is **Data feeds**
@@ -14591,7 +14612,7 @@ March") is kept against what it is about.
 - **Farmer view.** *Notes about your hydrological unit* (`farm/FarmNotes.svelte`) lists
   the farmer's own notes and the WUA's farm-visible ones on that farm, and
   adds a note, always shown to the farm. The WUA previewing the page sees the
-  same farm-visible notes, read only. It is the same `NotesList`, given the
+  same farm-visible notes, read only. Switching unit keeps the card mounted, so the list resets what was typed, an open edit and its errors when its target changes, and drops an answer for the last target (`notes.ts` `targetKey`); the page's CSV download error clears too. It is the same `NotesList`, given the
   catalogue's words (`words` prop, `farm/notesWords.ts`; server errors
   through `errorText`), so the farmer's copy is translated while the
   workspace's stays English and never loads the catalogue.
@@ -15695,7 +15716,7 @@ published.
   than the one the list names (another `publishedAt`) is not shown at all,
   since it describes a superseded decision beside the card's current level
   word, and the card says its figures couldn't be had instead, the copy
-  itself kept for the farm page: `savedForPublication`, issue #942), and goes straight to the only one. `/farm/[projectId]` is one farm (`?node=` and a
+  itself kept for the farm page: `savedForPublication`, issue #942), and goes straight to the only one, but only when every catchment's list answered: when one failed (not for access gone), the list stays, with a line that some catchments couldn't be loaded and Try again, rather than landing on one farm with no sign of the others (`farm/load.ts` `farmsLanding`). `/farm/[projectId]` is one farm (`?node=` and a
   switcher when the farmer has several there: a row of links above the name
   for up to 4 farms; past that, folded under "Your hydrological units in this catchment
   (N farms)", so the name and the WUA's notice stay on the first screen,

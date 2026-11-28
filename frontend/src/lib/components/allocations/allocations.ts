@@ -48,6 +48,23 @@ export const volumeCell = (a: { waterUse: AllocationWaterUse; volumeM3PerYear: n
 /** A registered irrigated area (244): up to two decimals, as the authorisation states it ("42.5 ha"); a whole-number round would read 42.5 as 43. */
 export const areaHa = (ha: number): string => `${fmtNum(ha, 2, true)} ha`;
 
+/** A band (a fraction) in percent as the band card saves it, up to two decimals: 0.125 → 12.5, 0.07 → 7 (no float dust). */
+export const bandPercent = (tolerance: number) => Math.round(tolerance * 1e6) / 1e4;
+
+/** The comparison band in words, "±10 %", "±12.5 %": never rounded to a band the comparison didn't use. */
+export const bandText = (tolerance: number): string => `±${fmtNum(bandPercent(tolerance), 2, true)} %`;
+
+/**
+ * How far a use outside the band is from the registered volume, in percent,
+ * with as many decimals (up to three) as it takes to read past the band: 10.4 %
+ * above a ±10 % band is "10.4 %", never the band's own "10 %".
+ */
+function pastBand(percent: number, tolerance: number): string {
+	const band = bandPercent(tolerance);
+	for (let d = 0; d < 3; d++) if (Number(percent.toFixed(d)) > band) return fmtNum(percent, d, true);
+	return fmtNum(percent, 3, true);
+}
+
 /**
  * The dam against its registered storage (engine compareAllocations
  * `storage`, issue #72), in words, or null when there is neither. Arithmetic
@@ -57,7 +74,7 @@ export const areaHa = (ha: number): string => `${fmtNum(ha, 2, true)} ha`;
 export function storageSentence(s: AllocationComparison['nodes'][number]['storage'], tolerance: number): string | null {
 	const cap = s.modelledCapacityM3;
 	if (s.registeredM3 === null && !cap) return null;
-	const band = `±${fmtNum(tolerance * 100, 0)} %`;
+	const band = bandText(tolerance);
 	if (s.registeredM3 === null) return `Dam capacity in the run ${fmtNum(cap)} m³, with no registered storage (s21b).`;
 	if (!cap) return `Registered storage ${fmtNum(s.registeredM3)} m³, with no dam in the run.`;
 	const both = `Registered storage ${fmtNum(s.registeredM3)} m³ · dam capacity in the run ${fmtNum(cap)} m³`;
@@ -142,12 +159,12 @@ export const waterYearLabel = (wy: number) => `${wy}/${String((wy + 1) % 100).pa
 
 /** One sentence for a year's comparison, with the tolerance, never a legal word. */
 export function statusSentence(y: Pick<AllocationYear, 'status' | 'ratio' | 'modelledM3' | 'registeredM3'>, tolerance: number): string {
-	const band = `±${fmtNum(tolerance * 100, 0)} %`;
+	const band = bandText(tolerance);
 	switch (y.status) {
 		case 'over':
-			return `Modelled use is ${fmtNum(((y.ratio ?? 0) - 1) * 100, 0)} % above the registered volume (outside the ${band} band).`;
+			return `Modelled use is ${pastBand(((y.ratio ?? 0) - 1) * 100, tolerance)} % above the registered volume (outside the ${band} band).`;
 		case 'under':
-			return `Modelled use is ${fmtNum((1 - (y.ratio ?? 0)) * 100, 0)} % below the registered volume (outside the ${band} band).`;
+			return `Modelled use is ${pastBand((1 - (y.ratio ?? 0)) * 100, tolerance)} % below the registered volume (outside the ${band} band).`;
 		case 'within':
 			return `Modelled use is within ${band} of the registered volume.`;
 		case 'unregistered':
@@ -317,7 +334,7 @@ export function totalsSentence(t: AllocationTotal): string {
  */
 export function judgementSentence(j: { wholeYears: number; within: number; outside: number } | null, tolerance: number): string {
 	if (!j) return 'Not judged against the registered volumes: they changed during the run, or too few registered users (or mostly one or two) held them.';
-	return `Of ${fmtNum(j.wholeYears)} whole water years, ${fmtNum(j.within)} within ±${fmtNum(tolerance * 100, 0)} % of the registered volumes and ${fmtNum(j.outside)} outside.`;
+	return `Of ${fmtNum(j.wholeYears)} whole water years, ${fmtNum(j.within)} within ${bandText(tolerance)} of the registered volumes and ${fmtNum(j.outside)} outside.`;
 }
 
 /** The note an owner reads before letting viewers see each farm's registered volumes (162, D3). */
@@ -330,7 +347,7 @@ export const VIEWER_UNITS_NOTE =
  * when it loses the focus. Said rather than done silently.
  */
 export function emptyBandNote(saved: number): string {
-	return `Left empty, so the comparison keeps the saved band, ±${fmtNum(Math.round(saved * 1e6) / 1e4, 2, true)} %.`;
+	return `Left empty, so the comparison keeps the saved band, ${bandText(saved)}.`;
 }
 
 /** Preview rows in the order a person fixes them: rows with problems, then unmatched, then matched; file order within each. */
@@ -368,7 +385,7 @@ export const ALLOCATIONS_FORMAT: FileFormat = {
 	id: 'registered-volumes',
 	title: 'Registered water-use volumes (WARMS, licences)',
 	where: 'Allocations → Import',
-	accepts: 'A CSV file (.csv), comma- or semicolon-separated, in UTF-8: at most 2 MB, 5 000 rows and 200 columns. An Excel workbook isn’t read: save the sheet as CSV first.',
+	accepts: 'A CSV file (.csv), comma- or semicolon-separated, in UTF-8 (or Windows-1252, as Excel saves a CSV): at most 2 MB, 5 000 rows and 200 columns. An Excel workbook isn’t read: save the sheet as CSV first.',
 	rules: [
 		'The first row holds the headings, in any order: the template’s (`registration_no`, `farm`, `volume_m3_year` …) or a WARMS extract’s (“Registration Number”, “Registered Volume (m3/a)”, “Water Use Sector” …). A column it doesn’t know is listed as not read.',
 		'Every file needs a volume column. A WARMS extract also needs a water-use column (21(a) taking, 21(b) storing); in the template a blank is a take.',
@@ -386,6 +403,23 @@ export const ALLOCATIONS_FORMAT: FileFormat = {
 		{ name: 'allocations-full-template.csv', text: TEMPLATE_CSV, label: 'Download the full template, every column' }
 	]
 };
+
+/**
+ * A chosen CSV file's text. UTF-8 when it is (a BOM or none); UTF-16 by its
+ * BOM; otherwise Windows-1252, the code page Excel's “CSV (Comma delimited)”
+ * saves in on a Windows machine set to English or Afrikaans. Read as UTF-8
+ * (File.text()), every “ö” or “ê” in a holder's name and the “³” of “m³/a”
+ * became U+FFFD: the name was stored mangled and the unit refused.
+ */
+export function decodeCsvFile(bytes: Uint8Array): string {
+	if (bytes[0] === 0xff && bytes[1] === 0xfe) return new TextDecoder('utf-16le').decode(bytes);
+	if (bytes[0] === 0xfe && bytes[1] === 0xff) return new TextDecoder('utf-16be').decode(bytes);
+	try {
+		return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+	} catch {
+		return new TextDecoder('windows-1252').decode(bytes);
+	}
+}
 
 /** The first 12 hex digits of a SHA-256, for display beside the full hash in a title. */
 export const shortHash = (sha: string) => sha.slice(0, 12);

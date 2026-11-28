@@ -149,6 +149,45 @@ describe('copying a project copies its catchment map', () => {
 		expect((await stranger.call('GET', `/projects/${projectId}/map/features`)).status).toBe(404);
 	});
 
+	it('moves the WR2012 reference’s lookup to the copied feature, so the copy’s Map checks don’t call it gone', async () => {
+		const a = await signUp('CopyMapLookup');
+		const { projectId, parcel } = await mappedProject(a);
+		const reference = (featureId: string) => ({
+			quaternary: 'X99A',
+			areaKm2: 10,
+			marMm3: 1,
+			monthlyMm3: monthly(1 / 12),
+			periodStart: 1920,
+			periodEnd: 2009,
+			mapMm: 600,
+			source: 'Synthetic study',
+			lookup: { point: [21.32, -33.68], code: 'X99A', feature: { id: featureId, kind: 'catchment_boundary', updatedAt: '2026-01-01T00:00:00.000Z', areaM2: parcel.areaM2 } }
+		});
+		const set = await a.call('PATCH', `/projects/${projectId}`, { settings: { wr2012: { reference: reference(parcel.id) } } });
+		expect(set.status, JSON.stringify(set.body)).toBe(200);
+		const copy = await a.call('POST', `/projects/${projectId}/copy`, { name: 'Lookup copy' });
+		expect(copy.status, JSON.stringify(copy.body)).toBe(201);
+		const copiedParcel = (await mapOf(a, copy.body.project.id)).features.find((f) => f.name === 'Farm 1' && f.kind === 'farm_parcel')!.id;
+		expect(copy.body.project.settings.wr2012.reference.lookup.feature.id).toBe(copiedParcel);
+		expect((await a.call('GET', `/projects/${copy.body.project.id}`)).body.project.settings.wr2012.reference).toEqual(reference(copiedParcel));
+		// The original keeps its own.
+		expect((await a.call('GET', `/projects/${projectId}`)).body.project.settings.wr2012.reference.lookup.feature.id).toBe(parcel.id);
+	});
+
+	it('leaves a lookup whose feature the copy has no copy of naming no feature of either project', async () => {
+		const a = await signUp('CopyMapLookupGone');
+		const { projectId, parcel } = await mappedProject(a);
+		const gone = crypto.randomUUID();
+		const ref = { quaternary: 'X99A', areaKm2: 10, marMm3: 1, monthlyMm3: monthly(1 / 12), periodStart: 1920, periodEnd: 2009, mapMm: null, source: 'Synthetic study', lookup: { point: [21.32, -33.68], code: 'X99A', feature: { id: gone, kind: 'gauge', updatedAt: '2026-01-01T00:00:00.000Z', areaM2: null } } };
+		expect((await a.call('PATCH', `/projects/${projectId}`, { settings: { wr2012: { reference: ref } } })).status).toBe(200);
+		const copy = await a.call('POST', `/projects/${projectId}/copy`, { name: 'Lookup gone copy' });
+		expect(copy.status, JSON.stringify(copy.body)).toBe(201);
+		const id = copy.body.project.settings.wr2012.reference.lookup.feature.id as string;
+		expect(id).not.toBe(gone);
+		expect(id).not.toBe(parcel.id);
+		expect((await mapOf(a, copy.body.project.id)).features.map((f) => f.id)).not.toContain(id);
+	});
+
 	it('copies the map for a viewer of the original, into their own copy', async () => {
 		const owner = await signUp('CopyMapOwner');
 		const viewer = await signUp('CopyMapViewer');

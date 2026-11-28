@@ -661,3 +661,48 @@ describe('§ 7 observed wet days (evidence-21; Sentinel-2 from evidence-24)', ()
 		expect((await report(stranger, applicantRun)).status).toBe(404);
 	});
 });
+
+// ER-38: the declared rule's rain sources and records are the ones it resolves to on the baseline run (loadDeclaredScope).
+// Last in the file: it nominates another run and, in the second test, changes a project series.
+describe('the declared rule’s rain sources and records (ER-38)', () => {
+	let chirpsRun: string;
+	let narrow: string;
+	let own: string;
+
+	beforeAll(async () => {
+		const rain = (await inputOf(baseRun)).series.rain_catchment_mm!;
+		const chirps = rain.values.map((v, i) => (typeof v === 'number' ? Math.round(v * (0.8 + 0.4 * ((i * 7) % 10) / 10) * 10) / 10 : null));
+		expect((await owner.call('PUT', `/projects/${projectId}/series`, { kind: 'rain_chirps_mm', unit: 'mm', startDate: rain.startDate, values: chirps })).status).toBe(200);
+		chirpsRun = await newRun('With CHIRPS');
+		expect((await owner.call('POST', `/projects/${projectId}/evidence`, { runId: chirpsRun, reason: 'Baseline with CHIRPS' })).status).toBe(201);
+		// Started first through the API with the station rain only (narrower than the rule's), then the rule's own.
+		narrow = await ensemble(chirpsRun, { request: { ...declaredRuleRequest(RULE), rainSources: ['recorded'] } });
+		own = await ensemble(chirpsRun, { request: declaredRuleRequest(RULE) });
+	}, 600_000);
+
+	it('doesn’t cite the older, narrower ensemble; cites the rule’s own (positive control) and lists how the other departs', async () => {
+		const r = (await report(owner, chirpsRun)).body.report as EvidenceReport;
+		expect(r.mode).toBe('baseline');
+		expect(r.uncertainty.cited?.id).toBe(own);
+		const departs = r.uncertainty.ledger.find((e) => e.id === narrow)!.departsFromDeclared;
+		expect(departs.map((d) => d.label)).toEqual(['Rain sources']);
+		expect(departs[0]!.b).toBe('Station rain, CHIRPS infill (as the run)');
+		expect(r.uncertainty.ledger.find((e) => e.id === own)!.departsFromDeclared).toEqual([]);
+		expect(r.checks.find((c) => c.id === 'citedEnsemble')!.passed).toBe(true);
+	});
+
+	it('cites none when the baseline’s inputs no longer load (409), and says the rule can’t be checked', async () => {
+		// As a run from before stored input series (021): hashes only; then the project's CHIRPS changes, so it can't be rebuilt.
+		await asOwner('DELETE FROM run_input_series WHERE run_id = $1', [chirpsRun]);
+		const rain = (await inputOf(baseRun)).series.rain_catchment_mm!;
+		expect((await owner.call('PUT', `/projects/${projectId}/series`, { kind: 'rain_chirps_mm', unit: 'mm', startDate: rain.startDate, values: rain.values.map((v) => (typeof v === 'number' ? v * 0.5 : null)) })).status).toBe(200);
+		const res = await report(owner, chirpsRun);
+		expect(res.status, JSON.stringify(res.body)).toBe(200);
+		const r = res.body.report as EvidenceReport;
+		expect(r.uncertainty.cited).toBeNull();
+		const c = r.checks.find((x) => x.id === 'citedEnsemble')!;
+		expect(c.passed).toBe(false);
+		expect(c.detail).toBe('The declared rule can’t be checked on the baseline (its inputs no longer load as the run used them), so no ensemble is cited.');
+		expect(r.issuable).toBe(false);
+	});
+});

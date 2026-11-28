@@ -161,10 +161,11 @@
 			{/if}
 		</div>
 	{/each}
-	{#if fold.hidden}
-		<button type="button" class="btn btn-sm more" aria-expanded="false" onclick={() => (open = true)}>Show all {stored.length} gauges</button>
-	{:else if open && stored.length > FOLD_CAP + 1}
-		<button type="button" class="btn btn-sm more" aria-expanded="true" onclick={() => (open = false)}>Show the first {FOLD_CAP}</button>
+	<!-- One button both ways, so it keeps the focus and its aria-expanded changes on the control pressed (WCAG 2.4.3, 4.1.2). -->
+	{#if fold.hidden || (open && stored.length > FOLD_CAP + 1)}
+		<button type="button" class="btn btn-sm more" aria-expanded={open} aria-controls="res-gauges" onclick={() => (open = !open)}
+			>{open ? `Show the first ${FOLD_CAP}` : `Show all ${stored.length} gauges`}</button
+		>
 	{/if}
 </section>
 

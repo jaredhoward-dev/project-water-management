@@ -79,7 +79,7 @@ describe('declaredRuleMismatches', () => {
 	const resolved = (over: Partial<ResolvedEnsembleOptions> = {}) =>
 		({ model: 'gr4j', free: ['x1', 'x3', 'x4'], members: 300, bounds: 'typical', panOffset: 0.1, thresholds: { ...RULE.thresholds }, seed: 987, records: ['flow_logger_m3s'], rainSources: ['chirps'], ...over }) as ResolvedEnsembleOptions;
 
-	it('is empty when the ensemble followed the rule, whatever its seed, records and rain sources', () => {
+	it('is empty when the ensemble followed the rule, whatever its seed (and, without a scope, its records and rain sources)', () => {
 		expect(declaredRuleMismatches(RULE, resolved())).toEqual([]);
 	});
 
@@ -104,6 +104,18 @@ describe('declaredRuleMismatches', () => {
 		expect(declaredRuleMismatches(RULE, resolved({ free: ['x1', 'x2', 'x3', 'x4'] }))).toEqual([{ label: 'Parameters varied', a: 'x1, x3, x4', b: 'x1, x2, x3, x4' }]);
 		// Control: the default set (what declaredRuleRequest's start resolves to) follows the rule.
 		expect(declaredRuleMismatches(RULE, resolved({ free: ['x1', 'x3', 'x4'] }))).toEqual([]);
+	});
+
+	it('given the rule’s scope on the baseline run, counts the rain sources and records varied (ER-38)', () => {
+		const scope = { rainSources: ['recorded', 'chirps'] as const, records: ['flow_observed_m3s', 'flow_logger_m3s'] as const };
+		// Control: the rule's own ensemble varies every one the run offers.
+		expect(declaredRuleMismatches(RULE, resolved({ rainSources: ['recorded', 'chirps'], records: ['flow_observed_m3s', 'flow_logger_m3s'] }), scope)).toEqual([]);
+		expect(declaredRuleMismatches(RULE, resolved({ rainSources: ['recorded'], records: ['flow_observed_m3s'] }), scope)).toEqual([
+			{ label: 'Rain sources', a: 'Station rain, CHIRPS infill (as the run), CHIRPS only (bias-corrected)', b: 'Station rain, CHIRPS infill (as the run)' },
+			{ label: 'Observed records', a: 'gauge record, logger record', b: 'gauge record' }
+		]);
+		// Without a scope (a caller that can't load the run's inputs) they aren't compared, as before.
+		expect(declaredRuleMismatches(RULE, resolved({ rainSources: ['recorded'] }))).toEqual([]);
 	});
 
 	it('builds the request that starts the declared ensemble, with its own copy of the thresholds', () => {

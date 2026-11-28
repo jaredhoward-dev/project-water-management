@@ -52,7 +52,7 @@ test('Settings: the unsaved A-pan previewed against the last run, nothing saved 
 	await expect(figure(page, 'Shortfall (m³/day)').getByRole('cell').last()).toContainText(/up [\d ]+, worse$/);
 	await expect(dialog.getByTestId('unsaved-preview-problems')).toHaveCount(0);
 	await expectNoViolations(page, { include: '[data-testid="unsaved-preview"]' });
-	await page.setViewportSize({ width: 390, height: 844 });
+	await resizeTo(page, { width: 390, height: 844 });
 	await expectNoSidewaysScroll(page);
 	await expectNoViolations(page, { include: '[data-testid="unsaved-preview"]' });
 	await page.setViewportSize({ width: 1280, height: 900 });

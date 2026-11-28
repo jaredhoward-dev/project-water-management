@@ -11,7 +11,7 @@ import { seedWhatIfs } from '../support/compare.ts';
 import { failReport, holdReportJob } from '../support/db.ts';
 import { API_URL } from '../support/env.ts';
 import { expect, test } from '../support/fixtures.ts';
-import { expectNoSidewaysScroll } from '../support/reflow.ts';
+import { expectNoSidewaysScroll, resizeTo } from '../support/reflow.ts';
 import { seedSupplyProject } from '../support/supply.ts';
 
 const DESKTOP = { width: 1440, height: 960 };
@@ -65,7 +65,7 @@ test.describe('the printable report', () => {
 		// The curtailment table's unit column: each name and verdict in a readable column, not a word a line.
 		const unit = page.locator('#rep-curtailment tbody th[scope="row"]').first();
 		expect((await unit.boundingBox())!.width).toBeGreaterThanOrEqual(150);
-		await page.setViewportSize(PHONE);
+		await resizeTo(page, PHONE);
 		await expectNoSidewaysScroll(page);
 	});
 

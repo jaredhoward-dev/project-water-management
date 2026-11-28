@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { Page } from '@playwright/test';
 import { expectNoViolations } from '../support/a11y.ts';
 import { words } from '../support/lang.ts';
-import { expectNoSidewaysScroll } from '../support/reflow.ts';
+import { expectNoSidewaysScroll, resizeTo } from '../support/reflow.ts';
 import { expect, test } from '../support/fixtures.ts';
 
 const HEADLINE = 'Every drop in the catchment, accounted for.';
@@ -26,8 +26,11 @@ const headline = (page: Page) => page.getByRole('heading', { level: 1, name: HEA
 
 /** Scroll the whole page so lazy pictures and in-view reveals have all run. */
 async function scrollThrough(page: Page) {
-	const height = await page.evaluate(() => document.documentElement.scrollHeight);
-	for (let y = 0; y < height; y += 600) await page.evaluate((top) => window.scrollTo(0, top), y);
+	// The page's height is read again at each step: a picture loading on the way grows it, and a height read once would
+	// stop short of the pictures it pushed down.
+	const height = () => page.evaluate(() => document.documentElement.scrollHeight);
+	// settled: each stop only wakes what comes into view; nothing is measured there.
+	for (let y = 0; y < (await height()); y += 600) await page.evaluate((top) => window.scrollTo(0, top), y);
 	await page.evaluate(() => window.scrollTo(0, 0));
 }
 
@@ -409,7 +412,7 @@ test('the story’s heading is on the first screen at 1440 × 960, and the page 
 	const heading = page.getByRole('heading', { level: 2, name: 'From rainfall to river' });
 	await expect(heading).toBeInViewport({ ratio: 1 });
 	await expectNoSidewaysScroll(page);
-	await page.setViewportSize(DESKTOP);
+	await resizeTo(page, DESKTOP);
 	await expectNoSidewaysScroll(page);
 	// The header's controls are touch-sized.
 	const signIn = page.getByRole('banner').getByRole('link', { name: 'Sign in' });

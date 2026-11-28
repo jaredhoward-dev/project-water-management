@@ -327,7 +327,20 @@ These follow the project rules in `CLAUDE.md`. Keep to them:
   `support/map.ts`), or wait with a web-first `expect`. Where the state truly
   can't be changing, say why in a `// settled:` comment on the line or the
   one above; `support/snapshotChecks.test.ts` (`pnpm test`) fails on a use
-  without one.
+  without one. A `count()` read in an `if`, `while` or `?:` is the same
+  one-off look and needs the same reason.
+- **Don't measure after a one-off scroll or resize.** `window.scrollTo(0,
+  scrollHeight)`, `el.scrollTop = …` and `scrollBy` land where the page's end
+  is at that moment, so a page still growing leaves them short, and
+  `mouse.wheel` returns before Chromium's animated scroll ends: a box read
+  straight after reads the wrong place (scenarios-page.spec.ts read the rail at
+  the top, CI run 46033108045). Scroll with `support/scroll.ts`
+  (`scrollToEnd(page | box)`, `scrollToY`, `wheelAndSettle`, which waits for
+  `scrollend`), or scroll inside an `expect.poll` that checks where it landed.
+  Resize with `resizeTo` (`support/reflow.ts`) before reading a box: media
+  queries apply in the next rendering update. `support/measureChecks.test.ts`
+  (`pnpm test`) fails on either without a `// settled:` reason; a scroll back
+  to 0 is fine.
 - **Pin the clock before asserting a relative day word.** "ran today",
   "published today", "Last changed today", the history's Today / Yesterday
   headings are the browser's clock against a record's server timestamp, so a

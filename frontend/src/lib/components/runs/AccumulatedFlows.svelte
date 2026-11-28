@@ -178,8 +178,15 @@
 		</div>
 		{#if lines.length > 4}
 			<div class="all">
-				<button type="button" class="btn btn-sm" disabled={hiddenIds.size === 0} onclick={() => (hiddenIds = new Set())}>Show all</button>
-				<button type="button" class="btn btn-sm" disabled={lines.every((l) => hiddenIds.has(l.id))} onclick={() => (hiddenIds = new Set([...hiddenIds, ...lines.map((l) => l.id)]))}>Show none</button>
+				<!-- aria-disabled, not disabled: each turns itself off when pressed, and disabling the focused button throws the
+				     keyboard's focus to the page (WCAG 2.4.3). Pressing one that has nothing to do does nothing. -->
+				<button type="button" class="btn btn-sm" aria-disabled={hiddenIds.size === 0} onclick={() => (hiddenIds = new Set())}>Show all</button>
+				<button
+					type="button"
+					class="btn btn-sm"
+					aria-disabled={lines.every((l) => hiddenIds.has(l.id))}
+					onclick={() => (hiddenIds = new Set([...hiddenIds, ...lines.map((l) => l.id)]))}>Show none</button
+				>
 			</div>
 		{/if}
 	</fieldset>

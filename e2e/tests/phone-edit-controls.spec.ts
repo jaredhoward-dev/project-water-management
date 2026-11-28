@@ -203,6 +203,7 @@ test('a table that scrolls sideways keeps its row names at the left and shows th
 	const left = (await wrap.boundingBox())!.x;
 	// The cue: the box's background carries the edge shadows (app.css).
 	expect(await wrap.evaluate((el) => getComputedStyle(el).backgroundImage)).toContain('radial-gradient');
+	// settled: any sideways offset will do: the poll below waits for it, and the check is that the name cell stays pinned wherever it lands.
 	await wrap.evaluate((el) => (el.scrollLeft = 200));
 	await expect.poll(() => wrap.evaluate((el) => el.scrollLeft)).toBeGreaterThan(0);
 	const after = (await name.boundingBox())!;

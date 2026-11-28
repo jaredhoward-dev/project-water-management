@@ -150,8 +150,9 @@ const MONTH_NUMBER = new Map(MONTHS.map((m, i) => [m.toLowerCase(), i + 1]));
  * as fmtDay shows it: "15 Nov 2021", "15 November 2021", "15/11/2021",
  * "15-11-2021", "15.11.2021", and the ISO "2021-11-15" (year first is never
  * ambiguous). Never month first, so "11/15/2021" is no day. The day must
- * exist (no 31 Nov, 29 Feb only in a leap year). Read from the string, never
- * through Date, so no time zone can shift it.
+ * exist (no 31 Nov, 29 Feb only in a leap year), from year 1 (the engine's
+ * isIsoDate). Read from the string, never through Date, so no time zone can
+ * shift it.
  */
 export function parseDay(input: string): string | null {
 	const s = input.trim().replace(/\s+/g, ' ');
@@ -166,7 +167,8 @@ export function parseDay(input: string): string | null {
 		if (!n || !(word.length === 3 || MONTHS_LONG[n - 1]!.startsWith(word))) return null;
 		[d, m, y] = [Number(x[1]), n, Number(x[3])];
 	} else return null;
-	if (m < 1 || m > 12 || d < 1) return null;
+	// Year 0000 is no day: Postgres's date has none and the engine's isIsoDate refuses it.
+	if (y < 1 || m < 1 || m > 12 || d < 1) return null;
 	const days = [31, y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][m - 1]!;
 	if (d > days) return null;
 	return `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;

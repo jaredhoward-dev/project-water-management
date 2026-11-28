@@ -155,6 +155,29 @@ describe('compareAllocations', () => {
 		expect(r.nodes[0]!.storage).toMatchObject({ registeredM3: 100_000, status: 'within' });
 	});
 
+	it('counts a dam registered again during the run once: the most storage in force on any one day, not every row the run overlaps', () => {
+		const run = (allocations: AllocationEntry[]) =>
+			compareAllocations({ startDate: '2001-10-01', nodes: [farm(new Array(days).fill(1), undefined, { damCapacityM3: 100_000 })], allocations }).nodes[0]!.storage;
+		const dam = (id: string, storageM3: number, validFrom?: string, validTo?: string): AllocationEntry => ({
+			id,
+			nodeId: 'F',
+			waterSource: 'surface',
+			volumeM3PerYear: 0,
+			waterUse: '21b',
+			storageM3,
+			...(validFrom ? { validFrom } : {}),
+			...(validTo ? { validTo } : {})
+		});
+		// The registration lapsed and was renewed mid-run: one dam of 100 000 m³, not 200 000 (which read "smaller than registered").
+		expect(run([dam('old', 100_000, undefined, '2002-12-31'), dam('renewed', 100_000, '2003-01-01')])).toMatchObject({ registeredM3: 100_000, differenceM3: 0, status: 'within' });
+		// Raised mid-run: the larger storage, the one in force on the later days.
+		expect(run([dam('old', 80_000, undefined, '2002-12-31'), dam('raised', 100_000, '2003-01-01')])).toMatchObject({ registeredM3: 100_000, status: 'within' });
+		// Positive control: two rows in force on the same days (a 21b row and the storage stated on a take) still add up.
+		expect(run([dam('a', 60_000), { ...dam('b', 40_000), waterUse: '21a', volumeM3PerYear: 10 }])).toMatchObject({ registeredM3: 100_000, status: 'within' });
+		// Overlapping for one day only: both are in force that day.
+		expect(run([dam('old', 100_000, undefined, '2003-01-01'), dam('renewed', 100_000, '2003-01-01')])).toMatchObject({ registeredM3: 200_000 });
+	});
+
 	it('counts a storage-only (s21b) row for storage, never as a volume taken (issue #72)', () => {
 		const r = compareAllocations({
 			startDate: '2001-10-01',

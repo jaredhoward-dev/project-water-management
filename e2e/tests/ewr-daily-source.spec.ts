@@ -10,7 +10,7 @@
 import type { APIRequestContext } from '@playwright/test';
 import { createProject, createRun, putModel, putSeries, sampleModel, syntheticFlow, syntheticRain, updateSettings } from '../support/api.ts';
 import { expectNoViolations } from '../support/a11y.ts';
-import { expectNoSidewaysScroll } from '../support/reflow.ts';
+import { expectNoSidewaysScroll, resizeTo } from '../support/reflow.ts';
 import { expect, test } from '../support/fixtures.ts';
 import { openFold, saveChanges, saveSettings } from '../support/settings.ts';
 import { answerConfirm } from '../support/confirm.ts';
@@ -123,7 +123,7 @@ test('a .tab shows the whole file, its total maintenance column marked as the TA
 	await expect(monthly.getByRole('row', { name: /^Oct/ }).getByRole('cell').last()).toHaveText('0.4704');
 
 	// A phone: the eight-column table scrolls inside its own box, not the page.
-	await page.setViewportSize({ width: 390, height: 844 });
+	await resizeTo(page, { width: 390, height: 844 });
 	await expectNoSidewaysScroll(page);
 	await expectNoViolations(page, { include: '[data-testid="ewr-daily-source"]' });
 });
@@ -181,7 +181,7 @@ test('TAB flows saved without their file: browse for the .tab, see it whole besi
 	await expect(daily.getByTestId('ewr-tab-compare').getByTestId('ewr-tab-compare-line')).toHaveText(/^\d+ of 12 months differ from the file/);
 
 	// A phone: the comparison scrolls inside its own box, not the page.
-	await page.setViewportSize({ width: 390, height: 844 });
+	await resizeTo(page, { width: 390, height: 844 });
 	await expectNoSidewaysScroll(page);
 });
 
@@ -264,7 +264,7 @@ test('a .rul under the TAB file fills the percentile tables and keeps the TAB fi
 	await expect(daily.getByLabel('Natural flow percentile table, Oct, 10 %, m³/s')).toHaveValue('1.305');
 
 	// A phone: the grids scroll in their own boxes, the page doesn't scroll sideways.
-	await page.setViewportSize({ width: 390, height: 844 });
+	await resizeTo(page, { width: 390, height: 844 });
 	await expectNoSidewaysScroll(page);
 	await expectNoViolations(page);
 });

@@ -509,8 +509,7 @@ export function stationDays(r: StationReadings, f: StationFormat, from: string, 
 	const a = toEpochDay(from);
 	let b = toEpochDay(to);
 	// The last day that has ended: a daily total once its date is past in the zone; a rain day once its end has passed.
-	const lastEnded = f.resolution === 'daily' ? localEpochDay(tz, nowMs) - 1 : rainDay(nowMs, f, tz) - 1;
-	b = Math.min(b, lastEnded);
+	b = Math.min(b, stationLastEndedDay(f, nowMs));
 	const n = Math.max(0, b - a + 1);
 	const sums = new Array<number>(n).fill(0);
 	const counts = new Array<number>(n).fill(0);
@@ -606,6 +605,17 @@ export function stationDays(r: StationReadings, f: StationFormat, from: string, 
 		values.push(v);
 	}
 	return { startDate: fromEpochDay(a), values, daysWithData, gaps };
+}
+
+/**
+ * The newest day (epoch day) that has ended by `nowMs`: a daily total once its date is past in the zone, a sub-daily
+ * rain day once its end (dayStartHour the next morning, by the zone's wall clock) has passed. stationDays cuts its
+ * days here, and the backend's fetch window (stationLastDay) ends here, so the two never disagree about the newest
+ * day, across a daylight-saving change included.
+ */
+export function stationLastEndedDay(f: StationFormat, nowMs: number): number {
+	const tz = f.timeZone ?? STATION_DEFAULT_TIME_ZONE;
+	return f.resolution === 'daily' ? localEpochDay(tz, nowMs) - 1 : rainDay(nowMs, f, tz) - 1;
 }
 
 /** The rain day (epoch day, as credited) an instant's reading belongs to. */

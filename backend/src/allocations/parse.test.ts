@@ -38,6 +38,31 @@ describe('splitCsv', () => {
 	});
 });
 
+describe('the delimiter: blank lines before the header and Excel\'s sep= line', () => {
+	const HEAD = 'registration_no;water_source;authorisation;volume_m3_year';
+	it('reads a ; file whose header follows a blank line by the header, not the blank line', () => {
+		const t = parseAllocationTable(`\n\r\n${HEAD}\nR1;surface;licence;1500,5\n`, 'csv');
+		expect(t.delimiter).toBe(';');
+		expect(t.rows.map((r) => [r.line, r.volumeM3PerYear, r.errors])).toEqual([[4, 1500.5, []]]);
+	});
+
+	it('takes the delimiter from a first line sep=; (as Excel writes it) and doesn\'t read that line as the header', () => {
+		const t = parseAllocationTable(`sep=;\r\n${HEAD}\r\nR1;surface;licence;1.500,5\r\n`, 'csv');
+		expect(t.delimiter).toBe(';');
+		expect(t.ignoredColumns).toEqual([]);
+		expect(t.rows.map((r) => [r.line, r.volumeM3PerYear, r.errors])).toEqual([[3, 1500.5, []]]);
+		// sep=, too, after a BOM, where the header alone would read as ; (more semicolons than commas in it).
+		const c = parseAllocationTable('\ufeffsep=,\nregistration_no,water_source,authorisation,volume_m3_year,reference\nR1,surface,licence,1500,a;b;c;d;e\n', 'csv');
+		expect(c.delimiter).toBe(',');
+		expect(c.rows[0]!.volumeM3PerYear).toBe(1500);
+		expect(c.rows[0]!.reference).toBe('a;b;c;d;e');
+	});
+
+	it('positive control: a header on the first line is read as before', () => {
+		expect(parseAllocationTable(`${HEAD}\nR1;surface;licence;1500,5\n`, 'csv').rows[0]!.volumeM3PerYear).toBe(1500.5);
+	});
+});
+
 describe('cell parsers', () => {
 	it('reads numbers with thousands separators, and decimal commas in ; files', () => {
 		expect(parseNumber('120,000', ',')).toBe(120000);

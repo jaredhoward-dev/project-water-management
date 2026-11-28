@@ -276,6 +276,9 @@ describe('parseDay', () => {
 		}
 		expect(parseDay('1 Sept 2021')).toBe('2021-09-01');
 		expect(parseDay('5/3/2021')).toBe('2021-03-05');
+		// Year 0000 is no day (Postgres's date has none; the engine's isIsoDate refuses it), however it's typed.
+		for (const typed of ['0000-01-01', '1/1/0000', '1 Jan 0000']) expect(parseDay(typed), typed).toBeNull();
+		expect(parseDay('0001-01-01')).toBe('0001-01-01');
 		// Round trip with fmtDay.
 		expect(parseDay(fmtDay('2024-02-29'))).toBe('2024-02-29');
 	});

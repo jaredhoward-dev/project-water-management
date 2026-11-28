@@ -32,6 +32,7 @@ import { DEFAULT_PROJECT_TIME_ZONE, projectDay } from '../support/dates.ts';
 import { dayFirst } from '../support/format.ts';
 import { box } from '../support/map.ts';
 import { runJobsTick } from '../support/jobs.ts';
+import { scrollToEnd } from '../support/scroll.ts';
 
 const POINTS = [10, 20, 30, 40, 50, 60, 70, 80, 90, 99];
 const RULE = { members: 30, bounds: 'typical', panOffset: 0.1, thresholds: { objective: 'kgePrime', minSkill: -10, wr2012MaxLevel: 'unusable', maxLowFlowBiasPct: null } };
@@ -166,7 +167,7 @@ test('a baseline pack is created, signed, issued and verified signed out; a copy
 	// The run statement's ten, and the pack's own eleventh naming its version and hash.
 	await expect(boxes).toHaveCount(11);
 	for (const box of await boxes.all()) await box.check();
-	await dialog.getByRole('region', { name: /^Known limitations/ }).evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
+	await scrollToEnd(dialog.getByRole('region', { name: /^Known limitations/ }));
 	await dialog.getByRole('button', { name: 'Sign off', exact: true }).click();
 	await expect(dialog).toBeHidden();
 

@@ -1773,6 +1773,54 @@ describe('later ops (engine ≥ 1.35.0): moving and inserting nodes', () => {
 		expect(classifyScenario(base(), [{ op: 'node.add', node: { ...dam, downstreamNodeId: 'B' } }, { op: 'node.move', nodeId: 'D', downstreamNodeId: 'A' }], [])).toEqual(['proposal', 'proposal']);
 	});
 
+	it('refuses an op that leaves the drought restriction naming a unit, dam or EWR site the network no longer has, as a save does', () => {
+		const withRule = () => {
+			const b = base();
+			b.settings.droughtRestriction = { reviewDates: ['10-01'], levels: [{ belowPct: 0.5, cuts: { crops: 0.2 } }], basis: 'dams', damNodeIds: ['C'], nodeIds: ['A', 'B'] };
+			return b;
+		};
+		// Removing the one dam it reads turned the restriction off for every unit, scored as the op's effect.
+		const gone = applyScenario(withRule(), [{ op: 'node.remove', nodeId: 'C' }]);
+		expect(gone.applied).toEqual([]);
+		expect(gone.problems).toEqual(['op 1 (node.remove): drought restriction rule: the dam C isn\'t in the model']);
+		// Emptying that dam too.
+		expect(applyScenario(withRule(), [{ op: 'node.set', nodeId: 'C', field: 'damCapacityM3', value: 0 }]).problems).toEqual(['op 1 (node.set): drought restriction rule: “Farm C” has no dam']);
+		// A unit it cuts.
+		expect(applyScenario(withRule(), [{ op: 'node.remove', nodeId: 'B' }]).problems).toEqual(['op 1 (node.remove): drought restriction rule: the unit B isn\'t in the model']);
+		// Changing the rule first lets the removal through.
+		const ok = applyScenario(withRule(), [
+			{ op: 'settings.set', path: 'droughtRestriction', value: { reviewDates: ['10-01'], levels: [{ belowPct: 0.5, cuts: { crops: 0.2 } }], nodeIds: ['A'] } },
+			{ op: 'node.remove', nodeId: 'C' },
+			{ op: 'node.remove', nodeId: 'B' }
+		]);
+		expect(ok.problems).toEqual([]);
+		expect(ok.applied).toHaveLength(3);
+		// A base that already names a missing unit still takes unrelated ops.
+		const stale = withRule();
+		stale.settings.droughtRestriction!.nodeIds = ['A', 'gone'];
+		expect(applyScenario(stale, [{ op: 'node.set', nodeId: 'A', field: 'name', value: 'Farm A2' }]).problems).toEqual([]);
+	});
+
+	it('classifies making an own user a priority user as baseline, as inserting one is: the farms above it must then pass its demand', () => {
+		const b = base();
+		const user = node('U', { name: 'New town', kind: 'user', downstreamNodeId: 'G', areaKm2: 0, userDemandM3Day: new Array(12).fill(100), userPriority: 'junior' });
+		const toSenior: ScenarioOp = { op: 'node.set', nodeId: 'U', field: 'userPriority', value: 'senior' };
+		// Inserted as Non-priority (the proposal), then made Priority: the second op curtails farm B above it, so it is no proposal.
+		const ops: ScenarioOp[] = [{ op: 'node.insert', node: user, upstreamNodeIds: ['B'] }, toSenior];
+		expect(applyScenario(b, ops).problems).toEqual([]);
+		expect(classifyScenario(b, ops, [])).toEqual(['proposal', 'baseline']);
+		// An existing own Non-priority user made Priority: the same.
+		const withUser = base();
+		withUser.model.nodes.push(node('U', { ...user, downstreamNodeId: 'A' }));
+		expect(classifyOp(toSenior, ['U'], withUser)).toBe('baseline');
+		// Without the input it can't tell whether the user was Priority already: conservative.
+		expect(classifyOp(toSenior, ['U'])).toBe('baseline');
+		// Making it Non-priority, or Priority when it already is, ranks it above no one new.
+		expect(classifyOp({ ...toSenior, value: 'junior' }, ['U'], withUser)).toBe('proposal');
+		nodeOf(withUser, 'U')!.userPriority = 'senior';
+		expect(classifyOp(toSenior, ['U'], withUser)).toBe('proposal');
+	});
+
 	it('masked: a hidden node moves and takes new nodes by its mask name, and a loop through it keeps its words (the shape is visible)', () => {
 		const mask: ScenarioMask = { nodes: { B: 'Farm 1', C: 'Farm 2' } };
 		const r = applyScenario(base(), [{ op: 'node.move', nodeId: 'B', downstreamNodeId: 'A' }], { mask });

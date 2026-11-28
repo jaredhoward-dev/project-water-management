@@ -14,6 +14,7 @@ import { loadSyntheticQuaternaries } from '../support/map.ts';
 import { expect, test } from '../support/fixtures.ts';
 import { boxesOf, expectNoSidewaysScroll } from '../support/reflow.ts';
 import { answerConfirm } from '../support/confirm.ts';
+import { scrollToEnd } from '../support/scroll.ts';
 import { anySaveBar, fitSummary, header, isProjectPatch, openCalibration, openFold, openSettings, saveChanges, saveSettings, settingsBar, settingsMenu } from '../support/settings.ts';
 import { headerControl } from '../support/sectionHeader.ts';
 
@@ -78,7 +79,7 @@ test('Model settings’ header points at Calibration for the fit, and its side i
 
 	// Each anchor's landing from a page load is pinned in settings-layout-pins.spec.ts. Scrolled to the foot of
 	// the page, the index still sticks beside the last panel and marks it.
-	await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+	await scrollToEnd(page);
 	await expect(menu.getByRole('link', { name: 'Automatic runs', exact: true })).toHaveAttribute('aria-current', 'location');
 	// The index sticks beside the last panel too.
 	await expect(menu).toBeInViewport();

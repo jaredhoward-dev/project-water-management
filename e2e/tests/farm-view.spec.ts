@@ -1040,3 +1040,72 @@ test('a link to someone else’s unit says it isn’t linked to the account, and
 	await mine.getByRole('link').first().click();
 	await expect(page.getByRole('heading', { level: 1 })).toContainText(index.farms[0]!.name);
 });
+
+// A farmer with units in two catchments, one of whose lists fails (a 500, not access gone): the list stays,
+// with the unit it could load and a line saying the rest aren't listed, rather than landing straight on that
+// one unit with no sign the other exists. Try again lists both.
+test('a catchment whose list fails leaves the farms list up, saying so, with Try again', async ({ page }) => {
+	await page.setViewportSize(PHONE);
+	await signIn(page, FARMER2);
+	await expect(page).toHaveURL(/\/farm$/);
+	await expect(page.getByRole('link', { name: /Kareebos/ })).toBeVisible();
+	const { projects } = (await (await page.request.get(`${API_URL}/projects`)).json()) as { projects: { id: string; role: string }[] };
+	let failing = '';
+	for (const p of projects.filter((x) => x.role === 'farmer')) {
+		const ix = (await (await page.request.get(`${API_URL}/projects/${p.id}/farm`)).json()) as { farms: { name: string }[] };
+		if (ix.farms.some((f) => f.name === 'Kareebos')) failing = p.id;
+	}
+	expect(failing).not.toBe('');
+
+	await page.route(`${API_URL}/projects/${failing}/farm`, (route) => route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'Internal error' }) }));
+	await page.reload();
+	const note = page.getByTestId('farms-incomplete');
+	await expect(note).toContainText('Some of your catchments couldn’t be loaded');
+	await expect(page).toHaveURL(/\/farm$/);
+	await expect(page.getByRole('link', { name: /Rietspruit/ })).toBeVisible();
+	await expect(page.getByRole('link', { name: /Kareebos/ })).toHaveCount(0);
+
+	await page.unrouteAll({ behavior: 'wait' });
+	await note.getByRole('button', { name: 'Try again' }).click();
+	await expect(page.getByRole('link', { name: /Kareebos/ })).toBeVisible();
+	await expect(page.getByRole('link', { name: /Rietspruit/ })).toBeVisible();
+	await expect(page.getByTestId('farms-incomplete')).toHaveCount(0);
+});
+
+// Switching unit with the chips keeps the page (and its notes card) mounted: a note typed for one unit must not
+// carry over to the next, where Add note would post it to that unit, read by everyone linked to it.
+test('switching unit clears a note typed for the last one', async ({ page, owner, signIn: signInAs }) => {
+	test.setTimeout(90_000);
+	void owner;
+	const req = page.context().request;
+	const project = await createProject(req, 'Two farms notes catchment');
+	const base = sampleModel();
+	const [gauge, template] = [base.nodes[0]!, base.nodes[1]!];
+	const farms = ['North block', 'South block'].map((name, i) => ({ ...template, id: crypto.randomUUID(), name, sortOrder: i + 2 }));
+	const crop = base.crops[0]!;
+	await putModel(req, project.id, { nodes: [gauge, ...farms], crops: [crop], cropAreas: farms.map((f) => ({ nodeId: f.id, cropId: crop.id, areaM2: 100_000 })), transfers: [] });
+	await updateSettings(req, project.id, { apanMm: [150, 180, 220, 230, 190, 160, 110, 80, 60, 60, 80, 110], ewrPragmaticM3PerDay: Array(12).fill(1000) });
+	await putSeries(req, project.id, { kind: 'rain_catchment_mm', unit: 'mm', startDate: '2021-10-01', values: syntheticRain(120) });
+	await putSeries(req, project.id, { kind: 'flow_observed_m3s', unit: 'm³/s', startDate: '2021-10-01', values: syntheticFlow(120) });
+	const runId = await createRun(req, project.id, 'Baseline');
+	const pub = await req.post(`${API_URL}/projects/${project.id}/publication`, { data: { runId, restriction: { level: 'none' } } });
+	expect(pub.status(), await pub.text()).toBe(201);
+	const farmer = await signInAs('Two-farm farmer');
+	const add = await req.post(`${API_URL}/projects/${project.id}/farmers`, { data: { email: farmer.user.email, nodeIds: farms.map((f) => f.id) } });
+	expect(add.status(), await add.text()).toBe(201);
+	await acceptInvites(farmer.user.email, project.id);
+
+	const fp = farmer.page;
+	await fp.setViewportSize(PHONE);
+	await fp.goto(`/farm/${project.id}?node=${farms[0]!.id}`);
+	await expect(fp.getByRole('heading', { level: 1, name: 'North block' })).toBeVisible();
+	const notes = fp.getByRole('region', { name: 'Notes about your hydrological unit' });
+	await expect(notes.locator('[data-notes-ready="true"]')).toBeVisible();
+	await notes.getByLabel('Add a note').fill('The north pump is leaking');
+
+	await fp.getByRole('navigation', { name: 'Your hydrological units in this catchment' }).getByRole('link', { name: 'South block' }).click();
+	await expect(fp).toHaveURL(new RegExp(`node=${farms[1]!.id}`));
+	await expect(fp.getByRole('heading', { level: 1, name: 'South block' })).toBeVisible();
+	await expect(notes.locator('[data-notes-ready="true"]')).toBeVisible();
+	await expect(notes.getByLabel('Add a note')).toHaveValue('');
+});

@@ -1,6 +1,7 @@
 import type { Locator, Page } from '@playwright/test';
 import { createProject, putModel, sampleModel } from '../support/api.ts';
 import { expect, test } from '../support/fixtures.ts';
+import { scrollToEnd } from '../support/scroll.ts';
 
 // Every sampled point inside the bubble hits the bubble itself: nothing (a
 // sticky table header, a scroll container's edge) covers or clips it.
@@ -176,7 +177,7 @@ test('the help contents: groups under headings, the glossary one link per topic 
 	await expect(page.getByRole('heading', { level: 1, name: last })).toBeVisible();
 	await expect(reference.getByRole('link', { name: last, exact: true })).toHaveAttribute('aria-current', 'page');
 	const before = await nav.getByRole('link').count();
-	await page.evaluate(() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' }));
+	await scrollToEnd(page);
 	await expect(nav.getByRole('link')).toHaveCount(before);
 	await expect(nav.getByRole('link', { name: last, exact: true })).toBeInViewport();
 });

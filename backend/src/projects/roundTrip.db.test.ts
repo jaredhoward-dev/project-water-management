@@ -11,7 +11,7 @@ import type { ProjectDocument } from './document.js';
 
 type User = Awaited<ReturnType<typeof signUp>>;
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID_IN = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 
 /**
  * The document with each id replaced by the order it first appears in (object
@@ -26,11 +26,9 @@ function canonical(d: ProjectDocument): unknown {
 	};
 	const walk = (v: unknown): unknown => {
 		if (typeof v === 'string') {
-			if (UUID.test(v)) return tag(v);
-			// A key that names a node after an '@' (a gauge's record, a unit's rain).
-			const at = v.lastIndexOf('@');
-			if (at > 0 && UUID.test(v.slice(at + 1))) return `${v.slice(0, at)}@${tag(v.slice(at + 1))}`;
-			return v;
+			// An id anywhere in a string: a bare one, a key that names a node after an '@' (a gauge's record, a unit's rain),
+			// a kept check's or kept problem's item id (`outlier:<series>:…`, `problem:data:<series>`).
+			return v.replace(UUID_IN, tag);
 		}
 		if (Array.isArray(v)) return v.map(walk);
 		if (v && typeof v === 'object') {
@@ -77,4 +75,28 @@ describe('project file round trips over the example catchments', () => {
 			expect(canonical(copy)).toEqual(canonical(first));
 		});
 	}
+});
+
+describe('a kept Warnings-page problem about a series round-trips with the series', () => {
+	it('download → import → download, and a copy, keep `problem:data:<id>` naming the same series', async () => {
+		const u = await signUp('RoundTripKept');
+		const base = buildExamples({ fit: false })[0]!;
+		const sid = crypto.randomUUID();
+		const series = base.series!.map((s, i) => (i === 0 ? { ...s, id: sid } : s));
+		const file = { ...base, series, settings: { ...base.settings, warningsKept: [{ id: `problem:data:${sid}`, note: 'record ended' }] } };
+		const keptSeries = (d: ProjectDocument) => {
+			const id = ((d.settings.warningsKept as { id: string }[])[0]!.id).slice('problem:data:'.length);
+			return d.series.find((s) => s.id === id);
+		};
+		const id = await importFile(u, file);
+		const first = await download(u, id);
+		expect(keptSeries(first)).toMatchObject({ kind: series[0]!.kind, name: series[0]!.name });
+		const second = await download(u, await importFile(u, first));
+		expect(keptSeries(second)).toMatchObject({ kind: series[0]!.kind, name: series[0]!.name });
+		expect(canonical(second)).toEqual(canonical(first));
+		const { body } = await u.call('POST', `/projects/${id}/copy`, { name: first.name });
+		const copy = await download(u, body.project.id);
+		expect(keptSeries(copy)).toMatchObject({ kind: series[0]!.kind, name: series[0]!.name });
+		expect(canonical(copy)).toEqual(canonical(first));
+	});
 });

@@ -112,9 +112,13 @@ test('an editor uses the boundary’s reference ET as GR4J’s monthly PE; Histo
 	await expectNoSidewaysScroll(v);
 	// The months scroll in their own box; the row labels stay pinned at its left edge.
 	const wrap = panel(v).locator('.table-wrap');
-	await wrap.evaluate((el) => (el.scrollLeft = el.scrollWidth));
-	const [wrapBox, labelBox] = [await wrap.boundingBox(), await row(v, 'proposed').getByRole('rowheader').boundingBox()];
-	expect(Math.abs(labelBox!.x - wrapBox!.x)).toBeLessThan(2);
+	await expect
+		.poll(async () => {
+			await wrap.evaluate((el) => (el.scrollLeft = el.scrollWidth));
+			const [wrapBox, labelBox] = [await wrap.boundingBox(), await row(v, 'proposed').getByRole('rowheader').boundingBox()];
+			return (await wrap.evaluate((el) => el.scrollLeft > 0)) && Math.abs(labelBox!.x - wrapBox!.x) < 2;
+		})
+		.toBe(true);
 	await expectNoViolations(v, { include: '[data-testid="evaporation-proposal"]' });
 });
 

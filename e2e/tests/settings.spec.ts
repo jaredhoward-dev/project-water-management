@@ -3,6 +3,7 @@ import { createProject, putSeries } from '../support/api.ts';
 import { answerConfirm } from '../support/confirm.ts';
 import { API_URL } from '../support/env.ts';
 import { expect, test } from '../support/fixtures.ts';
+import { scrollToEnd } from '../support/scroll.ts';
 import { anySaveBar, openCalibration, openFold, saveChanges, saveSettings, settingsBar } from '../support/settings.ts';
 
 test('monthly A-pan and EWR values are saved and survive a reload', async ({ page, owner }) => {
@@ -164,7 +165,7 @@ test('the side index stays in view, jumps to each panel beside it and marks the 
 	const held = await strip.evaluate((el) => el.scrollLeft);
 	const marked = menu.locator('a[aria-current="location"]');
 	await expect(marked).toHaveText('Data quality');
-	await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+	await scrollToEnd(page);
 	// The page's end marks the last section, off the strip's left end where the person left it.
 	await expect(marked).toHaveText('Automatic runs');
 	await expect(marked).not.toBeInViewport();

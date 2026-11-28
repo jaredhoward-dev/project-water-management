@@ -14,7 +14,7 @@ import { answerConfirm } from '../support/confirm.ts';
 import { API_URL } from '../support/env.ts';
 import { expect, test } from '../support/fixtures.ts';
 import { box, loadSyntheticQuaternaries, loadSyntheticQuaternaryEvaporation } from '../support/map.ts';
-import { expectNoSidewaysScroll } from '../support/reflow.ts';
+import { expectNoSidewaysScroll, resizeTo } from '../support/reflow.ts';
 
 const panel = (page: Page) => page.getByTestId('wr2012-evaporation-proposal');
 const row = (page: Page, name: string, code?: string) => panel(page).locator(`tr[data-row="${name}"]${code ? `[data-code="${code}"]` : ''}`);
@@ -57,7 +57,7 @@ test('an editor uses WR2012’s A-pan for the quaternaries under the boundary, a
 	await expect(page.getByTestId('apan-row').getByLabel('A-pan evaporation, Oct, mm', { exact: true })).toHaveValue('193.4');
 	await expectNoViolations(page, { include: '[data-testid="wr2012-evaporation-proposal"]' });
 
-	await page.setViewportSize({ width: 390, height: 844 });
+	await resizeTo(page, { width: 390, height: 844 });
 	await expectNoSidewaysScroll(page);
 
 	await page.goto(`/projects/${project.id}?tab=history`);

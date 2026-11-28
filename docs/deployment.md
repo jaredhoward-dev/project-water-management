@@ -3590,7 +3590,23 @@ secret is involved: both switches are plain variables in
    BILLING_ENFORCED](./billing.md#billing_enforced)). Read the billing report
    first (`billing-admin.yml`, `billing-report`) for the accounts already past
    a limit, and grant or email them before the switch ([billing.md § Staff
-   grants](./billing.md#staff-grants)). No grace clock runs in shadow mode,
+   grants](./billing.md#staff-grants)). Check, in that report:
+   - **Accounts past Free's live catchments with no live plan.** Each
+     `plan ended, no grace yet` line is an account that gets its grace email
+     at the first tick after the switch and pauses that many catchments 14
+     days later (a staff grant or a trial that ended in shadow mode); grant
+     the ones that should keep everything. Each `never had a plan` line pauses
+     nothing, but can't switch a further catchment live once it is on.
+   - **Teams over their paid editor seats.** They keep every member's access,
+     but no one can be made an editor (`402 plan_limit`) until they buy seats
+     or make editors viewers. `since before it was recorded` is a team that
+     went over before the seat marker existed.
+   - **The verified-email gate** has no line before the switch (it counts
+     only refusals): a Free member with an unconfirmed or temporary-mail
+     address keeps the feeds already on, but is refused a new feed and the
+     assistant (`403 email_unverified` / `email_disposable`), worded in the
+     panel, not on the Plan page.
+   Rehearsed end to end by `backend/src/billing/turnOn.db.test.ts`. No grace clock runs in shadow mode,
    so nothing needs resetting: an account whose plan already ended past
    Free's live catchments starts its 14-day grace, with its grace email, at
    the first worker tick after the switch, and nothing pauses before those
@@ -3620,7 +3636,10 @@ secret is involved: both switches are plain variables in
 5. **Check it.** `GET /api/account/plan` (signed in, from the browser's
    network tab) answers `"enforced": true`; with the trial, a newly verified
    test account's plan answers its reverse trial (`subscription.reverseTrial`
-   true), and the next billing report counts the trial.
+   true), and the next billing report counts the trial. After the first
+   tick (5 minutes), the report's `plan ended, no grace yet` lines have become
+   `in its grace since …, pauses N from <date>`, and each of those owners
+   has one grace email in `billing_notice` (kind `grace`, status `sent`).
 
 To turn either off: set it back to `false` (the trial first, or both
 together) and apply; with the trial, `gh variable delete
@@ -3763,7 +3782,7 @@ and configuration set as every other email ([§ Email](#email-amazon-ses)).
   | `APP_ENCRYPTION_KEY` | The sops key `app_encryption_key` (32+ alphanumeric characters), in the API's runtime secret. Seals two-step sign-in's TOTP secrets (AES-256-GCM, `auth/secretBox.ts`); the API refuses a missing, short or `dev-only-` value at cold start. Rotate only if it leaked ([§ Runbooks](#runbooks) 15) |
   | `MFA_REQUIRED` | Unset (or `true`). The API and worker refuse `false` at cold start: in production, publishing to farmers, licence decisions and evidence packs always need two-step sign-in, and owners' and team admins' actions do where a project or team requires it (`auth/stepUp.ts`, 204_mfa_opt_in) |
   | `ALERTS_TOKEN_SECRET` | The sops key `alerts_token_secret` (32+ alphanumeric characters), in the worker's runtime secret (not its environment, not Terraform state). Signs the one-click unsubscribe links and the "Was this useful?" links (151). Only the worker has it; the API Lambda checks a link by its hash. Rotating it (a new sops value, applied through `tf.sh`, [§ Rotating a secret](#rotating-a-secret)) breaks the unsubscribe link in every alert already sent ("Manage your alerts" still works), so rotate only if it leaked |
-  | `ALERTS_ENABLED` | `var.alerts_enabled` (default `true`): **the kill switch**. `false` stops every alert email and drops those waiting; alerts are still evaluated and shown in the app |
+  | `ALERTS_ENABLED` | `var.alerts_enabled` (default `true`): **the kill switch**. `false` (or `0`, `off`, `no`, any case) stops every alert email and drops those waiting; alerts are still evaluated and shown in the app |
   | `ALERTS_DAILY_CAP` | `5`: immediate alert emails per person per day (06:00 to 06:00 in the project's time zone, South Africa's by default) before the rest wait for the 06:00 digest |
   | `SITE_URL` | also the base of the RFC 8058 one-click address, `SITE_URL/api/alerts/unsubscribe` (CloudFront's `/api/*`; `API_PUBLIC_URL` overrides it, which only local dev needs) |
 

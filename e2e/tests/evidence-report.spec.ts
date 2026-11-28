@@ -14,6 +14,7 @@ import { API_URL } from '../support/env.ts';
 import { expect, test } from '../support/fixtures.ts';
 import { box } from '../support/map.ts';
 import { hasPdftotext, pdfPageTexts } from '../support/pdf.ts';
+import { resizeTo } from '../support/reflow.ts';
 
 const POINTS = [10, 20, 30, 40, 50, 60, 70, 80, 90, 99];
 /** The rule the project declares, and the ensemble the River tab runs to it. */
@@ -208,7 +209,7 @@ test('an application on the nominated run gives the full evidence report, draft 
 	await expectNoViolations(page);
 	// On a phone the report stacks: nothing widens the page past the window (a sentence in a value cell once did).
 	const desktop = page.viewportSize()!;
-	await page.setViewportSize({ width: 390, height: 844 });
+	await resizeTo(page, { width: 390, height: 844 });
 	expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
 	await expectNoViolations(page);
 	await page.setViewportSize(desktop);

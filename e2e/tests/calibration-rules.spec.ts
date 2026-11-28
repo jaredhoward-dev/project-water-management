@@ -68,8 +68,11 @@ test('the saved rules pick the fit on the server: a rule change needs saving fir
 	await expect(auto.getByTestId('auto-apply-hint')).toHaveText('Save the calibration rules first.');
 	await rules.getByLabel('Seed').fill('1');
 	await expect(applyButton).toBeEnabled();
-	await applyButton.click();
+	// From the keyboard: the button goes once applied, and the focus moves to the line that replaces it (WCAG 2.4.3).
+	await applyButton.focus();
+	await page.keyboard.press('Enter');
 	await expect(auto.getByTestId('auto-applied')).toContainText(', with a run');
+	await expect(auto.getByTestId('auto-applied')).toBeFocused();
 	// Saved by the server: nothing unsaved in the form.
 	await expect(anySaveBar(page)).toHaveCount(0);
 

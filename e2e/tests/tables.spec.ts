@@ -25,6 +25,7 @@ test('a long table keeps both header rows in view while it scrolls in its box', 
 
 	const headerRows = table.locator('thead tr');
 	await expect(headerRows).toHaveCount(2);
+	// settled: the poll below waits for the box to be scrolled past 500 px; the header rows stick wherever it lands.
 	await wrap.evaluate((el) => el.scrollTo(0, 600));
 	await expect.poll(() => wrap.evaluate((el) => el.scrollTop)).toBeGreaterThan(500);
 

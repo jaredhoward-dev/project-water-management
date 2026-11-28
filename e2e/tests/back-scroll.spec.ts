@@ -9,6 +9,7 @@ import type { Locator, Page } from '@playwright/test';
 import { compareCard, openAllocations, seedManyAllocations } from '../support/allocations.ts';
 import { createRun, putModel, seedRunnableProject, type Model } from '../support/api.ts';
 import { expect, test } from '../support/fixtures.ts';
+import { scrollToY, wheelAndSettle } from '../support/scroll.ts';
 import { openSupply, seedSupplyProject, unitCards, unitChart } from '../support/supply.ts';
 
 const PHONE = { width: 390, height: 844 };
@@ -68,6 +69,10 @@ test('Hydrological units, on a phone: pick a unit low in the list, its detail co
 	await createRun(page.request, project.id, 'Baseline');
 	await openSupply(page, project.id);
 	const showAll = page.getByRole('button', { name: /^Show all \d+ hydrological units$/ });
+	// The fold depends on which units were short in the run's last week, known once every unit's series is in: the summary says
+	// how many then.
+	await expect(page.getByTestId('supply-summary')).toContainText(/ \d+ short /);
+	// settled: the fold is final once the summary counts the units short in the week (it waits for every unit's series), awaited above.
 	if (await showAll.count()) await showAll.click();
 	await expect(unitCards(page)).toHaveCount(14);
 
@@ -120,7 +125,7 @@ test('the section strip’s arrow keys: Back to the section returns to where the
 	await page.goto(`/projects/${project.id}?tab=dams`);
 	await expect(page.getByRole('list', { name: 'Dams' }).getByRole('listitem')).toHaveCount(14);
 	await expect(page.getByRole('region', { name: /^Storage/ }).locator('figure.chart')).toHaveAttribute('data-ready', 'true');
-	await page.evaluate(() => scrollTo(0, 600));
+	await scrollToY(page, 600);
 	const tabLink = page.getByRole('navigation', { name: 'Project sections' }).getByRole('link', { name: 'Dams', exact: true });
 	await tabLink.evaluate((a: HTMLElement) => a.focus({ preventScroll: true }));
 	const atDams = await scrollY(page);
@@ -153,7 +158,7 @@ test('Back holds the place only until the reader takes over: their own scroll st
 
 	// The reader scrolls up by hand; then the page re-flows (a narrower window). The hold has let go.
 	await page.mouse.move(195, 400);
-	await page.mouse.wheel(0, -600);
+	await wheelAndSettle(page, 0, -600);
 	await expect.poll(() => topInWindow(low)).toBeGreaterThan(atList + 300);
 	const theirs = await scrollY(page);
 	await page.setViewportSize({ width: 380, height: 844 });
@@ -176,7 +181,7 @@ test('Back to a section opened at a #panel returns to where the reader was, not 
 	const last = unitCards(page).last();
 	// A turn of the wheel is the reader taking over (it ends the anchor's hold); then on down to the last card.
 	await page.mouse.move(700, 450);
-	await page.mouse.wheel(0, 100);
+	await wheelAndSettle(page, 0, 100);
 	await last.scrollIntoViewIfNeeded();
 	await expect(panel).not.toBeInViewport();
 	const there = await scrollY(page);
@@ -199,7 +204,7 @@ test('Back from another page into a section returns to where it was scrolled, as
 	await createRun(page.request, project.id, 'Baseline');
 	await page.goto(`/projects/${project.id}?tab=dams`);
 	await expect(page.getByRole('region', { name: /^Storage/ }).locator('figure.chart')).toHaveAttribute('data-ready', 'true');
-	await page.evaluate(() => scrollTo(0, 600));
+	await scrollToY(page, 600);
 	const atDams = await scrollY(page);
 	expect(atDams).toBe(600);
 	await page.getByRole('link', { name: 'Help', exact: true }).first().click();

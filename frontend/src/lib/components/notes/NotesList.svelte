@@ -15,6 +15,7 @@
 	audience, and "edited" opens the note's earlier texts (note_revision).
 -->
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { confirmDialog } from '#lib/components/common/confirm.svelte.js';
 	import { focusAfterRemove } from '#lib/a11y/focusAfterRemove.js';
 	import { api, NOTE_MAX, type Note, type NoteRevision, type NoteVisibility } from '#lib/api/index.js';
@@ -28,6 +29,7 @@
 		OBJECTION_WARNING,
 		PUBLIC_COMMENT_RECIPIENTS,
 		REGISTER_CONSENT_LABEL,
+		targetKey,
 		targetQuery,
 		type NoteTarget
 	} from './notes';
@@ -105,20 +107,39 @@
 	const draftLength = $derived(normaliseBody(draft).length);
 	const message = (err: unknown) => words.error(err);
 
+	/** The target the list is showing; an answer for an earlier one is dropped. */
+	let shownKey = '';
+
 	async function load() {
+		const key = shownKey;
 		loadError = null;
 		try {
-			notes = await api.notes.list(projectId, targetQuery(target));
+			const list = await api.notes.list(projectId, targetQuery(target));
+			if (key === shownKey) notes = list;
 		} catch (err) {
-			loadError = message(err);
+			if (key === shownKey) loadError = message(err);
 		}
 	}
 
+	// A string, so the effect below reruns only when the key's value changes: the page passes `target` as an
+	// inline object (its farm name included), and a rename or a language change gives a new object for the same unit.
+	const targetKeyNow = $derived(`${projectId}|${targetKey(target)}`);
+
 	$effect(() => {
-		// Reload when the target changes (the drawer is reused across runs).
-		void JSON.stringify(targetQuery(target));
-		notes = null;
-		load();
+		// Reload when the target changes (the farm page switching unit keeps this list mounted). What was typed,
+		// an edit open and any error were about the last target: a draft kept would be added to the new one.
+		const key = targetKeyNow;
+		untrack(() => {
+			shownKey = key;
+			notes = null;
+			draft = '';
+			editing = null;
+			editDraft = '';
+			error = null;
+			historyOf = null;
+			registerConsent = false;
+			load();
+		});
 	});
 
 	async function add(e: SubmitEvent) {
@@ -130,14 +151,22 @@
 		}
 		busy = true;
 		error = null;
+		const key = shownKey;
 		try {
 			const note = await api.notes.create(projectId, createBody(target, draft, hasAudiences(target) ? chosen : farmer || shareWithFarm ? 'farm' : 'team', registerConsent));
+			// Saved on the target it was typed for; if the page has moved on since, that target's list (not the
+			// one shown) has it, so only tell the page.
+			if (key !== shownKey) {
+				onChanged?.();
+				return;
+			}
 			notes = [note, ...(notes ?? [])];
 			draft = '';
 			registerConsent = false;
 			onChanged?.();
 		} catch (err) {
-			error = message(err);
+			// A failure for a target the page has left would show on the new one's form.
+			if (key === shownKey) error = message(err);
 		} finally {
 			busy = false;
 		}
