@@ -386,7 +386,8 @@ jobs:
 
       - name: Rollback, migrations skipped
         if: needs.preflight.outputs.rollback == 'true'
-        run: echo "::notice::Rollback to ${RELEASE_TAG}: the migrate Lambda was neither updated nor run; the database keeps the latest release's schema (docs/deployment.md § Rollback)."
+        run: |
+          echo "::notice::Rollback to ${RELEASE_TAG}: the migrate Lambda was neither updated nor run; the database keeps the latest release's schema (docs/deployment.md § Rollback)."
 
       - name: Update API Lambda code
         env:
