@@ -155,6 +155,8 @@ export function resolveWindow(choice: WindowChoice, run: WindowRun, own: { repor
 		return { ok: true, window: w, note: notes.length ? notes.join(' ') : null };
 	}
 	if (choice.preset !== 'custom') return { ok: false, error: 'Unknown window.' };
+	// A choice built from a typed day as well as a parsed URL: a day the engine refuses (year 0000) is no window.
+	if (!isIsoDate(choice.start) || !isIsoDate(choice.end)) return { ok: false, error: 'The window needs two calendar days.' };
 	const a = toEpochDay(choice.start);
 	const b = toEpochDay(choice.end);
 	if (a > b) return { ok: false, error: 'The window must start before it ends.' };
