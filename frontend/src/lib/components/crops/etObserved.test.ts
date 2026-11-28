@@ -164,6 +164,15 @@ describe('etObserved', () => {
 		expect(decodeURIComponent(first)).toContain(`run "${label}"`);
 	});
 
+	it("keeps the first line one cell for a reader that splits on ';' too (Excel in a comma-decimal locale)", () => {
+		const name = 'North;=HYPERLINK("https://evil.example")';
+		const label = 'r; @SUM(1)';
+		const first = etCsv(data(undefined, { name, run: { ...data().run!, label } })).split('\r\n')[0]!;
+		for (const cell of first.split(/[;,]/).slice(1)) expect(cell).not.toMatch(/^\s*"?[=+\-@]/);
+		expect(decodeURIComponent(first)).toContain(`# ${name}: actual ET`);
+		expect(decodeURIComponent(first)).toContain(`run "${label}"`);
+	});
+
 	it('writes the CSV with the credit on its own first line, then a row per dekad', () => {
 		const csv = etCsv(data());
 		const lines = csv.split('\r\n');

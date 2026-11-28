@@ -182,6 +182,9 @@ async function emailCode(
 	}
 }
 
+/** The sign-in challenge expired, or another request used it first. */
+const challengeUsed = () => ApiError.coded(401, 'mfa_challenge_expired', 'your sign-in timed out: enter your email and password again');
+
 const emailNotOn = () => ApiError.coded(409, 'mfa_not_enrolled', 'codes by email are off');
 
 /** Refuses unless emailed codes are on for `userId` (as the account). */
@@ -381,8 +384,13 @@ export const mfaRoutes = new Hono<AuthEnv>()
 			await db.query('SELECT app_mfa_succeeded()');
 			// The owner has their factor: a waiting reset of it ends (auth/mfaReset.ts).
 			await cancelOwnReset(db);
-			// The challenge is good once (revoked_session, 102).
-			await db.query('SELECT app_revoke_session($1, to_timestamp($2))', [challenge.jti, challenge.expiresAt]);
+			// The challenge is good once (revoked_session, 102), atomically (412): a request with the same challenge
+			// that claimed it first wins, and this one's transaction rolls back, the code it spent included.
+			const { rows: claim } = await db.query<{ claimed: boolean }>('SELECT app_claim_session($1, to_timestamp($2)) AS claimed', [
+				challenge.jti,
+				challenge.expiresAt
+			]);
+			if (!claim[0]?.claimed) throw challengeUsed();
 			const { rows } = await db.query<UserRow & { sessions_revoked_at: Date | null }>(
 				`SELECT ${USER_COLS}, sessions_revoked_at FROM app_user WHERE id = $1`,
 				[userId]

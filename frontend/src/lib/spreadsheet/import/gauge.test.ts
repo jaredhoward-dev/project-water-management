@@ -81,7 +81,9 @@ describe('gaugeAsReference', () => {
 			['2006-07-01', -1],
 			['2006-07-01', NaN],
 			['07/01/2006', 0.5],
-			['2006-02-30', 0.5]
+			['2006-02-30', 0.5],
+			// Year 0000: Python's date.fromisoformat refuses it (MINYEAR is 1), so the TypeScript importer does too (test_gauge_reference.py).
+			['0000-07-01', 0.5]
 		];
 		for (const [from, factor] of bad) {
 			expect(() => validateScaling({ scalingFrom: from, scaleFactor: factor }), `${from} ${factor}`).toThrow(InvalidImportOptionsError);

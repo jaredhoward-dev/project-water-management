@@ -42,11 +42,14 @@
 			error = err instanceof Error ? err.message : 'The email couldn’t be sent.';
 		} finally {
 			sending = false;
+			// The button pressed was disabled while sending, and waits out the resend after: the keyboard goes where the code is typed.
+			input?.focus();
 		}
 	}
 
 	let open = $state(true);
 	let code = $state('');
+	let input: HTMLInputElement | undefined = $state();
 	let busy = $state(false);
 	let error = $state<string | null>(null);
 	let answered = false;
@@ -75,6 +78,8 @@
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'That code wasn’t accepted.';
 			code = '';
+			// Continue is disabled again with the field empty: back to the field, for the next code.
+			input?.focus();
 		} finally {
 			busy = false;
 		}
@@ -95,6 +100,7 @@
 		<label for="fresh-code-input">Code</label>
 		<input
 			id="fresh-code-input"
+			bind:this={input}
 			bind:value={code}
 			inputmode="numeric"
 			autocomplete="one-time-code"

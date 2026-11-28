@@ -14,6 +14,7 @@
 	import { api, type RunMeta } from '#lib/api/index.js';
 	import Dialog from '#lib/components/common/Dialog.svelte';
 	import Delta from '#lib/components/compare/Delta.svelte';
+	import { followRetry } from '#lib/components/common/loadState.js';
 	import { fmtMetric, type MetricSpec } from '#lib/components/compare/delta.js';
 	import { fmtDate, fmtDay } from '#lib/format/number.js';
 	import { runInputFor } from '#lib/preview/inputs.js';
@@ -135,11 +136,31 @@
 			<p class="lede">
 				The last run{#if base}, <strong>{runName(base)}</strong>,{/if} on its own inputs, against the same inputs with your unsaved {what}. Worked out in this browser; nothing is saved and no run is used.
 			</p>
-			{#if result.state === 'computing'}
-				<p role="status" class="muted">Working out the preview…</p>
-			{:else if result.state === 'error'}
-				<p class="failed" role="alert" data-testid="unsaved-preview-error">The preview couldn't be worked out: {result.message.replace(/\.$/, '')}.</p>
-			{:else}
+			<!-- Always under the lede (every state but no run), so the figures' arrival is announced, not only the wait (and a Try again's focus can
+			     follow the wait line, data-loading: followRetry). -->
+			<p
+				role="status"
+				class={result.state === 'computing' ? 'muted' : 'visually-hidden'}
+				data-loading={result.state === 'computing' || undefined}
+				data-testid="unsaved-preview-status"
+			>
+				{#if result.state === 'computing'}Working out the preview…{:else if result.state === 'done'}The preview is worked out: the figures are below.{/if}
+			</p>
+			{#if result.state === 'error'}
+				<p class="failed" role="alert" data-testid="unsaved-preview-error">
+					The preview couldn't be worked out: {result.message.replace(/\.$/, '')}.
+					<!-- The wait line takes its place: the focus follows it, then lands on the dialog's title (followRetry). -->
+					<button
+						type="button"
+						class="btn btn-sm"
+						data-retry
+						onclick={(e) => {
+							followRetry(e.currentTarget);
+							void compute();
+						}}>Try again</button
+					>
+				</p>
+			{:else if result.state === 'done'}
 				{@const e = result.effect}
 				{#if result.problems.length}
 					<div class="alert alert-warning" data-testid="unsaved-preview-problems">

@@ -107,6 +107,25 @@ export async function hasConfirmedFactor(db: Db, userId: string): Promise<boolea
 }
 
 /**
+ * The account-level actions a password-only session must not take once the
+ * account has a second factor: changing the email address (it would send the
+ * emailed codes, the factor-reset links and every notice to a new inbox),
+ * deleting the account (it can't be undone) and changing the password (it
+ * signs every session of the owner out). Such a session is one from
+ * before the first factor went on, which lives its 7 days; with the password
+ * it could otherwise act without ever giving the owner's factor's code, as
+ * adding another factor can't (mfa-routes.ts requireCodeForAnotherFactor).
+ * 403 mfa_step_up, whatever MFA_REQUIRED says: it is the account's own factor
+ * that is at stake, not a role's requirement. As the account (`db` under
+ * withUser). Call it before the password is checked, so a refusal is never
+ * counted on the sign-in lockout.
+ */
+export async function requireCodeIfEnrolled(db: Db, userId: string, amr: Amr, why: string): Promise<void> {
+	if (amr.includes('otp')) return;
+	if (await hasConfirmedFactor(db, userId)) throw ApiError.coded(403, 'mfa_step_up', `${why}: sign out and sign in again with a code`);
+}
+
+/**
  * The 403 this request would get for want of a second factor, or null when it
  * has one (or the requirement is off, or there is no request). `mfa_required`:
  * the person has no second factor yet (set one up on the Account page).

@@ -226,8 +226,9 @@ export function etCsv(data: EtObserved): string {
 	// with `#`, so its first cell is never a formula; the unit's name and the run's label are typed by editors, so
 	// their commas, quotes and control characters are percent-encoded (decodeURIComponent reads them back): else
 	// a name like `x,=HYPERLINK(…)` would open a cell of its own that a spreadsheet runs (docs/security.md "CSV exports
-	// defuse spreadsheet formulas"; groupedCsv.ts commentLine encodes a whole line the same way).
-	const own = (s: string) => s.replace(/[%,"\x00-\x1f\x7f-\x9f\u2028\u2029]/g, encodeURIComponent);
+	// defuse spreadsheet formulas"). Their `;` too, as the server's provenanceValue does: Excel in a comma-decimal
+	// locale (South Africa's among them) splits a CSV on `;`, so `x;=1+1` would open a cell there.
+	const own = (s: string) => s.replace(/[%;,"\x00-\x1f\x7f-\x9f\u2028\u2029]/g, encodeURIComponent);
 	const run = data.run ? `run "${own(data.run.label)}"` : 'no run';
 	const line = `# ${own(data.name)}: actual ET ${credits} · compared with ${run} · volumes on the run's planted area`.replace(/\s+/g, ' ');
 	return `${line}\r\n${toCsv([head, ...rows])}`;

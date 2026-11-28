@@ -165,6 +165,21 @@ describe('cells stay harmless', () => {
 		expect(line).not.toMatch(/[,"\u2028\x7f\x9f]/);
 		expect(decodeURIComponent(line.slice(2))).toBe(hostile);
 	});
+	it("a formula after a ';' stays text in a cell and a comment line, for Excel's comma-decimal locales (issue #949)", () => {
+		expect(textCell('a;=b')).toBe("a;'=b");
+		expect(textCell(';@SUM(A1:A9)')).toBe(";'@SUM(A1:A9)");
+		expect(textCell('Kloof; upper')).toBe('Kloof; upper');
+		expect(commentLine('a;=b')).toBe('# a%3B=b');
+		expect(commentLine('a; =b; plain')).toBe('# a%3B =b; plain');
+		expect(commentLine('no station; its rain')).toBe('# no station; its rain');
+		const hostile = 'Rain;@SUM(A1:A9)';
+		const line = commentLine(hostile);
+		expect(line).not.toContain(';');
+		expect(decodeURIComponent(line.slice(2))).toBe(hostile);
+		// In the CSV itself: a header and a text value.
+		const csv = datedCsv([], [{ header: 'q;=9+9', startDate: '2020-01-01', values: [';@SUM(A1:A9)'] }]);
+		expect(rows(csv)).toEqual(["date,q;'=9+9", "2020-01-01,;'@SUM(A1:A9)"]);
+	});
 	it('no columns gives the header row alone', () => {
 		expect(rows(datedCsv([], []))).toEqual(['date']);
 	});

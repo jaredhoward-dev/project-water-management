@@ -236,7 +236,15 @@ test('3. signing an evidence pack with a code over 10 minutes old: “Email me a
 	await fresh.getByRole('button', { name: 'Email me a code instead' }).click();
 	const code = await nextCode(owner.email, seen);
 	await expect(fresh.getByRole('button', { name: /^Send again \(in \d+ s\)$/ })).toBeDisabled();
+	// The pressed button waits out the resend, so the keyboard is on the field the code goes in, not thrown out of the dialog.
+	await expect(fresh.getByLabel('Code', { exact: true })).toBeFocused();
 	await expectNoViolations(page, { include: 'dialog[open]' });
+	// A wrong code says so, and the keyboard goes back to the emptied field (Continue is disabled again).
+	await fresh.getByLabel('Code', { exact: true }).fill(not(code));
+	await fresh.getByRole('button', { name: 'Continue' }).click();
+	await expect(fresh.getByRole('alert')).toBeVisible();
+	await expect(fresh.getByLabel('Code', { exact: true })).toBeFocused();
+	await expect(fresh.getByLabel('Code', { exact: true })).toHaveValue('');
 	await fresh.getByLabel('Code', { exact: true }).fill(code);
 	await fresh.getByRole('button', { name: 'Continue' }).click();
 

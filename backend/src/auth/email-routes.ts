@@ -149,8 +149,7 @@ export const emailAuthRoutes = new Hono<AuthEnv>()
 		const body = z.object({ token, password }).parse(await readJson(c));
 		const hash = parseToken(body.token);
 		if (!hash) throw invalidLink('/auth/reset-password');
-		const newHash = await hashPassword(body.password);
-		const watermark = new Date();
+		let watermark = new Date();
 		const email = await withoutUser(async (db) => {
 			const { rows } = await db.query<{ user_id: string | null }>(
 				"SELECT app_consume_email_token($1, 'reset') AS user_id",
@@ -158,10 +157,17 @@ export const emailAuthRoutes = new Hono<AuthEnv>()
 			);
 			const userId = rows[0]?.user_id;
 			if (!userId) return null;
+			// Only now, for a live link: the hash (Argon2id, 64 MiB and ~0.1 s) is the
+			// costliest thing a signed-out caller can ask for, and a made-up token
+			// must not buy one (docs/security.md § Password reset). If it throws,
+			// the transaction rolls back and the link is still unused.
+			const newHash = await hashPassword(body.password);
 			// The link proved the account: the rest runs as it (068, own-row policies).
 			await actAsUser(db, userId);
 			// Watermark from this server's clock, the same clock that stamps
-			// session iat, so a sign-in right after this is never mistaken as older.
+			// session iat, so a sign-in right after this is never mistaken as older;
+			// taken after the hash, so no session issued while it ran survives.
+			watermark = new Date();
 			const { rows: updated } = await db.query<{ email: string }>(
 				'UPDATE app_user SET password_hash = $2, sessions_revoked_at = $3 WHERE id = $1 RETURNING email',
 				[userId, newHash, watermark]

@@ -15,10 +15,11 @@
 // carry their provenance line (backend/src/export/csv.ts): a leading `#`
 // line is skipped by our own readers and read as one cell by others. Text a
 // user typed is kept to one harmless cell: header cells that a spreadsheet
-// would read as a formula get an apostrophe, and a comment line's commas,
-// quotes and control characters are percent-encoded. Pure: no DOM.
+// would read as a formula get an apostrophe (after a `;` too, issue #949),
+// and a comment line's commas, quotes and control characters (and a `;`
+// before a formula sign) are percent-encoded. Pure: no DOM.
 import { fromEpochDay, toEpochDay, type SeriesMeta } from '@water-management/engine';
-import { defuse } from '#lib/spreadsheet/export/names.js';
+import { defuseCsv, SEPARATOR_FORMULA } from '#lib/spreadsheet/export/names.js';
 import { kindLabel } from '#lib/series/kinds.js';
 import type { Daily } from './coverage';
 import type { AreaRainLines, UnitChainLines } from './derivedRain';
@@ -36,15 +37,21 @@ export interface CsvColumn {
 	values: ArrayLike<number | string | null>;
 }
 
-/** A header or text cell: RFC 4180-quoted when needed, formula-looking text behind an apostrophe (defuse; OWASP "CSV injection"). */
+/** A header or text cell: RFC 4180-quoted when needed, formula-looking text behind an apostrophe, also after a `;`, which Excel splits on in comma-decimal locales (defuseCsv; OWASP "CSV injection", issue #949). */
 export function textCell(v: string): string {
-	const s = defuse(v);
+	const s = defuseCsv(v);
 	return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-/** A `#` line kept to one cell: its `%`, commas, quotes and control characters percent-encoded (decodeURIComponent reads it back). */
+/**
+ * A `#` line kept to one cell: its `%`, commas, quotes and control characters
+ * percent-encoded, and a `;` that would open a formula cell for a reader that
+ * splits on it (a comma-decimal Excel, issue #949; SEPARATOR_FORMULA). The
+ * line's own `; ` separators stay: what follows them is plain text.
+ * decodeURIComponent reads it back.
+ */
 export function commentLine(text: string): string {
-	return `# ${text.replace(/[%,"\x00-\x1f\x7f-\x9f\u2028\u2029]/g, encodeURIComponent)}`;
+	return `# ${text.replace(/[%,"\x00-\x1f\x7f-\x9f\u2028\u2029]/g, encodeURIComponent).replace(SEPARATOR_FORMULA, '%3B')}`;
 }
 
 const numCell = (v: number) => (Number.isFinite(v) ? String(Math.round(v * 1e6) / 1e6) : '');

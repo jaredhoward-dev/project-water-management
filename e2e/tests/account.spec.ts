@@ -175,6 +175,9 @@ test('changing the email address sends a link to the new address, and the link s
 	await panel.getByRole('button', { name: 'Send the link' }).click();
 	await expect(panel.getByRole('status')).toHaveText(`If ${next} can take the change, a link is on its way there. Open it to finish.`);
 	await expect(panel.getByRole('alert')).toHaveCount(0);
+	// Typing another address clears that line: it named the address the link went to, not this one.
+	await panel.getByLabel('New email address').fill(uniqueEmail('another'));
+	await expect(panel.getByRole('status')).toHaveText('');
 	// Nothing changes until the link is used.
 	await page.reload();
 	await expect(account).toContainText(owner.email);

@@ -15,6 +15,7 @@
 	// project (importReport.ts; the Overview's Import record shows them).
 	// `source` only picks the wording and what the picker offers; the file's
 	// type decides how it is read, so either entry point takes either kind.
+	import { tick } from 'svelte';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { version } from '$app/env';
 	import { resolve } from '$app/paths';
@@ -43,6 +44,7 @@
 		withChirpsProvenance,
 		DEFAULT_CHIRPS_KEY,
 		type FailureView,
+		type GaugeOptionsError,
 		type WorkbookReport
 	} from './workbookFile';
 
@@ -93,7 +95,10 @@
 	/** The workbook's CHIRPS column: product and version (issue #40 part c), v2.0 unless the review says otherwise. */
 	let chirpsKey = $state(DEFAULT_CHIRPS_KEY);
 	let optionsError = $state<string | null>(null);
+	/** The review field `optionsError` is about, when it is one of the gauge fields (gaugeOptions). */
+	let optionsErrorField = $state<GaugeOptionsError['field'] | null>(null);
 	let updating = $state(false);
+	let fileInput: HTMLInputElement | undefined = $state();
 
 	const isWorkbook = $derived(source === 'workbook');
 	const reading = $derived(progressText(progress));
@@ -132,7 +137,19 @@
 		runOfRiver = false;
 		chirpsKey = DEFAULT_CHIRPS_KEY;
 		optionsError = null;
+		optionsErrorField = null;
 		updating = false;
+	}
+
+	/**
+	 * Back at the file picker after a read failed or was cancelled. The input was disabled while it read, which
+	 * dropped its focus (and Cancel, which had it during a workbook read, is gone), so the input takes it again
+	 * rather than leaving it on the page behind the dialog (WCAG 2.4.3).
+	 */
+	async function backToPick() {
+		step = 'pick';
+		await tick();
+		fileInput?.focus();
 	}
 
 	/** Show the preview for a document read from any source. */
@@ -158,7 +175,7 @@
 		} catch (e) {
 			if (mine !== attempt) return;
 			pickError = e instanceof Error ? e.message : String(e);
-			step = 'pick';
+			void backToPick();
 		}
 	}
 
@@ -172,7 +189,7 @@
 			if (mine !== attempt) return;
 			readingWorkbook = false;
 			readerFailed = true;
-			step = 'pick';
+			void backToPick();
 			return;
 		}
 		if (mine !== attempt) return;
@@ -190,7 +207,7 @@
 			closeSession();
 			if (e instanceof WorkbookImportFailed) pickFailure = describeFailure(e.failure);
 			else pickError = e instanceof Error ? e.message : String(e);
-			step = 'pick';
+			void backToPick();
 		} finally {
 			if (mine === attempt || session === null) readingWorkbook = false;
 		}
@@ -200,7 +217,7 @@
 		closeSession();
 		readingWorkbook = false;
 		progress = null;
-		step = 'pick';
+		void backToPick();
 	}
 
 	/** The importer's options changed on the review: extract again from the workbook already read. */
@@ -208,11 +225,13 @@
 		const opts = workbookOptions(gaugeAsReference, scalingFrom, scaleFactor, runOfRiver);
 		if ('error' in opts) {
 			optionsError = opts.error;
+			optionsErrorField = opts.field;
 			return;
 		}
 		const s = session;
 		if (!s || !parsed) return;
 		optionsError = null;
+		optionsErrorField = null;
 		updating = true;
 		try {
 			const { WorkbookImportFailed } = await import('#lib/spreadsheet/import/runner.js');
@@ -323,16 +342,24 @@
 			<FormatHelp format={isWorkbook ? B023_WORKBOOK_FORMAT : PROJECT_FILE_FORMAT} />
 			<div class="field">
 				<label for="imp-file">{inputLabel}</label>
-				<input id="imp-file" type="file" {accept} disabled={step === 'reading'} {@attach focusOnMount} onchange={(e) => pick(e.currentTarget.files?.[0])} />
+				<input
+					id="imp-file"
+					type="file"
+					{accept}
+					disabled={step === 'reading'}
+					bind:this={fileInput}
+					{@attach focusOnMount}
+					onchange={(e) => pick(e.currentTarget.files?.[0])}
+				/>
 			</div>
 			{#if step === 'reading' && readingWorkbook}
-				<div class="reading">
-					<progress max="1" value={reading.fraction} aria-label="Reading the workbook"></progress>
-					<p class="muted small" role="status">{fileName}: {reading.text}</p>
-				</div>
-			{:else}
-				<p class="muted small" role="status">{step === 'reading' ? `Reading ${fileName}…` : ''}</p>
+				<progress class="reading" max="1" value={reading.fraction} aria-label="Reading the workbook"></progress>
 			{/if}
+			<!-- One status line for picking and reading, on the page before its text changes: a live region inserted
+			     with its text already in it isn't announced reliably, which the per-sheet progress was (WCAG 4.1.3). -->
+			<p class="muted small read-status" role="status">
+				{step === 'reading' ? (readingWorkbook ? `${fileName}: ${reading.text}` : `Reading ${fileName}…`) : ''}
+			</p>
 		{:else if (step === 'preview' || step === 'importing') && parsed}
 			<p class="muted small file" {@attach focusName}>From <span class="mono">{fileName}</span></p>
 			<ImportPreview
@@ -354,6 +381,7 @@
 							bind:runOfRiver
 							bind:chirpsKey
 							{optionsError}
+							{optionsErrorField}
 							{updating}
 							disabled={step === 'importing'}
 							onoptions={changeOptions}
@@ -401,7 +429,8 @@
 				<button type="button" class="btn" onclick={() => (open = false)} {@attach focusOnMount}>Close</button>
 			{/if}
 		{:else if step === 'reading' && readingWorkbook}
-			<button type="button" class="btn" onclick={cancelReading}>Cancel</button>
+			<!-- The file input it took over from is disabled while it reads, so the focus comes here. -->
+			<button type="button" class="btn" onclick={cancelReading} {@attach focusOnMount}>Cancel</button>
 		{:else}
 			{#if step === 'preview'}<button type="button" class="btn" onclick={reset}>Choose another file</button>{/if}
 			<!-- While importing, closing doesn't stop the request (the list still takes the project), so it is Close. -->
@@ -453,11 +482,11 @@
 	.created {
 		color: var(--text);
 	}
-	.reading progress {
+	.reading {
 		width: 100%;
 		margin-top: 0.25rem;
 	}
-	.reading p {
+	.read-status {
 		overflow-wrap: anywhere;
 	}
 </style>

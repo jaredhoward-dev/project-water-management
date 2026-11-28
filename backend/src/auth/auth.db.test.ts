@@ -116,6 +116,33 @@ describe('auth', () => {
 		expect((await anon('POST', '/auth/login', { email: u.email, password: 'correct horse' })).status).toBe(200);
 	});
 
+	it('a made-up, or another address’s, invite token doesn’t tell a taken address from a free one; a live invite for it does', async () => {
+		const u = await signUp('DupInvite');
+		const reg = (email: string, inviteToken: string) =>
+			app.request('/auth/register', json({ email, password: 'longenough', displayName: 'X', acceptTerms: LEGAL_VERSION, inviteToken }));
+		const madeUp = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64url');
+		const free = await reg(`f-${crypto.randomUUID()}@x.io`, madeUp);
+		expect(free.status).toBe(202);
+		const taken = await reg(u.email, madeUp);
+		expect(taken.status).toBe(202);
+		expect(Object.keys((await taken.json()) as object)).toEqual(Object.keys((await free.json()) as object));
+		// A live invite, but for another address.
+		const owner = await signUp('DupInviter');
+		const projectId = (await owner.call('POST', '/projects', { name: 'Invites for the enumeration test' })).body.project.id as string;
+		const invite = async (email: string) => {
+			expect((await owner.call('POST', `/projects/${projectId}/members`, { email, role: 'viewer' })).status).toBe(201);
+			return tokenIn(lastMailTo(email));
+		};
+		expect((await reg(u.email, await invite(`elsewhere-${crypto.randomUUID()}@x.io`))).status).toBe(202);
+		// Positive control: a live invite for exactly the taken address names it, so that holder is told (409).
+		const invitedAddress = `invited-${crypto.randomUUID()}@x.io`;
+		const token = await invite(invitedAddress);
+		expect((await app.request('/auth/register', json({ email: invitedAddress, password: 'longenough', displayName: 'X', acceptTerms: LEGAL_VERSION }))).status).toBe(202);
+		const told = await reg(invitedAddress, token);
+		expect(told.status).toBe(409);
+		expect(((await told.json()) as { code: string }).code).toBe('account_exists');
+	});
+
 	it('a taken but never-confirmed address gets a fresh confirmation link', async () => {
 		const u = await signUp('Pending', { verified: false });
 		await app.request('/auth/register', json({ email: u.email, password: 'longenough', displayName: 'X', acceptTerms: LEGAL_VERSION }));

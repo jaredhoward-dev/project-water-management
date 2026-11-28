@@ -1,0 +1,4 @@
+{
+	"addKb": 2,
+	"why": "Merging main (#919, #952) into the 2026-11-27 sweep: the merged build measured 2585 KB gzipped against the 2583 KB ceiling the two sides' entries sum to"
+}

@@ -91,6 +91,18 @@ describe('readCells from the committed fixture copy', () => {
 	it('refuses a plan of the wrong length', async () => {
 		await expect(readCells(fixture, 'rnl', [LAND_NW], { start: '2024-01-01', end: '2024-01-02' }, { plan: '0' })).rejects.toThrow(RangeError);
 	});
+
+	it('refuses a window that ends before it starts, before opening the copy', async () => {
+		await expect(readCells(openStore('file:///nonexistent-mirror-dir'), 'rnl', [LAND_NW], { start: '2024-01-02', end: '2024-01-01' })).rejects.toThrow(
+			'the window ends before it starts'
+		);
+	});
+
+	it('reads a one-day window as one day', async () => {
+		const got = await readCells(fixture, 'rnl', [LAND_NW], { start: '2024-01-01', end: '2024-01-01' });
+		expect(got.cells.read).toBe('f');
+		expect(got.cells.values).toEqual([[expect.any(Number)]]);
+	});
 });
 
 describe('readCells from other copies', () => {

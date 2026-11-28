@@ -37,8 +37,7 @@
 	import { monthName } from '#lib/format/months.js';
 	import BandFdcChart from './BandFdcChart.svelte';
 	import { ENGINE_VERSION } from '@water-management/engine/version';
-	import { abandonedText, bandCells, coverageText, historyRows, pct, rejectedText, reproducedText, shownEnsemble, sig, withheldNote } from './bands';
-	import { FORMER_MEMBER } from '#lib/format/maker.js';
+	import { abandonedText, bandCells, coverageText, historyRows, pct, rejectedText, reproducedText, shownEnsemble, sig, storedText, withheldNote } from './bands';
 
 	let {
 		projectId,
@@ -214,7 +213,7 @@
 		<div class="alert alert-error" role="alert">{loadError} <button type="button" class="btn btn-sm" data-retry onclick={retry}>Try again</button></div>
 	{:else if summary && shown}
 		<p class="rule" data-testid="decision-rule"><strong>Decision rule.</strong> {summary.decisionRule}</p>
-		<p class="muted small">{optionLine(shown)} · {shown.runoffModel} · stored {shown.completedAt?.slice(0, 16).replace('T', ' ')} by {shown.createdBy ?? FORMER_MEMBER}</p>
+		<p class="muted small">{optionLine(shown)} · {shown.runoffModel} · {storedText(shown)}</p>
 		{#if engineNote}<p class="alert alert-info small">{engineNote}</p>{/if}
 		{#if withheld}<p class="alert alert-info" role="note" data-testid="uncertainty-withheld">{withheld}</p>{/if}
 
@@ -329,7 +328,9 @@
 				</div>
 			{/if}
 
-			<details>
+			<!-- An ensemble served as EWR counts and rates only (#523 I) has no annual volumes or curves: the withheld note above says why. -->
+			{#if b.annual.length}
+			<details data-testid="band-annual">
 				<summary>Annual volumes by water year</summary>
 				<div class="table-wrap">
 					<table class="data compact" aria-labelledby="{uid}-year">
@@ -357,9 +358,12 @@
 					</table>
 				</div>
 			</details>
+			{/if}
 
-			<h4>Monthly flow-duration curves against the EWR <HelpTip key="flow-duration-curve" /></h4>
-			<BandFdcChart fdc={b.fdc} points={b.fdcPoints} />
+			{#if b.fdc.length}
+				<h4>Monthly flow-duration curves against the EWR <HelpTip key="flow-duration-curve" /></h4>
+				<BandFdcChart fdc={b.fdc} points={b.fdcPoints} />
+			{/if}
 		{/if}
 
 		<div class="actions">

@@ -87,6 +87,8 @@ const RETAINED_AFTER_DELETION: Record<'id' | 'email' | 'name' | 'typedName', Rec
 let db: pg.Client;
 let owner: User;
 let subject: User;
+/** The subject's session from confirming their authenticator: signed in with a code, which deleting the account needs once a factor is on (stepUp.ts requireCodeIfEnrolled). */
+let subjectTwoStep: string;
 let farmer: User;
 let projectId: string;
 let teamId: string;
@@ -438,6 +440,7 @@ beforeAll(async () => {
 	// Codes by email beside it (206): user_email_otp, and a code sent (mfa_email_code, mfa_email_send). A second
 	// factor needs the two-step session the confirm gave (mfa-routes.ts requireCodeForAnotherFactor).
 	const twoStep = confirmed.headers.getSetCookie().find((c) => c.startsWith(`${SESSION_COOKIE}=`))!.split(';')[0]!;
+	subjectTwoStep = twoStep;
 	expect((await anon('POST', '/auth/mfa/email/enrol', { password: 'correct horse' }, twoStep)).status).toBe(202);
 	expect((await anon('POST', '/auth/mfa/email/confirm', { code: lastMailTo(subject.email)!.text.match(/^(\d{6})$/m)![1] }, twoStep)).status).toBe(200);
 	expect((await subject.call('POST', '/auth/mfa/recovery-codes', { code: 'AAAAA-AAAAA' })).status).toBe(400);
@@ -483,6 +486,18 @@ describe('the data-subject export carries every row USER_FK_COVERAGE files under
 		if (fk === 'audit_event.actor_user_id') expect(got.length).toBeGreaterThanOrEqual(stored);
 		else if (fk === 'note_revision.edited_by') expect(got.flatMap((n) => n.revisions as unknown[])).toHaveLength(stored);
 		else expect(got).toHaveLength(stored);
+	});
+
+	it('gives what a row count can’t see: which statement each sign-off is and the reference a delegation rests on (415)', async () => {
+		const signed = await db.query<{ id: string; kind: string }>('SELECT id, kind FROM signoff WHERE user_id = $1 ORDER BY id', [subject.id]);
+		// Positive control: the fixture signed, as the responsible specialist.
+		expect(signed.rows.map((r) => r.kind)).toContain('specialist');
+		const byId = (rows: { id: string; kind: string }[]) => rows.map((r) => ({ id: r.id, kind: r.kind })).sort((a, b) => a.id.localeCompare(b.id));
+		expect(byId(doc.signoffs)).toEqual(byId(signed.rows));
+		const delegated = await db.query<{ note: string }>('SELECT confirmation_note AS note FROM authority_delegate WHERE user_id = $1', [subject.id]);
+		expect(delegated.rows).toHaveLength(1);
+		expect(delegated.rows[0]!.note).not.toBe('');
+		expect(doc.authorityDelegations.map((d: Doc) => d.reference)).toEqual([delegated.rows[0]!.note]);
 	});
 
 	it('gives every APP_USER_EXPORTED column, with the value stored', async () => {
@@ -541,9 +556,10 @@ describe('deleting the account leaves no copy of the person outside the document
 		for (const [k, v] of Object.entries(needles())) before[k] = await whereIs(v);
 		// Through "Delete my account" (DELETE /auth/me, issue #112), as the person under RLS: the operator's path
 		// (the schema owner deleting the row) runs the same keys and triggers, checked end to end in account-deletion.db.test.ts.
+		// From the session that gave a code: with two-step sign-in on, a password-only one is refused (mfa_step_up).
 		const res = await app.request('/auth/me', {
 			method: 'DELETE',
-			headers: { cookie: subject.cookie, origin: ORIGIN, 'content-type': 'application/json' },
+			headers: { cookie: subjectTwoStep, origin: ORIGIN, 'content-type': 'application/json' },
 			body: JSON.stringify({ password: 'correct horse' })
 		});
 		expect(res.status).toBe(204);

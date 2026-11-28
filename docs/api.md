@@ -24,10 +24,10 @@ address doesn't lock it out ([security.md § Authentication](./security.md#authe
 | POST | `/auth/me/accept-terms` | `{ version }` | The re-acceptance step ([legal-status.md](./legal-status.md)): `version` is the terms version the notice showed (`LEGAL_VERSION`). `200 { user }` with `termsCurrent: true`, recording it (`app_user.terms_version`; the database stamps the time, and accepting the version already recorded changes nothing). Any other version is `400 terms_not_accepted` (`params.version`: the current one) |
 | GET | `/auth/me/export` | – | `200` a JSON file (`Content-Disposition: attachment; filename="my-data_<date>.json"`, `Cache-Control: no-store`): the signed-in person's data-subject export; `429` + `Retry-After` within a minute of the last one (signed in) |
 | POST | `/auth/me/farm-notice` | `{ version }` | "I understand" on the farm view's "Before you look at your farm" notice: `version` is the one the page showed (the engine's `FARMER_NOTICE_VERSION`, `packages/engine/src/legal.ts`); any other is `409 farm_notice_changed` (`params.version`: the current one). Stored on the account with the database's time (`app_user.farm_notice_version` / `farm_notice_accepted_at`, 093). `200 { user }` (signed in) |
-| DELETE | `/auth/me` | `{ password }` | "Delete my account" (issue #112): `204`, the account deleted and this browser's session and trusted-device cookies cleared, then an email to its address saying what was done; `403 wrong_current_password`; `429 signin_locked` + `Retry-After` while the address is locked; `409 account_sole_holder` with `details: { projects: [{ id, name }], teams: [{ id, name }] }`, the projects the person is the only owner of and the teams they are the only admin of (signed in) |
+| DELETE | `/auth/me` | `{ password }` | "Delete my account" (issue #112): `204`, the account deleted and this browser's session and trusted-device cookies cleared, then an email to its address saying what was done; `403 wrong_current_password`; `403 mfa_step_up` when the account has a second factor and this session signed in with the password only (checked before the password); `429 signin_locked` + `Retry-After` while the address is locked; `409 account_sole_holder` with `details: { projects: [{ id, name }], teams: [{ id, name }] }`, the projects the person is the only owner of and the teams they are the only admin of (signed in) |
 | PATCH | `/auth/me` | `{ displayName?, locale?, volumeUnit?, preferences? }` | `200 { user }`; `400` a blank (or only invisible characters) or over-100-character name, an unknown `locale` or `volumeUnit`, malformed `preferences`, or nothing to change (signed in) |
-| POST | `/auth/change-password` | `{ currentPassword, newPassword }` | `200 { user }` + a fresh cookie for this device; revokes **every other** session, outstanding reset links and a pending change of address (`/auth/change-email`); `403` wrong current password; `429` + `Retry-After` while the address is locked; `400` new password not 8–200 characters (signed in) |
-| POST | `/auth/change-email` | `{ newEmail, currentPassword }` | Changing the email address (347): `202 { sent: true, email }` (the new address, lower-cased) and a link mailed to the new address, which switches the account only when used (`/auth/confirm-email-change`). The **same** `202` when the new address already has an account, whose holder is mailed instead, in the email change's own words (`email_change_taken`: someone asked to move an account to this address, nothing changed, never naming that account; with a reset link, or a confirmation link if never confirmed; the holder's own cooldown and cap), never a change link (no enumeration: the link is issued, and the cooldown and cap counted, before the address is looked at). `403 wrong_current_password`; `429 signin_locked` + `Retry-After` while the address is locked; `400 email_change_same` (the account's own address); only with `BILLING_ENFORCED` on, `400 email_change_disposable`; `429 verification_sent_recently` (< 1 min since the last request) or `429 verification_limit` (the account's daily cap of reset, verification and change emails, 078) (signed in) |
+| POST | `/auth/change-password` | `{ currentPassword, newPassword }` | `200 { user }` + a fresh cookie for this device; revokes **every other** session, outstanding reset links and a pending change of address (`/auth/change-email`); `403` wrong current password; `403 mfa_step_up` when the account has a second factor and this session signed in with the password only (checked before the password); `429` + `Retry-After` while the address is locked; `400` new password not 8–200 characters (signed in) |
+| POST | `/auth/change-email` | `{ newEmail, currentPassword }` | Changing the email address (347): `202 { sent: true, email }` (the new address, lower-cased) and a link mailed to the new address, which switches the account only when used (`/auth/confirm-email-change`). The **same** `202` when the new address already has an account, whose holder is mailed instead, in the email change's own words (`email_change_taken`: someone asked to move an account to this address, nothing changed, never naming that account; with a reset link, or a confirmation link if never confirmed; the holder's own cooldown and cap), never a change link (no enumeration: the link is issued, and the cooldown and cap counted, before the address is looked at). `403 wrong_current_password`; `403 mfa_step_up` when the account has a second factor and this session signed in with the password only (checked before the password, so never counted on the lockout); `429 signin_locked` + `Retry-After` while the address is locked; `400 email_change_same` (the account's own address); only with `BILLING_ENFORCED` on, `400 email_change_disposable`; `429 verification_sent_recently` (< 1 min since the last request) or `429 verification_limit` (the account's daily cap of reset, verification and change emails, 078) (signed in) |
 | POST | `/auth/confirm-email-change` | `{ token }` | `200 { changed: true, email }`: the account's address is now the new one, verified, its bounce suppression cleared and its outstanding verify and reset links dropped; the old address gets a notice; every session of the account is signed out (`sessions_revoked_at`), and a browser that confirms while signed in to that account gets a fresh session cookie; + a trusted-device cookie for the new address. `400 link_invalid` bad/expired/used link (48 h, single use); `409 email_change_taken` when an account took the address after the link went out (public: the link is the credential) |
 | POST | `/auth/forgot-password` | `{ email }` | **always** `202 { ok: true }` (public) |
 | POST | `/auth/reset-password` | `{ token, password }` | `204`, clears cookie; `400` bad/expired/used link (public) |
@@ -253,9 +253,14 @@ stored only as SHA-256 hashes. Links point at `SITE_URL`:
   past RLS; a drop below contributor deletes the share itself, 049). `scenarios` is the scenarios they own, their
   licence applications (`origin: 'applicant'`) and modelling scenarios
   (`'team'`), as metadata, `[{ scenarioId, projectId, projectName, name,
-  origin, status, outcome, createdAt, submittedAt, decidedAt }]`
-  (`app_subject_scenarios()`, 396; never the ops or description, the
-  project's model record). `firstManualRun` is `{ firstRunAt }` or null (407); `reverseTrialClaim` is `{ emailHash, claimedAt }`
+  origin, status, outcome, createdAt, submittedAt, decidedAt,
+  objectionAddress, objectionClosingDate }]` (`app_subject_scenarios()`,
+  396; the application's notice details since 415, as the applicant typed
+  them, `null` on a team scenario; never the ops or description, the
+  project's model record). `authorityDelegations` carries each
+  delegation's `reference`, the letter it rests on (229; `''` while only
+  proposed), and each of `signoffs` its `kind` (`specialist` or `review`,
+  167; 415). `firstManualRun` is `{ firstRunAt }` or null (407); `reverseTrialClaim` is `{ emailHash, claimedAt }`
   when their current address had the Pro reverse trial (342; the SHA-256
   of its canonical form, as `reverse_trial_claim` keeps it, found by
   `app_subject_reverse_trial()`, 396), or `null`; a claim made under an
@@ -323,7 +328,9 @@ in; `404` = not found **or** not a member (RLS hides the project — the API nev
 reveals that a project exists); `403` = member without the needed role (also a
 cross-origin form post rejected by the CSRF check, a write RLS refused, or, in
 production, a request that didn't come through CloudFront); `400` =
-validation (`details` = zod issues), `{ error: "invalid JSON" }` for a
+validation (`details` = zod issues; every date field is a real calendar
+date `YYYY-MM-DD` from year 0001, the engine's `isIsoDate`, since Postgres's
+date has no year 0000), `{ error: "invalid JSON" }` for a
 body that isn't JSON (`backend/src/http/body.ts`), or `{ error: "bad request
 path" }` on any route for a path with an escaped unreserved character
 (`%61`), an escaped `/`, `\` or `%`, a malformed escape or a dot segment
@@ -472,7 +479,7 @@ the frontend catalogue (same contract: add, never rename):
 | `wrong_credentials` | 401 | sign-in with a wrong email or password |
 | `email_unconfirmed` | 403 | sign-in with the right password to an account whose address was never confirmed |
 | `signin_locked` | 429 | sign-in, a password change or deleting the account while the address is locked; `params.seconds` (also `Retry-After`) |
-| `account_exists` | 409 | sign-up **through an invite link** with an address that has an account (an ordinary sign-up answers the same `202` either way) |
+| `account_exists` | 409 | sign-up **through a live invite for exactly that address** when it has an account (an ordinary sign-up, or one carrying any other token, answers the same `202` either way) |
 | `signup_throttled` | 429 | `POST /auth/register` past the sign-up throttle (10 an hour per client address, 500 an hour in all), before the address is looked at; `params.seconds` (also `Retry-After`) |
 | `signup_disposable` | 400 | `POST /auth/register` with an address on a disposable domain, only with `BILLING_ENFORCED` on, except through a live invite for exactly this address |
 | `email_change_same` | 400 | `POST /auth/change-email` with the account's own address |
@@ -510,7 +517,7 @@ the frontend catalogue (same contract: add, never rename):
 | `mfa_not_started` | 409 | `POST /auth/mfa/totp/confirm` with nothing started |
 | `mfa_not_enrolled` | 409 | turning off, or new recovery codes, with two-step sign-in off |
 | `mfa_required` | 403 | an action that needs two-step sign-in (an owner's or team admin's where the project or team requires it, or one that always does), or turning a project's or team's requirement on, without a second factor set up (an authenticator or codes by email) |
-| `mfa_step_up` | 403 | the same with one set up, from a session signed in with the password only; also adding a second factor from such a session |
+| `mfa_step_up` | 403 | the same with one set up, from a session signed in with the password only; also adding a second factor, changing the email address (`POST /auth/change-email`), the password (`POST /auth/change-password`) or deleting the account (`DELETE /auth/me`) from such a session (stepUp.ts `requireCodeIfEnrolled`) |
 | `mfa_reset_limit` | 429 | `POST /auth/mfa/reset` past 3 requests for the account in 24 hours (205) |
 | `mfa_reset_admin` | 403 | `POST /teams/:id/members/:userId/mfa-reset` naming another admin of the team, or an admin of any other team: only a member below admin and admin of no team (205, operator decision 2026-10-08; 359, 2026-11-24). They recover through the self-service reset or the operator's identity-checked reset |
 | `run_unverified` | 409 | `POST …/runs/:runId/signoffs` for, or `POST …/scenarios/:sid/decide` with, a run whose server stamp is missing or no longer matches its rows (security.md § Run stamps) |

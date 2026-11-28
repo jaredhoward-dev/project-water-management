@@ -251,6 +251,11 @@ resource "aws_lambda_function" "worker" {
         # SES bounces and complaints (ses.tf): a record is read as one only
         # when it came from this queue (lambda-worker.ts fromMailEventsQueue).
         MAIL_EVENTS_QUEUE_ARN = aws_sqs_queue.mail_events.arn
+        # Each job message only from its own queue (lambda-worker.ts
+        # MESSAGE_QUEUES): a wake from jobs, a render's answer from
+        # render-results, a fetch result from ingest-results (below).
+        JOBS_QUEUE_ARN           = aws_sqs_queue.jobs.arn
+        RENDER_RESULTS_QUEUE_ARN = aws_sqs_queue.render_results.arn
         # Catchment delineation's `delineate` job (map_data.tf worker_dem): the
         # same DEM as the API's, empty while delineation_dem is off.
         DEM_URL = var.delineation_dem ? "s3://${aws_s3_bucket.tiles.bucket}/${local.dem_key}" : ""
@@ -261,6 +266,7 @@ resource "aws_lambda_function" "worker" {
       local.per_feed_fetching ? {
         FEED_FETCHER             = "sqs"
         FETCH_REQUESTS_QUEUE_URL = one(aws_sqs_queue.fetch_requests[*].url)
+        INGEST_RESULTS_QUEUE_ARN = one(aws_sqs_queue.ingest_results[*].arn)
       } : {},
       # Station API feeds' own fetch queue (feeds.tf, "Station fetches apart"):
       # their fetches never share fetch-requests or its trigger with CHC's and DWS's.

@@ -60,9 +60,14 @@ describe('gaugeOptions', () => {
 		expect(gaugeOptions(false, '2021-10-01', '0.8')).toEqual({ options: {} });
 		expect(gaugeOptions(true, '', ' ')).toEqual({ options: { gaugeAsReference: true } });
 		expect(gaugeOptions(true, '2021-10-01', '0,8')).toEqual({ options: { gaugeAsReference: { scalingFrom: '2021-10-01', scaleFactor: 0.8 } } });
-		expect(gaugeOptions(true, '2021-10-01', '')).toEqual({ error: 'Give both the date the scaling starts and its factor, or neither.' });
-		expect(gaugeOptions(true, '2021-10-01', '-1')).toEqual({ error: 'The scale factor must be a positive number.' });
-		expect(gaugeOptions(true, '2021-10-01', 'abc')).toEqual({ error: 'The scale factor must be a positive number.' });
+	});
+	// The field named is the one the review marks aria-invalid and ties the message to (WCAG 3.3.1).
+	it('names the field each problem is in', () => {
+		const both = 'Give both the date the scaling starts and its factor, or neither.';
+		expect(gaugeOptions(true, '2021-10-01', '')).toEqual({ error: both, field: 'scaleFactor' });
+		expect(gaugeOptions(true, '', '0.8')).toEqual({ error: both, field: 'scalingFrom' });
+		expect(gaugeOptions(true, '2021-10-01', '-1')).toEqual({ error: 'The scale factor must be a positive number.', field: 'scaleFactor' });
+		expect(gaugeOptions(true, '2021-10-01', 'abc')).toEqual({ error: 'The scale factor must be a positive number.', field: 'scaleFactor' });
 	});
 });
 
@@ -71,7 +76,7 @@ describe('workbookOptions: the gauge options plus run of river', () => {
 		expect(workbookOptions(false, '', '', false)).toEqual({ options: {} });
 		expect(workbookOptions(false, '', '', true)).toEqual({ options: { runOfRiver: true } });
 		expect(workbookOptions(true, '2021-10-01', '0.8', true)).toEqual({ options: { gaugeAsReference: { scalingFrom: '2021-10-01', scaleFactor: 0.8 }, runOfRiver: true } });
-		expect(workbookOptions(true, '2021-10-01', '', true)).toEqual({ error: 'Give both the date the scaling starts and its factor, or neither.' });
+		expect(workbookOptions(true, '2021-10-01', '', true)).toEqual({ error: 'Give both the date the scaling starts and its factor, or neither.', field: 'scaleFactor' });
 	});
 });
 

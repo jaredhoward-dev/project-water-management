@@ -488,6 +488,11 @@ out of order:
 - the report page (`components/report/reportLoad.ts`): changing `?run=`
   while the previous run's report still loads never shows that run under
   the new address (issue #859);
+- the Overview's recent notes (`components/notes/recentLoad.ts`), read
+  again whenever a note changes in any drawer and on Try again;
+- the Restriction log (`components/restrictions/logLoad.ts`): its first
+  page and its older pages share one sequencer, so neither an older page
+  nor another project's first page lands over the newer first page;
 - the share page's link (`routes/share`) and the evidence pack and verify
   pages' lookups.
 
@@ -1037,8 +1042,9 @@ Settings → Automatic runs.
   `SECURITY DEFINER` caller with no signed-in user name the acting user (a
   plain insert with no user is still refused). Like any job, the re-run runs
   as that person under RLS and fails closed if they are no longer an editor.
-  A key whose creator's account was deleted has nobody to run as: the re-run
-  is skipped (`rerunQueuedFor: null`) and the ingest still commits.
+  A key whose creator's account was deleted, or who was removed from the
+  project or now holds less than editor there (414), has nobody to run as:
+  the re-run is skipped (`rerunQueuedFor: null`) and the ingest still commits.
 - **The run** (`jobs/handlers/rerun.ts`, payload `trigger: 'auto'`): does
   nothing if the project turned automatic runs off since; otherwise
   `executeRun(db, id, autoRunLabel, 'auto')`, labelled `Auto · data to
@@ -1640,9 +1646,12 @@ row names a source, where to read it and the series it merges into:
   from when it was queued (§ Background work), so a job queued while a
   window ran goes before it. A day the copy doesn't hold yet reads as
   `-`, as a day CHC hasn't published, and a later fetch reads it. No copy at
-  all (no manifest, `MirrorNotReadyError`) writes nothing and records only
-  the attempt (`last_attempt_at`): no failure, no backoff, the same window
-  next time. A cell outside the region fails the feed with a message naming
+  all (no manifest, `MirrorNotReadyError`) writes nothing, not even the
+  re-check's claims (a savepoint taken before `chirps_recheck_claim` is
+  rolled back, so no untagged file's day sits under a 30-minute lease with
+  nothing read), and records only the attempt (`last_attempt_at`): no
+  failure, no backoff, the same window next time. A cell outside the
+  region fails the feed with a message naming
   the region. The re-check keeps only its re-reads: a stale day (a revision
   of the copy, 245) is read again from the copy and applied through
   `chirps_recheck_apply`; nothing is HEADed. Finals from the copy are tagged
@@ -2293,7 +2302,8 @@ EventBridge, daily
   for a cell list and window from the copy, from a running fetch of any
   CHIRPS feed (the cache's writers allow that for these two), with the same
   rules as a CHIRPS feed: a day the copy doesn't hold yet waits, no manifest
-  writes nothing, and stale days (a revision) are read again;
+  writes nothing (the re-check's claims included), and stale days (a
+  revision) are read again;
   `readProductSeries` is the weighted series from the cache, and
   `productVersions` each IMERG day's version (its `chirps_file` tag). The
   cache keeps both products' days as final: ERA5-Land's are, and IMERG Late
@@ -2987,7 +2997,8 @@ worker tick: the status, then each unit due by its load mark (≤ 200 a tick, ol
 - **What the worker hands over.** Ids and geometry only: a unit's key is its
   node id, its parcels one MultiPolygon, its land cover a list of
   `[row, col, share]` cells (the default dataset's, real before synthetic,
-  as the proposals choose; at most 40 000 cells and a 1° box, else none).
+  as the proposals choose; at most 40 000 cells and a 1° box, else none;
+  none, without a lookup, for parcels with no vertex).
   No name, project or person crosses the bucket. The worker reads the
   parcels and the cells through `SECURITY DEFINER` functions (281), since it
   runs with no user and both tables' policies need one. The list is written

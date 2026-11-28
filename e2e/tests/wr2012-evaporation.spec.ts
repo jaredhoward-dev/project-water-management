@@ -101,12 +101,29 @@ test('Demand’s A-pan source: typed S-pan converted by the equation picked, and
 	await entry.getByRole('button', { name: 'Fill the months' }).click();
 	await expect(entry.locator('tr[data-row="span"] td').last()).toHaveText(/1\s?465/);
 	await expect(entry.locator('tr[data-row="proposed"]')).toContainText('Pick an equation below');
+	// A month edited below the picked equation's floor (WR90's 32.5 mm) drops the pick: no radio left checked and disabled.
+	const wr90 = entry.getByTestId('span-entry-conversion').getByRole('radio', { name: /WR90/ });
+	await wr90.check();
+	await expect(entry.locator('tr[data-row="proposed"] td').first()).not.toHaveText(/Pick an equation/);
+	const oct = entry.getByLabel('S-pan evaporation, Oct, mm', { exact: true });
+	await oct.fill('25');
+	await oct.press('Tab');
+	await expect(wr90).toBeDisabled();
+	await expect(wr90).not.toBeChecked();
+	await expect(entry.locator('tr[data-row="proposed"]')).toContainText('Pick an equation below');
+	await oct.fill('150');
+	await oct.press('Tab');
+	await expect(wr90).toBeEnabled();
+	await expect(wr90).not.toBeChecked();
+	// The notice is a live region from the start, so a Use's words are announced as they arrive.
+	await expect(entry.getByRole('status')).toHaveText('');
 	await entry.getByTestId('span-entry-conversion').getByRole('radio', { name: /Taljaard/ }).check();
 	await expect(entry.locator('tr[data-row="proposed"] td').first()).toHaveText('185.1');
 	await entry.getByLabel(/Where the S-pan comes from/).fill('Invented S-pan for the test');
 	await entry.getByRole('button', { name: 'Use as the A-pan' }).click();
 	await answerConfirm(page, true, /from 1\s?465 mm of S-pan \(Invented S-pan for the test\), converted by the Taljaard \(2023\) general monthly equation, inverted\./);
 	await expect(entry.getByTestId('span-entry-notice')).toBeFocused();
+	await expect(entry.getByRole('status')).toHaveText(/^The A-pan row is now /);
 	await expect(page.getByTestId('apan-row').getByLabel('A-pan evaporation, Oct, mm', { exact: true })).toHaveValue('185.1');
 	await expectNoViolations(page, { include: '[data-testid="span-entry"]' });
 

@@ -100,7 +100,9 @@ server's `429` message in an alert; under it, outside the farm frame, a
 **Email address** card (`components/account/ChangeEmail.svelte`, 347: the new
 address and the current password; it says only that a link is on its way to
 the new address if it can take the change, since the server answers the same
-for a taken one; the link opens `/verify-email/change`, which switches the
+for a taken one, and clears that line once the address is edited; with a
+second factor on, a password-only session is told to sign in again with a
+code (`mfa_step_up`), as the **Password** form is; the link opens `/verify-email/change`, which switches the
 account and says the new address, signed in or out, [security.md § Changing
 the email address](./security.md#changing-the-email-address)) and a
 **Password** form
@@ -154,7 +156,11 @@ with a code from the way that is on, with **Sign in again** (sign out, then
 the sign-in page, back to the Account page after) and **Cancel**; a refusal
 the page didn't expect (the status read before another tab changed it)
 shows the same instead of calling the password wrong
-(`account/addFactor.ts`, issue #882; `account-add-factor-step-up.spec.ts`). The first way turned on brings the ten recovery codes, once, in a
+(`account/addFactor.ts`, issue #882; `account-add-factor-step-up.spec.ts`).
+Every form here opens with the focus in its first field (the button that
+opened it hides while it is open) and hands it back to that button on
+**Cancel** or once it is done, else to the panel's heading
+(`account-focus-after-actions.spec.ts`). The first way turned on brings the ten recovery codes, once, in a
 highlighted box whose heading takes focus: **Download the codes** (a text file, through the download helper loaded on click; if it can’t load, an alert says to copy the codes instead, never to reload, which would lose them), **Copy the codes** (the same text on the clipboard; a status line says whether it worked) and **I’ve
 saved them**; a second way keeps the same set. With either on: **Remove** /
 **Turn off** on its row, a **Recovery codes** part with how many are left
@@ -193,7 +199,9 @@ again (a wrong one is *Your current password is wrong.*; an empty one is
 refused before any request). The only owner of a project or only admin of
 a team gets an alert naming each, linked to its page (the `409
 account_sole_holder` details), which takes the focus; Cancel closes the
-dialog with nothing changed. On success the browser forgets the account as
+dialog with nothing changed. While the delete is out, Cancel is disabled
+and Escape doesn't close the dialog either, so its answer isn't hidden
+(`account-delete.spec.ts`). On success the browser forgets the account as
 signing out does (the farm view's saved copies, the note counts) and lands
 on `/login?deleted=1`, whose notice says the account was deleted and that
 an email says what was deleted and what was kept. The History reads such a
@@ -1249,7 +1257,10 @@ one with problems to fix is left out and named under "Not in this preview"
 (`preview/UnsavedPreviewDialog.svelte`, its own chunk) "Preview: your
 unsaved settings" (or "model edits", or "settings and model edits"). When
 the page couldn't load the runs list, the dialog asks for it itself rather
-than say there is no run. It starts from the newest run
+than say there is no run. A preview that fails says why, with **Try
+again**, which works it out again (the focus follows the wait line, then
+lands on the dialog's title); a status line under the lede announces the
+wait and the figures' arrival. It starts from the newest run
 of the catchment's own model (`previewBaseRun`: not a scenario's run, not a
 legacy one) and its own input from the server (`GET …/runs/:runId/model-input`,
 `lib/preview/inputs.ts`, kept for the next preview of that run), lays only the
@@ -2644,7 +2655,8 @@ or a script uses to push daily readings into the project's series.
   **Name**: a name, how long it works (until revoked, 90 days, 1 or 2 years)
   and what it may write: any series of the project, or only the ticked ones
   (the project's current series), with **Make key** and **Cancel** in its
-  action row. Cancel closes it and gives the focus back to **Make a key**;
+  action row. Cancel closes it, with any complaint about it, and gives the
+  focus back to **Make a key**;
   making a key closes it and puts the focus on the new key, which selects
   itself to copy.
 - **The new key** is shown once, in a highlighted box with **Copy** and the
@@ -3058,6 +3070,11 @@ and engine modules (comments, imports, type literals, a help entry's
 2. **Reading:** a progress bar and "Reading sheet *Flow data* (7 of 9)…" per
    sheet the importer parses (then "Building the project: …"), and
    **Cancel**, which stops the worker at once and returns to the picker.
+   The file input is disabled while it reads, so Cancel takes the focus, and
+   a cancel or a failure hands it back to the input (WCAG 2.4.3). The line
+   saying what is read is one `role="status"`, on the dialog before the read
+   starts, so its per-sheet text is announced (a live region inserted with
+   its text isn't, reliably; WCAG 4.1.3).
    Failures come back here, each with its own headline and the importer's
    message:
    - *not a Water Balance Tool workbook*: the named ranges it lacks (the first eight, then
@@ -3078,7 +3095,8 @@ and engine modules (comments, imports, type literals, a help entry's
      change re-extracts from the workbook the worker still holds (no second
      read) and updates the counts, notes and report in place; a date without
      a factor (or the other way round) or a non-positive factor is flagged
-     and blocks Import.
+     and blocks Import; the field at fault is `aria-invalid` and the message
+     is part of its description (`gaugeOptions` names the field; WCAG 3.3.1).
    - **River pumping units** (only when the importer flags a unit as
      probable run-of-river; issue #54, 2c/2d): *Import these N as run of
      river, pumping from the river*, off by default, its hint naming the
@@ -7489,7 +7507,8 @@ the data checks, the inputs and the warnings, every number at full precision
 with a display format per column ([api.md § Export](./api.md#export)). It is
 built in the browser: picking it closes the menu and shows, under the button,
 a progress bar and "Fetching Upper farm (3 of 9)…" per node, then "Building
-the workbook…", with **Cancel**, which stops at once and saves nothing. A
+the workbook…", with **Cancel**, which stops at once and saves nothing
+(the focus, on Cancel as it goes, moves back to the Download button). A
 failed fetch shows "Workbook failed: …" with the server's reason (a `413`
 included) in the menu's status line. The phone layout keeps the same menu and
 progress, wrapped under the button. Leaving the tab stops an export still
@@ -12084,12 +12103,18 @@ read it before.
   the **monthly flow-duration curve** of simulated outflow as a shaded 5–95 %
   band with its median against the dashed EWR line, one month at a time from
   a select (`uncertainty/BandFdcChart.svelte`, log flow axis; the chart's
-  title says at how many exceedance points the median falls below the EWR).
+  title says at how many exceedance points the median falls below the EWR,
+  counting only points with a median; **Show the numbers** under it is the
+  month's 5 %, median and 95 % at each exceedance point). Its labels never
+  draw under 9.5 px: on a phone the drawing scrolls sideways in its box, as
+  the tornado's does.
   With fewer than 30 sets kept no percentiles are shown, only the note why.
   On a run that caps use at, or scales demand to, the registered volumes, a
   viewer kept from them reads EWR counts and rates only, and a note says so
   (`uncertainty-withheld`, from the ensemble's `verdictsOnlyRuns`), so its
-  "–" isn't read as a gated band (issue #523 I).
+  "–" isn't read as a gated band (issue #523 I). The server sends that
+  viewer no annual volumes or flow-duration curves, so the panel leaves both
+  out (the empty curves crashed the panel until 2026-11-27).
   An ensemble run on a newer engine than the run says so. **Reproduce in
   this browser** re-runs the stored ensemble from its seed and options and
   reports "Reproduced: the same … members, verdicts, outputs and coverage" or
@@ -16354,6 +16379,8 @@ then.
   **Accept** / **Decline**. Accepting says "You joined …" with a link to it
   (a farmer's to their farm), declining "You declined the invitation to …";
   one that went meanwhile (revoked, expired) reloads the list with the error.
+  The answered card goes, and the focus with it to the next card's
+  **Accept**, else the page's title (`account-focus-after-actions.spec.ts`).
   Empty state: "You have no invitations waiting." While an invitation as a
   farmer waits, the header's line ends in **What does accepting mean?**, a
   link to the `farm-invitation` entry on `/farm/words`. Its words are translated

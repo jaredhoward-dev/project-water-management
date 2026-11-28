@@ -176,10 +176,11 @@
 			0 0 0 5px rgb(11 110 138 / 0.3),
 			0 1px 4px rgb(0 0 0 / 0.35);
 	}
+	/* 24px on a phone too: WCAG 2.2 target size (2.5.8). */
 	@media (max-width: 30rem) {
 		.marker {
-			width: 22px;
-			height: 22px;
+			width: 24px;
+			height: 24px;
 			font-size: var(--font-xs);
 		}
 	}

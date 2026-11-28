@@ -10,7 +10,7 @@ import { FARMER_NOTICE_VERSION, LEGAL_VERSION } from '@water-management/engine/l
 import { reverseTrialHash } from '../billing/reverseTrial.js';
 import { withUser } from '../db/tx.js';
 import { canonicalEmail } from '../billing/metrics.js';
-import { APP_USER_EXCLUDED, APP_USER_EXPORTED, EXPORT_COOLDOWN_SECONDS, MEMBER_FK_COVERAGE, USER_FK_COVERAGE } from './export.js';
+import { APP_USER_EXCLUDED, APP_USER_EXPORTED, EXPORT_COOLDOWN_SECONDS, MEMBER_FK_COVERAGE, PERSON_COLUMN_COVERAGE, USER_FK_COVERAGE } from './export.js';
 
 type User = Awaited<ReturnType<typeof signUp>>;
 type Doc = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -249,8 +249,9 @@ describe('GET /auth/me/export', () => {
 			await client.query(`SELECT set_config('app.current_user_id', $1, true)`, [applicant.id]);
 			[app1] = (
 				await client.query<{ id: string }>(
-					`INSERT INTO scenario (project_id, name, base_run_id, ops_sha256, owner_user_id, origin, status)
-					 VALUES ($1, 'Raise the Alpha weir', $2, repeat('0', 64), $3, 'applicant', 'draft') RETURNING id`,
+					// The notice details the applicant typed (166): theirs, so in their export (415).
+					`INSERT INTO scenario (project_id, name, base_run_id, ops_sha256, owner_user_id, origin, status, objection_address, objection_closing_date)
+					 VALUES ($1, 'Raise the Alpha weir', $2, repeat('0', 64), $3, 'applicant', 'draft', 'PO Box 1, Alphaville, 0001', '2026-12-31') RETURNING id`,
 					[projectId, run.id, applicant.id]
 				)
 			).rows as [{ id: string }];
@@ -262,7 +263,8 @@ describe('GET /auth/me/export', () => {
 		const membership = { scenarioId: app1.id, projectId, projectName: 'Export catchment', scenarioName: 'Raise the Alpha weir', addedAt: expect.any(String), addedBy: 'XApplicant' };
 		const application = {
 			scenarioId: app1.id, projectId, projectName: 'Export catchment', name: 'Raise the Alpha weir', origin: 'applicant', status: 'draft',
-			outcome: null, createdAt: expect.any(String), submittedAt: null, decidedAt: null
+			outcome: null, createdAt: expect.any(String), submittedAt: null, decidedAt: null,
+			objectionAddress: 'PO Box 1, Alphaville, 0001', objectionClosingDate: '2026-12-31'
 		};
 		const mine = await download(helper);
 		expect(mine.doc.scenarioMemberships).toEqual([membership]);
@@ -277,6 +279,8 @@ describe('GET /auth/me/export', () => {
 		expect(farmers.doc.scenarioMemberships).toEqual([]);
 		expect(farmers.doc.scenarios).toEqual([]);
 		expect(farmers.text).not.toContain('Raise the Alpha weir');
+		expect(farmers.text).not.toContain('Alphaville');
+		expect(mine.text).not.toContain('Alphaville');
 		// #906: the applicant's role drops below contributor (to farmer; the enum runs farmer < contributor < viewer). RLS
 		// no longer shows them their draft (positive control: it did before), yet it stands, so the export still carries it
 		// (app_subject_scenarios, 396). The helper's share goes with the drop (049 project_member_prune_shares deletes
@@ -439,6 +443,35 @@ describe('export completeness guard', () => {
 			 WHERE c.contype = 'f' AND c.confrelid IN ('project_member'::regclass, 'team_member'::regclass) AND fa.attname = 'user_id' ORDER BY 1`
 		);
 		expect(rows.map((r) => r.col).sort()).toEqual(Object.keys(MEMBER_FK_COVERAGE).sort());
+	});
+
+	it('lists every column that can hold a person without a foreign key (auth/export.ts PERSON_COLUMN_COVERAGE)', async () => {
+		// By name and type (export.ts says which words), less the columns the two foreign-key lists above already cover.
+		const { rows } = await db.query<{ col: string }>(
+			`WITH fk AS (
+				SELECT c.conrelid::regclass::text AS t, a.attname AS col
+				FROM pg_constraint c JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY (c.conkey)
+				WHERE c.contype = 'f' AND c.confrelid IN ('app_user'::regclass, 'project_member'::regclass, 'team_member'::regclass)
+			)
+			SELECT c.table_name || '.' || c.column_name AS col
+			FROM information_schema.columns c
+			JOIN information_schema.tables t ON t.table_schema = c.table_schema AND t.table_name = c.table_name AND t.table_type = 'BASE TABLE'
+			WHERE c.table_schema = 'public' AND c.table_name <> 'app_user'
+			  AND c.udt_name IN ('text', 'varchar', 'bpchar', 'citext', 'uuid', '_uuid', '_text', '_citext', 'json', 'jsonb', 'bytea', 'inet', 'cidr')
+			  AND (
+				string_to_array(c.column_name, '_') && ARRAY['email', 'actor', 'subject', 'recipient', 'recipients', 'author', 'owner', 'holder', 'signer',
+					'contact', 'phone', 'ip', 'address', 'postal', 'member']
+				OR c.column_name ~ '_(by|to)$'
+				OR c.column_name ~ '(^|_)user(_id|_display)?$'
+				OR c.column_name ~ '(full|register|display)_name$'
+				OR c.udt_name IN ('inet', 'cidr', 'citext')
+			  )
+			  AND NOT EXISTS (SELECT 1 FROM fk WHERE fk.t = c.table_name AND fk.col = c.column_name)
+			ORDER BY 1`
+		);
+		expect(rows.map((r) => r.col).sort()).toEqual(Object.keys(PERSON_COLUMN_COVERAGE).sort());
+		// Positive control: the test sees the kinds it is for (an address as text, ids in an array, a jsonb subject).
+		expect(rows.map((r) => r.col)).toEqual(expect.arrayContaining(['invite.email', 'report.email_to', 'audit_event.subject']));
 	});
 
 	it('lists every app_user column as exported or deliberately left out', async () => {

@@ -178,7 +178,10 @@ falls through to the first when it was the last. Neither is granted to
   a recovery code) for the session and the trusted-device cookie. The challenge is a
   JWT under the session key with **its own issuer**, so it never passes as
   a session nor a session as it; it is good once (its `jti` goes into
-  `revoked_session`), and a password reset voids it like a session (the
+  `revoked_session` through `app_claim_session`, 412, which says whether
+  this request recorded it: of two sent at once with two right codes, the
+  second rolls back, its code unspent, and gets `401 mfa_challenge_expired`;
+  `auth/mfa.db.test.ts` "one challenge sent twice at once"), and a password reset voids it like a session (the
   watermark). `auth/token-confusion.security.db.test.ts` presents it in the
   session's slot and as a bearer key (refused) and at the code step with a
   code (accepted).
@@ -288,7 +291,10 @@ falls through to the first when it was the last. Neither is granted to
   add a factor of its own and, by confirming it, become two-step without
   ever giving the owner's factor's code. At …/confirm the check runs before
   the code throttle counts (and again inside the confirm), so a refusal is
-  never counted as a code guess (issue #881). Turning a factor off needs a code (from
+  never counted as a code guess (issue #881). The same rule holds for
+  changing the email address, changing the password and deleting the account (`403 mfa_step_up`,
+  `auth/stepUp.ts` `requireCodeIfEnrolled`, before the password is checked).
+  Turning a factor off needs a code (from
   the app, by email, or a recovery code). Tests:
   `auth/mfa-email.db.test.ts` "adding a second factor needs a session that
   gave a code" (each order, a pending app or pending codes by email,
@@ -471,7 +477,11 @@ falls through to the first when it was the last. Neither is granted to
     challenge is what only a right password buys). It changes nothing: it
     emails a confirmation link to the account's address (its own token
     kind, SHA-256 in `mfa_reset.confirm_hash`, single use, 1 hour; a new
-    request voids an unused one). Following it starts a **3-day wait**
+    request voids an unused one, and so does a change of address, since the
+    link went to the old one: `POST /auth/confirm-email-change` ends the
+    account's unconfirmed reset through `app_mfa_reset_end_unconfirmed`, 414,
+    as it deletes the other links mailed there; a confirmed reset keeps
+    waiting, its emails going to the new address). Following it starts a **3-day wait**
     (`effective_at = now + 72 h`, the constant `MFA_RESET_WAIT`: no
     environment can shorten it). During the wait the factor keeps working;
     the start, a reminder every 24 hours (none in the last 2 hours) and the
@@ -589,7 +599,14 @@ token, a malformed or unknown one, a live invite for another address) is
 Issue #641 item 5 (347_email_change, `auth/email-change-routes.ts`). A
 signed-in person asks with the new address and their **current password**
 (checked through the sign-in lockout, as changing the password is, so a
-stolen session alone can't move the account). A link goes to the **new**
+stolen session alone can't move the account). With a second factor on, the
+session must also have signed in (or stepped up) with a code (`403
+mfa_step_up`, checked before the password so it never counts on the lockout),
+as adding another factor needs: a password-only session from before the first
+factor lives its 7 days, and with the password it could otherwise send the
+emailed codes, the factor-reset links and every later notice to its own inbox
+(test: `auth/email-change.db.test.ts` "with a second factor on, a
+password-only session can't change the address"). A link goes to the **new**
 address (the email-token pattern: 32 random bytes, only the SHA-256 stored in
 `email_change`, single use, 48 h, one pending change per account, a newer one
 replaces it); the account's address switches **only** when that link is used,
@@ -631,6 +648,14 @@ the owner secures the account", with a positive control).
   a purpose (a verify token can't reset a password), and expire: reset **1 h**,
   verify **48 h**, invite **7 days**. Issuing a new one replaces the old one.
   Malformed tokens are rejected before any DB work.
+- **A reset hashes the new password only for a live link**
+  (`auth/email-routes.ts`). The Argon2id hash (64 MiB, about 0.1 s) is the
+  costliest work a signed-out caller can ask for, and `/auth/reset-password`
+  sits under only the WAF's `/api/auth/` rate rule, not the sign-in CAPTCHA.
+  So the link is consumed first, and the hash runs inside that transaction
+  only when it named an account: a made-up, spent or expired token is
+  refused after one indexed delete. A failing hash rolls the transaction
+  back and leaves the link unused (`auth/reset-password-cost.db.test.ts`).
 - **No account enumeration:** `POST /auth/forgot-password`,
   `POST /auth/resend-confirmation` and `POST /auth/register` each answer the
   same `202` body for known and unknown addresses. Sign-up is **email-first**
@@ -640,8 +665,12 @@ the owner secures the account", with a positive control).
   answer: a fresh confirmation link if it was never confirmed, else "you
   already have an account" with a password-reset link, both under the
   address's cooldown and daily cap, so sign-up can't be used to flood an
-  inbox. The one exception is sign-up through an invite link, which names its
-  address already: `409 account_exists` there tells the holder nothing new.
+  inbox. The one exception is sign-up through a **live** invite for exactly
+  that address, which names it already: `409 account_exists` there tells the
+  holder nothing new. Any other token (made up, expired, withdrawn, or another
+  address's invite) gets the ordinary `202`, so carrying one can't tell a
+  taken address from a free one (`auth/auth.db.test.ts` "a made-up, or
+  another address's, invite token doesn't tell a taken address from a free one").
   **Timing too** (issue #51): `forgot-password` and `resend-confirmation`
   never wait for the send (it is started and left to finish), and answer
   after one fixed floor of 200 ms from the start of the request, known
@@ -1664,9 +1693,15 @@ and nothing else.
   app_enqueue_rerun`; the key itself gets no job policy. The re-run runs as
   that person under RLS and fails closed if they are no longer an editor, so
   a key never makes a run its creator couldn't. If the creator's account was
-  deleted (`created_by` NULL), the re-run is **skipped** (no job,
+  deleted (`created_by` NULL), or the creator was removed from the project
+  or holds less than editor there now (414, `app_rerun_acting_user`, direct
+  or through the team), the re-run is **skipped** (no job,
   `rerunQueuedFor: null`) and the ingest still commits: never a run as
-  nobody, never lost data.
+  nobody, never a job queued as someone the runner would refuse, never a
+  `rerunQueuedFor` time for a run that won't happen, and never lost data
+  (`ingest.db.test.ts`, a creator still an editor as the positive control).
+  The key itself keeps working: it belongs to the project, and its other
+  owners see and revoke it.
 - **A push that looks wrong holds the automatic runs** (WP-2.16, the
   "leaked or mis-configured gateway key" abuse case; `series/hold.ts`). A
   key's days that the engine's data-quality rules flag (a negative rain or
@@ -2021,6 +2056,36 @@ In short:
   covered automatically; the owner's positive controls prove they aren't
   vacuous. The two layers are tested apart: `requireRole` answers 404 at
   the route, and RLS alone must hold if a route forgets it.
+  Every table sweep's UPDATE sets a column the app role may update to
+  itself (`backend/src/__tests__/rlsProbe.ts`). Until 2026-11-27 they all
+  wrote `SET project_id = project_id`, which twenty tables whose grants are
+  column by column (`note`, `model_run`, `project_member`, `evidence_pack`,
+  `share_link`, `api_key`, `run_publication`, …) refuse on the grant
+  (42501) before any policy runs, so the sweeps never tried their UPDATE
+  policies. That applies here, in the team-loss sweep and in the
+  applicant's "nothing else" sweep.
+- **Below editor, RLS changes only your own rows**
+  (`backend/src/projects/below-editor.security.db.test.ts`). The role
+  ladder (below) checks each route's role; this checks the policies under
+  it. On the role ladder's project, plus an evidence pack, a delineation
+  request and an allocation import, a viewer, a farmer, an editor demoted
+  to viewer and a viewer removed from the project each try UPDATE and
+  DELETE on every row of every table with a `project_id`. They may change
+  only their own notes, their own alert preferences and their own
+  membership (leaving). A demoted editor loses the scenario, pack and
+  request they could change at once. A removed viewer reads no row and
+  changes none, their own note included. The owner's and the editor's
+  sweeps reaching those tables are the positive controls.
+  **413_rls_sweep_closes** closed three loose ends the sweep's review found
+  (`backend/src/db/migration-413.security.db.test.ts`, each with a positive
+  control): a queued `delineation_request` keeps its project and maker (an
+  editor of two projects could move one, or name another as who queued
+  it); `app_share_allowed` answers false unless the caller holds a role in
+  the project (it had told any caller, an outsider or a session with no
+  user, who in another project is a contributor and in which party), with
+  the rule moved to the owner-only `share_allowed_rule` that the share
+  triggers call; and `report_delete` needs the requester to still be a
+  viewer, as `report_update` does.
 - **Irrigation systems** (`198_irrigation_systems.sql`,
   `200_irrigation_system_seed_invoker.sql`,
   `201_irrigation_system_viewer_read.sql`). `irrigation_system` is read from
@@ -3165,7 +3230,15 @@ In short:
     fetcher could write plausible wrong values for the cells it was asked
     about, now into every project over them rather than one series. That
     is the same trust as before, wider in reach; the fetcher's role still
-    only receives requests and sends answers. A fixture database's
+    only receives requests and sends answers. The worker reads each kind of
+    message only from its own queue (`lambda-worker.ts` `MESSAGE_QUEUES`,
+    the ARNs in `JOBS_QUEUE_ARN`, `INGEST_RESULTS_QUEUE_ARN` and
+    `RENDER_RESULTS_QUEUE_ARN`): a fetch result only from `ingest-results`,
+    a render's answer only from `render-results`, a wake only from `jobs`.
+    So the fetcher can't answer for a report or a pack, nor the renderer
+    (headless Chromium) for a fetch; a message on the wrong queue is logged
+    (`job_message_wrong_queue`, its type, no body) and dropped
+    (`lambda-worker.test.ts`). A fixture database's
     synthetic values carry `origin = 'fixtures'` and are never read by a
     live feed.
   - **Re-checking finals** (`210_chirps_final_recheck`). The re-check adds
@@ -3187,6 +3260,11 @@ In short:
     key) may call: it validates the manifest and day bounds, only ever
     *marks* cached finals stale (never writes a value), and records the
     revision in `mirror_manifest`, which `water_app` can read but not write.
+    The copy's Zarr chunks are written by Lambdas that read the internet, so
+    the worker and API inflate each gzip chunk only up to what its shape and
+    type can hold (`mirror/store.ts` `gzipDecodedLimit`, never past 64 MiB): a
+    chunk that inflates further (a gzip bomb, a corrupt object) fails that
+    read as a format error instead of exhausting the reader's memory.
     Since 246 it does so in parts (at most 4000 days a call, logged in
     `mirror_change`, also read-only to `water_app`), and the worker records
     how far each product of the copy runs in `mirror_copy` through
@@ -3238,7 +3316,8 @@ In short:
     client's `FEED_HOSTS` gained `deafrica-services.s3.af-south-1.amazonaws.com`
     and, for the Waterbodies API (2026-10-30), `api.digitalearth.africa`
     and `geoserver.digitalearth.africa`, each kept by `FEED_HOST_PATHS` to
-    the one path we read (`/waterbodies/`, `/geoserver/wfs`), since both
+    the one path we read (`/waterbodies/` and its tree, the `/geoserver/wfs`
+    endpoint itself and nothing longer), since both
     serve far more; the WFS filter is built only from uids that match
     `WATERBODY_UID` (no quote can reach the CQL), and its JSON answer is
     checked per feature (`parseWbIds`). The log lines carry counts and a
@@ -3349,7 +3428,20 @@ In short:
   text, and ` +1`, ` -1` and ` @SUM(…)` stayed text either way). OWASP's page
   doesn't mention leading spaces, and Excel, Google Sheets and Numbers weren't
   tested; the rule doesn't depend on them. The apostrophe keeps ` =1+1` text
-  in the same test. Numbers are written as
+  in the same test. A trigger after a `;` gets the same apostrophe
+  (`csv.ts` `SEPARATOR_FORMULA`, the frontend's `names.ts` `defuseCsv`, which
+  the grouped series CSV's `textCell` uses since issue #949:
+  `Farm;=SUM(4)` is written `Farm;'=SUM(4)`): Excel in a comma-decimal
+  locale, South Africa's among them, splits a CSV on `;`, and so does
+  LibreOffice with `;` as its separator, which in a headless test on
+  2026-11-27 evaluated `q;=9+9` to 18 and `ok;=SUM(4;5)` to 4; RFC 4180
+  quotes don't stop it (that reader doesn't see the quote that opened the
+  field, and a quoted `"q;=5+5"` still opened a formula). A `;`
+  before ordinary text is left alone; `undefuse` drops the apostrophe again
+  when our readers (the paste grids' name matching, the invite CSV, the daily
+  table) read a file back, and the workbook's summary sheets, the summary
+  CSV's cells, keep it as the CSV has it. The workbook's own string cells
+  use `defuse` only, since a workbook isn't split on `;`. Numbers are written as
   numbers. Export file names are ASCII slugs, so `Content-Disposition` can't be
   injected. `export/export.security.db.test.ts` sweeps every `GET … .csv`
   route in the live route table over a project seeded with formula-looking
@@ -3371,7 +3463,9 @@ In short:
   its commas still split it into cells. Whatever a user typed in it (a unit's
   name, a run's label) has its `%`, commas, quotes and control characters
   percent-encoded first, so a name like `x,=HYPERLINK(…)` can't open a cell of
-  its own that a spreadsheet runs: the server's provenance lines
+  its own that a spreadsheet runs (the server's and the actual ET CSV's encode
+  `;` too, for a reader that splits on it; the grouped series CSV, whose own
+  lines use `; `, encodes a `;` before a formula sign, issue #949): the server's provenance lines
   (`export/csv.ts` `provenanceValue`), the grouped series CSV
   (`series/groupedCsv.ts` `commentLine`) and the observed actual ET CSV
   (`crops/etObserved.ts` `etCsv`). Each has a unit test with such a name.
@@ -4436,7 +4530,7 @@ PDF someone else asked for kept the person as a recipient
 | Audit log: actor name, names and masked addresses in subjects | `audit_event` | For the life of the project (the regulator's audit trail; POPIA s14(1)(b)) | Pseudonymised: "Deleted user" as actor and subject (D12, 048), and as the leaver a team project was handed over from (`handedFrom`, 383: by `handedFromId`, or for older entries through the `member.removed` entry the same transaction wrote), and the masked address in invitation entries blanked to `•••` (160). The entries stay and are **still treated as personal information** (owners and editors read them; deleted with the project), not as de-identified. Provisional position (pre-counsel research, 2026-10-01): s24(1)(b) reaches only what s14 no longer authorises, and s14(1)(b) authorises the audit trail. A team that keeps public records (`team.public_records`, 161) keeps the name in its projects' entries | Deleted |
 | Model and series revisions: who saved | `model_revision`, `series_revision` | Model revisions for the life of the project; series revisions 180 days / 5 versions | Who cleared | Deleted |
 | API keys, share links, publications: who made, revoked, published | `api_key`, `share_link`, `run_publication` | Kept after revocation (the audit record) | Who cleared; a key keeps working, its automatic re-runs are skipped | Deleted |
-| Jobs, reports, render tokens: who asked; a report's recipient addresses (`report.email_to`). Not in "Download my data" (reviewed for #906): operational rows kept 8 days; `email_to` is the addresses the requester typed, often someone else's, and the requester's own act is the `report.*` audit event; a schedule's recipients are in `reportSubscriptions` | `job`, `report`, `report_schedule_recipient`, `render_token` | Jobs 30 days after finishing; report rows 8 days, PDFs 7; tokens single use, 5 minutes | Deleted, and the PDFs of their reports removed from storage at the worker's next tick (395, issue #903: the trigger on `report` queues the ids in the owner-only `report_pdf_erasure`, the tick deletes each object, MinIO or the bucket, and retries a failed delete next tick; `reports/erasure.db.test.ts`). A render still in flight when the account goes stores its PDF after the removal: whoever stored it then finds no report row and queues it again (398, issue #911), and the 7-day expiry (production's bucket, and local MinIO's from `pnpm dev:s3:up`) backs that up; nothing can download it meanwhile (the row and its route are gone) | Deleted, PDFs removed the same way |
+| Jobs, reports, render tokens: who asked; a report's recipients (`report.email_to`, the account ids the PDF is emailed to, at most 50). Not in "Download my data" (reviewed for #906): operational rows kept 8 days; `email_to` names the recipients the requester picked, often other people's accounts, and the requester's own act is the `report.*` audit event; a schedule's recipients are in `reportSubscriptions` | `job`, `report`, `report_schedule_recipient`, `render_token` | Jobs 30 days after finishing; report rows 8 days, PDFs 7; tokens single use, 5 minutes | Deleted, and the PDFs of their reports removed from storage at the worker's next tick (395, issue #903: the trigger on `report` queues the ids in the owner-only `report_pdf_erasure`, the tick deletes each object, MinIO or the bucket, and retries a failed delete next tick; `reports/erasure.db.test.ts`). A render still in flight when the account goes stores its PDF after the removal: whoever stored it then finds no report row and queues it again (398, issue #911), and the 7-day expiry (production's bucket, and local MinIO's from `pnpm dev:s3:up`) backs that up; nothing can download it meanwhile (the row and its route are gone) | Deleted, PDFs removed the same way |
 | Alerts: a person's choices and the mails sent to them; the rules and events | `alert_subscription`, `alert_delivery`; `alert_rule`, `alert_event` | Choices while a member; deliveries 180 days; events 180 days after clearing | Choices and deliveries deleted; a rule's creator cleared | Deleted |
 | Evidence pack emails: that a person (an editor, or the applicant) was emailed about a pack's issue or withdrawal, and whether it went; the email itself goes to their account address | `pack_notice` (133) | 30 days after it is sent, skipped or failed (`app_purge_pack_notices`, the tick) | Deleted | Deleted |
 | Known engine bug emails: that a project owner was emailed about an erratum that may affect the project's runs, and whether it went | `erratum_notice` (153) | 30 days after it is sent, skipped or failed (`app_purge_erratum_notices`, the tick) | Deleted | Deleted |
@@ -4451,7 +4545,7 @@ PDF someone else asked for kept the person as a recipient
 | Sign-offs: typed name and registration | `signoff` | With the run or pack it signs: for the life of the project, and where the project is kept as a licence record (a nomination or a pack past draft), until the record's closing date the project holds (161): the licence's expiry, or any other outcome (refused, rejected, not considered or withdrawn) (233), + 3 years, with a 5-yearly review while no outcome is recorded; the tick tells the owners and the operator, and the operator removes the project on the client's written confirmation (deployment.md § Runbooks, item 16; § Authorization, "Tamper evidence"; POPIA s14(1)(b), s14(6)(b); provisional position, pre-counsel research, 2026-10-01) | Account cleared; name stays ([§ Liability](#liability)) | Refused while a nomination or an issued pack holds the project |
 | Registration checks (167): the name and number the host found on the public SACNASP or ECSA register, the outcome, who checked (the organisation) and when, who recorded it | `registration_check`, `signoff_registration_check` | A check no issued pack rests on: until the account is deleted; one bound to an issued pack's sign-off: as the sign-off (the licence record) | Account cleared; an unbound check deleted (`registration_check_forget`), a bound one stays without the account, as the sign-off's typed name does | Deleted with the project |
 | Evidence packs: who drafted and issued them; the signers' names and registrations, printed and returned by the public verify lookup; the frozen evidence report in the manifest, which prints the display names of who made its runs, ensembles and nominations and of the application's applicant; the reproduction bundle (the manifest and both runs' inputs: the model's farm and node names, as the manifest already holds them; no account or email) | `evidence_pack` (`created_by`, `issued_by`, `manifest`), `signoff`; the bundle in the packs bucket (`packs/<project>/<pack>/<sha256>.zip`, 122) | Once issued, until the licence record's closing date (as sign-offs, 161) | Who drafted and issued cleared (SET NULL, allowed past the pack's guard only when the account is gone); a signer's typed name stays, as on any sign-off; the names printed in the manifest and the bundle stay, because they are hashed (the verify lookup and the signatures rest on the hash) | Refused while a pack is past draft (`project_pack_guard`, 112) |
-| Evidence that names its maker: a project or team created, a run, a nomination, an ensemble, a scenario or licence application, an import. The scenarios a person owns (their licence applications and modelling scenarios) are in "Download my data" as metadata (`scenarios`: name, origin, status, outcome, dates; 396, `app_subject_scenarios()`, kept after they leave the project or lose the role that reads them), never the ops or description, the project's model record (reviewed for #906: an application names its applicant, so it is theirs to see) | `project`, `team`, `model_run`, `run_nomination`, `run_uncertainty`, `scenario`, `project_import` | With the project (runs are pruned as above) | Kept, maker cleared (SET NULL, 138): the API shows no name, the History "Deleted user". Never reassigned (that would make the record false, s16). Removed with the account: an ensemble they started and never completed, and their **draft** applications with those drafts' runs (unless the project keeps the draft: public comments, a pack, or a pinned, nominated or cited run). A submitted, withdrawn or decided application stays, applicant cleared *(confirm the rule, #90)* | Deleted, unless nominated (`project_evidence_guard`) |
+| Evidence that names its maker: a project or team created, a run, a nomination, an ensemble, a scenario or licence application, an import. The scenarios a person owns (their licence applications and modelling scenarios) are in "Download my data" as metadata (`scenarios`: name, origin, status, outcome, dates, and an application's notice details, `scenario.objection_address` and closing date, which the applicant typed and which is often their own address, 415; 396, `app_subject_scenarios()`, kept after they leave the project or lose the role that reads them), never the ops or description, the project's model record (reviewed for #906: an application names its applicant, so it is theirs to see) | `project`, `team`, `model_run`, `run_nomination`, `run_uncertainty`, `scenario`, `project_import` | With the project (runs are pruned as above) | Kept, maker cleared (SET NULL, 138): the API shows no name, the History "Deleted user". Never reassigned (that would make the record false, s16). Removed with the account: an ensemble they started and never completed, and their **draft** applications with those drafts' runs (unless the project keeps the draft: public comments, a pack, or a pinned, nominated or cited run). A submitted, withdrawn or decided application stays, applicant cleared *(confirm the rule, #90)* | Deleted, unless nominated (`project_evidence_guard`) |
 | The Map's records of who made them: a map import, a feature, a delineation proposed or decided (175) | `geo_source.imported_by`, `map_feature.created_by`, `delineation_proposal.created_by` and `decided_by` | With the project (superseded and rejected proposals past the newest 50 a project are pruned) | Kept, maker cleared (SET NULL); a proposal's polygon, dataset and method hold nothing about the person; its decision stays final (175 `delineation_proposal_final`, only the foreign key clears `decided_by`) | Deleted |
 | A model proposed from the map (178): who proposed and decided it | `start_proposal.created_by` and `decided_by` | With the project (superseded and discarded ones past the newest 50 a project are pruned) | Kept, maker cleared (SET NULL); the plan (units, areas, outlines from the project's map) and the decision hold nothing about the person; the decision stays final (178 `start_proposal_final`) | Deleted |
 | Logs: request logs, database logs | CloudWatch | 30 days (`lambda_log_retention_days`, `db_log_retention_days`) | Not searchable by person, except a page crash's `client_error` line, which names the user's id (§ Client error reports); it ages out with the log group | – |
@@ -4502,7 +4596,10 @@ same way.
   `app_user` is classified as exported or left out, with why, in
   `auth/export.ts` `USER_FK_COVERAGE`, and every column reaching a person
   through a composite key to `project_member` or `team_member` (`farm_link`,
-  `scenario_member`) in `MEMBER_FK_COVERAGE` (both guarded by `export.db.test.ts`; `personal-data.security.db.test.ts` checks each exported key's section holds exactly the person's rows, and every exported `app_user` column its stored value): the
+  `scenario_member`) in `MEMBER_FK_COVERAGE`, and every column that can
+  hold a person with no such key (an address typed as text, ids in an
+  array, a jsonb subject, a name as written), found by its name and type,
+  in `PERSON_COLUMN_COVERAGE` (all three guarded by `export.db.test.ts`; `personal-data.security.db.test.ts` checks each exported key's section holds exactly the person's rows, and every exported `app_user` column its stored value; a jsonb copy under another name is beyond a name test, and its deletion scan is what finds one): the
   project's own records that name the person only as their maker (runs,
   revisions, keys, publications…) are left out, because the act is in the
   audit events. The project exports (`export.json`, CSV, the farm CSV)
@@ -4512,7 +4609,9 @@ same way.
   account** (`DELETE /auth/me`, issue #112, [api.md § Auth](./api.md#auth))
   says what goes, what stays without the name and what keeps it, asks for
   the password again (through the sign-in lockout, as a password change
-  does), and deletes the account straight away. It runs as the person under
+  does; with a second factor on, from a session that signed in or stepped
+  up with a code, else `403 mfa_step_up` before the password is checked,
+  `requireCodeIfEnrolled`), and deletes the account straight away. It runs as the person under
   RLS: the up-front refusal reads their own memberships, the audit events
   (one per project and team they belonged to, `accountDeleted: true`) are
   written as them while they are still a member, and the row goes through
@@ -5021,6 +5120,16 @@ key there would let any read-only principal forge any user's session.
   origins; `default-src 'none'` on `/api/*`), HSTS 2 years, nosniff,
   `X-Frame-Options: DENY`, Referrer-Policy (`no-referrer` on `/api/*`),
   `X-XSS-Protection: 0`, Permissions-Policy, COOP (`infra/security_headers.tf`).
+- **Caching: every API answer is `Cache-Control: no-store`** unless its
+  route sets its own (`backend/src/http/noStore.ts`, first in `app.ts`, so
+  refusals, 404s and the error handler's answers get it too; no route sets
+  another value today). Nearly every answer carries someone's data (an
+  account, a project, a share link's catchment, an invitation's address).
+  CloudFront caches nothing under `/api/*` (`Managed-CachingDisabled`), but
+  that tells the browser nothing, and without the header it may keep a
+  response in its disk cache for the next person on a shared computer.
+  Tests: `http/noStore.test.ts` (a route's own value wins; signed-out
+  answers of the public routes are marked).
 - **Email (SES):** the API role may only `ses:SendEmail` as
   `no-reply@<domain>` through one identity and configuration set, over a VPC
   endpoint. DKIM + SPF-aligned MAIL FROM + DMARC; TLS required to the

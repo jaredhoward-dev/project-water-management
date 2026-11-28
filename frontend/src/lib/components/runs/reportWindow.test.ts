@@ -24,6 +24,9 @@ describe('the ?window= parameter', () => {
 		expect(isIsoDate('2023-02-29')).toBe(false);
 		expect(isIsoDate('2023-2-01')).toBe(false);
 		expect(isIsoDate('nope')).toBe(false);
+		// Year 0000 (Postgres's date has none), as the run export route refuses it.
+		expect(isIsoDate('0000-01-01')).toBe(false);
+		expect(parseWindowParam('0000-01-01..2020-01-31')).toEqual({ preset: 'project' });
 	});
 });
 

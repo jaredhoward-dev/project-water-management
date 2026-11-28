@@ -4,7 +4,7 @@
 // unit-tested.
 import { LANGUAGES } from '@water-management/engine/languages';
 import type { FileFormat } from '#lib/components/common/formatHelp.js';
-import { defuse, undefuse } from '#lib/spreadsheet/export/names.js';
+import { defuseCsv, undefuse } from '#lib/spreadsheet/export/names.js';
 import type { BulkFarmerResult, BulkFarmerRow, FarmerEntry } from '#lib/api/types.js';
 
 export interface FarmOption {
@@ -127,7 +127,7 @@ export function parseFarmerCsv(text: string): ParsedFarmerCsv {
  * break. parseFarmerCsv reads it back, apostrophe dropped.
  */
 const csvCell = (v: string) => {
-	const s = defuse(v);
+	const s = defuseCsv(v);
 	return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
 

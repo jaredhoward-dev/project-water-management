@@ -9,9 +9,10 @@ import { describe, expect, it } from 'vitest';
 import { MIRROR_FIXTURE_DIR } from '../../scripts/gen-mirror-fixture.js';
 import { MirrorOutsideRegionError } from '../mirror/grid.js';
 import { openStore } from '../mirror/store.js';
-import { cellCentre, chcCell, encodeCellValue, type GridCell } from './cellCache.js';
+import { cellCentre, chcCell, encodeCellValue, type GridCell, productCell } from './cellCache.js';
 import { FIXTURE_CELL, fixtureHttp } from './fixtures.js';
-import { fixtureKind, fixtureSourceCell, mirrorReader } from './fromMirror.js';
+import { FILL_MAX_DAYS, fillProductCache, fixtureKind, fixtureSourceCell, mirrorReader } from './fromMirror.js';
+import type { Db } from '../db/tx.js';
 import { fetchChirpsCells } from './sources/chirps.js';
 
 const store = openStore(pathToFileURL(MIRROR_FIXTURE_DIR).href);
@@ -93,5 +94,36 @@ describe('fixtures mode: the committed copy re-dated to today', () => {
 		const read = mirrorReader('sat', '2026-10-27', store)([chcCell(-5, 30)], { start: '2026-01-01', end: '2026-01-02' }, '00');
 		await expect(read).rejects.toBeInstanceOf(MirrorOutsideRegionError);
 		await expect(read).rejects.toThrow('outside the region the rain data copy holds (10–41° E, 8–35.5° S)');
+	});
+});
+
+describe('fillProductCache refuses a bad window or cell before it reads or claims anything', () => {
+	// Any query would be a read of the cache or a claim of stale days: none may happen.
+	const db = {
+		query: async () => {
+			throw new Error('fillProductCache queried the database before refusing its arguments');
+		}
+	} as unknown as Db;
+	const TODAY = '2026-02-09';
+	const inside = productCell('era5l', -33.9, 18.9);
+	const fill = (window: { start: string; end: string }, cells: GridCell[] = [inside]) =>
+		fillProductCache(db, { feedId: 'f', jobId: 'j', product: 'era5l', cells, window, today: TODAY, store, origin: 'fixtures' });
+
+	it('a window that ends before it starts, or starts after today (its end is cut to today)', async () => {
+		await expect(fill({ start: '2026-01-02', end: '2026-01-01' })).rejects.toThrow('the window ends before it starts, or after today');
+		await expect(fill({ start: add(TODAY, 1), end: add(TODAY, 5) })).rejects.toThrow('the window ends before it starts, or after today');
+	});
+
+	it(`more than FILL_MAX_DAYS (${FILL_MAX_DAYS}) days, counted after the end is cut to today`, async () => {
+		await expect(fill({ start: add(TODAY, -FILL_MAX_DAYS), end: TODAY })).rejects.toThrow(`at most ${FILL_MAX_DAYS} days a fill`);
+		// The same start with an end far past today is cut to today first, so it is the same refusal, not a bigger one.
+		await expect(fill({ start: add(TODAY, -FILL_MAX_DAYS), end: add(TODAY, 400) })).rejects.toThrow(`at most ${FILL_MAX_DAYS} days a fill`);
+		// FILL_MAX_DAYS days ending today pass the window checks and reach the database (positive control).
+		await expect(fill({ start: add(TODAY, -FILL_MAX_DAYS + 1), end: add(TODAY, 30) })).rejects.toThrow('queried the database');
+	});
+
+	it('a cell of the 0.1° grid outside the copy’s region, naming the region', async () => {
+		const outside = productCell('era5l', -5, 30);
+		await expect(fill({ start: '2026-01-01', end: '2026-01-02' }, [inside, outside])).rejects.toBeInstanceOf(MirrorOutsideRegionError);
 	});
 });

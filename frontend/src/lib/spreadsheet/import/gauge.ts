@@ -2,7 +2,7 @@
 // data] gauge column is a gauge on another river, so it becomes a
 // flow_reference_m3s series the engine never reads (docs/model.md §2.10),
 // optionally with a known scaling undone.
-import { toEpochDay } from '@water-management/engine';
+import { isIsoDate, toEpochDay } from '@water-management/engine';
 import { pyFormatG } from './cells';
 import { InvalidImportOptionsError } from './errors';
 import type { ImportedSeries } from './flowData';
@@ -18,13 +18,6 @@ export interface GaugeScaling {
 	scaleFactor: number;
 }
 
-/** A calendar date in the only form the option takes, YYYY-MM-DD. */
-function isIsoDate(s: string): boolean {
-	if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
-	const t = Date.parse(`${s}T00:00:00Z`);
-	return !Number.isNaN(t) && new Date(t).toISOString().slice(0, 10) === s;
-}
-
 /** Reject the combinations the Python CLI rejects. */
 export function validateScaling(scaling: Partial<GaugeScaling> | undefined): GaugeScaling | null {
 	if (!scaling) return null;
@@ -33,6 +26,7 @@ export function validateScaling(scaling: Partial<GaugeScaling> | undefined): Gau
 		throw new InvalidImportOptionsError('The gauge scaling date and factor go together.');
 	}
 	if (scalingFrom === undefined || scaleFactor === undefined) return null;
+	// The engine's isIsoDate: a real YYYY-MM-DD from year 0001, as Python's date.fromisoformat (MINYEAR 1) reads it.
 	if (!isIsoDate(scalingFrom)) throw new InvalidImportOptionsError(`The gauge scaling date is not a YYYY-MM-DD date: ${scalingFrom}`);
 	if (!(Number.isFinite(scaleFactor) && scaleFactor > 0)) {
 		throw new InvalidImportOptionsError(`The gauge scale factor must be a positive number, got ${scaleFactor}`);

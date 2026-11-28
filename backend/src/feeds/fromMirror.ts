@@ -99,6 +99,14 @@ import { beginFeedFetch, type FeedRow, recordFeedChecked, takeFeedFetch } from '
 /** The file tag of a final read from the copy (210 chirps_file.tag): known, so the re-check never reads it again unasked. */
 export const MIRROR_TAG = 'mirror';
 
+/**
+ * Taken before a fetch from the copy claims its re-check (chirps_recheck_claim
+ * leases an untagged file's day to the job for 30 minutes): a copy that isn't
+ * ready yet (MirrorNotReadyError) rolls back to it, so the claim goes with the
+ * reads and the next fetch reads the day at once.
+ */
+const RECHECK_SAVEPOINT = 'mirror_recheck_claim';
+
 /** Which cell cache rows a read from the copy fills: chc for a live copy, fixtures for the committed one. */
 export const mirrorOrigin = (): CacheOrigin => (feedSourceMode() === 'live' ? 'chc' : 'fixtures');
 
@@ -287,6 +295,8 @@ export async function fetchFromMirror(db: Db, feed: FeedRow, window: FetchWindow
 		return 'ingested';
 	}
 	const plan = planFetch(cells, await readCellCache(db, origin, product, cells, window), window);
+	// The claim is a write (an untagged file's 30-minute lease): a copy that isn't ready rolls it back with the reads (RECHECK_SAVEPOINT).
+	await db.query(`SAVEPOINT ${RECHECK_SAVEPOINT}`);
 	// Only the re-reads of the re-check: a stale day (a revision of the copy) is read again. No HEADs: the manifests say what changed.
 	const recheck = await claimRecheck(db, feed.id, origin, product, cells, { heads: 0, reads: RECHECK_READ_DAYS, intervalDays: RECHECK_INTERVAL_DAYS });
 	const empty: CellsResult = { ok: true, cells: { product, startDate: window.start, read: '', cells: [], values: [] }, meta: { product } };
@@ -319,13 +329,17 @@ export async function fetchFromMirror(db: Db, feed: FeedRow, window: FetchWindow
 		}
 	} catch (err) {
 		if (err instanceof MirrorNotReadyError) {
-			// The copy is behind, not the feed broken: nothing written, no failure counted, the same window next time.
+			// The copy is behind, not the feed broken: nothing written (the re-check's claims neither), no failure counted, the same window next time.
+			await db.query(`ROLLBACK TO SAVEPOINT ${RECHECK_SAVEPOINT}`);
 			await recordFeedChecked(db, feed.id);
 			return 'not_ready';
 		}
+		// A failed read keeps its claims: their lease spaces out the next try at a copy that fails.
+		await db.query(`RELEASE SAVEPOINT ${RECHECK_SAVEPOINT}`);
 		await ingestResult(db, feed, fetchFailure(err, config), window, { origin });
 		return 'ingested';
 	}
+	await db.query(`RELEASE SAVEPOINT ${RECHECK_SAVEPOINT}`);
 	// fromCopy: a window of years (CopyCellsResult), and nothing was asked of CHC, so a backfill's next window is due at once.
 	await ingestResult(db, feed, answer, window, { origin, fromCopy: true, fetchJobId: opts.jobId });
 	return 'ingested';
@@ -379,6 +393,8 @@ export async function fillProductCache(
 	const store = opts.store ?? mirrorStore();
 	const reader = liveReader(store, product);
 	const plan = planFetch(cells, await readCellCache(db, origin, product, cells, window), window);
+	// As fetchFromMirror: the claim rolls back with everything else when the copy isn't ready.
+	await db.query(`SAVEPOINT ${RECHECK_SAVEPOINT}`);
 	const recheck = await claimRecheck(db, feedId, origin, product, cells, { heads: 0, reads: RECHECK_READ_DAYS, intervalDays: RECHECK_INTERVAL_DAYS });
 	let merged = 0;
 	let revised = 0;
@@ -402,9 +418,13 @@ export async function fillProductCache(
 		}
 		if (reread.length) revised = await applyRecheck(db, feedId, jobId, origin, product, cells, { head: [], read: reread });
 	} catch (err) {
-		if (err instanceof MirrorNotReadyError) return { status: 'not_ready', merged: 0, revised: 0 };
+		if (err instanceof MirrorNotReadyError) {
+			await db.query(`ROLLBACK TO SAVEPOINT ${RECHECK_SAVEPOINT}`);
+			return { status: 'not_ready', merged: 0, revised: 0 };
+		}
 		throw err;
 	}
+	await db.query(`RELEASE SAVEPOINT ${RECHECK_SAVEPOINT}`);
 	return { status: plan || recheck?.read.length ? 'filled' : 'cached', merged, revised };
 }
 

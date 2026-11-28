@@ -858,3 +858,38 @@ describe('the team admin’s reset with codes by email, and never another admin 
 		expect(await hasFactor(memberElsewhere.id)).toBe(false);
 	});
 });
+
+// 414: a reset's confirmation link goes to the address the account had when it was asked for. When the address
+// changes (confirm-email-change), every link mailed to the old one dies with it, this one included.
+describe('changing the address ends an unconfirmed reset', () => {
+	async function moveTo(u: { twoStep: string }, next: string): Promise<void> {
+		expect((await anon('POST', '/auth/change-email', { newEmail: next, currentPassword: 'correct horse' }, u.twoStep)).status).toBe(202);
+		expect((await anon('POST', '/auth/confirm-email-change', { token: tokenIn(lastMailTo(next)!) })).status).toBe(200);
+	}
+
+	it('a confirmation link mailed to the old address no longer starts the wait (positive control: without the move it does)', async () => {
+		// Positive control: an account that keeps its address confirms its link.
+		const stays = await enrolled('ResetStays');
+		expect((await anon('POST', '/auth/mfa/reset/confirm', { token: await ask(stays) })).status).toBe(200);
+
+		const u = await enrolled('ResetMoves');
+		const token = await ask(u);
+		await moveTo(u, `moved-${crypto.randomUUID()}@example.com`);
+		const r = await anon('POST', '/auth/mfa/reset/confirm', { token });
+		expect(r.status).toBe(400);
+		expect(r.body.code).toBe('link_invalid');
+		expect(await resets(u.id)).toEqual([expect.objectContaining({ confirmed_at: null, end_reason: 'unconfirmed' })]);
+		expect(await hasFactor(u.id)).toBe(true);
+	});
+
+	it('leaves a confirmed reset waiting', async () => {
+		const u = await enrolled('ResetWaitsMove');
+		await started(u);
+		await moveTo(u, `moved-${crypto.randomUUID()}@example.com`);
+		expect(await resets(u.id)).toEqual([expect.objectContaining({ ended_at: null })]);
+	});
+
+	it('only as a signed-in account: no user, no call', async () => {
+		await expect(withoutUser((db) => db.query('SELECT app_mfa_reset_end_unconfirmed()'))).rejects.toMatchObject({ code: '42501' });
+	});
+});

@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Geometry, Position } from '../geo/geojson.js';
 import { pointInGeometry } from '../geo/geojson.js';
-import { assignMembers, boundaryCheck, madeBeforeBoundaries, pointOf, restBesideBoundaries } from './start.js';
+import { assignMembers, boundaryCheck, madeBeforeBoundaries, pointOf, restBesideBoundaries, upstreamFirst } from './start.js';
 
 const square = (x0: number, y0: number, x1: number, y1: number): Geometry => ({ type: 'Polygon', coordinates: [[[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]] });
 const pt = (x: number, y: number): Geometry => ({ type: 'Point', coordinates: [x, y] });
@@ -127,5 +127,53 @@ describe('madeBeforeBoundaries', () => {
 		expect(madeBeforeBoundaries([{ role: 'abstraction' }])).toBe(true);
 		expect(madeBeforeBoundaries([{ role: 'unit' }, { role: 'user' }, { role: 'gauge' }])).toBe(false);
 		expect(madeBeforeBoundaries([])).toBe(false);
+	});
+});
+
+describe('upstreamFirst (the order a plan lists its units in)', () => {
+	/** mulberry32, so a failing case names its seed. */
+	const rng = (seed: number) => {
+		let a = seed >>> 0;
+		return () => {
+			a = (a + 0x6d2b79f5) >>> 0;
+			let t = a;
+			t = Math.imul(t ^ (t >>> 15), t | 1);
+			t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+			return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+		};
+	};
+
+	it('lists every unit once, each before the one it drains into, on random trees (seeded)', () => {
+		for (let seed = 1; seed <= 200; seed++) {
+			const r = rng(seed);
+			const n = 1 + Math.floor(r() * 12);
+			// Unit i drains into an earlier unit, the outflow (null) or a key that isn't a unit (the outlet's own '').
+			const tree = Array.from({ length: n }, (_, i) => ({ key: `u${i}`, drainsInto: i && r() < 0.8 ? `u${Math.floor(r() * i)}` : r() < 0.5 ? null : '' }));
+			// Shuffled, so the input order says nothing.
+			const units = tree.map((u) => ({ u, k: r() })).sort((a, b) => a.k - b.k).map((x) => x.u);
+			const out = upstreamFirst(units);
+			expect(out.map((u) => u.key).sort(), `seed ${seed}`).toEqual(units.map((u) => u.key).sort());
+			const at = new Map(out.map((u, i) => [u.key, i]));
+			for (const u of out) if (u.drainsInto && at.has(u.drainsInto)) expect(at.get(u.key)!, `seed ${seed}: ${u.key}`).toBeLessThan(at.get(u.drainsInto)!);
+		}
+	});
+
+	it('keeps the given order among units as far from the outflow', () => {
+		const units = [
+			{ key: 'b', drainsInto: null },
+			{ key: 'a', drainsInto: null },
+			{ key: 'd', drainsInto: 'a' },
+			{ key: 'c', drainsInto: 'b' }
+		];
+		expect(upstreamFirst(units).map((u) => u.key)).toEqual(['d', 'c', 'b', 'a']);
+	});
+
+	it('ends on a loop in the drains-into, listing each unit once', () => {
+		const units = [
+			{ key: 'a', drainsInto: 'b' },
+			{ key: 'b', drainsInto: 'a' },
+			{ key: 'c', drainsInto: 'a' }
+		];
+		expect(upstreamFirst(units).map((u) => u.key).sort()).toEqual(['a', 'b', 'c']);
 	});
 });

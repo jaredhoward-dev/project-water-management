@@ -10,6 +10,7 @@
 import pg from 'pg';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { app, asOwner, monthly, node, signUp } from '../__tests__/helpers.js';
+import { updatableColumns, updateProbe } from '../__tests__/rlsProbe.js';
 import { withUser } from '../db/tx.js';
 import { TEAM_ROLES } from './access.js';
 
@@ -356,10 +357,13 @@ describe('losing the team revokes every team project, rows the user wrote includ
 	/** Each UPDATE and DELETE of the project's rows, per table, as `userId` through RLS, rolled back: the ones that reached a row. */
 	const rlsWrites = async (userId: string, projectId: string) => {
 		const changed: string[] = [];
+		// A column the app role may update, set to itself, so the UPDATE reaches the policy (__tests__/rlsProbe.ts).
+		const columns = await updatableColumns();
 		await withUser(userId, async (db) => {
 			for (const t of ['project', ...tables]) {
 				const col = t === 'project' ? 'id' : 'project_id';
-				for (const stmt of [`UPDATE "${t}" SET ${col} = ${col} WHERE ${col} = $1`, `DELETE FROM "${t}" WHERE ${col} = $1`]) {
+				const update = updateProbe(columns, t, col);
+				for (const stmt of [...(update ? [update] : []), `DELETE FROM "${t}" WHERE ${col} = $1`]) {
 					await db.query('SAVEPOINT attempt');
 					try {
 						const r = await db.query(stmt, [projectId]);

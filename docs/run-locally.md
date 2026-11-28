@@ -92,6 +92,13 @@ pnpm dev
   opt-in (`pnpm dev:mail:up`, `pnpm dev:s3:up`). Every checkout, git worktrees
   included, drives the same containers: `docker-compose.yml` fixes the compose
   project name, so `pnpm dev:db:down` in any of them stops the shared database.
+  The `dev:*:up` scripts pass `--no-recreate`: a plain `docker compose up`
+  from another checkout sees the `./dev/postgres` mount at a different
+  absolute path, takes the service as changed and recreates the shared
+  container, dropping every other session's connections mid-run (issue #945).
+  So after a Postgres image bump, recreate it on purpose with
+  `pnpm dev:db:recreate` (and `pnpm dev:down` before `dev:mail:up` or
+  `dev:s3:up` for theirs), when no other session is using it.
 - **Everything at once:** `pnpm dev:all` starts Mailpit, MinIO (with the
   map's basemap when one is cached; it never fetches one, see
   [maps.md § Basemap](./maps.md#basemap)) and then `pnpm dev:full` (Postgres,

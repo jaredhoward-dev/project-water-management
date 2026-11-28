@@ -24,9 +24,35 @@ export function defuse(text: string): string {
 	return FORMULA_START.test(text) ? `'${text}` : text;
 }
 
-/** Read a defused cell back: the apostrophe `defuse` (or the backend's `textCell`) added is dropped, any other kept. */
+/**
+ * A `;` that a formula trigger follows. Excel in a comma-decimal locale (South
+ * Africa's among them) and LibreOffice with `;` as its separator split a CSV
+ * on `;`, so the text after one is a cell of its own, quoted or not:
+ * `Farm;=SUM(4)` computes 4 there (docs/security.md "CSV exports defuse
+ * spreadsheet formulas"). One rule with backend/src/export/csv.ts
+ * `SEPARATOR_FORMULA`.
+ */
+export const SEPARATOR_FORMULA = /;(?=[\t\r\n]|\s*[=+\-@\uFF1D\uFF0B\uFF0D\uFF20])/g;
+const DEFUSED_SEPARATOR = /;'(?=[\t\r\n]|\s*[=+\-@\uFF1D\uFF0B\uFF0D\uFF20])/g;
+
+/**
+ * A CSV text cell's guard (before RFC 4180 quoting), exactly like the
+ * backend's `textCell`: `defuse`, and an apostrophe after each `;` that a
+ * trigger follows (`a;=b` → `a;'=b`). Only for CSV: a workbook's cells aren't
+ * split on `;`, so the workbook keeps `defuse`.
+ */
+export function defuseCsv(text: string): string {
+	return defuse(text).replace(SEPARATOR_FORMULA, ";'");
+}
+
+/**
+ * Read a defused cell back: the apostrophe `defuse` (or the backend's
+ * `textCell`) added is dropped, any other kept, and so is the one
+ * `defuseCsv` put after a `;`.
+ */
 export function undefuse(text: string): string {
-	return text.startsWith("'") && FORMULA_START.test(text.slice(1)) ? text.slice(1) : text;
+	const s = text.startsWith("'") && FORMULA_START.test(text.slice(1)) ? text.slice(1) : text;
+	return s.replace(DEFUSED_SEPARATOR, ';');
 }
 
 /** Longest sheet name Excel accepts. */

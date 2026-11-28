@@ -215,6 +215,8 @@ test('every help diagram: labels clear of each other, lines and box edges, never
 		const markers = page.locator('.tour .picture').first().locator('.marker');
 		await expect(markers.first()).toBeVisible();
 		const boxes = await markers.evaluateAll((els) => els.map((e) => e.getBoundingClientRect()).map((r) => ({ x0: r.left, y0: r.top, x1: r.right, y1: r.bottom })));
+		// And each is at least 24 × 24 px, WCAG 2.2's target size (2.5.8), on a phone too.
+		for (const [i, b] of boxes.entries()) expect(Math.min(b.x1 - b.x0, b.y1 - b.y0), `marker ${i + 1} at ${width}`).toBeGreaterThanOrEqual(24);
 		for (let i = 0; i < boxes.length; i++)
 			for (let j = i + 1; j < boxes.length; j++) {
 				const a = boxes[i]!;

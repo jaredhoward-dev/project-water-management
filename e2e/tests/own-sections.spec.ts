@@ -128,6 +128,8 @@ test.describe('1440×960', () => {
 		await panel(page).getByRole('button', { name: 'Reset to default' }).click();
 		expect(await sent(reset)).toBeNull();
 		await expect(panel(page).getByRole('button', { name: 'Reset to default' })).toBeDisabled();
+		// Nothing is left to reset, and the keyboard stays on the button, in the dialog (ui-playbook § 4).
+		await expect(panel(page).getByRole('button', { name: 'Reset to default' })).toBeFocused();
 		for (const name of DEFAULT_HIDDEN) await expect(panel(page).getByRole('checkbox', { name })).not.toBeChecked();
 		await expect(panel(page).getByRole('checkbox', { name: 'Transfers' })).toBeChecked();
 		await panel(page).getByRole('button', { name: 'Done' }).click();

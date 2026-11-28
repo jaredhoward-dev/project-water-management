@@ -107,7 +107,16 @@
 		</div>
 		<p class="error" role="status">{error ?? ''}</p>
 		{#snippet actions()}
-			<button type="button" class="btn" disabled={own === null} onclick={() => save(null)}>Reset to default</button>
+			<!-- aria-disabled, not disabled: pressing it leaves nothing to reset, and a focused button that
+			     turns disabled throws the keyboard's focus out of the dialog (ui-playbook § 4). -->
+			<button
+				type="button"
+				class="btn"
+				aria-disabled={own === null}
+				onclick={() => {
+					if (own !== null) save(null);
+				}}>Reset to default</button
+			>
 			<button type="button" class="btn btn-primary" onclick={() => (open = false)}>Done</button>
 		{/snippet}
 	</Dialog>

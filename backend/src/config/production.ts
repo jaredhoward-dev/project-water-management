@@ -429,6 +429,11 @@ export const SETTINGS: Record<string, Setting> = {
 	SMTP_USER: { why: 'SMTP transport only.' },
 	SMTP_PASSWORD: { why: 'SMTP transport only.' },
 	MAIL_EVENTS_QUEUE_ARN: { why: 'Only records from this queue are read as SES events (lambda-worker.ts).', checks: { worker: arn } },
+	// Each job message only from its own queue (lambda-worker.ts MESSAGE_QUEUES). Optional for now: an unset ARN binds nothing,
+	// so a backend release landing before the Terraform apply that sets them doesn't drop every result; required once that has shipped.
+	JOBS_QUEUE_ARN: { why: 'Only a wake from this queue is read as one (lambda-worker.ts MESSAGE_QUEUES).', checks: { worker: optional(arn) } },
+	RENDER_RESULTS_QUEUE_ARN: { why: "Only a render's answer from this queue is read as one (lambda-worker.ts MESSAGE_QUEUES).", checks: { worker: optional(arn) } },
+	INGEST_RESULTS_QUEUE_ARN: { why: 'Only a fetch result from this queue is read as one (lambda-worker.ts MESSAGE_QUEUES); set while per-feed fetching is on.', checks: { worker: optional(arn) } },
 	OPERATOR_EMAIL: {
 		why: 'The operator’s copy of the licence-record notices (licence/record.ts, 161); unset sends none and the owners still get theirs. Terraform sets it to budget_alert_email on the worker (infra/jobs.tf).'
 	},

@@ -215,6 +215,95 @@ class ProductGrids(unittest.TestCase):
                 zarrstore.write_daily(root, "imerg_late", dt.date(2026, 2, 1), np.zeros((1, 275, 310), np.float32))
 
 
+class Edges(unittest.TestCase):
+    """Chunk and year edges, days before an array starts, and days never written."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def chunk_files(self, product):
+        return sorted(p.relative_to(self.root / product / "c").as_posix() for p in (self.root / product / "c").rglob("*") if p.is_file())
+
+    def test_finals_cells_either_side_of_a_chunk_edge_land_in_their_own_chunks(self):
+        v = zeros(1)
+        cells = {(19, 19): 1.0, (19, 20): 2.0, (20, 19): 3.0, (20, 20): 4.0, (540, 600): 5.0, (549, 619): 6.0}
+        for (r, c), x in cells.items():
+            v[0, r, c] = x
+        zarrstore.write_finals(self.root, "rnl", dt.date(2024, 1, 1), v)
+        # 550 rows make 27 whole chunks and a last one of 10 rows (540-549); 620 cols make 31 whole chunks.
+        self.assertEqual(self.chunk_files("rnl"), ["43/0/0/0", "43/0/0/1", "43/0/1/0", "43/0/1/1", "43/0/27/30"])
+        a = open_array(self.root, "rnl")
+        for (r, c), x in cells.items():
+            self.assertEqual(a[43, 0, r, c], np.float32(x), (r, c))
+        # Nothing bleeds across the edge into the neighbouring cell.
+        self.assertTrue(np.isnan(a[43, 0, 21, 21]))
+        self.assertTrue(np.isnan(a[43, 0, 18, 18]))
+
+    def test_daily_cells_either_side_of_a_chunk_edge_land_in_their_own_chunks(self):
+        v = zeros(1)
+        v[0, 109, 123] = 1.0
+        v[0, 110, 124] = 2.0
+        zarrstore.write_daily(self.root, "prelim", dt.date(2026, 3, 1), v)
+        self.assertEqual(self.chunk_files("prelim"), ["0/0/0", "0/1/1"])
+        np.testing.assert_array_equal(zarrstore.read_daily_day(self.root, "prelim", dt.date(2026, 3, 1)), v[0])
+
+    def test_a_write_across_new_year_grows_the_year_axis_and_keeps_the_old_year(self):
+        a = zeros(1)
+        a[0, 0, 0] = 1.0
+        zarrstore.write_finals(self.root, "rnl", dt.date(1981, 12, 31), a)
+        self.assertEqual(open_array(self.root, "rnl").shape[0], 1)
+        b = zeros(2)
+        b[:, 0, 0] = [2.0, 3.0]
+        zarrstore.write_finals(self.root, "rnl", dt.date(1982, 12, 31), b)
+        arr = open_array(self.root, "rnl")
+        self.assertEqual(arr.shape[0], 3)
+        self.assertEqual([arr[0, 364, 0, 0], arr[1, 364, 0, 0], arr[2, 0, 0, 0]], [np.float32(1.0), np.float32(2.0), np.float32(3.0)])
+        # The read across the same edge gives the write back, and a year past the array is NaN, not an error.
+        np.testing.assert_array_equal(zarrstore.read_finals(self.root, "rnl", dt.date(1982, 12, 31), 2), b)
+        self.assertTrue(np.isnan(zarrstore.read_finals(self.root, "rnl", dt.date(1990, 1, 1), 1)).all())
+
+    def test_a_day_before_the_first_year_is_refused_and_leaves_no_array(self):
+        v = zeros(2)
+        v[:, 0, 0] = 1.0
+        # 31 Dec 1980 and 1 Jan 1981: the second day is in range, the first is not.
+        with self.assertRaisesRegex(ValueError, "1980 is before the array's first year 1981"):
+            zarrstore.write_finals(self.root, "rnl", dt.date(1980, 12, 31), v)
+        self.assertFalse((self.root / "rnl").exists())
+        with self.assertRaisesRegex(ValueError, "1980 is before"):
+            zarrstore.write_finals(self.root, "rnl", dt.date(1980, 6, 1), v)
+        self.assertFalse((self.root / "rnl").exists())
+        # Positive control: the first year's first day is written.
+        zarrstore.write_finals(self.root, "rnl", dt.date(1981, 1, 1), v)
+        self.assertEqual(open_array(self.root, "rnl")[0, 1, 0, 0], np.float32(1.0))
+
+    def test_daily_days_never_written_read_as_nan_and_ends_are_bounded(self):
+        self.assertIsNone(zarrstore.read_daily_day(self.root, "prelim", dt.date(2026, 3, 1)))  # no array yet
+        v = zeros(1)
+        v[0, 5, 5] = 1.0
+        zarrstore.write_daily(self.root, "prelim", dt.date(2026, 3, 1), v)
+        zarrstore.write_daily(self.root, "prelim", dt.date(2026, 3, 4), v + 1)
+        # 2 and 3 March were never written: NaN everywhere, never 0.
+        for d in (2, 3):
+            self.assertTrue(np.isnan(zarrstore.read_daily_day(self.root, "prelim", dt.date(2026, 3, d))).all(), d)
+        self.assertEqual(self.chunk_files("prelim"), ["0/0/0", "3/0/0"])
+        self.assertEqual(zarrstore.read_daily_day(self.root, "prelim", dt.date(2026, 3, 4))[5, 5], np.float32(2.0))
+        self.assertIsNone(zarrstore.read_daily_day(self.root, "prelim", dt.date(2026, 3, 5)))  # past the end
+        with self.assertRaisesRegex(ValueError, "is before prelim's firstDay 2026-03-01"):
+            zarrstore.read_daily_day(self.root, "prelim", dt.date(2026, 2, 28))
+
+    def test_a_daily_array_over_a_leap_day(self):
+        v = zeros(3)
+        v[:, 0, 0] = [28.0, 29.0, 1.0]
+        zarrstore.write_daily(self.root, "prelim", dt.date(2024, 2, 28), v)
+        self.assertEqual(open_array(self.root, "prelim").shape[0], 3)
+        self.assertEqual(zarrstore.read_daily_day(self.root, "prelim", dt.date(2024, 2, 29))[0, 0], np.float32(29.0))
+        self.assertEqual(zarrstore.read_daily_day(self.root, "prelim", dt.date(2024, 3, 1))[0, 0], np.float32(1.0))
+
+
 class S3Staging(unittest.TestCase):
     def test_writes_go_up_and_only_changed_objects_move(self):
         s3 = FakeS3()

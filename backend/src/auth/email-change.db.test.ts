@@ -183,6 +183,32 @@ describe('changing the email address', () => {
 		expect((await anon('POST', '/auth/change-email', { newEmail: next, currentPassword: PASSWORD })).status).toBe(401);
 	});
 
+	// A password-only session lives its 7 days after the account's first factor goes on (session.ts). With the
+	// password it must not move the address: the emailed codes, the factor-reset links and every notice would then
+	// go to its own inbox, and the factor the owner has would guard nothing (as adding another factor, mfa-routes.ts).
+	it('with a second factor on, a password-only session can’t change the address; a session that gave a code can', async () => {
+		const u = await signUp('StepUpMover');
+		expect((await u.call('POST', '/auth/mfa/email/enrol', { password: PASSWORD })).status).toBe(202);
+		const enrolCode = lastMailTo(u.email)!.text.match(/^(\d{6})$/m)![1]!;
+		const confirmed = await anon('POST', '/auth/mfa/email/confirm', { code: enrolCode }, u.cookie);
+		expect(confirmed.status).toBe(200);
+		const twoStep = sessionOf(confirmed);
+		const next = fresh('stepup');
+		// u.cookie is the password-only session from before the factor went on, still valid.
+		expect((await u.call('GET', '/auth/me')).status).toBe(200);
+		const refused = await u.call('POST', '/auth/change-email', { newEmail: next, currentPassword: PASSWORD });
+		expect(refused.status).toBe(403);
+		expect(refused.body.code).toBe('mfa_step_up');
+		expect(mailCount(next)).toBe(0);
+		expect(await asOwner('SELECT 1 FROM email_change WHERE user_id = $1', [u.id])).toEqual([]);
+		// Refused before the password is checked: nothing counted on the sign-in lockout.
+		expect(await asOwner('SELECT failures FROM login_throttle WHERE email = $1 AND failures > 0', [u.email])).toEqual([]);
+		// Positive control: the two-step session the confirm gave asks for the change.
+		const ok = await anon('POST', '/auth/change-email', { newEmail: next, currentPassword: PASSWORD }, twoStep);
+		expect(ok.status).toBe(202);
+		expect(mailCount(next)).toBe(1);
+	});
+
 	it('refuses the same address, and a disposable one while billing is enforced (positive control: off, it goes)', async () => {
 		const u = await signUp('Same');
 		const same = await u.call('POST', '/auth/change-email', { newEmail: u.email, currentPassword: PASSWORD });

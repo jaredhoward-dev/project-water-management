@@ -260,6 +260,14 @@ describe('GET /projects/:id/runs/:runId/day', () => {
 		expect((await day(owner, '2020-1-5')).status).toBe(400);
 		expect((await day(owner, '2019-12-31')).status).toBe(400);
 		expect((await day(owner, '2020-01-31')).status).toBe(400);
+		// Year 0000 is a date to JavaScript, not to Postgres (`$3::date`): the schema refuses it, never the query's 500.
+		const year0 = await day(owner, '0000-01-06');
+		expect(year0.status, JSON.stringify(year0.body)).toBe(400);
+		expect(year0.body.error).toBe('invalid request');
+		// Positive control: year 0001 reaches the database, which places it outside the run.
+		const year1 = await day(owner, '0001-01-06');
+		expect(year1.status, JSON.stringify(year1.body)).toBe(400);
+		expect(year1.body.error).toBe('the date is outside the run');
 		expect((await day(owner, '2020-01-02', crypto.randomUUID())).status).toBe(404);
 		expect((await owner.call('GET', `/projects/${projectId}/runs/${runId}/day?date=2020-01-02&nodeId=nope`)).status).toBe(400);
 	});

@@ -83,15 +83,21 @@ export function progressText(p: WorkbookImportProgress | null): { text: string; 
 		: { text: `Building the project: ${p.sheet} (${p.step} of ${p.steps})…`, fraction: 0.9 + 0.1 * within };
 }
 
+/** A gauge option problem, with the field it is in, so the review can mark that field and tie the message to it. */
+export interface GaugeOptionsError {
+	error: string;
+	field: 'scalingFrom' | 'scaleFactor';
+}
+
 /** The gauge options from the review's inputs, or why they don't go together. */
-export function gaugeOptions(asReference: boolean, scalingFrom: string, scaleFactor: string): { options: WorkbookImportOptions } | { error: string } {
+export function gaugeOptions(asReference: boolean, scalingFrom: string, scaleFactor: string): { options: WorkbookImportOptions } | GaugeOptionsError {
 	if (!asReference) return { options: {} };
 	const from = scalingFrom.trim();
 	const factor = scaleFactor.trim();
 	if (!from && !factor) return { options: { gaugeAsReference: true } };
-	if (!from || !factor) return { error: 'Give both the date the scaling starts and its factor, or neither.' };
+	if (!from || !factor) return { error: 'Give both the date the scaling starts and its factor, or neither.', field: from ? 'scaleFactor' : 'scalingFrom' };
 	const n = Number(factor.replace(',', '.'));
-	if (!Number.isFinite(n) || n <= 0) return { error: 'The scale factor must be a positive number.' };
+	if (!Number.isFinite(n) || n <= 0) return { error: 'The scale factor must be a positive number.', field: 'scaleFactor' };
 	return { options: { gaugeAsReference: { scalingFrom: from, scaleFactor: n } } };
 }
 
@@ -105,7 +111,7 @@ export function workbookOptions(
 	scalingFrom: string,
 	scaleFactor: string,
 	runOfRiver: boolean
-): { options: WorkbookImportOptions } | { error: string } {
+): { options: WorkbookImportOptions } | GaugeOptionsError {
 	const gauge = gaugeOptions(asReference, scalingFrom, scaleFactor);
 	if ('error' in gauge || !runOfRiver) return gauge;
 	return { options: { ...gauge.options, runOfRiver: true } };

@@ -143,13 +143,25 @@ export function numCell(v: number | null | undefined): string {
 export const FORMULA_START = /^(?:[\t\r\n]|\s*[=+\-@\uFF1D\uFF0B\uFF0D\uFF20])/;
 
 /**
+ * A `;` that a formula trigger follows (the same triggers as FORMULA_START).
+ * Excel in a comma-decimal locale (South Africa's among them) and LibreOffice
+ * with `;` as its separator split a CSV on `;`, so the text after one opens a
+ * cell of its own: `Farm;=SUM(4)` comes out as a cell that computes 4, and
+ * RFC 4180 quotes don't help, since that reader doesn't see the quote that
+ * opened the field (docs/security.md, tested in LibreOffice 2026-11-27). The
+ * frontend's copy is names.ts `SEPARATOR_FORMULA`: keep them one rule.
+ */
+export const SEPARATOR_FORMULA = /;(?=[\t\r\n]|\s*[=+\-@\uFF1D\uFF0B\uFF0D\uFF20])/g;
+
+/**
  * A text cell, RFC 4180-quoted when it contains a comma, quote or line break.
  * Text that a spreadsheet would treat as a formula (FORMULA_START) is prefixed
- * with an apostrophe: names and labels are user-controlled, and the file is
- * opened by other members of the project.
+ * with an apostrophe, and so is a trigger after a `;` (SEPARATOR_FORMULA:
+ * `a;=b` is written `a;'=b`): names and labels are user-controlled, and the
+ * file is opened by other members of the project.
  */
 export function textCell(v: string): string {
-	const s = FORMULA_START.test(v) ? `'${v}` : v;
+	const s = (FORMULA_START.test(v) ? `'${v}` : v).replace(SEPARATOR_FORMULA, ";'");
 	return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
