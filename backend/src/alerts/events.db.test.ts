@@ -18,15 +18,15 @@ let clearedId: string;
 const list = (u: User, query = '') => u.call('GET', `/projects/${projectId}/alert-events${query}`);
 
 beforeAll(async () => {
-	[owner, viewer, contributor, stranger] = await Promise.all(['Evowner', 'Evviewer', 'Evcontrib', 'Evstranger'].map((n) => signUp(n)));
+	[owner, viewer, contributor, stranger] = (await Promise.all(['Evowner', 'Evviewer', 'Evcontrib', 'Evstranger'].map((n) => signUp(n)))) as [User, User, User, User];
 	projectId = (await owner.call('POST', '/projects', { name: 'Alert events' })).body.project.id;
 	expect((await owner.call('POST', `/projects/${projectId}/members`, { email: viewer.email, role: 'viewer' })).status).toBe(201);
 	expect((await owner.call('POST', `/projects/${projectId}/members`, { email: contributor.email, role: 'contributor' })).status).toBe(201);
 	const [jobRule] = await asOwner(`INSERT INTO alert_rule (project_id, kind, threshold) VALUES ($1, 'job_dead', 1) RETURNING id`, [projectId]);
 	const [noticeRule] = await asOwner(`INSERT INTO alert_rule (project_id, kind, threshold) VALUES ($1, 'restriction_published', 0) RETURNING id`, [projectId]);
 	[{ id: clearedId }] = await asOwner(
-		`INSERT INTO alert_event (rule_id, project_id, state, value, detail, opened_at, cleared_at)
-		 VALUES ($1, $2, 'cleared', 0, $3, now() - interval '2 days', now() - interval '1 day') RETURNING id`,
+		// Inserted first, so it is the older (alert_event_guard stamps opened_at with now()).
+		`INSERT INTO alert_event (rule_id, project_id, state, value, detail) VALUES ($1, $2, 'cleared', 0, $3) RETURNING id`,
 		[noticeRule.id, projectId, JSON.stringify({ level: 'none', pct: null, lifted: true, signature: 'none||Water is short', publicationId: crypto.randomUUID() })]
 	);
 	[{ id: firingId }] = await asOwner(`INSERT INTO alert_event (rule_id, project_id, state, value, detail) VALUES ($1, $2, 'firing', 2, '{"count":2}') RETURNING id`, [
