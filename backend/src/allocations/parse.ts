@@ -258,9 +258,19 @@ export function splitCsv(text: string, delimiter: ',' | ';'): { line: number; ce
 	return out.filter((r) => r.cells.some((c) => c.trim() !== ''));
 }
 
-/** `;` when the header line has more semicolons than commas (a decimal-comma locale), else `,`. */
+/** Excel's delimiter line, `sep=;` or `sep=,`, before the header (a file saved for, or by, a decimal-comma locale). */
+const SEP_LINE = /^sep=([,;])$/i;
+
+/**
+ * The file's delimiter, read from its first line that isn't blank (blank lines
+ * before the header are skipped, as splitCsv skips them): the one a `sep=`
+ * line names, else `;` when the header has more semicolons than commas (a
+ * decimal-comma locale), else `,`.
+ */
 export function detectDelimiter(text: string): ',' | ';' {
-	const first = text.split(/\r?\n/, 1)[0] ?? '';
+	const first = (text.split(/\r\n|\r|\n/).find((l) => l.trim() !== '') ?? '').trim();
+	const sep = SEP_LINE.exec(first);
+	if (sep) return sep[1] as ',' | ';';
 	const count = (c: string) => first.split(c).length - 1;
 	return count(';') > count(',') ? ';' : ',';
 }
@@ -496,6 +506,8 @@ export function parseAllocationTable(text: string, kind: AllocationSourceKind): 
 	if (text.length > IMPORT_MAX_CHARS) throw new ImportRefused(`the file is larger than ${IMPORT_MAX_CHARS / 1024 / 1024} MB`);
 	const delimiter = detectDelimiter(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text);
 	const records = splitCsv(text, delimiter);
+	// Excel's `sep=` line named the delimiter (detectDelimiter); it isn't the header.
+	if (records[0] && SEP_LINE.test(records[0].cells.join(delimiter).trim())) records.shift();
 	const header = records.shift();
 	if (!header) throw new ImportRefused('the file is empty');
 	if (records.length > IMPORT_MAX_ROWS) throw new ImportRefused(`the file has more than ${IMPORT_MAX_ROWS} rows`);

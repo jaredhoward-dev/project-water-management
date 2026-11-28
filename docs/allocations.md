@@ -90,7 +90,10 @@ is listed as "not read", never guessed.
 
 - **File.** CSV, comma- or semicolon-separated, UTF-8, at most 2 MB, 5 000
   rows and 200 columns. Quoted fields, doubled quotes and line breaks inside
-  quotes are read. XLSX is not read yet: save the sheet as CSV.
+  quotes are read. The delimiter is the one an Excel `sep=;` or `sep=,`
+  first line names (that line isn't the header), else read from the header,
+  the first line that isn't blank (`detectDelimiter`). XLSX is not read yet:
+  save the sheet as CSV.
 - **Numbers.** A `;` file reads a comma as the decimal mark and a point as a
   thousands separator; a `,` file the other way round. A thousands
   separator, or a space, must group the digits in threes (`1,500`,
