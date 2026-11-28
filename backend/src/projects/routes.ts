@@ -34,7 +34,7 @@ import { projectName } from '../http/visibleName.js';
 import { bodyLimit } from 'hono/body-limit';
 import { AUTO_RUNS_OFF, autoRunsStartedOff } from '../billing/liveStart.js';
 import { copyAllocations } from './copyAllocations.js';
-import { copyCatchmentMap } from './copyMap.js';
+import { copyCatchmentMap, remapWr2012Lookup } from './copyMap.js';
 import { freshIds, IMPORT_MAX_BYTES, insertProjectFile, parseProjectFile, runImported } from './import.js';
 import { insertImportReport, latestImportReport, parseImportReport } from './importReport.js';
 import { loadMyOutcomes } from '../portfolio/portfolio.js';
@@ -546,7 +546,10 @@ export const projectRoutes = new Hono<AuthEnv>()
 			}
 			// The catchment map follows (sources, features, each node's area-from-map link and the records of what an accepted
 			// value was read over); proposals, dam observations, waterbody matches and feeds stay with the original (copyMap.ts).
-			await copyCatchmentMap(db, srcId, newId, ids);
+			const featureIds = await copyCatchmentMap(db, srcId, newId, ids);
+			// The WR2012 reference's lookup names the feature it was looked up at: it follows that feature to the copy's.
+			const withLookup = remapWr2012Lookup(copiedSettings, featureIds);
+			if (withLookup) await db.query('UPDATE project SET settings = $2 WHERE id = $1', [newId, JSON.stringify(withLookup)]);
 			// The registered volumes, their files and the names the copier may read, with the viewer-units choice
 			// (copyAllocations.ts); what points at a run stays behind with the runs, which don't copy.
 			await copyAllocations(db, srcId, newId, ids);

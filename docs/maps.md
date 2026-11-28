@@ -989,7 +989,10 @@ someone takes it again. These checks say so:
   typed by hand, saved before lookups were recorded, looked up at typed
   coordinates, or whose code was typed over since (the lookup's code isn't
   the reference's) records nothing to compare, so it is never flagged: the
-  check doesn't guess which quaternary the boundary lies in now.
+  check doesn't guess which quaternary the boundary lies in now. A project
+  copy moves the lookup's feature to the copied boundary or gauge
+  (`copyMap.ts remapWr2012Lookup`), so the copy isn't flagged for it; a
+  project document carries no map, so an imported one is.
 
 Not built here: re-proposing every unit's area at once without an
 elevation model (Divide's area half), and weighting WR2012 over every
