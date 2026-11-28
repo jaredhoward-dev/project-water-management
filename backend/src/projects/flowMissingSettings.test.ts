@@ -124,6 +124,19 @@ describe('the series ids settings name, and a copy’s or import’s fresh ones'
 		expect(FitRecord.shape.flowSeriesId.safeParse('not a series').success).toBe(false);
 	});
 
+	it('a kept problem about a series (the Warnings page’s `problem:data:<series id>`) follows it, so a copy keeps it kept', () => {
+		const N = 'f2000000-0000-4000-8000-0000000000ff';
+		const kept = { warningsKept: [{ id: `problem:data:${OBS}`, note: 'record ended' }, { id: 'run:text:1a2b3c4d', note: '' }, { id: 'problem:data:not-a-series', note: '' }] };
+		expect([...settingSeriesIds(kept)]).toEqual([OBS]);
+		expect(remapSettingSeriesIds(kept, new Map([[OBS, N]])).warningsKept).toEqual([
+			{ id: `problem:data:${N}`, note: 'record ended' },
+			{ id: 'run:text:1a2b3c4d', note: '' },
+			{ id: 'problem:data:not-a-series', note: '' }
+		]);
+		// An id not in the map stays.
+		expect(remapSettingSeriesIds(kept, new Map([[GAUGE, N]])).warningsKept).toEqual(kept.warningsKept);
+	});
+
 	it('so do each calibration location row’s fit record’s (issues #555, #659): a moved site record lives in a row', () => {
 		const N = 'f1000000-0000-4000-8000-0000000000ff';
 		const withRow = { calibrationZones: [{ nodeId: 'g1', fitRecord: { flowSeriesId: OBS, checksKept: [`outlier:${OBS}:2001-01-05:2001-01-05`] } }, { nodeId: 'g2', fitRecord: null }] };

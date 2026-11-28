@@ -11,7 +11,8 @@
 // And the series ids every setting names (settingSeriesIds), so a copy or an
 // export/import that gives the series fresh ids can make the settings follow
 // them (remapSettingSeriesIds): the rainfall stations' (remapRainStations),
-// each flow record's missing periods, and the kept data checks' item ids.
+// each flow record's missing periods, the kept data checks' item ids, and a
+// kept Warnings-page problem about one series (`problem:data:<series id>`).
 import { FLOW_RECORD_KINDS, parseCheckItemId } from '@water-management/engine';
 import type { Db } from '../db/tx.js';
 import { ApiError } from '../http/errors.js';
@@ -72,7 +73,12 @@ function collect(settings: Record<string, unknown>, out: Set<string>): void {
 		collectKept(fr.checksKept, out);
 	}
 	collectKept(settings.checksKept, out);
+	// A problem kept on the Warnings page about one series (issue #611; the page's `problem:data:<series id>`, a record behind).
+	if (Array.isArray(settings.warningsKept)) for (const w of settings.warningsKept) if (isObj(w) && typeof w.id === 'string' && w.id.startsWith(DATA_PROBLEM)) out.add(w.id.slice(DATA_PROBLEM.length));
 }
+
+/** The Warnings page's id for a problem about one series (frontend warnings/problems.ts `data:<series id>`, kept as `problem:data:…`). */
+const DATA_PROBLEM = 'problem:data:';
 
 /** The settings' fit records: the top level's, then each calibration location row's. */
 function fitRecordsOf(settings: Record<string, unknown>): Record<string, unknown>[] {
@@ -106,6 +112,11 @@ export function remapSettingSeriesIds(settings: Record<string, unknown>, ids: Re
 			return ref && to ? `${ref.check}:${to}:${ref.start}:${ref.end}` : item;
 		});
 	if (Array.isArray(out.checksKept)) out.checksKept = kept(out.checksKept);
+	if (Array.isArray(out.warningsKept))
+		out.warningsKept = out.warningsKept.map((w: unknown) => {
+			const to = isObj(w) && typeof w.id === 'string' && w.id.startsWith(DATA_PROBLEM) ? ids.get(w.id.slice(DATA_PROBLEM.length)) : undefined;
+			return to ? { ...(w as Record<string, unknown>), id: `${DATA_PROBLEM}${to}` } : w;
+		});
 	// The fit record names its series too (engine ≥ 1.102.0), so a copy's fit stays current with the copy's ids; so does each
 	// calibration location row's (issues #555, #659).
 	const remapFit = (r: Record<string, unknown>): Record<string, unknown> => {

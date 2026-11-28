@@ -94,3 +94,21 @@ export async function copyCatchmentMap(db: Db, srcId: string, newId: string, ids
 	);
 	return new Map(features.map((r) => [r.old, r.new]));
 }
+
+/**
+ * The WR2012 reference's lookup (settings.wr2012.reference.lookup, docs/maps.md § Quaternary lookup) follows the
+ * feature it was looked up at to the copy's (`features`, old → new, from copyCatchmentMap), so the copy's Map checks
+ * compare it with the copied outline or gauge and don't say it is gone. A feature the copy has no copy of becomes a
+ * random id, as `restamp` does for the accepted values: still "gone", without naming the original's row. Returns the
+ * settings to store, or null when there is no lookup to move.
+ */
+export function remapWr2012Lookup(settings: Record<string, unknown>, features: IdMap): Record<string, unknown> | null {
+	const isObj = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
+	const wr = settings.wr2012;
+	if (!isObj(wr) || !isObj(wr.reference) || !isObj(wr.reference.lookup) || !isObj(wr.reference.lookup.feature)) return null;
+	const { reference } = wr;
+	const lookup = reference.lookup as Record<string, unknown>;
+	const feature = lookup.feature as Record<string, unknown>;
+	const id = (typeof feature.id === 'string' && features.get(feature.id)) || crypto.randomUUID();
+	return { ...settings, wr2012: { ...wr, reference: { ...reference, lookup: { ...lookup, feature: { ...feature, id } } } } };
+}

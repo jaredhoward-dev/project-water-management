@@ -988,7 +988,10 @@ is the run warnings and problems from elsewhere kept (accepted) on the
 Warnings page, `[{ id, note }]`, the id `run:<code or text>:<hash>` or
 `problem:<source>:…` (`checkItems.ts` `WARNING_KEPT_ID`, at most 200
 characters), the note optional (at most 500), at most 300 entries, replaced
-whole by a save and read by no run. All three are absent until set, and none
+whole by a save and read by no run; a kept `problem:data:<series id>` (a
+record behind) follows its series' fresh id in a copy or an imported
+project document, as `flowMissing` and `checksKept` do
+(`flowMissingSettings.ts remapSettingSeriesIds`). All three are absent until set, and none
 needs a migration. `settings.calibrationRules` (engine ≥ 1.25.0,
 issue #153) is automated calibration's pre-declared rule set with its
 server-kept revision and the hydrologist's sign-off; no migration either
