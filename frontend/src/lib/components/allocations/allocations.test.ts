@@ -1,7 +1,7 @@
 import { compareAllocations, withIrrigatedAreas } from '@water-management/engine';
 import { describe, expect, it } from 'vitest';
 import type { AllocationPreviewRow } from '#lib/api/types.js';
-import { allocationsContext, areaHa, AUTHORISATION_LABEL, capYearsText, comparisonRows, conditionsFromText, conditionsSummary, emptyBandNote, foldYears, judgementSentence, MEASURE_STATUS_LABEL, MODE_NOTE, monthsText, pickUnit, previewOrder, rowsInListOrder, STATUS_LABEL, statusSentence, storageSentence, TEMPLATE_CSV, totalsSentence, VIEWER_UNITS_NOTE, unitMeasures, unitRows, unitStatusText, volumeCell, waterYearLabel } from './allocations';
+import { allocationsContext, areaHa, decodeCsvFile, AUTHORISATION_LABEL, capYearsText, comparisonRows, conditionsFromText, conditionsSummary, emptyBandNote, foldYears, judgementSentence, MEASURE_STATUS_LABEL, MODE_NOTE, monthsText, pickUnit, previewOrder, rowsInListOrder, STATUS_LABEL, statusSentence, storageSentence, TEMPLATE_CSV, totalsSentence, VIEWER_UNITS_NOTE, unitMeasures, unitRows, unitStatusText, volumeCell, waterYearLabel } from './allocations';
 import { fmtNum } from '#lib/format/number.js';
 
 const comparison = () =>
@@ -40,6 +40,23 @@ describe('allocation wording', () => {
 		expect(statusSentence({ status: 'under', ratio: 0.5, modelledM3: 1, registeredM3: 2 }, 0.1)).toMatch(/50 % below/);
 		expect(waterYearLabel(2009)).toBe('2009/10');
 		expect(waterYearLabel(1999)).toBe('1999/00');
+	});
+
+	it('never says a use just outside the band is the band\'s own percent, and states a band of 12.5 % as set', () => {
+		// 10.4 % above a ±10 % band is outside it: "10 % above (outside the ±10 % band)" contradicts itself.
+		expect(statusSentence({ status: 'over', ratio: 1.104, modelledM3: 1104, registeredM3: 1000 }, 0.1)).toBe(
+			'Modelled use is 10.4 % above the registered volume (outside the ±10 % band).'
+		);
+		expect(statusSentence({ status: 'under', ratio: 0.8996, modelledM3: 899.6, registeredM3: 1000 }, 0.1)).toBe(
+			'Modelled use is 10.04 % below the registered volume (outside the ±10 % band).'
+		);
+		// The band as the band card saves it (emptyBandNote), not rounded to ±13 %.
+		expect(statusSentence({ status: 'over', ratio: 1.13, modelledM3: 1130, registeredM3: 1000 }, 0.125)).toBe(
+			'Modelled use is 13 % above the registered volume (outside the ±12.5 % band).'
+		);
+		expect(statusSentence({ status: 'within', ratio: 1.02, modelledM3: 1020, registeredM3: 1000 }, 0.025)).toBe('Modelled use is within ±2.5 % of the registered volume.');
+		expect(storageSentence({ registeredM3: 100, modelledCapacityM3: 101, differenceM3: 1, status: 'within' }, 0.015)).toMatch(/: within ±1\.5 %\.$/);
+		expect(judgementSentence({ wholeYears: 3, within: 2, outside: 1 }, 0.075)).toBe('Of 3 whole water years, 2 within ±7.5 % of the registered volumes and 1 outside.');
 	});
 
 	it('says an empty band field keeps the saved band, in the field\'s own percent (#670)', () => {
@@ -423,5 +440,27 @@ describe('unitMeasures: each unit’s irrigated area, water use and dam, and the
 		const all = Object.values(MEASURE_STATUS_LABEL).flatMap((m) => Object.values(m));
 		expect(all.every(Boolean)).toBe(true);
 		expect(all.join(' ')).not.toMatch(/lawful|illegal|legal|complian|violat|breach/i);
+	});
+});
+
+describe('decodeCsvFile: a CSV Excel saved in Windows-1252 keeps its names', () => {
+	const enc = (t: string) => new TextEncoder().encode(t);
+	it('reads UTF-8 as UTF-8, with or without a BOM (positive control)', () => {
+		expect(decodeCsvFile(enc('holder\nRösch Boerdery, m³/a'))).toBe('holder\nRösch Boerdery, m³/a');
+		expect(decodeCsvFile(Uint8Array.of(0xef, 0xbb, 0xbf, ...enc('a,b')))).toBe('a,b');
+	});
+
+	it('reads bytes that are not UTF-8 as Windows-1252, as Excel\'s “CSV (Comma delimited)” saves them, never as U+FFFD', () => {
+		// "Rösch" and "m³/a" in Windows-1252: ö = 0xF6, ³ = 0xB3; read as UTF-8 both became U+FFFD and the name was stored mangled.
+		const bytes = Uint8Array.of(...enc('holder,unit\nR'), 0xf6, ...enc('sch,m'), 0xb3, ...enc('/a'));
+		expect(new TextDecoder().decode(bytes)).toContain('\ufffd');
+		expect(decodeCsvFile(bytes)).toBe('holder,unit\nRösch,m³/a');
+	});
+
+	it('reads a UTF-16 file by its BOM', () => {
+		const le = Uint8Array.of(0xff, 0xfe, ...[...'a;ö'].flatMap((c) => [c.charCodeAt(0), 0]));
+		expect(decodeCsvFile(le)).toBe('a;ö');
+		const be = Uint8Array.of(0xfe, 0xff, ...[...'a;ö'].flatMap((c) => [0, c.charCodeAt(0)]));
+		expect(decodeCsvFile(be)).toBe('a;ö');
 	});
 });

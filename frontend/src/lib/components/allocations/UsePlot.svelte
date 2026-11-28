@@ -16,7 +16,7 @@
 	// Each label's full text and each mark's year and share are its tooltip.
 	import { fmtNum } from '#lib/format/number.js';
 	import { distinctShortNames } from '#lib/components/network/schematic.js';
-	import { waterYearLabel } from './allocations';
+	import { bandText, waterYearLabel } from './allocations';
 	import { useSummary, type UseRow } from './usePlot';
 
 	let {
@@ -121,7 +121,7 @@
 	</div>
 	<figcaption>
 		{caption} Each mark is one whole water year: modelled use ÷ the registered volume{application ? '; hollow: the baseline, filled: the application' : ''}. The line is 100 %{tolerance !== null
-			? `; the shaded band ±${fmtNum(tolerance * 100, 0)} % is counted as within`
+			? `; the shaded band ${bandText(tolerance)} is counted as within`
 			: ''}; an arrowhead is a year above {fmtNum(axisMax * 100, 0)} %. Modelled, not metered.
 	</figcaption>
 </figure>
