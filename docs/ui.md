@@ -14593,7 +14593,7 @@ March") is kept against what it is about.
 - **Farmer view.** *Notes about your hydrological unit* (`farm/FarmNotes.svelte`) lists
   the farmer's own notes and the WUA's farm-visible ones on that farm, and
   adds a note, always shown to the farm. The WUA previewing the page sees the
-  same farm-visible notes, read only. It is the same `NotesList`, given the
+  same farm-visible notes, read only. Switching unit keeps the card mounted, so the list resets what was typed, an open edit and its errors when its target changes, and drops an answer for the last target (`notes.ts` `targetKey`); the page's CSV download error clears too. It is the same `NotesList`, given the
   catalogue's words (`words` prop, `farm/notesWords.ts`; server errors
   through `errorText`), so the farmer's copy is translated while the
   workspace's stays English and never loads the catalogue.
@@ -15697,7 +15697,7 @@ published.
   than the one the list names (another `publishedAt`) is not shown at all,
   since it describes a superseded decision beside the card's current level
   word, and the card says its figures couldn't be had instead, the copy
-  itself kept for the farm page: `savedForPublication`, issue #942), and goes straight to the only one. `/farm/[projectId]` is one farm (`?node=` and a
+  itself kept for the farm page: `savedForPublication`, issue #942), and goes straight to the only one, but only when every catchment's list answered: when one failed (not for access gone), the list stays, with a line that some catchments couldn't be loaded and Try again, rather than landing on one farm with no sign of the others (`farm/load.ts` `farmsLanding`). `/farm/[projectId]` is one farm (`?node=` and a
   switcher when the farmer has several there: a row of links above the name
   for up to 4 farms; past that, folded under "Your hydrological units in this catchment
   (N farms)", so the name and the WUA's notice stay on the first screen,
