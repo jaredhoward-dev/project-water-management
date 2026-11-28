@@ -59,10 +59,16 @@ are empty and nothing below changes.
     user, `trigger` without a dam, `runOfRiver` with one, a stop level
     below the trigger; WP-3.8),
     a catchment with no land left (`runModel` refuses 0 km²), or a
-    simulation, reporting or calibration window that ends before it starts.
+    simulation, reporting or calibration window that ends before it starts,
+    or a drought restriction naming a unit, dam or EWR site the network no
+    longer has (`droughtRestrictionNodeIssues`, which the Settings form blocks
+    a save on: removing or emptying the one dam the rule reads silently turned
+    the restriction off for every unit, scored as the op's effect; change the
+    rule with `settings.set droughtRestriction` first; a hidden unit's dam is
+    one of the masked rules).
     These are the model's save rules (`modelRuleIssues`,
     `packages/engine/src/modelRules.ts`, the one home the backend's
-    `modelProblems` also calls) plus the windows and the area, in
+    `modelProblems` also calls) plus the windows, the area and the drought restriction's ids, in
     `scenario/structure.ts`. So a scenario can only produce a model the
     backend would accept as a save. Only issues the op *introduces* count, so an
     old base that already has one can still take unrelated ops.

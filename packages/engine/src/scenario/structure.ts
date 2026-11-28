@@ -7,7 +7,8 @@
 //
 // Keys are id-based so renaming a node doesn't turn an existing issue into a
 // "new" one; texts are for people.
-import type { ModelInput } from '../project';
+import type { DroughtRestrictionRule, ModelInput } from '../project';
+import { droughtRestrictionIssues, droughtRestrictionNodeIssues } from '../network/restriction';
 import { modelRuleIssues } from '../modelRules';
 import { resolveCatchmentAreaKm2 } from '../runoff/area';
 
@@ -26,6 +27,21 @@ export function structureIssues(input: ModelInput): StructureIssues {
 
 	// Flow shares over 100 % (engines up to 1.104.x, the specific shares) can't happen from 1.105.0: each unit's natural
 	// MAR share adds up to 1 by construction (issue #616, network/ewrSplit.ts).
+
+	// The drought restriction's units, dams and EWR site (engine ≥ 1.54.0): the Settings form blocks a save naming one
+	// the network hasn't got, and the run leaves it out with only a warning. So removing (or emptying) the one dam the
+	// rule reads turned the restriction off for every unit, scored as the op's effect. Keyed per id, so an issue the
+	// base already carries isn't new. A malformed rule is the run's to refuse, not checked here.
+	const rule = s.droughtRestriction;
+	if (rule && typeof rule === 'object' && !droughtRestrictionIssues(rule).length) {
+		const r = rule as DroughtRestrictionRule;
+		const one = (key: string, part: Partial<DroughtRestrictionRule>) => {
+			for (const i of droughtRestrictionNodeIssues({ ...r, damNodeIds: [], nodeIds: [], ewrTrigger: undefined, ...part }, m.nodes)) add(key, `drought restriction rule: ${i.message}`);
+		};
+		if (r.basis === 'dams') for (const id of r.damNodeIds ?? []) one(`restrictionDam:${id}`, { damNodeIds: [id] });
+		for (const id of r.nodeIds ?? []) one(`restrictionUnit:${id}`, { nodeIds: [id] });
+		if (typeof r.ewrTrigger?.siteNodeId === 'string') one(`restrictionSite:${r.ewrTrigger.siteNodeId}`, { ewrTrigger: r.ewrTrigger });
+	}
 
 	// Windows: a start after its end.
 	for (const [a, b, label] of [

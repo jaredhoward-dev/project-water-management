@@ -345,7 +345,7 @@ function unmask(xs: Named[], real: Map<string, [string, string]>, kind: MaskedRe
 function hiddenRule(key: string, masked: Masked): boolean {
 	if (key === 'area') return masked.nodes.size > 0;
 	// A hidden node's dam, and its supply rule's levels, are hidden values: the rules that read them say nothing of them.
-	for (const p of ['bhDrought:', 'supplyTrigger:', 'supplyRor:', 'supplyStop:']) if (key.startsWith(p)) return masked.nodes.has(key.slice(p.length));
+	for (const p of ['bhDrought:', 'supplyTrigger:', 'supplyRor:', 'supplyStop:', 'restrictionDam:']) if (key.startsWith(p)) return masked.nodes.has(key.slice(p.length));
 	for (const t of masked.tokens) if (key.includes(t)) return true;
 	return false;
 }
