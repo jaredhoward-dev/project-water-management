@@ -218,6 +218,9 @@ export const PERSON_COLUMN_COVERAGE: Record<string, { section: string } | { excl
 	// The events about the person (subject.userId, a note's authorId), beside the ones they made.
 	'audit_event.subject': { section: 'auditEvents' },
 	// Billing is an open operator decision (#944): what is exported today is listed, not widened here.
+	'billing_conflict.resolved_by': {
+		excluded: 'the operator’s staff member who resolved a price conflict by hand, or `event` (406): the operator’s own audit trail, owner-only, never the customer’s'
+	},
 	'billing_grant_log.granted_by': { section: 'billing.grants' },
 	'email_change.new_email': { section: 'pendingEmailChange' },
 	'erasure_log.subject_id': { excluded: 'written only once the account is deleted, so there is no one left to export it to' },
