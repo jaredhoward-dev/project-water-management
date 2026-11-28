@@ -1094,17 +1094,15 @@ describe('errata', () => {
 		// (the engine end-to-end tests' findings, each from 1.30.0 or earlier until 1.69.0), ER-33 (node.remove's classing,
 		// from the first engine until 1.121.0; not ER-32, from 1.42.0), ER-34 (paired bands across engines, from the first
 		// engine until 1.123.0), ER-35 (the declared rule's parameters varied, 1.30.0 until 1.123.0; not ER-36, from
-		// 1.59.0), ER-38 (its rain sources and records, 1.30.0 until 1.123.2), ER-39 (a priority user's classing) and ER-41
-		// (a renewed storage counted twice), both from the first engine until 1.123.3 (not ER-40, from 1.54.0), and no other
-		// run erratum.
+		// 1.59.0), ER-38 (its rain sources and records, 1.30.0 until 1.123.2), ER-39 (a priority user's classing, from the
+		// first engine until 1.123.3; not ER-40, from 1.54.0), and no other run erratum.
 		expect(evidenceReport(i).verification.errata.filter((e) => e.keyedOn === 'run').map((e) => e.id)).toEqual([
 			...Array.from({ length: 20 }, (_, k) => `ER-${k + 10}`),
 			'ER-33',
 			'ER-34',
 			'ER-35',
 			'ER-38',
-			'ER-39',
-			'ER-41'
+			'ER-39'
 		]);
 		// Runs by the current engine carry none.
 		const now = evidenceReport(input({ baseline: { ...i.baseline, engineVersion: ENGINE_VERSION }, application: { ...i.application!, engineVersion: ENGINE_VERSION } }));

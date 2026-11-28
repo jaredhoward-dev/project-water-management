@@ -402,15 +402,5 @@ export const ENGINE_ERRATA: readonly Erratum[] = [
 		"appliesWhen": "A scenario run (an application or any other scenario, alone or in a cumulative impact) on a project with a drought restriction rule (settings.droughtRestriction) whose op removes (node.remove) or changes (node.set: emptying a dam, damCapacityM3 0; an EWR site's ewrSite off) a dam, unit or EWR trigger site the rule names (damNodeIds, nodeIds, ewrTrigger.siteNodeId)",
 		"summary": "The op applied and the run left that id out of the rule with only a warning, where a save naming it is refused: removing or emptying the one dam a dams rule reads turned the restriction off for every unit (no level ever in force from storage), removing one of several changed the storage the levels read, and removing the trigger's site dropped the EWR trigger. The scenario's supply and EWR results carried that, and in an application, a cumulative impact or a run comparison it was scored as the op's effect. What to do: re-run the scenario on the current engine, which now refuses the op with a problem; change the rule first (settings.set droughtRestriction, a baseline assumption) if that is what is meant, and re-issue (supersede) any evidence pack made from it. A plain run is unaffected",
 		"source": "scenarios.md § Engine: applyScenario (the drought restriction's ids); model.md §2.7i"
-	},
-	{
-		"id": "ER-41",
-		"keyedOn": "run",
-		"firstAffected": "0.0.0",
-		"fixedIn": "1.123.3",
-		"severity": "Low",
-		"appliesWhen": "A farm whose registered storage (a 21(b) row, or storage stated on a take) was registered again during the run's days (a renewal, a raised wall: one row's validity ends and the next starts within the run), or (engine ≥ 1.114.0) a unit whose take stating an irrigated area was so renewed",
-		"summary": "The Allocations comparison summed every row in force on any of the run's days, so the renewed storage or irrigated area counted once per row: the registered figure read up to double, and the dam or planted area could read under (smaller than registered) when it matched. The yearly use comparison (RunSummary.allocations) and the run's results are unaffected. What to do: open the run's Allocations tab again: the backend works the storage and irrigated area out when it is read, so on the current engine it reads the most in force on any one day; correct any figure taken from it earlier",
-		"source": "allocations.md § The comparison (Storage, Irrigated area); model.md §2.12 (storage)"
 	}
 ];

@@ -12724,8 +12724,8 @@ the days *D(y)* of *y* inside the run:
   any one of the run's days, storage-only (s21b) rows included (none when
   no allocation states one; a dam registered again during the run, a
   renewal or a raised wall, counts once: engine ≥ 1.123.3, `mostInForce`,
-  before which every row the run overlapped was summed, engine-errata.md
-  ER-41), beside the run's
+  before which every row the run overlapped was summed; worked out when the
+  page is read, so no erratum), beside the run's
   `damCapacityM3` for a farm, with the difference *C* − *S* and a status
   banded the same way with *C* for *M* and *S* for *R* (issue #72): **over**
   = a dam larger than the storage registered for it by more than *τ*,
