@@ -98,6 +98,15 @@ export type SettingNoteGroup = keyof typeof SETTING_NOTE_GROUPS;
 export const settingTarget = (key: SettingNoteGroup): NoteTarget => ({ kind: 'setting', key, label: SETTING_NOTE_GROUPS[key] });
 
 /** The GET /notes filter for a target. */
+/**
+ * One string per target (its query): the list resets its draft, edit and
+ * errors when this changes (the farm page switching unit keeps the list
+ * mounted), and drops an answer that came back for an earlier one.
+ */
+export function targetKey(t: NoteTarget): string {
+	return JSON.stringify(targetQuery(t));
+}
+
 export function targetQuery(t: NoteTarget): NotesQuery {
 	switch (t.kind) {
 		case 'project':

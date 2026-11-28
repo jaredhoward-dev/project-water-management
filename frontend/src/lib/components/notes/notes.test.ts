@@ -15,6 +15,7 @@ import {
 	scenarioAudiences,
 	settingTarget,
 	SETTING_NOTE_GROUPS,
+	targetKey,
 	targetQuery,
 	targetTitle,
 	type NoteTarget
@@ -24,6 +25,17 @@ import { CALIBRATION_SETTINGS_SECTIONS, SETTINGS_SECTIONS } from '#lib/component
 const farm: NoteTarget = { kind: 'node', nodeId: 'n1', name: 'Farm A', isFarm: true };
 const gauge: NoteTarget = { kind: 'node', nodeId: 'g1', name: 'Weir', isFarm: false };
 const run: NoteTarget = { kind: 'run', runId: 'r1', label: 'Baseline' };
+
+describe('targetKey', () => {
+	it('tells two units in one catchment apart, so the farm page’s switch resets the note being typed', () => {
+		const a = targetKey({ kind: 'node', nodeId: 'n1', name: 'Farm A', isFarm: true });
+		const b = targetKey({ kind: 'node', nodeId: 'n2', name: 'Farm B', isFarm: true });
+		expect(a).not.toBe(b);
+		// A rename of the same unit is the same target (control): its draft stays.
+		expect(targetKey({ kind: 'node', nodeId: 'n1', name: 'Farm A renamed', isFarm: true })).toBe(a);
+		expect(targetKey({ kind: 'run', runId: 'n1', label: 'Run' })).not.toBe(a);
+	});
+});
 
 describe('targetQuery', () => {
 	it('asks for exactly the notes on the target', () => {

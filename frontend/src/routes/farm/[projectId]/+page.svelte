@@ -74,6 +74,12 @@
 	// The CSV goes through fetch so the farm disclaimer and the column names come in the reader's language,
 	// laid out for their spreadsheet (csvNote.ts, issue #124).
 	let csvError = $state('');
+	// A failed download's line is about the unit it was for: switching unit (or catchment) clears it.
+	$effect(() => {
+		void projectId;
+		void asked;
+		csvError = '';
+	});
 	async function downloadCsv(e: MouseEvent, url: string) {
 		e.preventDefault();
 		csvError = '';
