@@ -11,6 +11,7 @@ import {
 	stationDays,
 	StationFormatError,
 	stationFormatProblem,
+	stationLastEndedDay,
 	stationRange,
 	zoneOffsetMs
 } from './stationFormat';
@@ -101,6 +102,16 @@ describe('clock changes (issue #908)', () => {
 		expect(localToInstant(BER, 2024, 10, 27, 2, 30)).toBe(at('2024-10-27T00:30:00Z'));
 		expect(localToInstant(BER, 2024, 10, 27, 3, 0)).toBe(at('2024-10-27T02:00:00Z'));
 		expect(localToInstant(BER, 2024, 10, 27, 1, 59)).toBe(at('2024-10-26T23:59:00Z'));
+	});
+	it('the newest ended rain day follows the wall clock’s 08:00 on a clock-change morning', () => {
+		// 08:00 CET on 27 October 2024 is 07:00Z: the rain day of the 26th has ended at 07:30Z, not before 07:00Z.
+		const sub: StationFormat = { format: 'json', time: 't', value: 'v', timeFormat: 'iso', resolution: 'subdaily', timeZone: BER };
+		const day = (iso: string) => Math.floor(at(`${iso}T00:00:00Z`) / 86_400_000);
+		expect(stationLastEndedDay(sub, at('2024-10-27T06:59:00Z'))).toBe(day('2024-10-25'));
+		expect(stationLastEndedDay(sub, at('2024-10-27T07:30:00Z'))).toBe(day('2024-10-26'));
+		// 08:00 CEST on 31 March 2024 is 06:00Z.
+		expect(stationLastEndedDay(sub, at('2024-03-31T06:30:00Z'))).toBe(day('2024-03-30'));
+		expect(stationLastEndedDay({ ...sub, resolution: 'daily' }, at('2024-03-31T06:30:00Z'))).toBe(day('2024-03-30'));
 	});
 	it('a skipped spring hour names none, and localToInstant reads it with the offset before the change', () => {
 		expect(localInstants(BER, 2024, 3, 31, 2, 30)).toEqual([]);
