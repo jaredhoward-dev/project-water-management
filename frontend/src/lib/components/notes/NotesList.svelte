@@ -121,11 +121,16 @@
 		}
 	}
 
+	// A string, so the effect below reruns only when the key's value changes: the page passes `target` as an
+	// inline object (its farm name included), and a rename or a language change gives a new object for the same unit.
+	const targetKeyNow = $derived(`${projectId}|${targetKey(target)}`);
+
 	$effect(() => {
 		// Reload when the target changes (the farm page switching unit keeps this list mounted). What was typed,
 		// an edit open and any error were about the last target: a draft kept would be added to the new one.
-		shownKey = `${projectId}|${targetKey(target)}`;
+		const key = targetKeyNow;
 		untrack(() => {
+			shownKey = key;
 			notes = null;
 			draft = '';
 			editing = null;
@@ -149,7 +154,8 @@
 		const key = shownKey;
 		try {
 			const note = await api.notes.create(projectId, createBody(target, draft, hasAudiences(target) ? chosen : farmer || shareWithFarm ? 'farm' : 'team', registerConsent));
-			// Saved on the target it was typed for; if the page has moved on since, the new list already has it.
+			// Saved on the target it was typed for; if the page has moved on since, that target's list (not the
+			// one shown) has it, so only tell the page.
 			if (key !== shownKey) {
 				onChanged?.();
 				return;
@@ -159,7 +165,8 @@
 			registerConsent = false;
 			onChanged?.();
 		} catch (err) {
-			error = message(err);
+			// A failure for a target the page has left would show on the new one's form.
+			if (key === shownKey) error = message(err);
 		} finally {
 			busy = false;
 		}
