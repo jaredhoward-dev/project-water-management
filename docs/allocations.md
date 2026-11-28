@@ -281,7 +281,10 @@ For a run, per farm or water user, per water source and per **water year**
   as it takes to read past the band (10.4 % above a ±10 % band, never
   "10 % above, outside the ±10 % band"; `bandText`, `statusSentence`).
 - **Storage**: the sum of the farm's registered storage (21(b) rows and
-  storage stated on a take) beside the dam capacity the run modelled, with
+  storage stated on a take), the most in force on any one of the run's
+  days, so a dam registered again during the run (a renewal, a raised wall)
+  counts once (engine `mostInForce`, ENGINE_VERSION moves with it), beside
+  the dam capacity the run modelled, with
   the difference (capacity − registered) and a status banded like a year's
   use (issue #72): *over* is a dam larger than the storage registered for
   it, *under* a smaller one, *unregistered* a dam with none registered. The
@@ -289,7 +292,8 @@ For a run, per farm or water user, per water source and per **water year**
   s21(a) take is the hydrologist's question (issue #90). A 21(b) row is
   never part of the registered volume a year's use is compared with.
 - **Irrigated area**: the sum of the irrigated areas stated on the unit's
-  takes in force on any of the run's days (like the storage, a row that
+  takes in force, the most on any one of the run's days (a take renewed
+  during the run counts once; like the storage, a row that
   lapsed before the run or starts after it isn't counted; a 21(b) row has
   none) beside the crop areas the run planted on the unit (its stored
   inputs' `cropAreas`, m² → ha: every crop the engine models is irrigated),
