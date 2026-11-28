@@ -1343,13 +1343,21 @@ export function classifyOp(op: ScenarioOp, ownedNodeIds: Iterable<string>, input
 		case 'ewrRule.set':
 		case 'ewrRule.remove':
 			return 'baseline';
-		case 'node.set':
+		case 'node.set': {
 			// Any other field of the applicant's own node is theirs to propose: its dam, irrigation,
 			// boreholes, and how it takes water (the supply rule and river pump, WP-3.8), which is
 			// what a licence to abstract from the river asks for, like a new pump. Land sets the unit's natural MAR share,
 			// which splits the catchment's natural runoff, so it stays baseline.
 			// Another unit's dam (engine 1.118.0) names a node beyond the applicant's own: never theirs (an application refuses it).
+			// Making an other water user a priority one ranks it above the farms upstream of it, which must then pass its
+			// demand (model.md §2.7c): as inserting a priority user is (node.insert), the authority's call, not the
+			// proposal's. Only when it wasn't one already (without the input that can't be told: conservative).
+			if (op.field === 'userPriority' && op.value !== 'junior') {
+				const n = input?.model.nodes.find((x) => x.id === op.nodeId);
+				if (!n || !seniorUser(n)) return 'baseline';
+			}
 			return ok(mine(op.nodeId) && !BASELINE_NODE_FIELDS.includes(op.field) && op.field !== 'cropRemoteNodeId');
+		}
 		case 'node.add':
 			// A new gauge moves an EWR site; a new node with land re-partitions the catchment's runoff (its natural MAR share).
 			return ok(!sharesRunoff(op.node));
