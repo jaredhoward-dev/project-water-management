@@ -17,6 +17,7 @@
 <script lang="ts">
 	// Thin wrapper over the native <dialog> (focus trap, Esc to close, backdrop).
 	import type { Snippet } from 'svelte';
+	import { escapeIsFor } from './dialogEscape';
 
 	let {
 		open = $bindable(false),
@@ -184,11 +185,14 @@
 	// Listened for on the window, not the dialog: when the focus has fallen out
 	// of the dialog to <body> (a control that had it was disabled) the key never
 	// reaches the dialog. A key from inside another dialog (the question
-	// `beforeclose` asks, stacked on this one) is that dialog's.
+	// `beforeclose` asks, stacked on this one, or a dialog nested inside
+	// this one's DOM) is that dialog's.
 	function onkeydown(e: KeyboardEvent) {
 		if (!beforeclose || !open || !el?.open || e.key !== 'Escape' || e.defaultPrevented) return;
-		const t = e.target;
-		if (t instanceof Node && t !== document.body && t !== document.documentElement && !el.contains(t)) return;
+		// The innermost dialog round the key's target takes it (dialogEscape.ts): not one stacked beside this
+		// (the question `beforeclose` asks), nor one nested in it (a paste dialog over a grid, issue #931).
+		const t = e.target instanceof Node ? e.target : null;
+		if (!escapeIsFor(el, t, document.body, document.documentElement)) return;
 		e.preventDefault();
 		requestClose();
 	}

@@ -99,15 +99,23 @@ describe('FarmState', () => {
 		expect(f.phase).toEqual({ kind: 'error', offline: false, attempts: 1 });
 	});
 
-	it('says access was removed on a 403 or 404 and clears the saved copy', async () => {
+	it('says access was removed on the API’s own 403 or 404 and clears the saved copy', async () => {
 		for (const status of [403, 404]) {
 			writeSaved('u1', P, N, vaalbankFixture());
-			const s = new FarmState(fakeApi({ view: async () => Promise.reject(new ApiError(status, 'x')) }), () => 'u1');
+			const s = new FarmState(fakeApi({ view: async () => Promise.reject(new ApiError(status, 'x', undefined, null, {}, true)) }), () => 'u1');
 			await s.load(P, N);
 			expect(s.phase).toEqual({ kind: 'removed' });
 			expect(s.view).toBeNull();
 			expect(readSaved('u1', P, N)).toBeNull();
 		}
+	});
+
+	it('keeps the saved copy on a 403 the API didn’t write (a WAF block page): a failure, not removed access', async () => {
+		writeSaved('u1', P, N, vaalbankFixture());
+		const s = new FarmState(fakeApi({ view: async () => Promise.reject(new ApiError(403, 'Forbidden')) }), () => 'u1');
+		await s.load(P, N);
+		expect(s.phase).not.toEqual({ kind: 'removed' });
+		expect(readSaved('u1', P, N)?.view.farm.name).toBe('Vaalbank (example)');
 	});
 
 	it('says why a WUA viewer’s preview is withheld (403 farm_preview_withheld), and keeps the saved copies', async () => {
@@ -129,7 +137,7 @@ describe('FarmState', () => {
 		const old = vaalbankFixture();
 		old.farm = { ...old.farm, nodeId: OLD, name: 'Unlinked unit' };
 		writeSaved('u1', P, OLD, old);
-		const view = vi.fn(async (_p: string, node: string) => (node === OLD ? Promise.reject(new ApiError(404, 'x')) : vaalbankFixture()));
+		const view = vi.fn(async (_p: string, node: string) => (node === OLD ? Promise.reject(new ApiError(404, 'x', undefined, null, {}, true)) : vaalbankFixture()));
 		const api = { ...fakeApi(), farm: { ...fakeApi().farm, view } };
 		const s = new FarmState(api, () => 'u1');
 		await s.load(P, null);

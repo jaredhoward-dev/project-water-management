@@ -29,7 +29,8 @@
 							"recurring": {
 								"interval": "year",
 								"interval_count": 1
-							}
+							},
+							"currency": "zar"
 						},
 						"current_period_start": 1796209600,
 						"current_period_end": 1827745600
@@ -43,7 +44,8 @@
 							"recurring": {
 								"interval": "year",
 								"interval_count": 1
-							}
+							},
+							"currency": "zar"
 						},
 						"current_period_start": 1796209600,
 						"current_period_end": 1827745600

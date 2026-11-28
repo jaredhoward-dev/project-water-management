@@ -5,11 +5,11 @@
 # the ENI actions their roles then need, and the private VPC gains nothing.
 # The module's own shape (routes, the Elastic IP on the ENI, the security
 # groups, IMDSv2, the recovery alarms) is pinned by running it directly: the
-# root's network guardrails (guardrails.tftest.hcl run "network") read only
+# root's network guardrails (guardrails_network.tftest.hcl run "network") read only
 # the root module's files, so these asserts are this module's guardrails.
 #
 # The mocks, overrides and variables below are copied from
-# guardrails.tftest.hcl (a test file can't share them); keep them in step.
+# guardrails_*.tftest.hcl (a test file can't share them); keep them in step.
 #
 #   pnpm check:infra          (bin/check-infra.sh: fmt + validate + test)
 

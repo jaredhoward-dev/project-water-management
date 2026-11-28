@@ -18,7 +18,7 @@
 -->
 <script lang="ts">
 	import { onDestroy, onMount, tick, untrack } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { page } from '$app/state';
 	import { api, hasRole, type Role, type RunMeta } from '#lib/api/index.js';
 	import { toEpochDay } from '@water-management/engine';
@@ -118,7 +118,7 @@
 		const url = new URL(page.url.href);
 		url.searchParams.set('run', id);
 		if (url.search === page.url.search) return;
-		void goto(url, { reset: false });
+		void guardedGoto(url, { reset: false });
 	}
 
 	// --- the run's details, through Runs' cache ---

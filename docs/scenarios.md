@@ -1775,10 +1775,15 @@ scenario is `'team'`, and behaves exactly as above).
     (removing a hidden farm reports no crop areas, transfers, patches,
     boreholes or demand objects; the EWR tables sited there are settings,
     which they see), and removing their own unit that a hidden off-take's
-    seepage rejoins below re-points that seepage one unit lower with the same
-    notes, problems and class as with no such off-take (engine ≥ 1.122.0, issue #853; unmasked,
-    the water reaches the outlet rather than leaving as a loss, and a unit
-    draining into the outflow gauge still returns none);
+    seepage rejoins below re-points that seepage to the nearest point above
+    the removed unit on the off-take's path (the last farm on the way down
+    from the source, or the source itself; `seepageAbove`, as in the op
+    catalogue's `transfer.set` row), with the same notes, problems and class
+    as with no such off-take (engine ≥ 1.122.0, issue #853). The water then
+    reaches the unit below exactly as before, rather than leaving the
+    catchment as a loss scored against the proposal (engine-errata.md ER-37);
+    it returns none only when no such point exists, which a valid rule never
+    meets;
   - `crop.remove` (engine ≥ 1.35.0) likewise counts only the areas on nodes
     they see, and a change to a crop is classed a baseline assumption
     whoever grows it, so neither says whether a hidden farm grows it;

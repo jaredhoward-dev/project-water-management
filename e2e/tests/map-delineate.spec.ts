@@ -229,6 +229,9 @@ test('a boundary is replaced only with the tick; Reject changes nothing; a point
 	// Outside the DEM: refused in the sheet with the reason, nothing proposed.
 	await delineateAt(page, [25, -30]);
 	await expect(sheet(page).getByTestId('delineate-error')).toContainText('outside the elevation model');
+	// Editing the coordinates clears that attempt's error: it answered the old point (issue #938).
+	await sheet(page).getByLabel('Latitude').fill('-30.5');
+	await expect(sheet(page).getByTestId('delineate-error')).toHaveCount(0);
 	await sheet(page).getByRole('button', { name: 'Close', exact: true }).click();
 	await page.getByTestId('map-draw-bar').getByRole('button', { name: 'Cancel' }).click();
 

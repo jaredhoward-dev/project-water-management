@@ -10549,7 +10549,13 @@ one). It changes no run output; 0.31.2 only adds it to the engine's surface.
   runs made by the affected versions stay stored. A new row also tags the
   runs it may affect in the app and emails their projects' owners once
   ([legal/known-defect-procedure.md](./legal/known-defect-procedure.md),
-  issue #103).
+  issue #103). The site's statement (`ValidationStatement.svelte`) lists the
+  run's `errata` ids as the API worked them out when the run carries them,
+  described from the site's own list, and an id the site's build doesn't
+  know yet is named as recorded after it; only without them does it fall
+  back to the site engine's `errataFor` (`statementErrata.ts`). So a site
+  older than the backend still prints every erratum the backend knows
+  ([deployment.md § Releasing](./deployment.md#releasing)).
 - **Methodology**: the current methodology statement's version and SHA-256
   ([methodology/](./methodology/README.md)); `methodology.test.ts` pins every
   published version's hash.

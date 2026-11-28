@@ -19,6 +19,7 @@ import pg from 'pg';
 import { issueInvoice, type InvoiceRequest } from '../src/billing/invoice.js';
 import { billingProvider } from '../src/billing/provider.js';
 import { describeTarget, type Target } from '../src/billing/staffGrant.js';
+import { setOwnerBillingEnforced } from '../src/billing/enforced.js';
 import { loadDevEnv } from '../src/config/devEnv.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -71,6 +72,8 @@ export async function runInvoice(url: string, req: ScriptRequest, env: NodeJS.Pr
 	const client = new pg.Client({ connectionString: url });
 	await client.connect();
 	try {
+		// The invoice's grant fires the pause sync: enforced as the app is (409).
+		await setOwnerBillingEnforced(client, env);
 		const r = await issueInvoice(client, provider, req);
 		const i = r.invoice;
 		const lines = [

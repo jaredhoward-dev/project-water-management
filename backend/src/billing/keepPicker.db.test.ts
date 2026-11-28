@@ -1,7 +1,7 @@
 // 345_plan_keep_picker (issue #641 § Downgrade or lapse; docs/billing.md § Choosing the catchment to keep): the Plan
 // page's live-catchment picker over 341's pause.
 //  - GET /account/plan/live-catchments lists the account's live catchments for its person, with which stays live, and
-//    when the account went past Free's limit; a stranger can't read another's (no route names another account), and a
+//    whether a plan ended past Free's limit (409, planEnded) and when the grace started (null in shadow mode); a stranger can't read another's (no route names another account), and a
 //    team's list is its admins' only (a member, positive control: the admin, gets it);
 //  - POST /account/plan/keep: the owner chooses, and past the grace, enforced, the pause moves at once;
 //  - a project that isn't one of the account's live catchments, a stranger's choice and a team member's are all 404;
@@ -66,7 +66,7 @@ describe('345: the live-catchment picker on the Plan page', () => {
 	it('an account that never had a plan lists its live catchments, with no grace', async () => {
 		const r = await owner.call('GET', '/account/plan/live-catchments');
 		expect(r.status).toBe(200);
-		expect(r.body).toMatchObject({ freeLimit: 1, overFreeSince: null, pausesFrom: null });
+		expect(r.body).toMatchObject({ freeLimit: 1, planEnded: false, overFreeSince: null, pausesFrom: null });
 		expect(r.body.catchments.map((c: { id: string }) => c.id)).toEqual([b, a]);
 		expect(r.body.catchments[0]).toEqual({ id: b, name: 'Keep B', chosen: false, staysLive: true, pausedAt: null });
 	});
@@ -79,11 +79,17 @@ describe('345: the live-catchment picker on the Plan page', () => {
 
 	it('past the grace, enforced, the pause moves to follow the owner’s choice at once', async () => {
 		await lapse(account);
+		// Shadow mode (409): the plan has ended, but no grace runs, so no pause date is given.
+		await tick();
+		const shadow = await owner.call('GET', '/account/plan/live-catchments');
+		expect(shadow.body).toMatchObject({ planEnded: true, overFreeSince: null, pausesFrom: null });
+		await asOwner(`UPDATE billing_account SET over_free_since = now() - interval '15 days' WHERE id = $1`, [account]);
 		process.env.BILLING_ENFORCED = 'true';
 		await tick();
 		expect(await paused(account)).toEqual([a]);
 		const before = await owner.call('GET', '/account/plan/live-catchments');
 		expect(before.body.overFreeSince).not.toBeNull();
+		expect(before.body.planEnded).toBe(true);
 		expect(before.body.catchments.find((c: { id: string }) => c.id === a).pausedAt).not.toBeNull();
 		expect((await owner.call('GET', `/projects/${a}`)).body.project.planPausedAt).not.toBeNull();
 		expect((await owner.call('GET', `/projects/${b}`)).body.project.planPausedAt).toBeNull();

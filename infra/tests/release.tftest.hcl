@@ -4,7 +4,7 @@
 # that keeps the image renderer_image_tag pins.
 #
 # The mocks, overrides and variables below are copied from
-# guardrails.tftest.hcl (a test file can't share them); keep them in step.
+# guardrails_*.tftest.hcl (a test file can't share them); keep them in step.
 #
 #   pnpm check:infra          (bin/check-infra.sh: fmt + validate + test)
 

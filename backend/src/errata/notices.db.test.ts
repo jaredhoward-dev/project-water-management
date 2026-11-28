@@ -6,7 +6,8 @@
 // through the team; never an editor, a viewer or an unconfirmed address),
 // that a sweep runs once per range, that water_app writes nothing itself and
 // only the worker sweeps, claims and purges, the email each owner gets (built
-// as them), the re-checks at send, the data export and the purge. Each
+// as them, one per owner and project listing every erratum: 411), the
+// re-checks at send, the data export and the purge. Each
 // "can't" has its positive control.
 //
 // The errata here are invented (ER-9xxx, engine 90.x.y and up), so no other
@@ -202,7 +203,7 @@ describe('the sweep', () => {
 describe('sending', () => {
 	const errata = [erratum('ER-9001', { fixedIn: null }), erratum('ER-9002', { keyedOn: 'fit', firstAffected: '90.2.0', fixedIn: null }), erratum('ER-9003', { firstAffected: '90.3.0', fixedIn: null })];
 
-	it('mails each owner once, built as them: the erratum, the conditions, the count and a link to the runs, the names escaped', async () => {
+	it('mails each owner once per project, built as them, listing every erratum: the conditions, the count and a link to the runs, the names escaped', async () => {
 		// Demoted since the sweep: the team admin is now a team member (an editor), so gets nothing. (The owner joins as
 		// a second admin first: a team keeps at least one, 149.)
 		const team = (await asOwner('SELECT team_id::text AS t FROM project WHERE id = $1', [affected]))[0]!.t as string;
@@ -214,13 +215,13 @@ describe('sending', () => {
 			outbox.length = 0;
 			const r = await sendErratumNotices({ errata, limit: 500 });
 			expect(r.failed).toBe(0);
+			// One email for both errata that reach the owner's project (411), not one each.
 			const toOwner = outbox.filter((m) => m.to === owner.email && m.kind === 'erratum_notice');
-			expect(toOwner.map((m) => m.subject).sort()).toEqual([
-				'Known engine bug ER-9001 may affect Erratum <i>catchment</i> — IC-WBT',
-				'Known engine bug ER-9003 may affect Erratum <i>catchment</i> — IC-WBT'
-			]);
-			const m = toOwner.find((x) => x.subject.includes('ER-9001'))!;
+			expect(toOwner.map((m) => m.subject)).toEqual(['2 known engine bugs may affect Erratum <i>catchment</i> — IC-WBT']);
+			const m = toOwner[0]!;
+			expect(m.text).toContain('ER-9001 and ER-9003');
 			expect(m.text).toContain('2 runs in Erratum <i>catchment</i> were made by engine 90.1.0 or later');
+			expect(m.text).toContain('1 run in Erratum <i>catchment</i> was made by engine 90.3.0 or later');
 			expect(m.text).toContain('It changes results only when: A dam <b>spills</b> on a dry day.');
 			expect(m.text).toContain(`/projects/${affected}?tab=runs`);
 			expect(m.html).toContain('Erratum &lt;i&gt;catchment&lt;/i&gt;');
@@ -228,7 +229,9 @@ describe('sending', () => {
 			expect(outbox.filter((x) => x.to === teamAdmin.email || x.to === otherOwner.email)).toEqual([]);
 			const status = async (u: User, id: string) =>
 				(await asOwner(`SELECT status, reason FROM erratum_notice WHERE erratum_id = $1 AND user_id = $2 ORDER BY project_id LIMIT 1`, [id, u.id]))[0];
+			// Each erratum keeps its own record that the owner was told.
 			expect(await status(owner, 'ER-9001')).toMatchObject({ status: 'sent', reason: null });
+			expect(await status(owner, 'ER-9003')).toMatchObject({ status: 'sent', reason: null });
 			expect(await status(teamAdmin, 'ER-9001')).toMatchObject({ status: 'skipped', reason: 'no longer an owner of the project' });
 			expect(await status(otherOwner, 'ER-9002')).toMatchObject({ status: 'skipped', reason: 'the address is suppressed (a bounce or complaint)' });
 			// Settled: a second tick sends nothing.
@@ -331,6 +334,125 @@ describe('the claim’s lease and retries', () => {
 	});
 });
 
+describe('one email per owner and catchment (411: a release that adds several errata)', () => {
+	// Five new errata reach every 90.x run (open, keyed on the run), so each of the owner's catchments is touched by all five.
+	const five = ['ER-9201', 'ER-9202', 'ER-9203', 'ER-9204', 'ER-9205'].map((id) => erratum(id, { firstAffected: '90.0.0', fixedIn: null, summary: `Bug ${id}` }));
+	const later = erratum('ER-9206', { firstAffected: '90.0.0', fixedIn: null, summary: 'Bug ER-9206' });
+	let second: string;
+	let third: string;
+	const mails = () => outbox.filter((m) => m.kind === 'erratum_notice');
+
+	beforeAll(async () => {
+		// Only these notices open, so the sends below see nothing of the tests above.
+		await asOwner(`UPDATE erratum_notice SET status = 'skipped', settled_at = now(), locked_until = NULL WHERE status IN ('pending', 'sending')`);
+		second = (await owner.call('POST', '/projects', { name: 'Second catchment' })).body.project.id as string;
+		third = (await owner.call('POST', '/projects', { name: 'Third catchment' })).body.project.id as string;
+		await arrange(async (q) => {
+			for (const p of [second, third])
+				await q(`INSERT INTO model_run (project_id, created_by, engine_version, start_date, end_date, inputs) VALUES ($1, $2, '90.1.0', '2020-01-01', '2020-01-02', '{}')`, [p, owner.id]);
+		});
+	});
+
+	afterAll(async () => {
+		await asOwner(`DELETE FROM erratum_notice WHERE erratum_id LIKE 'ER-92%'`);
+		await asOwner(`DELETE FROM erratum_sweep WHERE erratum_id LIKE 'ER-92%'`);
+		await asOwner('DELETE FROM project WHERE id IN ($1, $2)', [second, third]);
+	});
+
+	it('five new errata: one email per owner per catchment listing all five, each erratum keeping its own sent record', async () => {
+		// Swept one at a time, as the tick's single call does in a loop: a notice per erratum, project and owner.
+		expect(await sweepErrata(five)).toBeGreaterThan(0);
+		const mine = async () =>
+			asOwner(`SELECT project_id::text AS p, erratum_id AS e, status FROM erratum_notice WHERE user_id = $1 AND erratum_id LIKE 'ER-92%' ORDER BY 1, 2`, [owner.id]);
+		expect((await mine()).filter((r) => r.p === second)).toHaveLength(5);
+		outbox.length = 0;
+		// A small limit counts emails, not notices: 2 emails' worth claims every notice of 2 (project, owner) pairs, whole.
+		const r1 = await sendErratumNotices({ errata: [...ENGINE_ERRATA, ...five], limit: 2 });
+		expect(r1.failed).toBe(0);
+		expect(mails()).toHaveLength(2);
+		const r2 = await sendErratumNotices({ errata: [...ENGINE_ERRATA, ...five], limit: 100 });
+		expect(r2.failed).toBe(0);
+		const toOwner = mails().filter((m) => m.to === owner.email);
+		// The owner's three catchments: three emails, not fifteen.
+		expect(toOwner.map((m) => m.subject).sort()).toEqual(
+			[
+				'5 known engine bugs may affect Erratum <i>catchment</i> — IC-WBT',
+				'5 known engine bugs may affect Second catchment — IC-WBT',
+				'5 known engine bugs may affect Third catchment — IC-WBT'
+			].sort()
+		);
+		for (const m of toOwner) {
+			expect(m.text).toContain('ER-9201, ER-9202, ER-9203, ER-9204 and ER-9205');
+			for (const e of five) expect(m.text).toContain(`Bug ${e.id}.`);
+		}
+		// Every other owner (the team admin of the first catchment, the other owner's catchments) gets one per catchment too.
+		const perRecipientAndProject = new Set(mails().map((m) => `${m.to}|${m.subject}`));
+		expect(perRecipientAndProject.size).toBe(mails().length);
+		expect(mails().every((m) => m.subject.startsWith('5 known engine bugs'))).toBe(true);
+		// Each erratum's own record, per project: all sent.
+		expect((await mine()).every((r) => r.status === 'sent')).toBe(true);
+		expect(await mine()).toHaveLength(15);
+	});
+
+	it('a re-sweep and a re-send send nothing: the record is per erratum and project', async () => {
+		outbox.length = 0;
+		expect(await sweepErrata(five)).toBe(0);
+		// Even a forced re-sweep (the range forgotten) queues no notice the owner was already sent.
+		await asOwner(`DELETE FROM erratum_sweep WHERE erratum_id LIKE 'ER-92%'`);
+		expect(await sweepErrata(five)).toBe(0);
+		expect(await sendErratumNotices({ errata: [...ENGINE_ERRATA, ...five] })).toEqual({ sent: 0, skipped: 0, failed: 0 });
+		expect(mails()).toEqual([]);
+	});
+
+	it('a new erratum later is one email per owner and catchment with just it (positive control: it is sent)', async () => {
+		outbox.length = 0;
+		expect(await sweepErrata([...five, later])).toBeGreaterThan(0);
+		await sendErratumNotices({ errata: [...ENGINE_ERRATA, ...five, later], limit: 500 });
+		const toOwner = mails().filter((m) => m.to === owner.email);
+		expect(toOwner.map((m) => m.subject).sort()).toEqual(
+			[
+				'Known engine bug ER-9206 may affect Erratum <i>catchment</i> — IC-WBT',
+				'Known engine bug ER-9206 may affect Second catchment — IC-WBT',
+				'Known engine bug ER-9206 may affect Third catchment — IC-WBT'
+			].sort()
+		);
+		for (const m of toOwner) {
+			expect(m.text).toContain('Bug ER-9206.');
+			for (const e of five) expect(m.text).not.toContain(e.id);
+		}
+	});
+
+	it('a failed send retries the whole email, and every notice it listed settles together', async () => {
+		const extra = [erratum('ER-9207', { firstAffected: '90.0.0', fixedIn: null }), erratum('ER-9208', { firstAffected: '90.0.0', fixedIn: null })];
+		await sweepErrata(extra);
+		// Only the owner's Second catchment left open, so the send below is this one email.
+		await asOwner(`UPDATE erratum_notice SET status = 'skipped', settled_at = now() WHERE status = 'pending' AND NOT (user_id = $1 AND project_id = $2)`, [owner.id, second]);
+		const rows = async () =>
+			asOwner(`SELECT erratum_id AS e, status, attempts FROM erratum_notice WHERE user_id = $1 AND project_id = $2 AND erratum_id IN ('ER-9207', 'ER-9208') ORDER BY 1`, [
+				owner.id,
+				second
+			]);
+		vi.stubEnv('MAIL_TRANSPORT', 'smtp');
+		vi.stubEnv('SMTP_HOST', '127.0.0.1');
+		vi.stubEnv('SMTP_PORT', '1');
+		const errSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+		try {
+			expect(await sendErratumNotices({ errata: [...ENGINE_ERRATA, ...extra] })).toEqual({ sent: 0, skipped: 0, failed: 2 });
+			expect(await rows()).toEqual([
+				{ e: 'ER-9207', status: 'pending', attempts: 1 },
+				{ e: 'ER-9208', status: 'pending', attempts: 1 }
+			]);
+		} finally {
+			vi.unstubAllEnvs();
+			errSpy.mockRestore();
+		}
+		outbox.length = 0;
+		expect(await sendErratumNotices({ errata: [...ENGINE_ERRATA, ...extra] })).toEqual({ sent: 2, skipped: 0, failed: 0 });
+		expect(mails().map((m) => m.subject)).toEqual(['2 known engine bugs may affect Second catchment — IC-WBT']);
+		expect((await rows()).map((r) => r.status)).toEqual(['sent', 'sent']);
+	});
+});
+
 describe('the worker’s tick', () => {
 	it('sweeps a new erratum and sends its notices in the same tick; the next tick queues nothing', async () => {
 		// A real erratum (the engine's list, as the tick passes it), forgotten so this tick sweeps it again, and a run it reaches.
@@ -349,9 +471,13 @@ describe('the worker’s tick', () => {
 			const first = await runTick({ feeds: false, reports: false, alerts: false, projectIds: [affected] });
 			expect(first.erratumNotices.queued).toBeGreaterThanOrEqual(2);
 			expect(first.erratumNotices.sent).toBeGreaterThanOrEqual(2);
-			expect(outbox.filter((m) => m.kind === 'erratum_notice' && m.subject.startsWith(`Known engine bug ${target.id} may affect Erratum`)).map((m) => m.to).sort()).toEqual(
-				[owner.email, teamAdmin.email].sort()
-			);
+			// One email per owner for the catchment, naming the erratum (alone, or with any other the same sweep found, 411).
+			expect(
+				outbox
+					.filter((m) => m.kind === 'erratum_notice' && m.subject.includes('may affect Erratum <i>catchment</i>') && m.text.includes(`(${target.id}, severity`))
+					.map((m) => m.to)
+					.sort()
+			).toEqual([owner.email, teamAdmin.email].sort());
 			const second = await runTick({ feeds: false, reports: false, alerts: false, projectIds: [affected] });
 			expect(second.erratumNotices).toMatchObject({ queued: 0, sent: 0 });
 		} finally {

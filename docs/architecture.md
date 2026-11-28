@@ -524,7 +524,7 @@ must not inherit the last page's language. CloudFront's `spa_rewrite` function s
 `/welcome` from `welcome.html`, `/welcome/af` from `welcome/af.html` (its
 `PRERENDERED` list), the pricing page (issue #641, `routes/welcome/pricing/[[lang=locale]]`, built the same way and treated as a landing route by
 `hooks.server.ts` and the root layout: `LANDING_ROUTES`) from `welcome/pricing.html` and `welcome/pricing/af.html`, and `/privacy`, `/terms`, `/methods` and `/data-sources` from theirs (`infra/s3_cloudfront.tf`, guarded in
-`guardrails.tftest.hcl`, and `infra/scripts/cloudfront-functions.test.mjs`
+`guardrails_baseline.tftest.hcl`, and `infra/scripts/cloudfront-functions.test.mjs`
 checks `PRERENDERED` against the routes and the language table, so a new
 language can't 404 in production only; the e2e static server mirrors it). The absolute URLs in
 its tags come from `paths.origin` (SvelteKit's config in `frontend/vite.config.ts`): the build's `SITE_ORIGIN` (the
@@ -1135,7 +1135,9 @@ flowchart LR
    the mails then say the firing event's forecast is out of date), the data feeds (staleness per feed, each at its own level) and
    the dead jobs. `alerts/rules.ts` decides
    with hysteresis: open an event on crossing, clear it only after recovery
-   past the margin. A restriction notice is an event per change. Each newly
+   past the margin. A restriction notice is an event per change, new words
+   under no restriction included; the notices standing when that shipped
+   were recorded as already announced, unmailed (411). Each newly
    opened event is fanned out (`app_alert_fan_out`) to one delivery per
    recipient, `pending` or `digest` by their choice. Nothing is mailed here:
    the job holds no network I/O, and its writes commit with its "done".
@@ -3245,6 +3247,14 @@ sequenceDiagram
   those PDFs from storage (`reports/erasure.ts`; MinIO or the bucket, the
   worker's role holding `s3:DeleteObject` on `reports/*` only), dropping
   each entry once its object is gone and retrying the rest next tick.
+  A render still in flight when its row goes stores its PDF after that
+  removal, so whoever stored it asks `app_report_pdf_orphaned` (398, issue
+  #911) right after: the inline render in its job, and for the renderer
+  Lambda (no database) the worker on its answer, which names the project.
+  No report of that id left: the ids are queued again and the next tick
+  removes the late PDF. Locally `pnpm dev:s3:up` gives the `water-reports`
+  bucket production's 7-day expiry rule too (`expire-reports` on
+  `reports/`, `backend/scripts/s3-lifecycle.ts`).
 
 Where the render runs (`REPORT_RENDERER`, `jobs/transport.ts`):
 

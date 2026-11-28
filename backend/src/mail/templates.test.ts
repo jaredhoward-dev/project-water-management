@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { accountDeletedMail, accountExistsMail, emailChangeTakenMail, erratumNoticeMail, licenceRecordMail, mfaCodeMail, mfaResetMail, resetWhen, escapeHtml, farmerInviteMail, inviteMail, listText, packNoticeMail, reportReadyMail, resetPasswordMail, roleName, siteLink, sitePage, verifyEmailMail } from './templates.js';
+import { accountDeletedMail, accountExistsMail, emailChangeTakenMail, erratumNoticeMail, licenceRecordMail, mfaCodeMail, mfaResetMail, resetWhen, escapeHtml, farmerInviteMail, inviteMail, listText, packNoticeMail, reportReadyMail, resetPasswordMail, roleName, siteLink, sitePage, verifyEmailMail, type ErratumNoticeFacts } from './templates.js';
 import { en } from './i18n/en.js';
 
 const TOKEN = 'abcDEF123_-abcDEF123_-abcDEF123_-abcDEF1234';
@@ -332,30 +332,64 @@ describe('accountDeletedMail (issue #112, POPIA s24(4))', () => {
 
 describe('erratumNoticeMail (issue #103, the known-defect procedure)', () => {
 	const erratum = { id: 'ER-7', keyedOn: 'run' as const, firstAffected: '0.16.0', fixedIn: '0.19.0', severity: 'Medium', appliesWhen: 'A transfer into a dam that loses water', summary: 'The dam was topped up short' };
-	const base = { projectId: 'p 1', projectName: 'Upper dam', erratum, runCount: 3 };
+	const one = (e: ErratumNoticeFacts['errata'][number]['erratum'] = erratum, runCount = 3) => ({
+		projectId: 'p 1',
+		projectName: 'Upper dam',
+		errata: [{ erratum: e, runCount }]
+	});
 
 	it('names the bug, when it changes results, the affected runs and the fix, and links the project’s runs', () => {
-		const m = erratumNoticeMail('o@example.com', base);
+		const m = erratumNoticeMail('o@example.com', one());
 		expect(m).toMatchObject({ kind: 'erratum_notice', to: 'o@example.com', subject: 'Known engine bug ER-7 may affect Upper dam — IC-WBT' });
+		expect(m.text).toContain('A known engine bug may affect results in Upper dam');
 		expect(m.text).toContain('We confirmed a bug in the model engine (ER-7, severity medium): The dam was topped up short.');
 		expect(m.text).toContain('It changes results only when: A transfer into a dam that loses water.');
 		expect(m.text).toContain('3 runs in Upper dam were made by engine 0.16.0 up to (not including) 0.19.0, which had this bug.');
 		expect(m.text).toContain('It is fixed in engine 0.19.0.');
 		expect(m.text).toContain('/projects/p%201?tab=runs');
 		expect(m.text).toContain('You get this email because you own Upper dam.');
+		expect(m.text).not.toContain('1 of 1');
 	});
 
 	it('one run reads in the singular; an open erratum says it isn’t fixed yet', () => {
-		const m = erratumNoticeMail('o@example.com', { ...base, runCount: 1, erratum: { ...erratum, fixedIn: null } });
+		const m = erratumNoticeMail('o@example.com', one({ ...erratum, fixedIn: null }, 1));
 		expect(m.text).toContain('1 run in Upper dam was made by engine 0.16.0 or later, which had this bug.');
 		expect(m.text).toContain('It is not fixed yet.');
 		expect(m.text).not.toContain('fixed in engine');
 	});
 
 	it('a fit erratum speaks of the calibration the parameters came from', () => {
-		const m = erratumNoticeMail('o@example.com', { ...base, erratum: { ...erratum, keyedOn: 'fit' } });
+		const m = erratumNoticeMail('o@example.com', one({ ...erratum, keyedOn: 'fit' }));
 		expect(m.text).toContain('3 runs in Upper dam use parameters from an automatic calibration made by engine 0.16.0 up to (not including) 0.19.0');
-		expect(erratumNoticeMail('o@example.com', { ...base, runCount: 1, erratum: { ...erratum, keyedOn: 'fit' } }).text).toContain('1 run in Upper dam uses parameters');
+		expect(erratumNoticeMail('o@example.com', one({ ...erratum, keyedOn: 'fit' }, 1)).text).toContain('1 run in Upper dam uses parameters');
+	});
+
+	it('several errata go in one email (411): the subject counts them, the intro names them all, and each keeps its own words, count and fix', () => {
+		const errata = [
+			{ erratum, runCount: 3 },
+			{ erratum: { ...erratum, id: 'ER-8', fixedIn: null, summary: 'Spills were lost' }, runCount: 1 },
+			{ erratum: { ...erratum, id: 'ER-9', keyedOn: 'fit' as const, summary: 'The fit drifted' }, runCount: 2 }
+		];
+		const m = erratumNoticeMail('o@example.com', { projectId: 'p 1', projectName: 'Upper dam', errata });
+		expect(m.subject).toBe('3 known engine bugs may affect Upper dam — IC-WBT');
+		expect(m.text).toContain('Known engine bugs may affect results in Upper dam');
+		expect(m.text).toContain('We confirmed 3 bugs in the model engine that may affect runs in Upper dam: ER-7, ER-8 and ER-9.');
+		const at = (s: string) => m.text.indexOf(s);
+		expect(at('1 of 3: ER-7')).toBeLessThan(at('2 of 3: ER-8'));
+		expect(at('2 of 3: ER-8')).toBeLessThan(at('3 of 3: ER-9'));
+		expect(m.text).toContain('(ER-7, severity medium): The dam was topped up short.');
+		expect(m.text).toContain('3 runs in Upper dam were made by engine 0.16.0 up to (not including) 0.19.0');
+		expect(m.text).toContain('(ER-8, severity medium): Spills were lost.');
+		expect(m.text).toContain('1 run in Upper dam was made by engine 0.16.0 or later');
+		expect(m.text).toContain('2 runs in Upper dam use parameters from an automatic calibration');
+		// The closing advice, the link and the footer once, not once per erratum.
+		expect(m.text.split('consider telling the people who rely on it').length).toBe(2);
+		expect(m.text.split('You get this email because you own Upper dam.').length).toBe(2);
+		expect(m.text.split('/projects/p%201?tab=runs').length).toBe(2);
+	});
+
+	it('refuses an email that lists no erratum', () => {
+		expect(() => erratumNoticeMail('o@example.com', { projectId: 'p', projectName: 'x', errata: [] })).toThrow();
 	});
 });
 

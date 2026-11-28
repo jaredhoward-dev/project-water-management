@@ -72,7 +72,7 @@ describe('opensStraightAway', () => {
 describe('GetStarted after the example import', () => {
 	it('navigates only when opensStraightAway says so, else holds the card', () => {
 		expect(GET_STARTED).toContain('else if (!opensStraightAway(r)) held = r;');
-		expect(GET_STARTED).toContain('else if (!gone) await goto(`${basePath()}${r.path}`);');
+		expect(GET_STARTED).toContain('else if (!gone) await guardedGoto(`${basePath()}${r.path}`);');
 	});
 
 	it('shows the shared auto-runs-off line, for the plan that bills the example, only when the answer said so', () => {

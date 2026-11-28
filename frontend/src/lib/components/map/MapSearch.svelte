@@ -10,7 +10,8 @@
 	answer holds places, listed or picked at once, their credit (GeoNames, CC BY
 	4.0) shows under the box, linking to the Data sources page. The state is
 	mapSearchState.svelte.ts.
-	Escape closes the list. Nothing is saved, nothing is drawn: the view moves.
+	Escape closes the list, and so does emptying the box (its clear button ×, issue #938); a pick puts the focus back in the box (the
+	button it was on goes with the list). Nothing is saved, nothing is drawn: the view moves.
 -->
 <script lang="ts">
 	import { resolve } from '$app/paths';
@@ -47,6 +48,12 @@
 		void s.find(q);
 	}
 
+	/** A match picked from the list: the list (and the button that had the focus) goes, so the focus goes back to the box, as Escape's does. */
+	function pick(h: MapSearchHit) {
+		s.pick(h);
+		input.focus();
+	}
+
 	function key(e: KeyboardEvent) {
 		if (e.key === 'Escape' && s.close()) {
 			e.preventDefault();
@@ -67,6 +74,7 @@
 			placeholder="Find a town, farm, river, gauge, dam or quaternary"
 			bind:value={q}
 			bind:this={input}
+			oninput={(e) => s.edited(e.currentTarget.value)}
 			aria-describedby="{uid}-said"
 			data-testid="map-search-input"
 		/>
@@ -78,7 +86,7 @@
 		<ul class="hits" aria-label="Matches" data-testid="map-search-results" bind:offsetHeight={listH}>
 			{#each s.answer.hits as h, i (`${h.kind}:${h.dataset}:${h.code ?? h.name}:${i}`)}
 				<li>
-					<button type="button" class="hit" onclick={() => s.pick(h)} data-testid="map-search-hit" data-kind={h.kind}>
+					<button type="button" class="hit" onclick={() => pick(h)} data-testid="map-search-hit" data-kind={h.kind}>
 						<span class="name">{hitName(h)}</span>
 						<span class="detail small">{hitDetail(h)}</span>
 					</button>

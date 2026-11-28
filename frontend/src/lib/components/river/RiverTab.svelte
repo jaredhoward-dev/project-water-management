@@ -21,7 +21,7 @@
 	// Another run picked keeps the page on screen, aria-busy, until its record is in (docs/ui.md § EWR).
 	import { onDestroy, tick, untrack } from 'svelte';
 	import { fillHeader } from '#lib/components/workspace/headerSlot.svelte.js';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { page } from '$app/state';
 	import { api, type Project, type Run, type RunMeta, type RunSeriesRef } from '#lib/api/index.js';
 	import Lazy from '#lib/components/common/Lazy.svelte';
@@ -102,7 +102,7 @@
 		const url = new URL(page.url.href);
 		url.searchParams.set('run', id);
 		url.hash = '';
-		goto(url, { reset: false });
+		guardedGoto(url, { reset: false });
 	}
 
 	// --- the run's record and the one before it, through the Runs tab's cache ---

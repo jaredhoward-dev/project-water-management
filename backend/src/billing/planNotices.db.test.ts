@@ -73,7 +73,7 @@ describe('346: the grace and pause emails', () => {
 		// The owner keeps Alpha live; Bravo and Charlie are past Free's one.
 		await asOwner('UPDATE billing_account SET kept_project_id = $2 WHERE id = $1', [account, a]);
 		await asOwner(`INSERT INTO subscription (billing_account_id, plan_code, status, provider) VALUES ($1, 'pro', 'active', 'mock')`, [account]);
-		// The lapse: the trigger stamps the grace's start (341).
+		// The lapse. No grace starts until an enforced tick stamps it (409).
 		await asOwner(`UPDATE subscription SET status = 'canceled' WHERE billing_account_id = $1 AND status = 'active'`, [account]);
 	});
 

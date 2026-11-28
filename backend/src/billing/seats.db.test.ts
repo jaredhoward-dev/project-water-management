@@ -64,6 +64,14 @@ describe('POST /teams/:id/plan/seats with the mock provider', () => {
 
 		expect((await admin.call('POST', `/teams/${teamId}/plan/seats`, { seats: 3 })).status).toBe(200);
 		expect((await admin.call('GET', `/teams/${teamId}/plan`)).body.subscription).toMatchObject({ seats: 3 });
+		// Each mock event carried its price (#928) and passed the price check: the price accepted is the plan's, and no conflict.
+		expect(
+			await asOwner(
+				`SELECT s.price_minor = p.price_monthly_minor AS at_plan FROM subscription s JOIN plan p ON p.code = s.plan_code WHERE s.billing_account_id = $1 AND s.status = 'active'`,
+				[accountId]
+			)
+		).toEqual([{ at_plan: true }]);
+		expect(await asOwner('SELECT id FROM billing_conflict WHERE billing_account_id = $1', [accountId])).toEqual([]);
 	});
 });
 
@@ -72,7 +80,8 @@ describe('333: app_billing_live_subscription_ref', () => {
 
 	it('answers the provider and id to the team’s admin (positive control), null to a member and a stranger', async () => {
 		const account = (await admin.call('GET', `/teams/${teamId}/plan`)).body.account.id as string;
-		expect(await ref(admin, account)).toEqual({ provider: 'mock', externalRef: `sub_mock_${account.replace(/-/g, '')}` });
+		// Checkout's own new id (#929), not the per-account one the mock used before.
+		expect(await ref(admin, account)).toEqual({ provider: 'mock', externalRef: expect.stringMatching(/^sub_mock_[0-9a-f]{24}$/) });
 		expect(await ref(member, account)).toBeNull();
 		expect(await ref(stranger, account)).toBeNull();
 	});
@@ -80,5 +89,37 @@ describe('333: app_billing_live_subscription_ref', () => {
 	it('is null for an account with no live subscription', async () => {
 		const own = (await stranger.call('GET', '/account/plan')).body.account.id as string;
 		expect(await ref(stranger, own)).toBeNull();
+	});
+});
+
+// Fewer seats than the team's editors in use (docs/billing.md § Changing a Team's seats, step 4): with billing
+// enforced the reduction is refused before any provider call, since the seat guard (334) never takes a seat from
+// someone already holding one, so a team could otherwise buy many seats, fill them and drop back to 3 while keeping
+// every editor. Off (shadow mode), it passes. Positive control: down to the editors in use passes.
+describe('POST /teams/:id/plan/seats below the editors in use', () => {
+	it('is refused with billing enforced, passes down to the editors in use, and passes off', async () => {
+		const [owner, ...others] = (await Promise.all(['SbAdmin', 'SbOne', 'SbTwo', 'SbThree'].map((n) => signUp(n)))) as User[];
+		const team = (await owner!.call('POST', '/teams', { name: `Seats below WUA ${crypto.randomUUID().slice(0, 8)}` })).body.team.id as string;
+		const start = await owner!.call('POST', `/teams/${team}/plan/checkout`, { plan: 'team', interval: 'month', seats: 5 });
+		expect(start.status).toBe(200);
+		expect((await formPost(`${local(start.body.url)}&outcome=pays`)).status).toBe(303);
+		for (const u of others) expect((await owner!.call('POST', `/teams/${team}/members`, { email: u.email, role: 'member' })).status).toBe(201);
+		const plan = (await owner!.call('GET', `/teams/${team}/plan`)).body;
+		expect(plan.subscription).toMatchObject({ seats: 5 });
+		expect(plan.team.editorCount).toBe(4);
+
+		vi.stubEnv('BILLING_ENFORCED', 'true');
+		const refused = await owner!.call('POST', `/teams/${team}/plan/seats`, { seats: 3 });
+		expect(refused.status).toBe(409);
+		expect(refused.body).toMatchObject({ code: 'seats_below_editors', params: { seats: 3, editors: 4 } });
+		expect((await owner!.call('GET', `/teams/${team}/plan`)).body.subscription).toMatchObject({ seats: 5 });
+		// Positive control: down to the editors in use.
+		expect((await owner!.call('POST', `/teams/${team}/plan/seats`, { seats: 4 })).status).toBe(200);
+		expect((await owner!.call('GET', `/teams/${team}/plan`)).body.subscription).toMatchObject({ seats: 4 });
+
+		// Off (shadow mode): counted, never refused.
+		vi.stubEnv('BILLING_ENFORCED', '');
+		expect((await owner!.call('POST', `/teams/${team}/plan/seats`, { seats: 3 })).status).toBe(200);
+		expect((await owner!.call('GET', `/teams/${team}/plan`)).body.subscription).toMatchObject({ seats: 3 });
 	});
 });

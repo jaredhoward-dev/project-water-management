@@ -8,7 +8,7 @@
 	// Accept records the version (POST /auth/me/accept-terms) and the page
 	// the person asked for renders in its place.
 	import { tick } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { resolve } from '$app/paths';
 	import { focusPageStart } from '#lib/a11y/focusPage.js';
 	import { api } from '#lib/api/index.js';
@@ -60,7 +60,7 @@
 		session.user = null;
 		signingOut = false;
 		await tick();
-		await goto(resolve('login'));
+		await guardedGoto(resolve('login'));
 	}
 </script>
 

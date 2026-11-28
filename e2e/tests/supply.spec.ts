@@ -254,6 +254,14 @@ test('the node table shows River to dam set by month read-only, and links to the
 	await expect(sheet.getByRole('group', { name: 'Routing', exact: true }).getByTestId('river-to-dam-months-note')).toHaveText(
 		'River to dam takes up to 0.01 m³/s; nothing in Oct–Apr. The one value above is not used.'
 	);
+
+	// The same table opened over Crops & demand: the link opens the sheet on the Network, not Crops with no form
+	// (lib/nav/tabUrl.ts nodeSheetHref sets tab=network).
+	await page.goto(`/projects/${id}?tab=crops&grid=nodes`);
+	await page.getByRole('dialog', { name: 'Hydrological unit table' }).getByTestId(`divert-by-month-${upper.id}`).getByRole('link').click();
+	await expect(page.getByRole('dialog', { name: 'Edit Upper farm' })).toBeVisible();
+	await expect(page).toHaveURL(/[?&]tab=network\b/);
+	await expect(page).toHaveURL(/[?&]section=routing\b/);
 });
 
 test('a dam on the river (Upstream inflow to dam 100 %) has no River to dam; an off-channel one enters it in m³/s', async ({ page, owner }) => {

@@ -3,7 +3,7 @@
 	// Reached from the confirmation email. Works signed in or out (the token is
 	// the proof); signed in, the banner and session update straight away.
 	import { onMount } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { api } from '#lib/api/index.js';
@@ -25,7 +25,7 @@
 	let otherAccount = $state<string | null>(null);
 
 	onMount(async () => {
-		if (page.url.searchParams.has('token')) void goto(resolve('verify-email'), { replace: true, reset: false });
+		if (page.url.searchParams.has('token')) void guardedGoto(resolve('verify-email'), { replace: true, reset: false });
 		if (!token) return;
 		// Whether the signed-in account still needed confirming when the link was opened.
 		const wasUnconfirmed = session.user?.emailVerified === false;

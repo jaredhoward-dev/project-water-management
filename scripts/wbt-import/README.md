@@ -520,7 +520,10 @@ the built-in formats are openpyxl's table by id, not SheetJS's (which also
 has id 56, a time format openpyxl lacks); a workbook's own format replaces
 any id, 0 included, and ids past 0x188 are looked up as written (SheetJS
 moved them); a cell with no `s` has style 0, and `s` is read with Python's
-`int()` (`01`, ` 1`); the last `<numFmts>` and `<cellXfs>` block counts; an
+`int()` (`01`, ` 1`); the last `<numFmts>` and `<cellXfs>` block counts,
+and only blocks that are direct children of `<styleSheet>`, holding direct
+`<numFmt>`/`<xf>` children (one nested in an `extLst` is ignored, issue
+#915); an
 `s` or id `int()` can't read refuses the workbook, as openpyxl does. And cell
 text is decoded as openpyxl decodes it (issue #22). So the XML entities are
 expanded once, a formula's cached text included (SheetJS decoded it twice:

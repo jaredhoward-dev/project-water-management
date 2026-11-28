@@ -45,6 +45,12 @@ export type MockSession =
 			/** The live subscription to offer to cancel, when there is one (the mock's own: external ref sub_mock_…). */
 			subscription: {
 				planCode: string;
+				/**
+				 * Which provider holds it and its id (333): `manual` (a staff or invoice grant) has nothing to cancel here, so the
+				 * page shows its invoices only (#941); absent on a token signed before, read as the mock's own.
+				 */
+				provider?: string;
+				externalRef?: string | null;
 				planName?: string;
 				status: string;
 				periodStart: string;
@@ -54,6 +60,14 @@ export type MockSession =
 				seatsIncluded?: number;
 				/** How often it bills; absent on a token signed before 332, or null when not recorded: the event's items then carry no price. */
 				interval?: 'month' | 'year' | null;
+				/**
+				 * The plan figures at that interval (#928): the base price, each extra seat's price and the currency, which the
+				 * event's items carry as Stripe's do. Absent on a token signed before, or when the interval or plan is unknown:
+				 * the items then carry no price (MockPricing).
+				 */
+				baseMinor?: number;
+				extraSeatMinor?: number;
+				currency?: string;
 			} | null;
 			exp: number;
 	  };
@@ -86,8 +100,15 @@ export function readMockSession(secret: string | undefined, token: string | unde
 	return s;
 }
 
-/** The mock's subscription id for an account: one per account, so a second "pays" updates it rather than making another. */
+/**
+ * The id the mock gave an account's subscriptions before #929, one per account: a portal token or seat change
+ * that names no id falls back to it. New checkouts never use it, since re-subscribing under the id of a
+ * subscription that ended meets "ended stays ended" (399) as a conflict.
+ */
 export const mockSubscriptionRef = (accountId: string) => `sub_mock_${accountId.replace(/-/g, '')}`;
+
+/** A new subscription id for each checkout, as Stripe makes one per Checkout session paid (#929). */
+export const newMockSubscriptionRef = () => `sub_mock_${randomBytes(12).toString('hex')}`;
 
 const eventId = () => `evt_mock_${randomBytes(12).toString('hex')}`;
 
@@ -101,12 +122,40 @@ function addInterval(start: Date, interval: 'month' | 'year'): Date {
 const secs = (d: Date | string) => Math.floor(new Date(d).getTime() / 1000);
 
 /**
+ * What each item's price carries (#928): the interval, the currency and the
+ * plan figures checkout prices from (provider.ts checkoutPrices), the plan
+ * item at the base price and the extra-seat item at the extra-seat price, so
+ * app_billing_apply's price check (405) sees what Stripe would send. Null
+ * when a figure is missing (a token signed before, a subscription with no
+ * interval recorded): the items then carry no `price` at all, which the
+ * normaliser reads as "nothing to check" (priceOf and intervalOf undefined)
+ * and app_billing_apply keeps the stored interval and price, never as an
+ * unreadable price (`unpriced`). A real Stripe subscription always carries
+ * its prices, so this never loosens the check for one.
+ */
+export interface MockPricing {
+	interval: 'month' | 'year';
+	currency: string;
+	baseMinor: number;
+	extraSeatMinor: number;
+}
+
+const isMinor = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 0;
+
+/** The pricing from loose figures, or null when any is missing or malformed. */
+export function mockPricing(interval: 'month' | 'year' | null | undefined, currency: string | undefined, baseMinor: unknown, extraSeatMinor: unknown): MockPricing | null {
+	if ((interval !== 'month' && interval !== 'year') || !currency || !isMinor(baseMinor) || !isMinor(extraSeatMinor)) return null;
+	return { interval, currency: currency.toLowerCase(), baseMinor, extraSeatMinor };
+}
+
+/**
  * A subscription as Stripe sends it, with its items as checkout makes them
  * (provider/stripeApi.ts): the plan at quantity 1 and, past the included
  * seats, a second item of the extra seats; seats_included in the metadata;
  * each item's price recurring at the interval, when there is one.
  */
 function subscriptionObject(
+	ref: string,
 	accountId: string,
 	planCode: string,
 	status: string,
@@ -115,20 +164,21 @@ function subscriptionObject(
 	cancelAtPeriodEnd: boolean,
 	seats: number,
 	seatsIncluded = 1,
-	interval: 'month' | 'year' | null = null
+	pricing: MockPricing | null = null
 ): Record<string, unknown> {
-	// Each item's price carries the interval, as Stripe's does (the normaliser reads price.recurring.interval).
-	const price = interval ? { price: { object: 'price', recurring: { interval, interval_count: 1 } } } : {};
-	const item = (quantity: number) => ({ object: 'subscription_item', quantity, ...price, current_period_start: start, current_period_end: end });
+	// Each item's price as Stripe's: unit_amount, currency (lowercase) and the interval (the normaliser reads all three).
+	const price = (unitAmount: number) =>
+		pricing ? { price: { object: 'price', unit_amount: unitAmount, currency: pricing.currency, recurring: { interval: pricing.interval, interval_count: 1 } } } : {};
+	const item = (quantity: number, unitAmount: number) => ({ object: 'subscription_item', quantity, ...price(unitAmount), current_period_start: start, current_period_end: end });
 	const extra = Math.max(0, seats - seatsIncluded);
 	return {
-		id: mockSubscriptionRef(accountId),
+		id: ref,
 		object: 'subscription',
 		status,
 		cancel_at_period_end: cancelAtPeriodEnd,
 		trial_end: null,
 		metadata: { billing_account_id: accountId, plan_code: planCode, seats_included: String(seatsIncluded), wm_environment: billingEnvironment() },
-		items: { object: 'list', data: extra > 0 ? [item(1), item(extra)] : [item(1)] }
+		items: { object: 'list', data: extra > 0 ? [item(1, pricing?.baseMinor ?? 0), item(extra, pricing?.extraSeatMinor ?? 0)] : [item(1, pricing?.baseMinor ?? 0)] }
 	};
 }
 
@@ -136,7 +186,13 @@ function subscriptionObject(
 export function paidEvents(s: Extract<MockSession, { kind: 'checkout' }>, nowMs = Date.now()): Record<string, unknown>[] {
 	const now = new Date(nowMs);
 	const created = secs(now);
-	const sub = subscriptionObject(s.accountId, s.planCode, 'active', created, secs(addInterval(now, s.interval)), false, s.seats ?? 1, s.seatsIncluded ?? 1, s.interval);
+	const seats = s.seats ?? 1;
+	const seatsIncluded = s.seatsIncluded ?? 1;
+	// The token's whole price less its extra seats is the base (a token signed before seats were sold has none: the whole price).
+	const extra = Math.max(0, seats - seatsIncluded);
+	const extraSeatMinor = s.extraSeatMinor ?? (extra > 0 ? undefined : 0);
+	const pricing = mockPricing(s.interval, s.currency, isMinor(extraSeatMinor) ? s.amountMinor - extra * extraSeatMinor : undefined, extraSeatMinor);
+	const sub = subscriptionObject(newMockSubscriptionRef(), s.accountId, s.planCode, 'active', created, secs(addInterval(now, s.interval)), false, seats, seatsIncluded, pricing);
 	return [
 		{
 			id: eventId(),
@@ -152,13 +208,13 @@ export function paidEvents(s: Extract<MockSession, { kind: 'checkout' }>, nowMs 
 /** The event Stripe sends when the portal cancels at the period end: the subscription updated, still live until then. */
 export function cancelAtPeriodEndEvent(s: Extract<MockSession, { kind: 'portal' }>, nowMs = Date.now()): Record<string, unknown> | null {
 	const sub = s.subscription;
-	if (!sub) return null;
+	if (!sub || sub.provider === 'manual') return null;
 	return {
 		id: eventId(),
 		object: 'event',
 		type: 'customer.subscription.updated',
 		created: secs(new Date(nowMs)),
-		data: { object: subscriptionObject(s.accountId, sub.planCode, sub.status, secs(sub.periodStart), secs(sub.periodEnd), true, sub.seats, Math.min(sub.seats, sub.seatsIncluded ?? 1), sub.interval ?? null) }
+		data: { object: subscriptionObject(sub.externalRef || mockSubscriptionRef(s.accountId), s.accountId, sub.planCode, sub.status, secs(sub.periodStart), secs(sub.periodEnd), true, sub.seats, Math.min(sub.seats, sub.seatsIncluded ?? 1), mockPricing(sub.interval, sub.currency, sub.baseMinor, sub.extraSeatMinor)) }
 	};
 }
 
@@ -171,21 +227,25 @@ export function signedDelivery(secret: string, event: Record<string, unknown>, n
 /**
  * The event Stripe sends after a seat change (POST /teams/:id/plan/seats): the
  * subscription updated, its extra-seat item at the new quantity (none at the
- * included seats), the period and status as they were.
+ * included seats), the period and status as they were, each item priced
+ * from `pricing` (the plan figures at the subscription's interval; null when
+ * the interval isn't recorded: no prices, MockPricing).
  */
 export function seatsChangedEvent(
 	accountId: string,
+	externalRef: string,
 	sub: { planCode: string; status: string; periodStart: string; periodEnd: string; cancelAtPeriodEnd: boolean },
 	seatsIncluded: number,
 	seats: number,
-	nowMs = Date.now()
+	nowMs = Date.now(),
+	pricing: MockPricing | null = null
 ): Record<string, unknown> {
 	return {
 		id: eventId(),
 		object: 'event',
 		type: 'customer.subscription.updated',
 		created: secs(new Date(nowMs)),
-		data: { object: subscriptionObject(accountId, sub.planCode, sub.status, secs(sub.periodStart), secs(sub.periodEnd), sub.cancelAtPeriodEnd, seats, seatsIncluded) }
+		data: { object: subscriptionObject(externalRef, accountId, sub.planCode, sub.status, secs(sub.periodStart), secs(sub.periodEnd), sub.cancelAtPeriodEnd, seats, seatsIncluded, pricing) }
 	};
 }
 

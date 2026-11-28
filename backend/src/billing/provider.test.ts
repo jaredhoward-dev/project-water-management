@@ -13,10 +13,23 @@ const NOW = 1_800_000_000_000;
 const signed = (body = BODY, secret = SECRET) => ({ 'stripe-signature': signPayload(secret, body, NOW / 1000) });
 
 describe('billingProviderName', () => {
-	it('is the mock when unset or blank (the code default), else the name given', () => {
+	it('is the mock when unset or blank off Lambda (the code default), else the name given', () => {
 		expect(billingProviderName({})).toBe('mock');
 		expect(billingProviderName({ BILLING_PROVIDER: ' ' })).toBe('mock');
 		for (const n of ['mock', 'manual', 'stripe'] as const) expect(billingProviderName({ BILLING_PROVIDER: n })).toBe(n);
+	});
+
+	// A backend released before the Terraform apply that sets BILLING_PROVIDER starts with it unset
+	// (config/production.ts takes that): it must serve manual there, never the mock and its committed key.
+	it('is manual when unset or blank on Lambda, and a name given still wins', () => {
+		const lambda = { AWS_LAMBDA_FUNCTION_NAME: 'water-management-api' };
+		expect(billingProviderName(lambda)).toBe('manual');
+		expect(billingProviderName({ ...lambda, BILLING_PROVIDER: '  ' })).toBe('manual');
+		const p = billingProvider(lambda)!;
+		expect(p.acceptsWebhooks).toBe(false);
+		for (const n of ['manual', 'stripe'] as const) expect(billingProviderName({ ...lambda, BILLING_PROVIDER: n })).toBe(n);
+		// Named explicitly it is still the mock (production.ts refuses that value at cold start).
+		expect(billingProviderName({ ...lambda, BILLING_PROVIDER: 'mock' })).toBe('mock');
 	});
 
 	it('is null for a name that isn’t ours, never a fallback to the mock', () => {
@@ -109,6 +122,20 @@ describe('checkout and the portal (Phase 3)', () => {
 		const portal = new URL((await p.createPortal({ id: ACCOUNT, customerRef: null }, null, URLS)).url);
 		expect(portal.pathname).toBe('/billing/mock/portal');
 		expect(readMockSession(SECRET, portal.searchParams.get('t'), NOW)).toMatchObject({ kind: 'portal', accountId: ACCOUNT, subscription: null });
+	});
+
+	it('mock signs the plan figures at the subscription’s interval into its portal token, never the plan itself (#928)', async () => {
+		const p = billingProvider({ BILLING_WEBHOOK_SECRET: SECRET }, { now: () => NOW })!;
+		const live = { planCode: 'team', status: 'active', periodStart: '2026-11-01T00:00:00.000Z', periodEnd: '2027-11-01T00:00:00.000Z', cancelAtPeriodEnd: false, seats: 5, seatsIncluded: 3 };
+		const token = async (sub: Parameters<typeof p.createPortal>[1]) => readMockSession(SECRET, new URL((await p.createPortal({ id: ACCOUNT, customerRef: null }, sub, URLS)).url).searchParams.get('t'), NOW);
+		const yearly = await token({ ...live, interval: 'year', plan: TEAM });
+		expect(yearly).toMatchObject({ subscription: { baseMinor: 2499000, extraSeatMinor: 499000, currency: 'ZAR', interval: 'year' } });
+		expect(yearly?.kind === 'portal' && yearly.subscription && 'plan' in yearly.subscription).toBe(false);
+		// No interval recorded, or the plan not on sale: no figures, so the cancel's items carry no price (mock.ts MockPricing).
+		for (const sub of [{ ...live, interval: null, plan: TEAM }, { ...live, interval: 'year' as const }]) {
+			const t = await token(sub);
+			expect(t?.kind === 'portal' && t.subscription && 'baseMinor' in t.subscription).toBe(false);
+		}
 	});
 
 	it('mock without its dev key is billing_provider_error, never an unsigned page', async () => {

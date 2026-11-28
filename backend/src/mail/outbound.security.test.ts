@@ -114,14 +114,11 @@ const builders: Record<string, () => Mail[]> = {
 		templates.LOCALES.map((l) => templates.accountDeletedMail(TO, { projects: [EVIL, EVIL], teams: [EVIL] }, l)),
 	erratumNoticeMail: () =>
 		(['run', 'fit'] as const).flatMap((keyedOn) =>
-			['1.2.0', null].map((fixedIn) =>
-				templates.erratumNoticeMail(TO, {
-					projectId: 'p1',
-					projectName: EVIL,
-					erratum: { id: 'ER-1', keyedOn, firstAffected: '1.0.0', fixedIn, severity: 'High', appliesWhen: EVIL, summary: EVIL },
-					runCount: 2
-				})
-			)
+			['1.2.0', null].flatMap((fixedIn) => {
+				const e = (id: string) => ({ erratum: { id, keyedOn, firstAffected: '1.0.0', fixedIn, severity: 'High', appliesWhen: EVIL, summary: EVIL }, runCount: 2 });
+				// One erratum, and several in one email (411).
+				return [[e('ER-1')], [e('ER-1'), e('ER-2')]].map((errata) => templates.erratumNoticeMail(TO, { projectId: 'p1', projectName: EVIL, errata }));
+			})
 		),
 	// Recovering a lost second factor (205_mfa_recovery, auth/mfaReset.ts): the links carry the hostile text (the
 	// site's own links can't, but the template must escape whatever it is given), the admin's the team's name.

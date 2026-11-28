@@ -244,3 +244,41 @@ describe('getPackBundle (154_pack_reproduce)', () => {
 		await expect(getPackBundle(key, 10)).rejects.toThrow('has no body');
 	});
 });
+describe('applyLocalReportsLifecycle (pnpm dev:s3:up, issue #911)', () => {
+	it("creates the local reports bucket if missing and puts production's 7-day expiry on reports/, the same on every run", async () => {
+		failHead.on = true;
+		const { applyLocalReportsLifecycle, REPORT_RETENTION_DAYS } = await import('./storage.js');
+		expect(await applyLocalReportsLifecycle()).toEqual({ bucket: 'water-reports' });
+		const rule = { ID: 'expire-reports', Status: 'Enabled', Filter: { Prefix: 'reports/' }, Expiration: { Days: 7 } };
+		expect(REPORT_RETENTION_DAYS).toBe(7);
+		expect(sent).toEqual([
+			{ name: 'HeadBucketCommand', input: { Bucket: 'water-reports' } },
+			{ name: 'CreateBucketCommand', input: { Bucket: 'water-reports' } },
+			{ name: 'PutBucketLifecycleConfigurationCommand', input: { Bucket: 'water-reports', LifecycleConfiguration: { Rules: [rule] } } }
+		]);
+		// Again (a second dev:s3:up): the same whole configuration, nothing added.
+		sent.length = 0;
+		failHead.on = false;
+		resetStorageClient();
+		await applyLocalReportsLifecycle();
+		expect(sent.map((c) => c.name)).toEqual(['HeadBucketCommand', 'PutBucketLifecycleConfigurationCommand']);
+		expect(sent[1]!.input).toEqual({ Bucket: 'water-reports', LifecycleConfiguration: { Rules: [rule] } });
+	});
+
+	it("matches production's rule in infra/reports.tf (id, prefix, days)", async () => {
+		const { readFileSync } = await import('node:fs');
+		const tf = readFileSync(new URL('../../../infra/reports.tf', import.meta.url), 'utf8');
+		const block = tf.slice(tf.indexOf('resource "aws_s3_bucket_lifecycle_configuration" "reports"'));
+		expect(block).toMatch(/id\s*=\s*"expire-reports"/);
+		expect(block).toMatch(/prefix\s*=\s*"reports\/"/);
+		expect(block).toMatch(/days\s*=\s*local\.report_retention_days/);
+		expect(tf).toMatch(/report_retention_days\s*=\s*7\b/);
+	});
+
+	it('refuses STORAGE=s3: production\'s bucket and rule are Terraform\'s', async () => {
+		vi.stubEnv('STORAGE', 's3');
+		const { applyLocalReportsLifecycle } = await import('./storage.js');
+		await expect(applyLocalReportsLifecycle()).rejects.toThrow('Terraform');
+		expect(sent).toEqual([]);
+	});
+});

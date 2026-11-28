@@ -668,6 +668,9 @@ did, and refuses the whole file on any problem, listing them per feature:
   can't be imported twice into a project (409). Two identical imports at
   once both pass the duplicate check; the unique index `geo_source_sha_idx`
   stops the second, which gets the same 409, never a bare "already exists".
+  The upload sheet and Every feature list it cut to 12 characters, with
+  Copy for the full hash; where the browser refuses the clipboard, the full
+  hash is written out in its place, selected, to copy by hand.
 - **A file may mix kinds** (issue #326 D2). `POST …/map/import/preview`
   reads and checks the file as the import will, saves nothing, and proposes
   each feature's kind (`proposeKinds` in `geojson.ts`):
@@ -1701,7 +1704,8 @@ to a point on a river. The design, the method and its accuracy are in
 - **Where you click.** A **terrain channel** (the solid red lines, orange-red in dark, named in the key; [§ The
   elevation model's channels](#the-elevation-models-channels)) at the
   catchment's outlet, or just below a dam wall (the draw bar's point; or
-  **Enter coordinates**). The server puts the point on the nearest cell
+  **Enter coordinates**; editing them clears the last attempt's error and
+  channel offer, which answered the old point, issue #938). The server puts the point on the nearest cell
   within 150 m that has at least `minKm2` draining through it (`place.ts`,
   issue #472), measured from the exact click to each cell's centre, the
   larger area winning a tie. `minKm2` is the least area of the channels
@@ -1781,7 +1785,15 @@ to a point on a river. The design, the method and its accuracy are in
   the one after where the request stopped, within the worker's 300 s. The
   sheet says it is queued, then how far it is, asks every 2 s, and shows
   the proposal (or the refusal) as the request would have; a reloaded Map
-  picks it up. **A large catchment, over about 100 km across: work it out
+  picks it up. Closed while the worker has it, the Map asks for it instead
+  (every 2 s while the sheet stays closed) and, once it is done, says what
+  came of it in its notice, a live region: the proposal is waiting (**Review
+  it**), or the refusal or failure with **Delineate again**, either link
+  opening the sheet (`delineation.ts` `backgroundOutcome`, issue #938);
+  reopened from it, the sheet shows the refusal as the request would have,
+  a much larger channel's **Use that channel** offer included
+  (`outcomeShown`; only from that link, not an older proposal's Review it). The sheet hands the Map what it left waiting, so
+  closing it asks the server nothing. **A large catchment, over about 100 km across: work it out
   in the background** sends a point straight there. One per editor at a
   time: a new click in the same catchment replaces a waiting one, and one
   running, or waiting in another catchment, is refused (429). Locally the
@@ -2140,7 +2152,9 @@ geocoder, so what is typed leaves the app for no one.
   its own country's; a place found by an alternate name is listed by its
   name with the one matched, "Tshabong (also Tsabong), Botswana",
   "Polokwane (also Pietersburg)", `mapSearch.ts` `hitName`), and picking one moves the map and
-  closes the list (Escape closes it too). A quaternary is framed whole; a
+  closes the list (Escape closes it too, and so does emptying the box, its
+  clear button × included, issue #938); either way the focus goes back to
+  the search box. A quaternary is framed whole; a
   point is centred, at zoom 14 for a gauge or dam and 13 for a place. The
   map's centre is then the match, so a Delineate or a placed point from the
   keyboard (Enter at the crosshair) lands on it. Nothing is drawn or saved:

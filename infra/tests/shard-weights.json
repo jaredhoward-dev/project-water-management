@@ -1,0 +1,30 @@
+{
+	"//": "CPU seconds of `terraform test -filter=<file>` per test file (user time), measured 2026-11-27 with four files at once pinned to four CPUs (CI's runner). infra/scripts/terraform-shards.mjs packs CI's Terraform shards by these; a file not listed weighs its size at the listed mean. Re-measure when a file grows a lot (infra/README.md \u00a7 Validating locally).",
+	"cpuSeconds": {
+		"agera5.tftest.hcl": 49,
+		"assistant.tftest.hcl": 183,
+		"c3s.tftest.hcl": 26,
+		"chirps_source.tftest.hcl": 15,
+		"cutover.tftest.hcl": 68,
+		"dam_observations.tftest.hcl": 89,
+		"data.tftest.hcl": 27,
+		"ecmwf.tftest.hcl": 26,
+		"edge.tftest.hcl": 21,
+		"egress.tftest.hcl": 40,
+		"era5land.tftest.hcl": 31,
+		"et_observations.tftest.hcl": 22,
+		"guardrails_baseline.tftest.hcl": 195,
+		"guardrails_edge.tftest.hcl": 195,
+		"guardrails_jobs.tftest.hcl": 103,
+		"guardrails_map.tftest.hcl": 123,
+		"guardrails_network.tftest.hcl": 226,
+		"guardrails_reports.tftest.hcl": 36,
+		"iam.tftest.hcl": 127,
+		"imerg.tftest.hcl": 31,
+		"ingest.tftest.hcl": 234,
+		"kms.tftest.hcl": 13,
+		"logging.tftest.hcl": 13,
+		"observability.tftest.hcl": 43,
+		"release.tftest.hcl": 19
+	}
+}

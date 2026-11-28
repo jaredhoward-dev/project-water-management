@@ -10,7 +10,7 @@
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { onDestroy, onMount, untrack } from 'svelte';
 	import type { SeriesMeta } from '@water-management/engine';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { followAnchors } from '#lib/nav/anchorLanding.js';
 	import type { Project, RunMeta } from '#lib/api/index.js';
 	import DownloadMenu from '#lib/components/export/DownloadMenu.svelte';
@@ -115,7 +115,7 @@
 		stopLanding = followAnchors({
 			page: 'project',
 			land: (hash) => (projectAnchor(hash) && body ? landOnAnchor(hash, body) : undefined),
-			forward: (to) => void goto(to, { replace: true, reset: false })
+			forward: (to) => void guardedGoto(to, { replace: true, reset: false })
 		});
 	});
 	onDestroy(() => stopLanding());

@@ -3,13 +3,18 @@
 //
 //   local — default. MinIO from docker-compose (`pnpm dev:s3:up`) at
 //           S3_ENDPOINT, with its throwaway root credentials. The bucket is
-//           created on first use. No AWS account.
+//           created on first use, and by `pnpm dev:s3:up`, which also gives
+//           the reports bucket production's 7-day expiry
+//           (applyLocalReportsLifecycle). No AWS account.
 //   s3    — production: the private reports bucket (REPORTS_BUCKET, SSE,
 //           7-day lifecycle; infra/reports.tf), credentials from the Lambda's
 //           role, the region from its environment.
 //
 // A PDF's key is derived from its ids (reportKey), never stored or taken from
-// a message, so nothing can point a download at another project's file.
+// a message, so nothing can point a download at another project's file. (One
+// exception, a removal only: a renderer's answer names the project, so the
+// worker can queue a PDF stored after its report was deleted, once no report
+// of that id exists anywhere; 398_report_pdf_orphan.)
 // Downloads are short-lived signed URLs, minted per click by the auth-checked
 // GET /projects/:id/reports/:jobId/pdf (a 302), so the only lasting handle on
 // a PDF is that route, behind the session, the WAF and the project's
@@ -362,6 +367,39 @@ async function signedGet(bucket: string, key: string, fileName: string, expiresI
 		new sdk.GetObjectCommand({ Bucket: bucket, Key: key, ResponseContentDisposition: disposition }),
 		{ expiresIn }
 	);
+}
+
+/**
+ * Production's reports bucket rule (infra/reports.tf
+ * aws_s3_bucket_lifecycle_configuration.reports): every object under
+ * `reports/` expires REPORT_RETENTION_DAYS after it was written. The same id,
+ * prefix and age locally. Production's rule also aborts incomplete multipart
+ * uploads after a day; it is left out here, since MinIO's lifecycle has no
+ * such action (it cleans stale uploads up itself), and putPdf never uploads in
+ * parts.
+ */
+export const REPORTS_LIFECYCLE_RULE = {
+	ID: 'expire-reports',
+	Status: 'Enabled',
+	Filter: { Prefix: 'reports/' },
+	Expiration: { Days: REPORT_RETENTION_DAYS }
+} as const;
+
+/**
+ * Locally (`pnpm dev:s3:up`, issue #911): create the reports bucket if MinIO
+ * lacks it and give it production's expiry rule, so a local PDF goes after 7
+ * days as it does in production, not only when the 8-day purge or an erasure
+ * reaches it. Idempotent: putting a bucket's lifecycle replaces the whole
+ * configuration with this one rule. Refused under STORAGE=s3, whose bucket
+ * and rule are Terraform's.
+ */
+export async function applyLocalReportsLifecycle(): Promise<{ bucket: string }> {
+	if (storageKind() === 's3') throw new Error("STORAGE=s3: the reports bucket's lifecycle is Terraform's (infra/reports.tf), not this script's");
+	const bucket = reportsBucket();
+	await ensureBucket(bucket);
+	const { s3: c, sdk } = await s3();
+	await c.send(new sdk.PutBucketLifecycleConfigurationCommand({ Bucket: bucket, LifecycleConfiguration: { Rules: [{ ...REPORTS_LIFECYCLE_RULE, Filter: { ...REPORTS_LIFECYCLE_RULE.Filter }, Expiration: { ...REPORTS_LIFECYCLE_RULE.Expiration } }] } }));
+	return { bucket };
 }
 
 /** Delete a PDF (local purge; production's lifecycle rule does this). Missing is fine. */

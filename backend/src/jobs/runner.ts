@@ -36,6 +36,7 @@ import { type MirrorTickResult, runMirrorTick } from './handlers/mirror-tick.js'
 import { type DwsTickResult, runDwsTick } from '../feeds/gaugeRecordLoad.js';
 import { type DamsTickResult, runDamsTick } from '../dams/observed/tick.js';
 import { type EtTickResult, runEtTick } from '../water-use/observed/tick.js';
+import { DUNNING_GRACE_DAYS } from '@water-management/engine/plans';
 
 /** Default lease: longer than any job may run (the worker Lambda's timeout is 300 s). */
 export const DEFAULT_LEASE_SECONDS = 360;
@@ -294,8 +295,14 @@ export interface TickResult {
 	staffGrantsExpired: number;
 	/** Reverse trials past their end moved to expired, the account back to Free (342_reverse_trial). */
 	reverseTrialsExpired: number;
+	/** Reports with the renderer past the hour's answer window whose count was given back (408). */
+	reportsRefunded: number;
 	/** Live catchments newly paused past Free's limit after the grace (341 app_plan_pause_tick; 0 unless billing is enforced). */
 	catchmentsPaused: number;
+	/** Subscriptions past_due past DUNNING_GRACE_DAYS, newly lapsed (405 app_billing_dunning_lapse). */
+	subscriptionsLapsed: number;
+	/** The billing sweeps that failed this tick (logged billing_tick_step_failed; tried again next tick), by step name. Empty when all ran. */
+	billingFailed: BillingStep[];
 	claimed: number;
 	done: number;
 	failed: number;
@@ -364,6 +371,24 @@ async function dueWait(horizonMs: number, budgetEnd: number, projectIds: readonl
 	return wait <= horizonMs && Date.now() + wait < budgetEnd ? wait : null;
 }
 
+/** The billing sweeps the tick runs before its feeds, alerts and jobs, by the name their failure is logged under. */
+export type BillingStep = 'staff_grant_expire' | 'reverse_trial_expire' | 'dunning_lapse' | 'report_refund' | 'plan_pause';
+
+/**
+ * One billing sweep in its own transaction, returning its count. Never throws: a failure is logged as
+ * `billing_tick_step_failed` with the step and safeError's name and SQLSTATE only (no row values, so no personal
+ * data), recorded in `result.billingFailed`, and answered null; the sweep is idempotent and runs again next tick.
+ */
+async function billingStep(result: TickResult, step: BillingStep, sql: string, params: unknown[] = []): Promise<number | null> {
+	try {
+		return await withoutUser(async (db) => (await db.query<{ n: number }>(sql, params)).rows[0]?.n ?? 0);
+	} catch (err) {
+		logEvent('error', { event: 'billing_tick_step_failed', step, ...safeError(err) });
+		result.billingFailed.push(step);
+		return null;
+	}
+}
+
 export async function runTick(o: TickOptions = {}): Promise<TickResult> {
 	const started = Date.now();
 	const maxJobs = o.maxJobs ?? envInt(process.env.JOB_MAX_PER_TICK, 25);
@@ -378,7 +403,10 @@ export async function runTick(o: TickOptions = {}): Promise<TickResult> {
 		billingEventsPurged: 0,
 		staffGrantsExpired: 0,
 		reverseTrialsExpired: 0,
+		reportsRefunded: 0,
 		catchmentsPaused: 0,
+		subscriptionsLapsed: 0,
+		billingFailed: [],
 		claimed: 0,
 		done: 0,
 		failed: 0,
@@ -411,13 +439,20 @@ export async function runTick(o: TickOptions = {}): Promise<TickResult> {
 	result.billingEventsPurged = await withoutUser(
 		async (db) => (await db.query<{ n: number }>('SELECT app_purge_billing_events(make_interval(days => $1)) AS n', [BILLING_EVENT_RETENTION_DAYS])).rows[0]?.n ?? 0
 	);
+	// The billing sweeps (330, 342, 405, 408, 341): each in its own transaction, and never throws, so one that fails is
+	// logged (billing_tick_step_failed) and tried next tick while the feeds, alerts and jobs below still run.
 	// A staff grant past its end: expired (never deleted), the account back to Free.
-	result.staffGrantsExpired = await withoutUser(async (db) => (await db.query<{ n: number }>('SELECT app_staff_grant_expire() AS n')).rows[0]?.n ?? 0);
+	result.staffGrantsExpired = (await billingStep(result, 'staff_grant_expire', 'SELECT app_staff_grant_expire() AS n')) ?? 0;
 	// A reverse trial past its end (342): expired (never deleted), the account back to Free.
-	result.reverseTrialsExpired = await withoutUser(async (db) => (await db.query<{ n: number }>('SELECT app_reverse_trial_expire() AS n')).rows[0]?.n ?? 0);
-	// After the expiry: an account that lost its paid plan starts its 14-day grace, and past it (billing enforced) its live
-	// catchments beyond Free's are paused, or resumed once it is back on a plan or within Free (341).
-	result.catchmentsPaused = await withoutUser(async (db) => (await db.query<{ n: number }>('SELECT app_plan_pause_tick() AS n')).rows[0]?.n ?? 0);
+	result.reverseTrialsExpired = (await billingStep(result, 'reverse_trial_expire', 'SELECT app_reverse_trial_expire() AS n')) ?? 0;
+	// A subscription overdue past the dunning limit (405, issue #927): lapsed, so the account drops to Free as on a lapse.
+	result.subscriptionsLapsed = (await billingStep(result, 'dunning_lapse', 'SELECT app_billing_dunning_lapse($1) AS n', [DUNNING_GRACE_DAYS])) ?? 0;
+	// A report the renderer never answered (shown failed after the hour): its count given back (408; the other two ways a
+	// report ends failed refund it by trigger).
+	result.reportsRefunded = (await billingStep(result, 'report_refund', 'SELECT app_report_usage_refund_silent() AS n')) ?? 0;
+	// After the expiry: an account that lost its paid plan starts its 14-day grace (only while billing is enforced, 409),
+	// and past it its live catchments beyond Free's are paused, or resumed once it is back on a plan or within Free (341).
+	result.catchmentsPaused = (await billingStep(result, 'plan_pause', 'SELECT app_plan_pause_tick() AS n')) ?? 0;
 	const noticesPurged = await purgePackNotices();
 	const erratumPurged = await purgeErratumNotices();
 	if (o.feeds !== false) {

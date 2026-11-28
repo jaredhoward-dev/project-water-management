@@ -2108,7 +2108,7 @@ export const TIPS: HelpTipText[] = [
 	{
 		id: 'dws-flow',
 		term: 'DWS gauge flow',
-		short: 'A DWS river gauge’s verified daily mean flow in m³/s, from a data feed or an exported table. Verified data lags by months.',
+		short: 'A DWS river gauge’s verified daily mean flow in m³/s, by feed or upload. An upload asks first if it may not be a river flow.',
 		units: 'm³/s',
 		category: 'data'
 	},

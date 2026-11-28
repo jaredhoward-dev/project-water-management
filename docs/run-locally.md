@@ -607,6 +607,13 @@ site's report route (`RENDER_SITE_URL`, `:7777`) in headless Chromium, signs in
 with a single-use render token through the dev API (`RENDER_API_URL`,
 `:3001`), waits for the page to be ready, prints it to A4 and stores it in
 MinIO (`STORAGE=local`; the `water-reports` bucket is created on first use).
+`pnpm dev:s3:up` also creates it if MinIO lacks it and gives it production's
+lifecycle rule (`expire-reports`: objects under `reports/` expire after 7
+days, infra/reports.tf), so a local PDF goes when production's would, not
+only when the tick's 8-day purge or an account's erasure reaches it. It is
+safe to re-run (the rule replaces the bucket's lifecycle); on a MinIO started
+before this, run `pnpm dev:s3:up` once more. The MinIO console shows it
+(Buckets → water-reports → Lifecycle).
 All of that is in the committed `backend/.env.development`. The largest
 example catchment (Sandspruit, 14 pages) renders in about 3 s. Without the
 worker running a PDF stays "queued"; `pnpm dev:jobs:tick` renders it once.

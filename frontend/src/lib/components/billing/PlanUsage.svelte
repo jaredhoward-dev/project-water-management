@@ -34,8 +34,10 @@
 		billingRedirect,
 		checkoutNotice,
 		editorsHint,
+		grantNote,
 		hasPaidSubscription,
 		monthName,
+		overSeatsNotice,
 		priceLine,
 		seatHint,
 		seatOffer,
@@ -191,9 +193,12 @@
 	const sub = $derived(subscriptionLine(plan.subscription));
 	// The reverse trial's last 3 days (349, trialEnding.ts): when it ends, what Free means, and Upgrade (offered below).
 	const trialEnding = $derived(plan.subscription?.reverseTrial ? trialEndingText(plan.subscription.trialEnd) : null);
+	const grant = $derived(grantNote(plan.subscription));
 	const seatsLine = $derived(subscriptionSeatsLine(plan));
 	const totalLine = $derived(subscriptionTotalLine(plan));
 	const editors = $derived(editorsHint(plan.team?.editorCount));
+	// More editors than the paid seats (403, issue #926): the team admin is told what to do.
+	const overSeats = $derived(overSeatsNotice(plan));
 	const rows = $derived(usageRows(plan));
 	const nothingUsed = $derived(rows.every((r) => r.used === 0));
 </script>
@@ -213,6 +218,8 @@
 		{:else}
 			<p class="muted sub" data-subscription="none">No subscription: {whose} is on {plan.plan.name}.</p>
 		{/if}
+		{#if overSeats}<p class="note over-seats" role="note" data-over-seats>{overSeats}</p>{/if}
+		{#if grant}<p class="muted sub" data-grant-note>{grant}</p>{/if}
 		{@render assistantShare?.()}
 		{#if note}
 			<p class="note" data-shadow>{note}</p>

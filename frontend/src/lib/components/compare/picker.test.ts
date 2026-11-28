@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { RunMeta } from '#lib/api/types.js';
 import { fmtProjectStamp } from '#lib/components/project/project.js';
-import { compareSearch, compareTabHref, defaultPair, defaultRunFor, defaultWhatIf, formatRef, parseRef, projectZoneOf, publishedBaseline, runOptionLabel, runPickName, SCENARIO_NAME_MAX } from './picker';
+import { compareSearch, compareTabHref, defaultPair, defaultRunFor, defaultWhatIf, formatRef, parseRef, projectZoneOf, publishedBaseline, runOptionLabel, runPickName, runsTabSearch, SCENARIO_NAME_MAX, staleComparisonNote, waitingSides } from './picker';
 
 const run = (id: string, label = ''): RunMeta => ({
 	id,
@@ -195,5 +195,39 @@ describe('projectZoneOf (issue #899: each compared run on its own project\'s clo
 		} finally {
 			process.env.TZ = prev;
 		}
+	});
+});
+
+describe('waitingSides / staleComparisonNote (issue #924: a card picked onto a project with no runs)', () => {
+	const sides = ['a', 'b', 'c'] as const;
+	it('counts a pick whose runs came back empty or failed, not one still loading or with runs', () => {
+		const runs = { empty: [], full: [{ id: 'r1' }] };
+		const errors = { broken: 'Project not found or not shared with you' };
+		expect(waitingSides({ a: null, b: null, c: null }, runs, errors, sides)).toEqual([]);
+		expect(waitingSides({ a: null, b: 'empty', c: null }, runs, errors, sides)).toEqual(['b']);
+		expect(waitingSides({ a: 'broken', b: 'loading', c: 'full' }, runs, errors, sides)).toEqual(['a']);
+		expect(waitingSides({ a: 'empty', b: null, c: 'broken' }, runs, errors, sides)).toEqual(['a', 'c']);
+	});
+	it('names each waiting card, its project and why, and says the comparison is of the runs before', () => {
+		expect(staleComparisonNote([])).toBeNull();
+		expect(staleComparisonNote([{ card: 'What-if 1', project: 'Empty', failed: false }])).toBe(
+			"What-if 1's project, Empty, has no runs, so the comparison below is still of the runs chosen before. Pick a project with runs, or go Back."
+		);
+		expect(
+			staleComparisonNote([
+				{ card: 'Baseline', project: 'Gone', failed: true },
+				{ card: 'What-if 2', project: 'Empty', failed: false }
+			])
+		).toBe("Baseline's project, Gone, couldn't load its runs and What-if 2's project, Empty, has no runs, so the comparison below is still of the runs chosen before. Pick a project with runs, or go Back.");
+	});
+});
+
+describe('runsTabSearch (issue #924: the standalone page’s Back to runs keeps the run)', () => {
+	it('opens the Runs tab on what-if 1 when it is the project’s, else the baseline, else no run', () => {
+		expect(runsTabSearch('p1', { projectId: 'p1', runId: 'ra' }, { projectId: 'p1', runId: 'rb' })).toBe('?tab=runs&run=rb');
+		expect(runsTabSearch('p1', { projectId: 'p1', runId: 'ra' }, { projectId: 'p2', runId: 'rb' })).toBe('?tab=runs&run=ra');
+		expect(runsTabSearch('p1', { projectId: 'p1', runId: 'ra' }, null)).toBe('?tab=runs&run=ra');
+		expect(runsTabSearch('p1', null, null)).toBe('?tab=runs');
+		expect(runsTabSearch('p1', null, { projectId: 'p2', runId: 'rb' })).toBe('?tab=runs');
 	});
 });

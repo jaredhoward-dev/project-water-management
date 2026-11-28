@@ -23,6 +23,8 @@ import {
 	searchSummary,
 	SEED_MAX,
 	seedError,
+	budgetError,
+	fitBlocker,
 	STAGE_LABEL,
 	stageText,
 	totalRuns,
@@ -708,5 +710,38 @@ describe('searchSummary', () => {
 		expect(searchSummary({ budget: null, starts: null, seed: null })).toBe('– runs × – starts · seed –');
 		// Grouped as the seed field shows it (NumberInput's grouped), not 20000.
 		expect(searchSummary({ budget: 1500, starts: 5, seed: 20000 })).toBe(`${fmtNum(1500)} runs × 5 starts · seed ${fmtNum(20000)}`);
+	});
+});
+
+describe('budgetError', () => {
+	it('takes a whole number from 50 to 10 000', () => {
+		for (const ok of [50, 1500, 10_000]) expect(budgetError(ok), String(ok)).toBeNull();
+		for (const bad of [null, 0, 49, 10_001, 120.5, NaN]) expect(budgetError(bad), String(bad)).toMatch(/whole number from 50 to 10.000/);
+	});
+});
+
+describe('fitBlocker: why Fit automatically is disabled', () => {
+	const ok = { hasObserved: true, planError: false, free: 3, busy: false, fix: [] };
+	const budget = { name: 'model runs per fit', inSearch: true };
+	const starts = { name: 'starts', inSearch: true };
+	const seed = { name: 'seed', inSearch: true };
+	const weight = { name: 'penalty weight', inSearch: false };
+	it('is null when the fit can start', () => {
+		expect(fitBlocker(ok)).toBeNull();
+	});
+	it('says nothing where another line already says why (no record, the plan’s error) or while a fit runs', () => {
+		expect(fitBlocker({ ...ok, free: 0, fix: [budget], hasObserved: false })).toBeNull();
+		expect(fitBlocker({ ...ok, free: 0, fix: [budget], planError: true })).toBeNull();
+		expect(fitBlocker({ ...ok, free: 0, fix: [budget], busy: true })).toBeNull();
+	});
+	it('names an unticked parameter list first', () => {
+		expect(fitBlocker({ ...ok, free: 0, fix: [budget] })).toBe('Tick at least one parameter to fit.');
+	});
+	it('names each field to fix, a Search field with the fold that holds it, each once', () => {
+		expect(fitBlocker({ ...ok, fix: [budget] })).toBe('Fix the model runs per fit under Search first.');
+		expect(fitBlocker({ ...ok, fix: [starts, seed, starts] })).toBe('Fix the starts and seed under Search first.');
+		expect(fitBlocker({ ...ok, fix: [budget, starts, seed] })).toBe('Fix the model runs per fit, starts and seed under Search first.');
+		expect(fitBlocker({ ...ok, fix: [weight] })).toBe('Fix the penalty weight first.');
+		expect(fitBlocker({ ...ok, fix: [seed, weight] })).toBe('Fix the penalty weight, and the seed under Search first.');
 	});
 });

@@ -18,7 +18,7 @@
 	// (AssessorQuestions.svelte, 164).
 	import { untrack } from 'svelte';
 	import { basePath } from '#lib/nav/base.js';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { page } from '$app/state';
 	import { api, type Pack, type Scenario } from '#lib/api/index.js';
 	import LoadState from '#lib/components/common/LoadState.svelte';
@@ -32,10 +32,12 @@
 	import { fillHeader } from '#lib/components/workspace/headerSlot.svelte.js';
 	import { fmtDate } from '#lib/format/number.js';
 	import { withoutParam, withParam } from '#lib/workspace/overlays.js';
+	import { landOnAnchor } from '#lib/help/anchor.js';
 	import {
 		APPLICATION_FILTERS,
 		applicationCounts,
 		applicationsContext,
+		applicationsViewHeading,
 		daysSince,
 		daysText,
 		FILTER_LABEL,
@@ -83,11 +85,21 @@
 	// In the URL like the filter, so a reload and Back keep it (issue #521); a new sort is a step in history.
 	const sort = $derived<ApplicationSort>(parseSort(page.url.searchParams.get('sort')));
 	function setSort(next: ApplicationSort) {
-		if (next !== sort) void goto(next === 'date' ? withoutParam(page.url, 'sort') : withParam(page.url, 'sort', next), { reset: false });
+		if (next !== sort) void guardedGoto(next === 'date' ? withoutParam(page.url, 'sort') : withParam(page.url, 'sort', next), { reset: false });
 	}
 	const assessView = $derived(page.url.searchParams.get('view') === 'assess');
 	const assessHref = $derived(withParam(page.url, 'view', 'assess'));
 	const listHref = $derived(withoutParam(page.url, 'view'));
+	// Back to the list and Assess together keep the focus (data-sveltekit-reset="false", so it never falls to
+	// <body>) but change the view: the new view's heading takes it, scrolled into view once it is drawn
+	// (landOnAnchor waits for Assess together's load, and yields to Back restoring the reader's place).
+	let shownView: boolean | null = null;
+	$effect(() => {
+		const assess = assessView;
+		const target = applicationsViewHeading(shownView, assess);
+		shownView = assess;
+		if (target) return untrack(() => landOnAnchor(target));
+	});
 	const counts = $derived(applicationCounts(items ?? []));
 	const shown = $derived(sortApplications(filterApplications(items ?? [], filter), sort));
 	const next = $derived(longestWaiting(items ?? []));
@@ -126,9 +138,9 @@
 {#snippet headerContext()}<span>{applicationsContext(items ?? [], now)}</span>{/snippet}
 {#snippet headerActions()}
 	{#if assessView}
-		<a class="btn" href={listHref} data-sveltekit-noscroll>Back to the list</a>
+		<a class="btn" href={listHref} data-sveltekit-reset="false">Back to the list</a>
 	{:else if items?.length}
-		<a class="btn" href={assessHref} data-sveltekit-noscroll>Assess together</a>
+		<a class="btn" href={assessHref} data-sveltekit-reset="false">Assess together</a>
 	{/if}
 	{#if next}<a class="btn" href={scenarioHref(next.id)} title="Open “{next.name}”, waiting longest">Decide the longest waiting</a>{/if}
 {/snippet}
@@ -158,8 +170,7 @@
 								class="chip"
 								href={filterHref(f)}
 								aria-current={filter === f ? 'true' : undefined}
-								data-sveltekit-noscroll
-								data-sveltekit-keepfocus
+								data-sveltekit-reset="false"
 							>
 								{FILTER_LABEL[f]} <span class="n">{counts[f]}</span>
 							</a>
@@ -187,7 +198,7 @@
 					</p>
 				</div>
 			{:else if !shown.length}
-				<p class="empty" data-testid="applications-none">{EMPTY_FILTER[filter]} <a href={filterHref('all')} data-sveltekit-noscroll>Show all</a></p>
+				<p class="empty" data-testid="applications-none">{EMPTY_FILTER[filter]} <a href={filterHref('all')} data-sveltekit-reset="false">Show all</a></p>
 			{:else}
 				<div class="table-wrap">
 					<table class="data apps">

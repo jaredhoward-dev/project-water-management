@@ -9,7 +9,7 @@
 	// planted areas (the farm drawer). Edits go into the shared ModelEditor.
 	import type { ProjectSettings } from '@water-management/engine';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { page } from '$app/state';
 	import { api, type AllocationList } from '#lib/api/index.js';
 	import { STATUS_LABEL } from '#lib/components/allocations/allocations.js';
@@ -21,6 +21,7 @@
 	import { WATER_YEAR_MONTHS } from '#lib/format/months.js';
 	import type { ModelEditor } from '#lib/model/editor.svelte.js';
 	import { withoutParam, withParam } from '#lib/workspace/overlays.js';
+	import { demandEditHref } from '#lib/nav/tabUrl.js';
 	import { demandRows, demandShares, demandTotal, type DemandRow } from './demands';
 	import { DEMANDS_UNIT_CHOICES, demandsUnitView, parseDemandsUnit, UNIT_PARAM } from './demandUnits';
 	import { nodeSpans, registeredCells, registeredTotal } from './demandsRegistered';
@@ -59,7 +60,7 @@
 	const show = (m3Day: number) => fmtNum(m3Day * uv.scale, uv.decimals);
 	function pickUnit(v: string) {
 		const next = parseDemandsUnit(v);
-		void goto(next ? withParam(page.url, UNIT_PARAM, next) : withoutParam(page.url, UNIT_PARAM), { reset: false });
+		void guardedGoto(next ? withParam(page.url, UNIT_PARAM, next) : withoutParam(page.url, UNIT_PARAM), { reset: false });
 	}
 	// --- registered volumes (docs/allocations.md): per unit or user, read as the Allocations page reads them, so a viewer
 	// sees per-unit volumes only when the owners allow it, and a farmer is refused (no column) ---
@@ -82,7 +83,7 @@
 	const regTotal = $derived(cells ? registeredTotal(cells) : null);
 
 	/** Where the rest of a row is set: a unit's crops in its farm drawer on Crops & demand, anything else in its node's sheet. */
-	const editHref = (r: DemandRow) => (r.kind === 'crops' ? `?tab=crops&farm=${encodeURIComponent(r.nodeId)}` : `?tab=network&edit=${encodeURIComponent(r.nodeId)}&section=demand`);
+	const editHref = (r: DemandRow) => demandEditHref(page.url, r.kind, r.nodeId);
 
 	/** Writes one month of an editable row into the model (a monthly object's `monthlyM3Day`, a user's `userDemandM3Day`). */
 	function setMonth(r: DemandRow, m: number, v: number | null) {

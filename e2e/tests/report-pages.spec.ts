@@ -168,7 +168,8 @@ test.describe('the standalone /compare page', () => {
 		await expect(page.getByRole('heading', { name: 'What the change does' })).toBeVisible();
 		await expect(page.getByRole('heading', { level: 1 })).toHaveText(['Compare runs']);
 		await expect(page.getByRole('link', { name: 'Projects', exact: true })).toHaveAttribute('aria-current', 'page');
-		await expect(page.getByRole('link', { name: 'Back to runs' })).toHaveAttribute('href', `/projects/${w.id}?tab=runs`);
+		// On the run being looked at: what-if 1, since it is the baseline's project's (issue #924, run-comparison.md).
+		await expect(page.getByRole('link', { name: 'Back to runs' })).toHaveAttribute('href', `/projects/${w.id}?tab=runs&run=${w.whatIf1}`);
 	});
 
 	test('three runs on a phone: no sideways scroll, no violations; nor in the workspace tab', async ({ page, owner }) => {

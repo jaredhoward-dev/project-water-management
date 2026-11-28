@@ -8,6 +8,8 @@
 	set while it is invalid, so the parent form can block saving. Its rows
 	mirror common/PeriodList.svelte's layout with more fields; fold the two
 	into one piece if a third such list appears (extract on the third caller).
+	Rows keep their own keys, an add puts the focus in the new row and a
+	remove on the row in its place, else the add button (a11y/listRows.ts).
 -->
 <script lang="ts">
 	import { LOW_FLOW_TEXT_MAX, lowFlowPeriodsError, RATING_SOURCE_MAX, type CalibrationFlowKind, type LowFlowPeriod } from '@water-management/engine';
@@ -16,6 +18,7 @@
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { ratedKinds, RECORD_NAME } from '#lib/components/settings/qualityFlags.js';
 	import { localIsoDate } from '#lib/format/number.js';
+	import { focusListTarget, listFocusTarget, RowKeys } from '#lib/a11y/listRows.js';
 
 	let {
 		list = $bindable([]),
@@ -38,6 +41,9 @@
 
 	const uid = $props.id();
 	const kinds = $derived(ratedKinds(seriesKinds));
+	let box = $state<HTMLElement>();
+	const keys = new RowKeys();
+	const rowKeys = $derived(keys.for(list.length));
 
 	$effect(() => {
 		error = lowFlowPeriodsError(list);
@@ -50,18 +56,24 @@
 		const listed = list.map((p) => Number(p.start.slice(0, 4)) - (Number(p.start.slice(5, 7)) >= 10 ? 0 : 1));
 		const y = listed.length ? Math.min(...listed) - 1 : year - (month >= 10 ? 0 : 1) - 1;
 		const kind: CalibrationFlowKind = flowKind && kinds.includes(flowKind) ? flowKind : kinds.includes('flow_logger_m3s') ? 'flow_logger_m3s' : (kinds[0] ?? 'flow_observed_m3s');
+		keys.added();
 		list = [...list, { kind, start: `${y}-10-01`, end: `${y + 1}-09-30`, maxM3s: 1, reason: '', source: '' }];
+		void focusListTarget(box, listFocusTarget({ added: true, length: list.length }));
 	}
-	const remove = (i: number) => (list = list.filter((_, j) => j !== i));
+	function remove(i: number) {
+		keys.removed(i);
+		list = list.filter((_, j) => j !== i);
+		void focusListTarget(box, listFocusTarget({ removedAt: i, left: list.length }));
+	}
 	const set = (i: number, patch: Partial<LowFlowPeriod>) => (list[i] = { ...list[i]!, ...patch });
 	const blank = (v: string) => !v.trim();
 </script>
 
-<div class="lf" role="group" aria-labelledby="{uid}-l" aria-describedby="{uid}-hint" data-testid="low-flow-periods">
+<div class="lf" bind:this={box} role="group" aria-labelledby="{uid}-l" aria-describedby="{uid}-hint" data-testid="low-flow-periods">
 	<div class="head">
 		<span class="legend"><span id="{uid}-l">Low flows only</span> <HelpTip key="settings.qualityFlags" label="Low flows only" /></span>
 		{#if !readonly}
-			<button type="button" class="btn btn-sm" onclick={add}>Use only low flows in a date range</button>
+			<button type="button" class="btn btn-sm" data-add onclick={add}>Use only low flows in a date range</button>
 		{/if}
 	</div>
 	<p class="hint explain" id="{uid}-hint">
@@ -76,8 +88,8 @@
 	{/if}
 	{#if list.length}
 		<ol class="rows">
-			{#each list as x, i (i)}
-				<li class="row" data-testid="low-flow-period">
+			{#each list as x, i (rowKeys[i])}
+				<li class="row" data-row data-testid="low-flow-period">
 					<div class="field">
 						<label for="{uid}-k{i}">Record</label>
 						<select id="{uid}-k{i}" disabled={readonly} value={x.kind} onchange={(e) => set(i, { kind: e.currentTarget.value as CalibrationFlowKind })}>
@@ -123,7 +135,7 @@
 						/>
 					</div>
 					{#if !readonly}
-						<button type="button" class="btn btn-icon" aria-label="Remove low-flow period {i + 1}" title="Remove" onclick={() => remove(i)}>✕</button>
+						<button type="button" class="btn btn-icon" aria-label="Remove low-flow period {i + 1}" title="Remove" data-remove onclick={() => remove(i)}>✕</button>
 					{/if}
 				</li>
 			{/each}

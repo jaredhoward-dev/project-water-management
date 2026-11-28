@@ -450,8 +450,8 @@ export const SETTINGS: Record<string, Setting> = {
 
 	// --- Billing (issue #641, docs/billing.md) -----------------------------------------------
 	BILLING_PROVIDER: {
-		why: 'Which billing provider the webhook route serves (billing/provider.ts). The code default is the mock, whose events anyone holding the committed dev key can sign, so the API must be told manual or stripe. The assistant Lambda serves no billing route (assistantOnly).',
-		checks: { api: oneOf('manual', 'stripe') }
+		why: 'Which billing provider the webhook route serves (billing/provider.ts). Off Lambda the code default is the mock, whose events anyone holding the committed dev key can sign; on Lambda unset is manual (no webhooks, no Stripe), Terraform’s default too (var.billing_provider), so a backend released before the apply that sets it still starts and serves no mock. A value set must be manual or stripe, never mock. The assistant Lambda serves no billing route (assistantOnly).',
+		checks: { api: optional(oneOf('manual', 'stripe')) }
 	},
 	BILLING_WEBHOOK_SECRET: {
 		why: 'The billing webhook signing secret (Stripe’s whsec_…), from the API’s runtime secret once the provider is stripe; manual takes no webhooks and needs none.',
@@ -486,10 +486,18 @@ export const SETTINGS: Record<string, Setting> = {
 		}
 	},
 	BILLING_ENFORCED: {
-		why: 'Whether plan limits refuse anything. Phase 1 is shadow mode: the code default (false) counts and shows usage and refuses nothing, and the API only reports the value.'
+		why: 'Whether plan limits refuse anything. Phase 1 is shadow mode: the code default (false) counts and shows usage and refuses nothing, and the API only reports the value. The migrate Lambda’s owner actions set it on their session, so a grant or revoke syncs the pause as the app would (billing/enforced.ts setOwnerBillingEnforced).',
+		// Only the exact string "true" turns it on, so "True" or "1" would quietly mean off: refuse anything else (infra writes "true"/"false").
+		checks: {
+			api: optional(oneOf('true', 'false')),
+			worker: optional(oneOf('true', 'false')),
+			assistant: optional(oneOf('true', 'false')),
+			migrate: optional(oneOf('true', 'false'))
+		}
 	},
 	REVERSE_TRIAL: {
-		why: 'Whether a newly verified person gets the 14-day Pro reverse trial (billing/reverseTrial.ts, 342_reverse_trial). Only `true` with BILLING_ENFORCED `true` grants one; the code default (off) grants none and records no claim, and the API only reports the value.'
+		why: 'Whether a newly verified person gets the 14-day Pro reverse trial (billing/reverseTrial.ts, 342_reverse_trial). Only `true` with BILLING_ENFORCED `true` grants one; the code default (off) grants none and records no claim, and the API only reports the value.',
+		checks: { api: optional(oneOf('true', 'false')) }
 	},
 
 	// --- Background jobs -------------------------------------------------------------------
@@ -652,18 +660,20 @@ export const SETTINGS: Record<string, Setting> = {
 		checks: { assistant: optional(wholeNumberIn(1, 30)) }
 	},
 	// The dollar caps (336_assistant_dollar_caps, 337's SAST day, issue #641): refuse only with BILLING_ENFORCED on.
-	// Terraform sets all three on the assistant (infra/assistant.tf), so the assistant requires them, as the token caps.
+	// Terraform sets all three on the assistant (infra/assistant.tf) to the code defaults (assistant/config.ts:
+	// 0.30, 20 and 30), so unset is the same figures: checked only when set, so a backend released before the
+	// apply that sets them still starts.
 	ASSISTANT_FREE_USD_PER_DAY: {
-		why: 'Dollars one person may spend on the assistant a SAST day on a Free account. Terraform var.assistant_free_usd_per_day (0.30).',
-		checks: { assistant: usdIn(0, 15) }
+		why: 'Dollars one person may spend on the assistant a SAST day on a Free account. Terraform var.assistant_free_usd_per_day (0.30); unset is the code default, the same 0.30.',
+		checks: { assistant: optional(usdIn(0, 15)) }
 	},
 	ASSISTANT_FREE_MESSAGES_PER_DAY: {
-		why: 'Messages one person may send the assistant a SAST day on a Free account. Terraform var.assistant_free_messages_per_day (20).',
-		checks: { assistant: wholeNumberIn(1, 500) }
+		why: 'Messages one person may send the assistant a SAST day on a Free account. Terraform var.assistant_free_messages_per_day (20); unset is the code default, the same 20.',
+		checks: { assistant: optional(wholeNumberIn(1, 500)) }
 	},
 	ASSISTANT_FREE_POOL_USD_PER_MONTH: {
-		why: 'Dollars the Free and trial accounts together may spend on the assistant a UTC month, paced per SAST day. Terraform var.assistant_free_pool_usd_per_month (30).',
-		checks: { assistant: usdIn(0, 10_000) }
+		why: 'Dollars the Free and trial accounts together may spend on the assistant a UTC month, paced per SAST day. Terraform var.assistant_free_pool_usd_per_month (30); unset is the code default, the same 30.',
+		checks: { assistant: optional(usdIn(0, 10_000)) }
 	},
 	ASSISTANT_TURN_SECONDS: {
 		why: 'How long one turn may run before it ends with an error event. Terraform sets it below the assistant Lambda’s timeout (var.assistant_timeout_seconds less 15), so a long turn ends cleanly and is charged rather than cut off by the runtime. Checked when set.',

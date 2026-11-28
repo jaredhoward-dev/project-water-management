@@ -36,7 +36,7 @@
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import ChunkFailed from '#lib/components/common/ChunkFailed.svelte';
 	import { followRetry } from '#lib/components/common/loadState.js';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { page } from '$app/state';
 	import type { MapFeature } from '#lib/api/index.js';
 	import { fmtNum } from '#lib/format/number.js';
@@ -135,7 +135,7 @@
 	const uid = $props.id();
 
 	function toggle(layer: MapLayer, on: boolean) {
-		void goto(withLayer(page.url.search, layer, on), { reset: false });
+		void guardedGoto(withLayer(page.url.search, layer, on), { reset: false });
 	}
 
 	// A layer's Try again takes itself out for the loading line: the focus follows it there, to a new Try again if

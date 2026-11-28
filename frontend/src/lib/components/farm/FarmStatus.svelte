@@ -22,7 +22,8 @@
 		title = null,
 		retry,
 		projectId = null,
-		farms = []
+		farms = [],
+		workspaceHref = null
 	}: {
 		kind: 'no-publication' | 'removed' | 'not-yours' | 'withheld' | 'error';
 		farmName?: string | null;
@@ -37,6 +38,8 @@
 		/** not-yours: the catchment, and the farmer's own units in it, to go to instead. */
 		projectId?: string | null;
 		farms?: { nodeId: string; name: string }[];
+		/** withheld: the workspace the previewing WUA staff came from, linked in the page as well as the banner (issue #942). */
+		workspaceHref?: string | null;
 	} = $props();
 
 	// Try again takes the error (and itself) off the page for the loading skeleton: the focus follows it there,
@@ -64,6 +67,7 @@
 	<!-- A WUA viewer's preview while a cap or full-allocation run is published (#523 I): why, worded from the API's code. -->
 	<h1>{farmName ?? t('Your hydrological unit')}</h1>
 	<p role="alert">{errorText(new ApiError(403, '', undefined, 'farm_preview_withheld'))}</p>
+	{#if workspaceHref}<a class="link" href={workspaceHref} data-testid="withheld-workspace">{t('Back to the workspace')}</a>{/if}
 {:else if kind === 'not-yours'}
 	<!-- A link to a unit that isn't theirs, in a catchment they still see: say so without "no longer", and offer their own units here. -->
 	<h1>{t('Your hydrological unit')}</h1>

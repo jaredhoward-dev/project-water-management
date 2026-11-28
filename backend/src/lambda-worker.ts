@@ -87,7 +87,9 @@ export function metricLine(r: TickResult, now = Date.now()): string {
 						{ Name: 'JobsFailed', Unit: 'Count' },
 						// Alert mails (alerts/send.ts): infra/jobs.tf alarms on a burst (docs/deployment.md § Runbooks, alert storm).
 						{ Name: 'AlertMailsSent', Unit: 'Count' },
-						{ Name: 'AlertMailsFailed', Unit: 'Count' }
+						{ Name: 'AlertMailsFailed', Unit: 'Count' },
+						// Billing sweeps that threw this tick (runner.ts billingStep): infra/alarms.tf billing_tick_failed.
+						{ Name: 'BillingStepsFailed', Unit: 'Count' }
 					]
 				}
 			]
@@ -96,7 +98,8 @@ export function metricLine(r: TickResult, now = Date.now()): string {
 		JobsDead: r.dead,
 		JobsFailed: r.failed,
 		AlertMailsSent: r.alerts.sent,
-		AlertMailsFailed: r.alerts.failed
+		AlertMailsFailed: r.alerts.failed,
+		BillingStepsFailed: r.billingFailed.length
 	});
 }
 
@@ -167,7 +170,9 @@ async function acceptRecord(record: SQSRecord): Promise<void> {
 	else if (message.type === 'rendered') {
 		await freeRenderSlot(answeredSlot(message), message.requestId);
 		const outcome = await acceptRenderResult(message);
-		if (outcome !== 'queued') logEvent('warn', { event: 'render_result_dropped', messageId: record.messageId, reason: outcome });
+		// The report was deleted while it rendered: its PDF is queued for removal (398), which is no fault.
+		if (outcome === 'orphan_queued') logEvent('info', { event: 'report_pdf_orphaned', messageId: record.messageId, reportId: message.reportId });
+		else if (outcome !== 'queued') logEvent('warn', { event: 'render_result_dropped', messageId: record.messageId, reason: outcome });
 	}
 	// An evidence pack's render outcome (render-results queue): becomes a pack_render job.
 	else if (message.type === 'rendered_pack') {

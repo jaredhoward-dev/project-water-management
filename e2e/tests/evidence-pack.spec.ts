@@ -142,6 +142,12 @@ test('a baseline pack is created, signed, issued and verified signed out; a copy
 	await expect(checklist).toContainText('The frozen report may be issued');
 	await expect(checklist).toContainText('Not signed under the current pack statement');
 	await expect(checklist).toContainText('Its manifest records every known erratum of its runs’ engines.');
+	// The "Not signed" line links to Appendix B.2 further down the page, where it is signed (issue #934).
+	const toSignoff = checklist.getByRole('link', { name: 'Go to Appendix B.2' });
+	await expect(toSignoff).toHaveAttribute('href', '#ev-b2-h');
+	await toSignoff.click();
+	await expect(page).toHaveURL(/#ev-b2-h$/);
+	await expect(page.locator('#ev-b2-h')).toBeInViewport();
 	await expect(actions.getByRole('button', { name: 'Issue pack' })).toBeDisabled();
 	await expect(page.locator('main')).toHaveAttribute('data-report-footer', /^Draft pack · not issued · /);
 	await expectNoViolations(page);
@@ -245,6 +251,8 @@ test('a baseline pack is created, signed, issued and verified signed out; a copy
 	await page.getByTestId('pack-send-open').click();
 	const sendDialog = page.getByRole('dialog', { name: 'Send evidence pack v1 to the responsible authority' });
 	await expect(sendDialog.getByTestId('pack-send-none')).toContainText('No other member acts for the responsible authority');
+	// It links to the Project page's Acts for the authority panel, where the authority confirms them (issue #934).
+	await expect(sendDialog.getByTestId('pack-send-delegates')).toHaveAttribute('href', new RegExp(`/projects/${project.id}\\?tab=project#delegates-h$`));
 	await sendDialog.getByRole('button', { name: 'Close', exact: true }).click();
 	const assessor = await signIn('Authority assessor');
 	await addMember(page.request, project.id, assessor.user.email, 'editor');
@@ -351,12 +359,42 @@ test('a baseline pack is created, signed, issued and verified signed out; a copy
 	await withdraw.getByRole('button', { name: 'Withdraw pack' }).click();
 	await expect(page.getByTestId('pack-banner')).toContainText('Withdrawn. Reason (shown publicly on the verify page): The rule table was replaced by the 2026 determination.');
 	for (const s of await stamps.all()) await expect(s).toHaveText(/^Withdrawn · version 1 · issued \d{1,2} [A-Z][a-z]{2} \d{4}$/);
+	// Withdraw took its own button away: the focus lands on the board that says where the pack stands, not <body>,
+	// and nothing moves a withdrawn pack again, so the editor is pointed at the evidence report to draft a new one.
+	await expect(actions).toBeFocused();
+	await expect(page.getByTestId('pack-withdrawn-next').getByRole('link', { name: 'Open the evidence report' })).toHaveAttribute(
+		'href',
+		`/projects/${project.id}/report?run=${baseline}&evidence`
+	);
 	await pub.goto(`/verify/${code}`);
 	await expect(result).toHaveAttribute('data-status', 'withdrawn');
 	await expect(pub.getByTestId('verify-verdict')).toContainText('Withdrawn.');
 	await expect(pub.getByTestId('verify-reason')).toHaveText('Reason given: The rule table was replaced by the 2026 determination.');
 	await expectNoViolations(pub);
 	await anon.close();
+});
+
+test('a draft another editor issued behind the page: Issue says why and the board shows it issued, the focus on it', async ({ page, owner }) => {
+	void owner;
+	const { project, baseline } = await seed(page, 'Pack conflict catchment');
+	const drafted = await page.request.post(`${API_URL}/projects/${project.id}/packs`, { data: { runId: baseline } });
+	expect(drafted.status(), await drafted.text()).toBe(201);
+	const pack = ((await drafted.json()) as { pack: ApiPack }).pack;
+	await signPack(page.request, project.id, pack.id);
+	await page.goto(`/projects/${project.id}/packs/${pack.id}`);
+	await ready(page);
+	const actions = page.getByTestId('pack-actions');
+	await expect(actions.getByRole('button', { name: 'Issue pack' })).toBeEnabled();
+	// Behind the page (another editor, another tab): the same draft is issued.
+	expect((await page.request.post(`${API_URL}/projects/${project.id}/packs/${pack.id}/issue`, { data: {} })).status()).toBe(200);
+	await actions.getByRole('button', { name: 'Issue pack' }).click();
+	await answerConfirm(page, true, 'Its verify page then answers for code');
+	// The 409 is shown, and the board reads the pack again: issued, with the moves an issued pack has.
+	await expect(actions.getByRole('alert')).toBeVisible();
+	await expect(actions).toContainText(`Its verify page answers for code ${pack.shortCode}`);
+	await expect(actions.getByRole('button', { name: 'Issue pack' })).toHaveCount(0);
+	await expect(actions.getByRole('button', { name: 'New version…' })).toBeVisible();
+	await expect(actions).toBeFocused();
 });
 
 test('an application’s packs show in the Applications tab and its panel; a new version supersedes the first', async ({ page, owner, browser, signIn }) => {

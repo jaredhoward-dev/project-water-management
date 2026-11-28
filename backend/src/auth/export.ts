@@ -159,6 +159,8 @@ export const USER_FK_COVERAGE: Record<string, { section: string } | { excluded: 
 	'billing_account.user_id': { section: 'billing.account' },
 	// The annual renewal notices sent to them (329, CPA s14): in billing, beside the subscription each is about.
 	'renewal_notice.user_id': { section: 'billing.renewalNotices' },
+	// When their first manual run was saved (407, the activation metric's record; owner only, read by a definer reader).
+	'first_manual_run.user_id': { section: 'firstManualRun' },
 	// The plan emails sent to them (346): grace started, pause landed, trial ending; a team's admins get theirs too.
 	'billing_notice.user_id': { section: 'billing.planNotices' },
 	'team.created_by': { excluded: 'the team itself; the membership is in teamMemberships' },
@@ -370,6 +372,9 @@ export async function buildSubjectExport(userId: string, now = new Date()) {
 		// definer reader that hashes the caller's own canonical address (396); a claim under an earlier address isn't theirs to find.
 		const { rows: trial } = await db.query<{ c: unknown }>('SELECT app_subject_reverse_trial() AS c');
 		const reverseTrialClaim = trial[0]?.c ?? null;
+		// When their first manual run was saved (407): owner-only table, so a definer reader of the caller's own row; or null.
+		const { rows: firstRun } = await db.query<{ f: unknown }>('SELECT app_subject_first_manual_run() AS f');
+		const firstManualRun = firstRun[0]?.f ?? null;
 		// A pending change of address (347): own row only under RLS; never the link's hash.
 		const { rows: emailChange } = await db.query(
 			`SELECT new_email AS "newEmail", created_at AS "createdAt", expires_at AS "expiresAt" FROM email_change WHERE user_id = $1`,
@@ -523,6 +528,7 @@ export async function buildSubjectExport(userId: string, now = new Date()) {
 			assistantDays,
 			billing,
 			reverseTrialClaim,
+			firstManualRun,
 			twoStepSignIn,
 			twoStepSignInResets,
 			twoStepEmail,

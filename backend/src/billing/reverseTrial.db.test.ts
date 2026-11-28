@@ -115,6 +115,28 @@ describe('granting the reverse trial', () => {
 		expect(await liveSub(again)).toBeUndefined();
 	});
 
+	it('follows the person to a new address: change it, delete the account, sign up again with the new one, and no second trial (401)', async () => {
+		on();
+		const p = await person(`${local()}@example.com`);
+		expect((await liveSub(p))?.status).toBe('trialing');
+		const next = `${local()}@example.com`;
+		expect((await p.call('POST', '/auth/change-email', { newEmail: next, currentPassword: 'correct horse' })).status).toBe(202);
+		expect((await anon('POST', '/auth/confirm-email-change', { token: tokenIn(lastMailTo(next)) })).status).toBe(200);
+		// The new address is claimed too, still by hash only.
+		expect(await asOwner(`SELECT 1 FROM reverse_trial_claim WHERE email_hash = decode($1, 'hex')`, [reverseTrialHash(next)])).toHaveLength(1);
+		await asOwner('DELETE FROM app_user WHERE id = $1', [p.id]);
+		const again = await person(next);
+		expect(await liveSub(again)).toBeUndefined();
+		// Positive control: an address change on an account that never had a trial claims nothing, and the new
+		// address's own first verification elsewhere would still start one.
+		vi.unstubAllEnvs();
+		const free = await person(`${local()}@example.com`);
+		const moved = `${local()}@example.com`;
+		expect((await free.call('POST', '/auth/change-email', { newEmail: moved, currentPassword: 'correct horse' })).status).toBe(202);
+		expect((await anon('POST', '/auth/confirm-email-change', { token: tokenIn(lastMailTo(moved)) })).status).toBe(200);
+		expect(await asOwner(`SELECT 1 FROM reverse_trial_claim WHERE email_hash = decode($1, 'hex')`, [reverseTrialHash(moved)])).toEqual([]);
+	});
+
 	it('never without a verified address; the same person verified later gets it (positive control)', async () => {
 		on();
 		const email = `${local()}@example.com`;

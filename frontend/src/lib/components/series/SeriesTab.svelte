@@ -24,11 +24,12 @@
 	import { confirmDialog } from '#lib/components/common/confirm.svelte.js';
 	import { onDestroy, onMount, untrack } from 'svelte';
 	import { focusAfterRemove } from '#lib/a11y/focusAfterRemove.js';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { followAnchors } from '#lib/nav/anchorLanding.js';
 	import { page } from '$app/state';
 	import { fillHeader } from '#lib/components/workspace/headerSlot.svelte.js';
 	import { withParam, withoutParam } from '#lib/workspace/overlays.js';
+	import { seriesPickHref } from '#lib/nav/tabUrl.js';
 	import {
 		agreementOptions,
 		checkSeries,
@@ -74,7 +75,7 @@
 	import { defaultUnit, KIND_OPTIONS, kindLabel, seriesKindLabel } from '#lib/series/kinds.js';
 	import { CHIRPS_CHOICES, describeProvenance, feedMark, provenanceFields, rebuildingNote } from '#lib/series/provenance.js';
 	import { firstOutletSeries } from '#lib/series/pick.js';
-	import { asksSite, productField, rowSiteMark, siteText, uploadUnitText } from './details';
+	import { asksSite, productField, rowSiteMark, settleSave, siteText, uploadUnitText, type SaveStatus } from './details';
 	import { asksStation } from './station';
 	import StationFields from './StationFields.svelte';
 	import AreaRainPanel from './AreaRainPanel.svelte';
@@ -121,7 +122,7 @@
 		projectId,
 		readonly,
 		initial = null,
-		settings = null,
+		settings,
 		gauges = [],
 		nodes = [],
 		timeZone = null,
@@ -136,8 +137,9 @@
 		initial?: SeriesMeta[] | null;
 		/** Not read: "New data since the latest run" is the page's own notice (series/freshness.ts `newDataSinceRun`), on this tab as on every other. */
 		runs?: RunMeta[] | null;
-		/** The project's settings, the same object the Settings tab gets; null only before the page's own load finishes. */
-		settings?: ProjectSettings | null;
+		/** The project's settings, the same object the Settings tab gets. The page draws this tab only once the project is
+		    loaded, so they are always there: the preview read null as "No series data loaded yet." with no retry (issue #932). */
+		settings: ProjectSettings;
 		/** The model's gauge nodes above the outlet: a flow record can be attached to one (084_gauge_records, engine ≥ 1.4.0). */
 		gauges?: readonly { id: string; name: string }[];
 		/** The model's nodes: the land units the Hydrological units group lists, with their MAPs, and the catchment's MAP (issue #553). */
@@ -216,8 +218,14 @@
 		untrack(() => {
 			if (id === removedHere) return;
 			goneSeries = true;
-			void goto(withoutParam(page.url, 'series'), { reset: false, replace: true });
+			void guardedGoto(withoutParam(page.url, 'series'), { reset: false, replace: true });
 		});
+	});
+	// The note is about the default charted in the dead link's place: once the URL names a stored series by any
+	// route (a row's View, an upload through Add data charting what it stored, Back or Forward), it no longer
+	// applies. Only View cleared it, so an upload left it saying "showing <the upload> instead".
+	$effect(() => {
+		if (seriesParam && list.some((s) => s.id === seriesParam)) untrack(() => (goneSeries = false));
 	});
 	// How the Series details show its product (series/details.ts): a CHIRPS select, the words, or no field.
 	const viewingProduct = $derived(viewing ? productField(viewing) : null);
@@ -242,7 +250,7 @@
 			if (previewParam === null) return;
 			previewView = previewParam;
 			if (list.length) openPreviewAll();
-			else void goto(withoutParam(page.url, 'preview'), { reset: false, replace: true });
+			else void guardedGoto(withoutParam(page.url, 'preview'), { reset: false, replace: true });
 		});
 	});
 	$effect(() => {
@@ -251,7 +259,7 @@
 		const have = previewParam;
 		untrack(() => {
 			if (want === have) return;
-			void goto(want === null ? withoutParam(page.url, 'preview') : withParam(page.url, 'preview', want), { reset: false, replace: true });
+			void guardedGoto(want === null ? withoutParam(page.url, 'preview') : withParam(page.url, 'preview', want), { reset: false, replace: true });
 		});
 	});
 	/** The card header's "Preview all data": every column, nothing highlighted. */
@@ -274,11 +282,12 @@
 		if ((e.target as Element).closest('button, a, input, select, summary, [role="menu"]')) return;
 		choose(id);
 	}
-	/** Chart a series: a URL change, so it can be shared and Back returns; the chart, under the table, comes into view. */
+	/** Chart a series: a URL change, so it can be shared and Back returns; the chart, under the table, comes into view.
+	 *  The pick drops `view=`, `rain=` and `feed=`, which belonged to the link that arrived (issue #933, lib/nav/tabUrl.ts). */
 	function choose(id: string, replaceState = false) {
 		if (id === selectedId && seriesParam === id) return;
 		goneSeries = false;
-		void goto(withParam(page.url, 'series', id), { reset: false, replace: replaceState }).then(() => {
+		void guardedGoto(seriesPickHref(page.url, id), { reset: false, replace: replaceState }).then(() => {
 			if (!replaceState) showChart();
 		});
 	}
@@ -438,16 +447,31 @@
 	// The controls that save on change (CHIRPS product, where measured, source): each says Saving…, Saved or why
 	// not beside itself, and a failed save puts the control back to the stored value (the one-way `value=` doesn't
 	// change when the list doesn't, so Svelte would leave the unsaved choice showing).
-	let saves = $state<Record<string, { state: 'saving' | 'saved' | 'error'; text?: string }>>({});
+	let saves = $state<Record<string, SaveStatus>>({});
 	const saveId = (s: SeriesMeta, field: string) => `save-${s.id}-${field}`;
+	// Leaving a series clears the statuses: they speak of the series shown, and coming back to one showed its old
+	// "Saved" or "Not saved…" (issue #932). A save still out then lands silently (settleSave); `picks` counts the changes.
+	let picks = 0;
+	$effect(() => {
+		void selectedId;
+		untrack(() => {
+			picks++;
+			if (Object.keys(saves).length) saves = {};
+		});
+	});
 	async function saveOnChange(key: string, el: HTMLInputElement | HTMLSelectElement, stored: string, save: () => Promise<void>) {
+		const at = picks;
 		saves = { ...saves, [key]: { state: 'saving' } };
 		try {
 			await save();
-			saves = { ...saves, [key]: { state: 'saved' } };
+			saves = settleSave(saves, key, { state: 'saved' }, at, picks) ?? saves;
 		} catch (e) {
-			el.value = stored;
-			saves = { ...saves, [key]: { state: 'error', text: msg(e) } };
+			const next = settleSave(saves, key, { state: 'error', text: msg(e) }, at, picks);
+			// Put the control back only while it still shows this series: after leaving, it shows another's value.
+			if (next) {
+				el.value = stored;
+				saves = next;
+			}
 		}
 	}
 	const saveFailed = (key: string) => saves[key]?.state === 'error';
@@ -591,7 +615,7 @@
 			list = list.filter((x) => x.id !== s.id);
 			onSeriesChange?.(list);
 			// The deleted series was charted: back to the default, without a history entry for it.
-			if (seriesParam === s.id) void goto(withoutParam(page.url, 'series'), { reset: false, replace: true });
+			if (seriesParam === s.id) void guardedGoto(withoutParam(page.url, 'series'), { reset: false, replace: true });
 			// Its row, and the Delete that had the focus, have gone: the View of the series now in its place takes it.
 			await focusAfterRemove(at, '#series-rows button[aria-pressed]', 'ser-h');
 		} catch (e) {
@@ -851,7 +875,7 @@
 				}
 				return dataAnchor(hash) ? landOnAnchor(hash) : undefined;
 			},
-			forward: (to) => void goto(to, { replace: true, reset: false })
+			forward: (to) => void guardedGoto(to, { replace: true, reset: false })
 		})
 	);
 

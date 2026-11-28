@@ -95,6 +95,9 @@ describe('the pricing page as prerendered', () => {
 		expect(t).toContain('3 editors included; each further editor R 499 a month or R 4 990 a year');
 		expect(t).toContain('Live data feeds, automatic runs, alerts and published farm views on 1 catchment');
 		expect(t).toContain('5 server PDF reports a month');
+		// Pro's card names its scheduled report emails (#941: Team's "Everything in Pro" implies them).
+		expect(text(body.slice(body.indexOf('data-plan="pro"'), body.indexOf('data-plan="team"')))).toContain('Unlimited server PDF reports, and scheduled report emails');
+		expect(text(body.slice(body.indexOf('data-plan="free"'), body.indexOf('data-plan="pro"')))).not.toContain('scheduled report emails');
 		expect(t).toContain('Issued evidence packs at R 1 499 each');
 		expect(t).toContain('Issued evidence packs at R 999 each');
 		expect(t).toContain('3 issued evidence packs a month included, then R 999 each');

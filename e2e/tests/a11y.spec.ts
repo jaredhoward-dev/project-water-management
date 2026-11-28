@@ -315,6 +315,8 @@ for (const colorScheme of ['light', 'dark'] as const) {
 						await expect(p.getByTestId('file-format').first()).toBeVisible();
 					}
 				},
+				// A topic page: its entries' See also links (underlined, WCAG 1.4.1).
+				{ path: '/help/glossary/goodness-of-fit', ready: (p) => expect(p.getByRole('heading', { level: 1, name: 'Goodness of fit' })).toBeVisible() },
 				{
 					path: '/help/search?q=dam',
 					ready: async (p) => {

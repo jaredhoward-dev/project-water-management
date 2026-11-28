@@ -38,6 +38,7 @@
 import { type Context, Hono } from 'hono';
 import { z } from 'zod';
 import type { AuthEnv } from '../auth/middleware.js';
+import { countGateRefusals } from '../billing/emailGate.js';
 import type { Geometry } from '../geo/geojson.js';
 import { withUser, type Db } from '../db/tx.js';
 import { readJson } from '../http/body.js';
@@ -437,98 +438,100 @@ const applyProposal = (k: BoundarySource) => async (c: Context<AuthEnv>) => {
 	const body = ApplyBody.parse(await readJson(c));
 	if (!k.products && body.product !== undefined) throw new ApiError(400, 'only a CHIRPS feed has a daily product');
 	const id = c.req.param('id')!;
-	const out = await withUser(c.get('userId'), async (db) => {
-		await requireRole(db, id, 'owner');
-		const b = await loadBoundary(db, id);
-		if (b.id !== body.featureId || b.updated_at.getTime() !== new Date(body.updatedAt).getTime()) {
-			throw new ApiError(409, 'the catchment boundary changed since this proposal: look at the new proposal before applying it', { code: 'boundary_changed' });
-		}
-		const r = cellsOf(b, k);
-		const from = { featureId: b.id, name: b.name };
-		const pick = await runSeries(db, id, k.targetKind);
-		const defaults = boundaryDefaults(pick, k);
-		const withProduct = (product: ChirpsDailyProduct | undefined) => (product !== undefined ? { product } : {});
-		if (body.replace) {
-			const feeds = (await listFeeds(db, id)).filter((f) => f.source === k.source);
-			const choice = await replaceChoice(db, id, pick, feeds, k, defaults.product, body.product);
-			if (!choice) throw new ApiError(409, `no ${k.short} series holds a record yet, so there is nothing to replace: attach the boundary’s feed instead`, { code: 'nothing_to_replace' });
-			if (!choice.available) throw new ApiError(409, choice.reason.charAt(0).toUpperCase() + choice.reason.slice(1), { code: 'series_replace' });
-			const product = choice.product;
-			if (choice.feedId) return replaceThroughFeed(db, id, feeds.find((f) => f.id === choice.feedId)!, b, r.cells, product, body.startDate);
+	const out = await countGateRefusals(() =>
+		withUser(c.get('userId'), async (db) => {
+			await requireRole(db, id, 'owner');
+			const b = await loadBoundary(db, id);
+			if (b.id !== body.featureId || b.updated_at.getTime() !== new Date(body.updatedAt).getTime()) {
+				throw new ApiError(409, 'the catchment boundary changed since this proposal: look at the new proposal before applying it', { code: 'boundary_changed' });
+			}
+			const r = cellsOf(b, k);
+			const from = { featureId: b.id, name: b.name };
+			const pick = await runSeries(db, id, k.targetKind);
+			const defaults = boundaryDefaults(pick, k);
+			const withProduct = (product: ChirpsDailyProduct | undefined) => (product !== undefined ? { product } : {});
+			if (body.replace) {
+				const feeds = (await listFeeds(db, id)).filter((f) => f.source === k.source);
+				const choice = await replaceChoice(db, id, pick, feeds, k, defaults.product, body.product);
+				if (!choice) throw new ApiError(409, `no ${k.short} series holds a record yet, so there is nothing to replace: attach the boundary’s feed instead`, { code: 'nothing_to_replace' });
+				if (!choice.available) throw new ApiError(409, choice.reason.charAt(0).toUpperCase() + choice.reason.slice(1), { code: 'series_replace' });
+				const product = choice.product;
+				if (choice.feedId) return replaceThroughFeed(db, id, feeds.find((f) => f.id === choice.feedId)!, b, r.cells, product, body.startDate);
+				await attachSlot(db, id);
+				const input = FeedInput.parse({
+					source: k.source,
+					config: { cells: configCells(r.cells), boundary: mark(b), ...withProduct(product), ...(body.startDate !== undefined ? { startDate: body.startDate } : {}) },
+					targetKind: k.targetKind,
+					targetName: choice.targetName,
+					replaceSeries: true
+				});
+				// A full backfill from the record's first day (a later start date, or sat for a record before 1998, is refused).
+				const { input: checked, replaceFrom } = await versionCheck(db, id, input, true);
+				if (replaceFrom === undefined) throw new ApiError(409, 'the series already holds what this feed writes, so it would be added to, not replaced', { code: 'series_replace' });
+				const fid = await createFeed(db, id, checked, replaceFrom).catch(conflict);
+				await recordAudit(db, id, 'feed.configured', { ...feedSubject(fid, 'created', checked), boundary: from, cells: r.cells.length, replaceSeries: replaceFrom });
+				return { feed: await getFeed(db, id, fid), created: true };
+			}
+			if (body.feedId) {
+				const cur = await getFeed(db, id, body.feedId);
+				if (!cur) throw new ApiError(404, 'not found');
+				if (cur.source !== k.source) throw new ApiError(409, `only ${k.source === 'chirps' ? 'a CHIRPS daily rainfall feed' : 'an AgERA5 reference evapotranspiration feed'} takes these cells of the boundary`);
+				await holdFeed(db, id, cur.id);
+				if ((await targetSeries(db, id, cur.targetKind, cur.targetName))?.filled) {
+					throw new ApiError(
+						409,
+						'the feed’s series already holds days averaged over its old cells, and a feed never splices two areas into one record: attach a new feed for the boundary instead, into a separate series, or replace the record runs read (replace)',
+						{ code: 'series_area' }
+					);
+				}
+				const old = cur.config as GridConfig;
+				// The product and first day asked for, else the feed's own, else the defaults (the record's first day).
+				const { product, startDate } = boundaryReads(defaults, old, body, k);
+				const input = FeedInput.parse({
+					source: k.source,
+					config: {
+						cells: configCells(r.cells),
+						boundary: mark(b),
+						...withProduct(product),
+						...(startDate !== null ? { startDate } : {}),
+						...(old.staleAfterDays !== undefined ? { staleAfterDays: old.staleAfterDays } : {})
+					},
+					targetKind: cur.targetKind,
+					targetName: cur.targetName,
+					schedule: cur.schedule,
+					enabled: cur.enabled
+				});
+				await refuseTakeOver(db, id, input);
+				// The series is empty: nothing for the version check to ask.
+				const { input: checked } = await versionCheck(db, id, input, false);
+				if (!(await updateFeed(db, id, cur.id, checked).catch(conflict))) throw new ApiError(404, 'not found');
+				await recordAudit(db, id, 'feed.configured', { ...feedSubject(cur.id, 'changed', checked), boundary: from, cells: r.cells.length });
+				return { feed: await getFeed(db, id, cur.id), created: false };
+			}
 			await attachSlot(db, id);
-			const input = FeedInput.parse({
-				source: k.source,
-				config: { cells: configCells(r.cells), boundary: mark(b), ...withProduct(product), ...(body.startDate !== undefined ? { startDate: body.startDate } : {}) },
-				targetKind: k.targetKind,
-				targetName: choice.targetName,
-				replaceSeries: true
-			});
-			// A full backfill from the record's first day (a later start date, or sat for a record before 1998, is refused).
-			const { input: checked, replaceFrom } = await versionCheck(db, id, input, true);
-			if (replaceFrom === undefined) throw new ApiError(409, 'the series already holds what this feed writes, so it would be added to, not replaced', { code: 'series_replace' });
-			const fid = await createFeed(db, id, checked, replaceFrom).catch(conflict);
-			await recordAudit(db, id, 'feed.configured', { ...feedSubject(fid, 'created', checked), boundary: from, cells: r.cells.length, replaceSeries: replaceFrom });
-			return { feed: await getFeed(db, id, fid), created: true };
-		}
-		if (body.feedId) {
-			const cur = await getFeed(db, id, body.feedId);
-			if (!cur) throw new ApiError(404, 'not found');
-			if (cur.source !== k.source) throw new ApiError(409, `only ${k.source === 'chirps' ? 'a CHIRPS daily rainfall feed' : 'an AgERA5 reference evapotranspiration feed'} takes these cells of the boundary`);
-			await holdFeed(db, id, cur.id);
-			if ((await targetSeries(db, id, cur.targetKind, cur.targetName))?.filled) {
+			const targetName = body.targetName ?? (await freeName(db, id, (await listFeeds(db, id)).filter((f) => f.source === k.source), pick, k));
+			if ((await targetSeries(db, id, k.targetKind, targetName))?.filled) {
 				throw new ApiError(
 					409,
-					'the feed’s series already holds days averaged over its old cells, and a feed never splices two areas into one record: attach a new feed for the boundary instead, into a separate series, or replace the record runs read (replace)',
+					`that series already holds a record; the boundary’s ${k.reads} goes into a series of its own, so the two can be compared rather than spliced`,
 					{ code: 'series_area' }
 				);
 			}
-			const old = cur.config as GridConfig;
-			// The product and first day asked for, else the feed's own, else the defaults (the record's first day).
-			const { product, startDate } = boundaryReads(defaults, old, body, k);
+			const { product, startDate } = boundaryReads(defaults, null, body, k);
 			const input = FeedInput.parse({
 				source: k.source,
-				config: {
-					cells: configCells(r.cells),
-					boundary: mark(b),
-					...withProduct(product),
-					...(startDate !== null ? { startDate } : {}),
-					...(old.staleAfterDays !== undefined ? { staleAfterDays: old.staleAfterDays } : {})
-				},
-				targetKind: cur.targetKind,
-				targetName: cur.targetName,
-				schedule: cur.schedule,
-				enabled: cur.enabled
+				config: { cells: configCells(r.cells), boundary: mark(b), ...withProduct(product), ...(startDate !== null ? { startDate } : {}) },
+				targetKind: k.targetKind,
+				targetName
 			});
+			// Never into a new series that would take over from the record runs read (issue #561).
 			await refuseTakeOver(db, id, input);
-			// The series is empty: nothing for the version check to ask.
-			const { input: checked } = await versionCheck(db, id, input, false);
-			if (!(await updateFeed(db, id, cur.id, checked).catch(conflict))) throw new ApiError(404, 'not found');
-			await recordAudit(db, id, 'feed.configured', { ...feedSubject(cur.id, 'changed', checked), boundary: from, cells: r.cells.length });
-			return { feed: await getFeed(db, id, cur.id), created: false };
-		}
-		await attachSlot(db, id);
-		const targetName = body.targetName ?? (await freeName(db, id, (await listFeeds(db, id)).filter((f) => f.source === k.source), pick, k));
-		if ((await targetSeries(db, id, k.targetKind, targetName))?.filled) {
-			throw new ApiError(
-				409,
-				`that series already holds a record; the boundary’s ${k.reads} goes into a series of its own, so the two can be compared rather than spliced`,
-				{ code: 'series_area' }
-			);
-		}
-		const { product, startDate } = boundaryReads(defaults, null, body, k);
-		const input = FeedInput.parse({
-			source: k.source,
-			config: { cells: configCells(r.cells), boundary: mark(b), ...withProduct(product), ...(startDate !== null ? { startDate } : {}) },
-			targetKind: k.targetKind,
-			targetName
-		});
-		// Never into a new series that would take over from the record runs read (issue #561).
-		await refuseTakeOver(db, id, input);
-		const { input: checked } = await versionCheck(db, id, input, true);
-		const fid = await createFeed(db, id, checked).catch(conflict);
-		await recordAudit(db, id, 'feed.configured', { ...feedSubject(fid, 'created', checked), boundary: from, cells: r.cells.length });
-		return { feed: await getFeed(db, id, fid), created: true };
-	});
+			const { input: checked } = await versionCheck(db, id, input, true);
+			const fid = await createFeed(db, id, checked).catch(conflict);
+			await recordAudit(db, id, 'feed.configured', { ...feedSubject(fid, 'created', checked), boundary: from, cells: r.cells.length });
+			return { feed: await getFeed(db, id, fid), created: true };
+		})
+	);
 	return c.json({ feed: out.feed }, out.created ? 201 : 200);
 };
 

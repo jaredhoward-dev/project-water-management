@@ -245,6 +245,33 @@ describe('POST /account/plan/portal', () => {
 		expect(html).not.toContain('Your pro subscription');
 		expect(html).toContain('href="http://site.test/account/plan" data-action="return"');
 	});
+
+	it('a grant (manual: an invoice or staff grant) shows its invoices only, no cancel, and a hand-made cancel is refused (#941)', async () => {
+		const sub = { status: 'active', periodStart: '2026-11-01T00:00:00Z', periodEnd: '2027-11-01T00:00:00Z', cancelAtPeriodEnd: false, seats: 1 };
+		answers.set('app_account_plan', [{ plan: { ...planOf('user', sub), plan: { code: 'pro', name: 'Pro' } } }]);
+		answers.set('app_billing_live_subscription_ref', [{ ref: { provider: 'manual', externalRef: 'in_mock_0123456789abcdef01234567' } }]);
+		const { url } = (await (await post('/account/plan/portal')).json()) as { url: string };
+		const html = await (await app.request(url)).text();
+		expect(html).toContain('data-mock-subscription="manual"');
+		expect(html).toContain('data-mock-invoices');
+		expect(html).not.toContain('data-action="cancel"');
+		const cancel = await app.request(`${url}&action=cancel`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' } });
+		expect(cancel.status).toBe(409);
+		expect(queries.some((q) => q.sql.includes('app_billing_apply'))).toBe(false);
+	});
+
+	it('the mock’s own subscription is offered to cancel, by its id (#929)', async () => {
+		const sub = { status: 'active', periodStart: '2026-11-01T00:00:00Z', periodEnd: '2026-12-01T00:00:00Z', cancelAtPeriodEnd: false, seats: 1 };
+		answers.set('app_account_plan', [{ plan: { ...planOf('user', sub), plan: { code: 'pro', name: 'Pro' } } }]);
+		answers.set('app_billing_live_subscription_ref', [{ ref: { provider: 'mock', externalRef: 'sub_mock_feedfeedfeedfeedfeedfeed' } }]);
+		answers.set('app_billing_apply', [{ result: 'applied' }]);
+		const { url } = (await (await post('/account/plan/portal')).json()) as { url: string };
+		expect(await (await app.request(url)).text()).toContain('data-action="cancel"');
+		const cancel = await app.request(`${url}&action=cancel`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' } });
+		expect(cancel.status).toBe(303);
+		const apply = queries.find((q) => q.sql.includes('app_billing_apply'));
+		expect(JSON.parse(String(apply?.params[3]))).toMatchObject({ externalRef: 'sub_mock_feedfeedfeedfeedfeedfeed', cancelAtPeriodEnd: true });
+	});
 });
 
 describe('the mock pages', () => {
@@ -316,6 +343,17 @@ describe('the mock pages', () => {
 		expect(html).toContain('Something went wrong');
 		// Back to the plan page the checkout came from, without its ?checkout= outcome.
 		expect(html).toContain('<a href="http://site.test/account/plan" data-action="return">Back to the plan page</a>');
+	});
+
+	it('pays, but the webhook answers conflict (a 200): the page shows that answer with 409, never the redirect to done (#929)', async () => {
+		answers.set('app_billing_apply', [{ result: 'conflict' }]);
+		const res = await app.request(`/billing/mock/checkout?t=${token()}&outcome=pays`, form);
+		expect(res.status).toBe(409);
+		expect(res.headers.get('location')).toBeNull();
+		const html = await res.text();
+		expect(html).toContain('Nothing changed');
+		expect(html).toContain('data-mock-result="conflict"');
+		expect(html).not.toContain('checkout=done');
 	});
 
 	it('a team’s failed page links back to the team’s plan page', async () => {

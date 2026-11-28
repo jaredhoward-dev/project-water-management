@@ -20,7 +20,7 @@ export type AccountBilling = { accountId: string; customerRef: string | null; li
 async function billingOf(db: Db, accountId: string, customerRef: string | null): Promise<AccountBilling> {
 	const { rows: live } = await db.query<{ provider: string; externalRef: string }>(
 		`SELECT provider, external_ref AS "externalRef" FROM subscription
-		 WHERE billing_account_id = $1 AND status IN ('trialing', 'active', 'past_due') AND provider <> 'manual' AND external_ref IS NOT NULL
+		 WHERE billing_account_id = $1 AND status IN ('trialing', 'active', 'past_due', 'lapsed') AND provider <> 'manual' AND external_ref IS NOT NULL
 		 ORDER BY created_at, external_ref`,
 		[accountId]
 	);
@@ -30,7 +30,7 @@ async function billingOf(db: Db, accountId: string, customerRef: string | null):
 /**
  * The person's own billing account (kind `user`; never a team's, whose plan is
  * the team's and stays with it), read as the person under RLS: its customer at
- * the provider and its live (trialing, active, past_due) subscriptions with a
+ * the provider and its live (trialing, active, past_due) or lapsed (405) subscriptions with a
  * provider ref. A grant (provider `manual`: a staff or invoice grant, the
  * reverse trial) is left out, since nothing charges for it at a provider. Null
  * when the person has no account (never opened a plan page or made a project).

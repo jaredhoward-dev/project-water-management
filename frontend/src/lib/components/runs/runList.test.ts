@@ -49,6 +49,12 @@ describe('defaultRunId', () => {
 		expect(defaultRunId([], 'viewer')).toBeNull();
 		expect(defaultRunId([], 'owner')).toBeNull();
 	});
+	it('is also the pick after the run on screen is deleted (issue #924): the remaining list, the same rule', () => {
+		const left = [{ id: 'newer' }, { id: 'published', published: true }];
+		expect(defaultRunId(left, 'viewer')).toBe('published');
+		expect(defaultRunId(left, 'editor')).toBe('newer');
+		expect(defaultRunId([], 'editor')).toBeNull();
+	});
 });
 
 describe('runErrorText (issue #77)', () => {

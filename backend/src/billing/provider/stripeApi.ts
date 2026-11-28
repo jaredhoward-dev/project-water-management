@@ -1,8 +1,9 @@
 // Stripe's API for checkout and the Customer Portal, over plain fetch (issue
 // #641 Phase 3; docs/billing.md § Checkout and portal, where the research
-// behind "fetch, not the stripe package" is recorded). Three form-encoded
-// POSTs, each with the API version pinned and an idempotency key where a
-// retry could make a second object:
+// behind "fetch, not the stripe package" is recorded). Form-encoded calls,
+// each with the API version pinned and an idempotency key where a retry could
+// make a second object; the restricted key's permissions for all of them are
+// in docs/deployment.md § Turning on Stripe, step 2. To start a plan:
 //
 //   POST /v1/customers                 the account's customer, made once (328 stores it)
 //   POST /v1/checkout/sessions         a hosted Checkout session for one plan and interval

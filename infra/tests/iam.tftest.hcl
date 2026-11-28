@@ -1,5 +1,5 @@
 # Plan-only IAM tests (issue #126 § IAM), against the same mocked providers as
-# guardrails.tftest.hcl (the mocks, overrides and variables below are copied
+# guardrails_*.tftest.hcl (the mocks, overrides and variables below are copied
 # from it: a test file can't share them). A mocked aws_iam_policy_document
 # renders a fixed JSON, so every assertion reads the data source's
 # `statement` inputs, never its `json`.

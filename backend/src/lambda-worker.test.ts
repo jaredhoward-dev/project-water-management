@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fileURLToPath } from 'node:url';
 import type { TickResult } from './jobs/runner.js';
 
-const tick: TickResult = { purged: 1, invitesPurged: 0, notesPurged: 0, erasuresPurged: 0, assistantPurged: 0, billingEventsPurged: 0, staffGrantsExpired: 0, reverseTrialsExpired: 0, catchmentsPaused: 0, claimed: 3, done: 1, failed: 1, dead: 1, lost: 0, released: 0, waitedMs: 0, stats: { due: 2, running: 0, oldestDueSeconds: 420 },
+const tick: TickResult = { purged: 1, invitesPurged: 0, notesPurged: 0, erasuresPurged: 0, assistantPurged: 0, billingEventsPurged: 0, staffGrantsExpired: 0, reverseTrialsExpired: 0, reportsRefunded: 0, catchmentsPaused: 0, subscriptionsLapsed: 0, billingFailed: [], claimed: 3, done: 1, failed: 1, dead: 1, lost: 0, released: 0, waitedMs: 0, stats: { due: 2, running: 0, oldestDueSeconds: 420 },
 	alerts: { scheduled: 0, purged: 0, sent: 7, skipped: 1, failed: 2, digests: 1 },
 	packNotices: { purged: 0, sent: 0, skipped: 0, failed: 0 },
 	erratumNotices: { purged: 0, queued: 0, sent: 0, skipped: 0, failed: 0 },
@@ -47,8 +47,13 @@ describe('metricLine', () => {
 		expect(line._aws.Timestamp).toBe(1_700_000_000_000);
 		expect(line._aws.CloudWatchMetrics[0].Namespace).toBe(METRIC_NAMESPACE);
 		expect(METRIC_NAMESPACE).toBe('water-management/Jobs');
-		expect(line._aws.CloudWatchMetrics[0].Metrics.map((m: { Name: string }) => m.Name)).toEqual(['OldestDueJobAgeSeconds', 'JobsDead', 'JobsFailed', 'AlertMailsSent', 'AlertMailsFailed']);
-		expect(line).toMatchObject({ OldestDueJobAgeSeconds: 420, JobsDead: 1, JobsFailed: 1, AlertMailsSent: 7, AlertMailsFailed: 2 });
+		expect(line._aws.CloudWatchMetrics[0].Metrics.map((m: { Name: string }) => m.Name)).toEqual(['OldestDueJobAgeSeconds', 'JobsDead', 'JobsFailed', 'AlertMailsSent', 'AlertMailsFailed', 'BillingStepsFailed']);
+		expect(line).toMatchObject({ OldestDueJobAgeSeconds: 420, JobsDead: 1, JobsFailed: 1, AlertMailsSent: 7, AlertMailsFailed: 2, BillingStepsFailed: 0 });
+	});
+
+	it('counts the billing sweeps that failed (infra/alarms.tf billing_tick_failed reads it)', () => {
+		const line = JSON.parse(metricLine({ ...tick, billingFailed: ['staff_grant_expire', 'plan_pause'] }));
+		expect(line.BillingStepsFailed).toBe(2);
 	});
 });
 
@@ -156,6 +161,14 @@ describe('handler', () => {
 		await handler({ Records: [{ messageId: 'm3', body: JSON.stringify(legacy) }] } as never);
 		expect(acceptRenderResult).toHaveBeenLastCalledWith(legacy);
 		expect(freeRenderSlot.mock.calls).toEqual([[`report:${msg.reportId}`, undefined]]);
+		freeRenderSlot.mockClear();
+		// A report deleted while it rendered: its PDF is queued for removal (398), logged as info, not as a dropped answer.
+		const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+		warn.mockClear();
+		acceptRenderResult.mockResolvedValueOnce('orphan_queued');
+		await handler({ Records: [{ messageId: 'm4', body: JSON.stringify(msg) }] } as never);
+		expect(info).toHaveBeenCalledWith(JSON.stringify({ event: 'report_pdf_orphaned', messageId: 'm4', reportId: msg.reportId }));
+		expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('render_result_dropped'));
 		freeRenderSlot.mockClear();
 		acceptRenderResult.mockClear();
 	});

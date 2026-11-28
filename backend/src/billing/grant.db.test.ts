@@ -145,6 +145,38 @@ describe('app_staff_grant_plan', () => {
 		expect((await planOf(p)).plan.code).toBe('pro');
 	});
 
+	it('expires a lapsed reverse trial the tick hasn’t reached before a new grant, logged as the tick logs it (408, issue #930)', async () => {
+		const p = await person('GrantLapsedTrial');
+		const account = await accountOf(p);
+		// A reverse trial as 342 writes it, its end a minute gone and the tick not run since.
+		const [trial] = await asOwner(
+			`INSERT INTO subscription (billing_account_id, plan_code, status, period_start, period_end, trial_end, cancel_at_period_end, provider)
+			 VALUES ($1, 'pro', 'trialing', now() - interval '14 days', now() - interval '1 minute', now() - interval '1 minute', true, 'manual') RETURNING id`,
+			[account]
+		);
+		await run([p.email, 'team', '--reason', 'Pilot after the trial']);
+		expect(await statusOf(trial.id as string)).toBe('expired');
+		const rows = await log(account);
+		expect(rows.map((r) => [r.action, r.plan_code, r.granted_by])).toEqual([
+			['expire', 'pro', 'expiry'],
+			['grant', 'team', 'test-operator']
+		]);
+		expect(rows[0]!.reason).toBe('the trial reached its end');
+		expect((await planOf(p)).plan.code).toBe('team');
+	});
+
+	it('still refuses a grant without --replace beside a trial that hasn’t ended (control for the lapsed trial)', async () => {
+		const p = await person('GrantLiveTrial');
+		const account = await accountOf(p);
+		const [trial] = await asOwner(
+			`INSERT INTO subscription (billing_account_id, plan_code, status, period_start, period_end, trial_end, cancel_at_period_end, provider)
+			 VALUES ($1, 'pro', 'trialing', now() - interval '1 day', now() + interval '13 days', now() + interval '13 days', true, 'manual') RETURNING id`,
+			[account]
+		);
+		expect(await failure(run([p.email, 'team', '--reason', 'Too early']))).toMatch(/^23505: the account already has a live manual subscription/);
+		expect(await statusOf(trial.id as string)).toBe('trialing');
+	});
+
 	it('refuses a grant beside a live Stripe subscription, even with --replace, and leaves it untouched', async () => {
 		const p = await person('GrantStripe');
 		const account = await accountOf(p);

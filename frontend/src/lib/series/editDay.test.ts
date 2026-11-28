@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { handDayCount, handPoints, handRangesText, isHandDay, lastDay, readTypedValue, valueOn } from './editDay';
+import { handDayCount, handPoints, handRangesText, isHandDay, lastDay, readTypedValue, savedApplies, storedValue, valueOn } from './editDay';
 
 const s = { startDate: '2021-10-01', values: [1.2, null, 0.6, 0.4] };
 
@@ -12,6 +12,25 @@ describe('the day edit', () => {
 		expect(valueOn(s, '2021-10-05')).toBeUndefined();
 		expect(valueOn(s, '')).toBeUndefined();
 		expect(lastDay({ startDate: '2021-10-01', length: 4 })).toBe('2021-10-04');
+	});
+
+	it('says a day just saved as saved until the values reload, and only for that day (issue #932)', () => {
+		const saved = { values: s, date: '2021-10-01', value: 9 };
+		expect(storedValue(s, '2021-10-01', saved)).toBe(9);
+		expect(savedApplies(saved, s, '2021-10-01')).toBe(true);
+		// Another day reads as stored.
+		expect(storedValue(s, '2021-10-03', saved)).toBe(0.6);
+		expect(savedApplies(saved, s, '2021-10-03')).toBe(false);
+		// A clear reads as no reading.
+		expect(storedValue(s, '2021-10-01', { ...saved, value: null })).toBeNull();
+		// Reloaded values (a new copy) are the truth, whatever they hold.
+		const reloaded = { startDate: s.startDate, values: [7, null, 0.6, 0.4] };
+		expect(storedValue(reloaded, '2021-10-01', saved)).toBe(7);
+		expect(savedApplies(saved, reloaded, '2021-10-01')).toBe(false);
+		// No values or no day: nothing to say; no save: as stored.
+		expect(storedValue(null, '2021-10-01', saved)).toBeUndefined();
+		expect(storedValue(s, '', saved)).toBeUndefined();
+		expect(storedValue(s, '2021-10-01', null)).toBe(1.2);
 	});
 
 	it('reads a typed value with a decimal point or comma; blank clears; a negative or text is refused', () => {

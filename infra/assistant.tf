@@ -405,7 +405,9 @@ resource "aws_lambda_function" "assistant" {
       # The Free dollar caps (issue #641; docs/billing.md § Assistant dollar
       # caps): only this Lambda begins a turn, so only it reads them (the
       # API's status shows the token caps). They refuse only while
-      # BILLING_ENFORCED is on.
+      # BILLING_ENFORCED is on: the same value as the API's (lambda.tf), and
+      # its withUser transactions set app.billing_enforced from it (db/tx.ts).
+      BILLING_ENFORCED                  = var.billing_enforced ? "true" : "false"
       ASSISTANT_FREE_USD_PER_DAY        = tostring(var.assistant_free_usd_per_day)
       ASSISTANT_FREE_MESSAGES_PER_DAY   = tostring(var.assistant_free_messages_per_day)
       ASSISTANT_FREE_POOL_USD_PER_MONTH = tostring(var.assistant_free_pool_usd_per_month)

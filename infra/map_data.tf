@@ -32,7 +32,7 @@
 #     `tiles` load records (248, backend/scripts/tiles-upload.ts). Beside
 #     them, originals/<dataset>/… keeps the operator's original downloads, so
 #     a dataset can be re-derived without the upstream: the operator's
-#     alone, outside migrate_reference's reference/* (guardrails.tftest.hcl).
+#     alone, outside migrate_reference's reference/* (guardrails_map.tftest.hcl).
 #
 # The operator uploads the objects with their own SSO session (deployment.md);
 # no role here can write either bucket, and the deploy role touches neither.

@@ -22,6 +22,7 @@ import { readJson } from '../http/body.js';
 import { ApiError } from '../http/errors.js';
 import { logEvent } from '../logging/logEvent.js';
 import { UUID } from '../projects/access.js';
+import { billingEnforced } from './enforced.js';
 import { accountPlan, listPlans, myAccountId, teamAccountId } from './entitlements.js';
 import type { PublicPlan } from './entitlements.js';
 import { BILLING_INTERVALS, BillingGrantSeatsError, BillingUnavailableError, billingProvider, checkoutPlanOf, MAX_CHECKOUT_SEATS, PURCHASABLE, type CheckoutPlan, type LiveSubscription, type ReturnUrls } from './provider.js';
@@ -70,7 +71,7 @@ interface AccountState {
 	customerRef: string | null;
 	plan: AccountPlanJson;
 }
-type AccountPlanJson = { plan?: { code?: string; name?: string; limits?: { seats_included?: unknown } }; subscription?: (Omit<LiveSubscription, 'planCode'> & { status: string }) | null };
+type AccountPlanJson = { plan?: { code?: string; name?: string; limits?: { seats_included?: unknown } }; team?: { editorCount?: number } | null; subscription?: (Omit<LiveSubscription, 'planCode'> & { status: string }) | null };
 
 /** The account's kind, plan and customer, read as the caller; null when they may not (app_account_plan's own check). */
 async function accountState(db: Db, accountId: string | null): Promise<AccountState | null> {
@@ -132,8 +133,15 @@ const includedSeats = (p: AccountPlanJson): number => {
 
 async function portal(c: Context<AuthEnv>, resolve: (db: Db) => Promise<string | null>, pagePath: string) {
 	// Access first, so a stranger meets 404 whatever the provider.
-	const state = await withUser(c.get('userId'), async (db) => accountState(db, await resolve(db)));
-	if (!state) throw new ApiError(404, 'not found');
+	const found = await withUser(c.get('userId'), async (db) => {
+		const state = await accountState(db, await resolve(db));
+		if (!state) return null;
+		// Which provider holds the live subscription and its id (333): the mock's portal cancels its own by that id and shows a grant's invoices only.
+		const { rows } = await db.query<{ ref: { provider?: string; externalRef?: string | null } | null }>('SELECT app_billing_live_subscription_ref($1) AS ref', [state.id]);
+		return { state, ref: rows[0]?.ref ?? null };
+	});
+	if (!found) throw new ApiError(404, 'not found');
+	const { state, ref } = found;
 	const provider = billingProvider();
 	if (!provider || provider.name === 'manual') throw new BillingUnavailableError();
 	// No fields, but a body sent is still read and checked (http/body.ts), as checkout's is: a hostile one is a 400, before any provider call.
@@ -149,9 +157,15 @@ async function portal(c: Context<AuthEnv>, resolve: (db: Db) => Promise<string |
 				cancelAtPeriodEnd: sub.cancelAtPeriodEnd,
 				seats: sub.seats,
 				seatsIncluded: includedSeats(state.plan),
-				interval: sub.interval ?? null
+				interval: sub.interval ?? null,
+				...(ref?.provider ? { provider: ref.provider, externalRef: ref.externalRef ?? null } : {})
 			}
 		: null;
+	// The plan as checkout prices it, so the mock's cancel event prices its items as Stripe's (#928); Stripe's portal ignores it.
+	if (live && provider.name === 'mock') {
+		const onSale = (await withoutUser((db) => listPlans(db))).find((p) => p.code === live.planCode);
+		if (onSale) live.plan = checkoutPlanOf(onSale);
+	}
 	const result = await provider.createPortal({ id: state.id, customerRef: state.customerRef }, live, returnUrls(c, pagePath, false));
 	logEvent('info', { event: 'billing_portal', provider: provider.name });
 	c.header('Cache-Control', 'no-store');
@@ -199,6 +213,11 @@ async function changeSeats(c: Context<AuthEnv>, teamId: string) {
 	if (plan.extraSeatMonthlyMinor === null && plan.extraSeatAnnualMinor === null) throw new ApiError(400, `the ${plan.name} plan sells no extra seats`);
 	if (body.seats < plan.seatsIncluded) throw new ApiError(400, `the ${plan.name} plan includes ${plan.seatsIncluded} seats; choose at least that many`);
 	if (body.seats === sub.seats) throw new ApiError(400, `the team already has ${sub.seats} seats`);
+	// Fewer seats than the editors in use: the seat guard (334) never takes a seat from someone holding one, so without
+	// this a team could buy seats, fill them and drop back while keeping every editor. Enforced only; shadow mode counts.
+	const editors = state.plan.team?.editorCount;
+	if (billingEnforced() && typeof editors === 'number' && body.seats < editors)
+		throw ApiError.coded(409, 'seats_below_editors', `this team has ${editors} editors: make some of them viewers before going below ${editors} seats`, { seats: body.seats, editors });
 	await provider.changeSeats({
 		accountId: state.id,
 		externalRef: ref.externalRef,
@@ -210,7 +229,8 @@ async function changeSeats(c: Context<AuthEnv>, teamId: string) {
 			periodEnd: sub.periodEnd,
 			cancelAtPeriodEnd: sub.cancelAtPeriodEnd,
 			seats: sub.seats,
-			seatsIncluded: plan.seatsIncluded
+			seatsIncluded: plan.seatsIncluded,
+			interval: sub.interval ?? null
 		},
 		seats: body.seats
 	});

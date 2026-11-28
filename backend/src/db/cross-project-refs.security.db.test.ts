@@ -356,6 +356,10 @@ const EXEMPT: Record<string, { reason: string; premise: 'no project_id' | 'not w
 		reason: 'no project_id of its own: the row is its run’s, written only by the model_run_allocation_holders trigger from that run’s own input; owner-only, water_app has no grant (219)',
 		premise: 'no project_id'
 	},
+	'report_usage.report_id': {
+		reason: 'no project_id of its own: the row is its report’s billing count (which account and month), written only by the definer functions app_report_count_usage and the refund triggers; owner-only, water_app has no grant (408)',
+		premise: 'no project_id'
+	},
 	'api_key_throttle.key_id': { reason: 'no project_id of its own: the row is its key’s, in the key’s project', premise: 'no project_id' },
 	'data_feed_run_now.feed_id': { reason: 'no project_id of its own: the row is its feed’s “Run now” bucket, written only by app_feed_take_run_now', premise: 'no project_id' },
 	'report_schedule_recipient.schedule_id': {

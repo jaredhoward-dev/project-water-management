@@ -4,12 +4,38 @@
 // `report`, and the worker's tick removes each PDF and settles the queue.
 // Storage is a stand-in here (the remover argument); reports/storage.ts
 // deletePdf is the same S3 DeleteObject for MinIO and the bucket.
-import { afterEach, describe, expect, it } from 'vitest';
+//
+// A render still in progress when its report goes (issue #911, 398) stores
+// its PDF after the deletion's erasure ran: the inline render asks
+// app_report_pdf_orphaned right after storing, and the worker asks it when
+// the renderer Lambda's answer arrives, so the late PDF is queued too. The
+// render and the store are stand-ins (the real ones: render.db.test.ts).
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { asOwner, monthly, node, retirePendingJobs, signUp } from '../__tests__/helpers.js';
 import { withUser, withoutUser } from '../db/tx.js';
+import { reportRenderHandler } from '../jobs/handlers/report-render.js';
 import { erasePendingReportPdfs } from './erasure.js';
+import { acceptRenderResult } from './schedule.js';
 import { reportKey } from './storage.js';
 import { createReport } from './store.js';
+
+const stand = vi.hoisted(() => ({
+	render: async (): Promise<void> => {},
+	stored: [] as string[]
+}));
+vi.mock('./render.js', async (orig) => ({
+	...(await orig<typeof import('./render.js')>()),
+	renderReportPdf: async () => {
+		await stand.render();
+		return { pdf: Buffer.from('%PDF-stand-in'), pages: 1, ms: 1 };
+	}
+}));
+vi.mock('./storage.js', async (orig) => ({
+	...(await orig<typeof import('./storage.js')>()),
+	putPdf: async (key: string) => {
+		stand.stored.push(key);
+	}
+}));
 
 type User = Awaited<ReturnType<typeof signUp>>;
 
@@ -118,5 +144,119 @@ describe('report PDF erasure (395, issue #903)', () => {
 		const u = await signUp('Someone');
 		await expect(withUser(u.id, (db) => db.query('SELECT * FROM app_report_pdf_erasures(10)'))).rejects.toMatchObject({ code: '42501' });
 		await expect(withoutUser((db) => db.query('SELECT * FROM report_pdf_erasure'))).rejects.toMatchObject({ code: '42501' });
+	});
+});
+
+describe('a PDF stored after its report was deleted (398, issue #911)', () => {
+	afterEach(() => {
+		stand.render = async () => {};
+		stand.stored.length = 0;
+		vi.unstubAllEnvs();
+	});
+
+	/** Run the report_render handler on `reportId` inline, as the worker does: in the acting user's transaction. */
+	async function renderInline(u: User, projectId: string, reportId: string) {
+		vi.stubEnv('REPORT_RENDERER', 'inline');
+		const [{ jobId }] = await asOwner('SELECT job_id AS "jobId" FROM report WHERE id = $1', [reportId]);
+		const job = { id: jobId as string, projectId, kind: 'report_render' as const, actingUserId: u.id, leaseToken: crypto.randomUUID(), attempts: 1, maxAttempts: 3 };
+		await withUser(u.id, (db) => reportRenderHandler.run({ db, job, payload: { reportId }, progress: async () => true }));
+	}
+
+	it('inline: the requester deleted mid-render, after the erasure ran, still has the PDF removed', async () => {
+		const owner = await signUp('Owner');
+		const leaver = await signUp('Leaver');
+		const { projectId, runId } = await withRun(owner);
+		const theirs = await reportBy(owner, leaver, projectId, runId);
+		await drain(); // anything earlier tests left
+		// While the browser prints: the account goes (DELETE /auth/me), and the tick's erasure runs on the queued ids before any PDF exists.
+		stand.render = async () => {
+			expect((await leaver.call('DELETE', '/auth/me', { password: 'correct horse' })).status).toBeLessThan(300);
+			expect(await drain()).toContain(reportKey(projectId, theirs));
+			expect(await queued([theirs])).toEqual([]);
+		};
+		await renderInline(leaver, projectId, theirs);
+		const key = reportKey(projectId, theirs);
+		expect(stand.stored).toEqual([key]);
+		// The PDF stored afterwards is queued again, and the next tick removes it.
+		expect(await queued([theirs])).toEqual([{ report_id: theirs, attempts: 0 }]);
+		expect(await drain()).toContain(key);
+		expect(await queued([theirs])).toEqual([]);
+	});
+
+	it('inline (positive control): a report that still exists is recorded, and nothing is queued', async () => {
+		const owner = await signUp('Owner');
+		const { projectId, runId } = await withRun(owner);
+		const mine = await reportBy(owner, owner, projectId, runId, false);
+		await renderInline(owner, projectId, mine);
+		expect(stand.stored).toEqual([reportKey(projectId, mine)]);
+		expect(await asOwner('SELECT status FROM report WHERE id = $1', [mine])).toEqual([{ status: 'done' }]);
+		expect(await queued([mine])).toEqual([]);
+	});
+
+	it('asks who is calling, needs a project that exists or did, and queues a key once however often it is named', async () => {
+		const owner = await signUp('Owner');
+		const { projectId } = await withRun(owner);
+		const gone = crypto.randomUUID();
+		const orphaned = (db: { query: (q: string, v: unknown[]) => Promise<{ rows: { o: boolean }[] }> }, project = projectId) =>
+			db.query('SELECT app_report_pdf_orphaned($1, $2) AS o', [project, gone]).then((r) => r.rows[0]!.o);
+		const asWorker = <T>(fn: (db: Parameters<Parameters<typeof withoutUser>[0]>[0]) => Promise<T>) =>
+			withoutUser(async (db) => {
+				await db.query("SELECT set_config('app.worker_context', 'on', true)");
+				return fn(db);
+			});
+		// Refused: a session with no user and no key that isn't the worker (a public route's, a pre-sign-in flow's).
+		await expect(withoutUser((db) => orphaned(db))).rejects.toMatchObject({ code: '42501' });
+		// Refused: an API key's session, even if it set the worker's marker.
+		await expect(
+			withoutUser(async (db) => {
+				await db.query("SELECT set_config('app.current_api_key_id', $1, true), set_config('app.worker_context', 'on', true)", [crypto.randomUUID()]);
+				return orphaned(db);
+			})
+		).rejects.toMatchObject({ code: '42501' });
+		// Refused: a project that never existed.
+		await expect(withUser(owner.id, (db) => orphaned(db, crypto.randomUUID()))).rejects.toMatchObject({ code: '22023' });
+		expect(await queued([gone])).toEqual([]);
+		// Positive control: the signed-in render and the worker are heard, and the key is queued once.
+		expect(await withUser(owner.id, (db) => orphaned(db))).toBe(true);
+		const [first] = await asOwner('SELECT id FROM report_pdf_erasure WHERE report_id = $1', [gone]);
+		await asOwner('UPDATE report_pdf_erasure SET attempts = 2 WHERE report_id = $1', [gone]);
+		expect(await asWorker((db) => orphaned(db))).toBe(true);
+		expect(await withUser(owner.id, (db) => orphaned(db))).toBe(true);
+		// One row, re-queued under a new id with its attempts reset (a settle of the old id's claim leaves it queued).
+		const rows = await asOwner('SELECT id, attempts FROM report_pdf_erasure WHERE report_id = $1', [gone]);
+		expect(rows).toHaveLength(1);
+		expect(rows[0]!.attempts).toBe(0);
+		expect(rows[0]!.id).not.toBe(first!.id);
+		// A deleted project's late PDF is still heard (erasure_log remembers the project).
+		await asOwner('DELETE FROM project WHERE id = $1', [projectId]);
+		expect(await asWorker((db) => orphaned(db))).toBe(true);
+		expect(await drain()).toContain(reportKey(projectId, gone));
+		expect(await queued([gone])).toEqual([]);
+	});
+
+	it("the renderer Lambda's answer for a deleted report queues its PDF; a live report's answer (a redelivery) doesn't", async () => {
+		const owner = await signUp('Owner');
+		const gone = await signUp('Gone');
+		const { projectId, runId } = await withRun(owner);
+		const theirs = await reportBy(owner, gone, projectId, runId);
+		const kept = await reportBy(owner, owner, projectId, runId, false);
+		await asOwner('DELETE FROM app_user WHERE id = $1', [gone.id]);
+		await drain(); // the deletion's own erasure ran before the Lambda stored the PDF
+		const ok = { ok: true as const, pages: 2, bytes: 1024, ms: 50 };
+		expect(await acceptRenderResult({ v: 1, type: 'rendered', reportId: theirs, projectId, result: ok })).toBe('orphan_queued');
+		expect(await queued([theirs])).toEqual([{ report_id: theirs, attempts: 0 }]);
+		expect(await drain()).toContain(reportKey(projectId, theirs));
+
+		// Positive control: an answered report's PDF is live, so its redelivered answer queues nothing.
+		await asOwner(`UPDATE report SET status = 'done', finished_at = now() WHERE id = $1`, [kept]);
+		expect(await acceptRenderResult({ v: 1, type: 'rendered', reportId: kept, projectId, result: ok })).toBe('unknown_report');
+		// Nor does naming another project: the check is by report id alone.
+		expect(await acceptRenderResult({ v: 1, type: 'rendered', reportId: kept, projectId: crypto.randomUUID(), result: ok })).toBe('unknown_report');
+		expect(await queued([kept])).toEqual([]);
+		// A failed render stored nothing, and an answer from an older renderer names no project: neither queues anything.
+		const other = crypto.randomUUID();
+		expect(await acceptRenderResult({ v: 1, type: 'rendered', reportId: other, projectId, result: { ok: false, error: 'x', retry: false } })).toBe('unknown_report');
+		expect(await acceptRenderResult({ v: 1, type: 'rendered', reportId: other, result: ok })).toBe('unknown_report');
+		expect(await queued([other])).toEqual([]);
 	});
 });

@@ -5,7 +5,7 @@
 	import { api, type Project, type Run, type RunMeta } from '#lib/api/index.js';
 	import AlertsPanel from '#lib/components/alerts/AlertsPanel.svelte';
 	import { cachedSeries, detailCache } from '#lib/components/runs/cache.js';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { fmtDay } from '#lib/format/number.js';
 	import { projectToday } from '#lib/components/projects/freshness.js';
 	import { fillHeader } from '#lib/components/workspace/headerSlot.svelte.js';
@@ -64,7 +64,7 @@
 		followAnchors({
 			page: 'overview',
 			land: () => undefined,
-			forward: (to) => void goto(to, { replace: true, reset: false }),
+			forward: (to) => void guardedGoto(to, { replace: true, reset: false }),
 			fill: () => ({ run: pick?.latest.id ?? null })
 		})
 	);

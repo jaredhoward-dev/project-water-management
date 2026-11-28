@@ -57,6 +57,7 @@ import { loadRuntimeSecrets } from './config/runtimeSecrets.js';
 import { getSecretString } from './config/secretsManager.js';
 import { migrate, MigrateError, type MigrateErrorCode } from '../scripts/migrate.js';
 import { CheckError, parseCheckRequest, runCheck, type CheckErrorCode, type CheckResult } from './checks/readOnlyChecks.js';
+import { setOwnerBillingEnforced } from './billing/enforced.js';
 import { billingProvider } from './billing/provider.js';
 import { ownerActionCode, ownerActionReason, parseOwnerAction, runOwnerAction, type OwnerActionErrorCode, type OwnerActionResult } from './ops/ownerActions.js';
 import { LoadError, loadReferenceText, parseLoadRequest, readReferenceText, type LoadErrorCode, type LoadResult, type ReadObject } from './geo/referenceLoad.js';
@@ -342,11 +343,15 @@ export async function ownerAction(event: unknown, context?: LogContext, connecti
 		const client = new pg.Client({ connectionString: await connection() });
 		await client.connect();
 		try {
-			// billing-invoice needs a provider that sends invoices: Stripe only, never the mock (the code
-			// default when BILLING_PROVIDER is unset, as it is on this function today). Until this function
-			// has BILLING_PROVIDER=stripe, its key and a route to Stripe, the action answers billing_unavailable
+			// billing-invoice needs a provider that sends invoices: Stripe only. Unset (as it is on this function
+			// today) is manual on Lambda (billing/provider.ts billingProviderName), which sends none, and the mock
+			// is never used here. Until this function has BILLING_PROVIDER=stripe, its key and a route to Stripe,
+			// the action answers billing_unavailable
 			// (docs/deployment.md § Owner actions; docs/billing.md § B2B invoices).
 			const invoiceProvider = process.env.BILLING_PROVIDER?.trim() === 'stripe' ? billingProvider(process.env) : null;
+			// A grant, revoke or invoice fires the pause sync: enforced as the app is (BILLING_ENFORCED on this function,
+			// infra/lambda.tf), so it doesn't drop the pause markers until the next tick (409).
+			await setOwnerBillingEnforced(client);
 			const result = await runOwnerAction(client, action, { invoiceProvider });
 			console.log(`owner action ${action.action}: done`);
 			return result;

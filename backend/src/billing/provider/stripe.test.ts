@@ -166,7 +166,6 @@ describe('normaliseStripeEvent', () => {
 			['no id', { ...fixture('invoice-paid'), id: undefined }],
 			['odd id', { ...fixture('invoice-paid'), id: 'evt 1;drop' }],
 			['no object', { ...fixture('invoice-paid'), data: {} }],
-			['no account', withSub('subscription-updated', { metadata: { plan_code: 'pro' } })],
 			['account not a uuid', withSub('subscription-updated', { metadata: { billing_account_id: 'acct_1', plan_code: 'pro' } })],
 			['unknown plan', withSub('subscription-updated', { metadata: { billing_account_id: ACCOUNT, plan_code: 'gold' } })],
 			['unknown status', withSub('subscription-updated', { status: 'frozen' })],
@@ -174,21 +173,34 @@ describe('normaliseStripeEvent', () => {
 			['no cancel flag', withSub('subscription-updated', { cancel_at_period_end: undefined })],
 			['zero seats', withSub('subscription-updated', { items: { data: [{ quantity: 0, current_period_start: 1, current_period_end: 2 }] } })],
 			['bad trial end', withSub('subscription-updated', { trial_end: 'soon' })],
-			['bad created', { ...fixture('invoice-paid'), created: 'yesterday' }],
-			['checkout without account', withSub('checkout-completed', { metadata: {} })],
-			['invoice without account', withSub('invoice-paid', { parent: null })]
+			['bad created', { ...fixture('invoice-paid'), created: 'yesterday' }]
 		];
 		for (const [why, body] of bad) expect(normaliseStripeEvent(body).kind, why).toBe('invalid');
+	});
+
+	it('ignores a signed event about an object this app never made (no billing_account_id at all): a retry wouldn’t change it', () => {
+		// A dashboard invoice (billing.md § Staff grants), a payment link's session, a subscription made by hand: answered
+		// 200 ignored, not a 400 Stripe would redeliver for 3 days. A malformed account id is still invalid (above).
+		const dashboardSub = withSub('subscription-updated', { metadata: { plan_code: 'pro' } });
+		const failed = withSub('invoice-payment-failed', { parent: null, subscription_details: null, metadata: {} });
+		const cases: [string, unknown][] = [
+			['subscription without account', dashboardSub],
+			['subscription without metadata', withSub('subscription-deleted', { metadata: undefined })],
+			['checkout without account', withSub('checkout-completed', { metadata: {} })],
+			['invoice without account', withSub('invoice-paid', { parent: null })],
+			['failed invoice without account', failed]
+		];
+		for (const [why, body] of cases) expect(normaliseStripeEvent(body), why).toEqual({ kind: 'ignored', eventId: (body as { id: string }).id, type: (body as { type: string }).type });
 	});
 });
 
 describe('a B2B invoice from the staff tool (no subscription)', () => {
-	it('reads the account from the invoice’s own metadata, with no subscription; still invalid with neither', () => {
+	it('reads the account from the invoice’s own metadata, with no subscription; ignored with neither', () => {
 		const e = fixture('invoice-paid');
 		e.data.object = { id: 'in_b2b', object: 'invoice', parent: null, metadata: { billing_account_id: ACCOUNT, wm_invoice_key: 'k' } };
 		expect(normaliseStripeEvent(e)).toMatchObject({ kind: 'event', event: { type: 'invoice.paid', payload: { accountId: ACCOUNT, externalRef: null } } });
 		e.data.object = { id: 'in_b2b', object: 'invoice', parent: null, metadata: {} };
-		expect(normaliseStripeEvent(e)).toMatchObject({ kind: 'invalid' });
+		expect(normaliseStripeEvent(e)).toMatchObject({ kind: 'ignored' });
 	});
 
 	const b2b = (metadata: Record<string, unknown>, over: Record<string, unknown> = {}) => {
@@ -239,5 +251,37 @@ describe('a B2B invoice from the staff tool (no subscription)', () => {
 		const f = normaliseStripeEvent(failed);
 		expect(f).toMatchObject({ kind: 'event', event: { type: 'invoice.payment_failed' } });
 		expect((f as { event: { payload: object } }).event.payload).not.toHaveProperty('invoice');
+	});
+});
+
+describe('the subscription’s price (405, issue #928)', () => {
+	const priceOfFixture = (name: string) => (normaliseStripeEvent(fixture(name)) as { event: { payload: { price?: unknown } } }).event.payload.price;
+
+	it('sums every item’s unit_amount × quantity in their one currency', () => {
+		expect(priceOfFixture('subscription-pro-priced')).toEqual({ totalMinor: 89900, currency: 'zar', discounted: false });
+		expect(priceOfFixture('subscription-team-seats')).toEqual({ totalMinor: 249900 + 2 * 49900, currency: 'zar', discounted: false });
+		expect(priceOfFixture('subscription-team-yearly')).toEqual({ totalMinor: 2499000 + 2 * 499000, currency: 'zar', discounted: false });
+	});
+
+	it('marks a coupon, in either of Stripe’s shapes', () => {
+		expect(priceOfFixture('subscription-pro-coupon')).toMatchObject({ discounted: true });
+		const e = fixture('subscription-pro-priced');
+		e.data.object.discounts = ['di_synthetic_0002'];
+		expect((normaliseStripeEvent(e) as { event: { payload: { price: unknown } } }).event.payload.price).toMatchObject({ discounted: true });
+	});
+
+	it('is unreadable (null total) for a price without unit_amount, a missing currency or items that disagree', () => {
+		const tiered = fixture('subscription-pro-priced');
+		delete tiered.data.object.items.data[0].price.unit_amount;
+		const mixed = fixture('subscription-team-seats');
+		mixed.data.object.items.data[0].price.currency = 'usd';
+		const bare = fixture('subscription-team-seats');
+		delete bare.data.object.items.data[1].price.currency;
+		for (const e of [tiered, mixed, bare])
+			expect((normaliseStripeEvent(e) as { event: { payload: { price: unknown } } }).event.payload.price).toEqual({ totalMinor: null, currency: null, discounted: false });
+	});
+
+	it('is absent when no item carries a price (the older fixtures), so nothing is checked', () => {
+		expect(priceOfFixture('subscription-updated')).toBeUndefined();
 	});
 });

@@ -206,6 +206,8 @@ describe('parseDwsDaily: a gap row with only a quality code', () => {
 			expect(() => parseDwsDaily(recorded([row('20210101', '1.5', '1')], unit))).toThrow(/not a daily mean flow in m³\/s/);
 		}
 		expect(parseDwsDaily(recorded([row('20210101', '1.5', '1')], 'Daily avg flow rate in m3/s')).values).toEqual([1.5]);
+		// The manual import's spellings too (lib/series/dws.ts M3S): m3/sec, m^3/s and cumec mean m³/s.
+		for (const spec of ['Daily avg flow rate in m3/sec', 'Daily avg flow rate in m^3/s', 'Daily avg flow rate in cumec']) expect(parseDwsDaily(recorded([row('20210101', '1.5', '1')], spec)).values, spec).toEqual([1.5]);
 	});
 
 	it('places rows by date whatever their order, and reads columns against an indented header', () => {

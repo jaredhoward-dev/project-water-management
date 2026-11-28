@@ -72,10 +72,10 @@
 	// Delineate and Draw (D4).
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { tick, untrack } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { page } from '$app/state';
 	import { PUBLIC_CHANNELS_URL, PUBLIC_TERRAIN_URL, PUBLIC_TILES_GLYPHS_URL, PUBLIC_TILES_URL } from '$app/env/public';
-	import { api, type DamTraceProposal, type DamTraceState, type MinOccurrence, type DelineationState, type MapFeature, type MapFeatureList, type Role, type RunMeta, type StartState } from '#lib/api/index.js';
+	import { api, type DamTraceProposal, type DamTraceState, type MinOccurrence, type DelineationRequest, type DelineationState, type MapFeature, type MapFeatureList, type Role, type RunMeta, type StartState } from '#lib/api/index.js';
 	import { confirmDialog } from '#lib/components/common/confirm.svelte.js';
 	import Dialog from '#lib/components/common/Dialog.svelte';
 	import Lazy from '#lib/components/common/Lazy.svelte';
@@ -113,7 +113,8 @@
 	import { ClickDivider, clickShape } from './clickPieces.svelte';
 	import { ChannelLayer } from './channelLayer.svelte';
 	import { openChannelArchive, staticChannels } from './channelArchive';
-	import { openProposal } from './delineation';
+	import { afterPollError, BACKGROUND_POLL_STOPPED, backgroundOutcome, backgroundPollStops, isWaiting, openProposal, outcomeShown, POLL_MS } from './delineation';
+	import { ApiError } from '#lib/api/client.js';
 	import { openDivide, openStart, type StartDraft } from './startFlow';
 	import type { DivideChoice, DivideDraft } from './divideFlow';
 	import { emptyPlacement } from './placement';
@@ -173,7 +174,7 @@
 	let error = $state<string | null>(null);
 	let notice = $state<string | null>(null);
 	/** The step a notice offers (the accept toast's Divide the model or Start from the map), shown only while that notice is the one up. */
-	let noticeNext = $state<{ text: string; step: BoundaryNextStep } | null>(null);
+	let noticeNext = $state<{ text: string; step: Pick<BoundaryNextStep, 'label'> & { sheet: BoundaryNextStep['sheet'] | 'delineate' } } | null>(null);
 	/** The notice that changed the model, while it shows: it ends with a link to Runs & results, where Run model is. */
 	let runNotice = $state<string | null>(null);
 
@@ -212,7 +213,7 @@
 		const q = new URLSearchParams(page.url.search);
 		q.set('feature', id);
 		q.delete('node');
-		return goto(`?${q}`, { reset: false });
+		return guardedGoto(`?${q}`, { reset: false });
 	}
 	/**
 	 * A pick from the list. Stacked (a phone, a narrow column) the card sits above the list, so bring
@@ -233,7 +234,7 @@
 		q.delete('node');
 		if (id) q.set('feature', id);
 		else q.delete('feature');
-		return goto(`?${q}`, { replace: true, reset: false });
+		return guardedGoto(`?${q}`, { replace: true, reset: false });
 	}
 
 	// --- the sheets and the grid: open while the URL names them; closing drops the param in place ---
@@ -244,7 +245,7 @@
 			open = asked;
 		});
 		$effect(() => {
-			if (!open && untrack(() => params.has(name))) void goto(withoutParam(page.url, name), { replace: true, reset: false });
+			if (!open && untrack(() => params.has(name))) void guardedGoto(withoutParam(page.url, name), { replace: true, reset: false });
 		});
 		return {
 			get open() {
@@ -313,7 +314,7 @@
 		if (params.get('checks') !== '1') return;
 		untrack(() => {
 			sideTab = 'checks';
-			void goto(withoutParam(page.url, 'checks'), { replace: true, reset: false });
+			void guardedGoto(withoutParam(page.url, 'checks'), { replace: true, reset: false });
 		});
 	});
 	const tabEls: Record<string, HTMLButtonElement | undefined> = $state({});
@@ -391,10 +392,84 @@
 			delineateAt = null;
 			delineateMinKm2 = null;
 			delineateStep = 'decide';
-			if (delineateWasOpen) void untrack(focusAfterDelineate);
+			if (delineateWasOpen) {
+				void untrack(focusAfterDelineate);
+				// A delineation the sheet left with the background worker: the map watches it (issue #938). Nothing to ask the
+				// server for: the sheet said which (Accept and Reject reload the state themselves, and leave none waiting).
+				untrack(() => {
+					const w = sheetWaiting;
+					sheetWaiting = null;
+					delineateOutcome = null;
+					delineateFromNotice = false;
+					if (w && isWaiting(w) && delineation) delineation = { ...delineation, request: w };
+				});
+			}
 		}
 		delineateWasOpen = delineateSheet.open;
 	});
+	/**
+	 * A background delineation still running when its sheet closed (issue #938): the map asks about it every POLL_MS
+	 * while the sheet stays closed (the open sheet asks for itself), and when it finishes, the toast (a live region)
+	 * says what came of it, with a link that opens the sheet again.
+	 */
+	/** What the open sheet has left with the background worker, as it last said (its `onwaiting`). */
+	let sheetWaiting: DelineationRequest | null = null;
+	/** A background delineation that came to nothing with the sheet closed: the notice's link shows it in the sheet again. */
+	let delineateOutcome = $state<DelineationRequest | null>(null);
+	/** The sheet was opened by that notice's own link, not by another opener (an older proposal's Review it): only then is the outcome shown. */
+	let delineateFromNotice = $state(false);
+	const backgroundRequest = $derived(!delineateSheet.open && delineation?.request && isWaiting(delineation.request) ? delineation.request : null);
+	let backgroundFailures = 0;
+	// Asks about one request while the sheet is closed; past the bound (delineation.ts BACKGROUND_POLL_LIMIT_MS)
+	// the map stops and says so, with a link that opens the sheet (which asks for itself).
+	let backgroundAsks = { id: '', n: 0 };
+	$effect(() => {
+		const r = backgroundRequest;
+		if (!r) return;
+		if (backgroundAsks.id !== r.id) backgroundAsks = { id: r.id, n: 0 };
+		if (backgroundPollStops(backgroundAsks.n)) {
+			untrack(() => {
+				backgroundAsks = { id: '', n: 0 };
+				if (delineation) delineation = { ...delineation, request: null };
+				notice = BACKGROUND_POLL_STOPPED.text;
+				noticeNext = { text: BACKGROUND_POLL_STOPPED.text, step: { sheet: 'delineate', label: BACKGROUND_POLL_STOPPED.label } };
+			});
+			return;
+		}
+		const timer = setTimeout(() => {
+			backgroundAsks.n++;
+			void untrack(() => pollBackground(r.id));
+		}, POLL_MS);
+		return () => clearTimeout(timer);
+	});
+	async function pollBackground(id: string) {
+		let r: DelineationRequest;
+		try {
+			r = (await api.delineation.request(projectId, id)).request;
+		} catch (err) {
+			if (delineateSheet.open || delineation?.request?.id !== id) return;
+			backgroundFailures++;
+			const again = afterPollError(backgroundFailures, err instanceof ApiError ? err.status : undefined) === 'retry';
+			if (!again) backgroundFailures = 0;
+			// A new object asks again in POLL_MS; given up, the request is dropped from the map's copy (the sheet still finds it).
+			delineation = { ...delineation, request: again ? { ...delineation.request } : null };
+			return;
+		}
+		backgroundFailures = 0;
+		// The sheet opened meanwhile: it asks, and says what came of it, itself.
+		if (delineateSheet.open || !delineation || delineation.request?.id !== id) return;
+		if (isWaiting(r)) {
+			delineation = { ...delineation, request: r };
+			return;
+		}
+		const out = backgroundOutcome(r);
+		await loadDelineation();
+		if (!out || delineateSheet.open) return;
+		notice = out.text;
+		noticeNext = { text: out.text, step: { sheet: 'delineate', label: out.label } };
+		// A refusal (beside a larger channel: its offer) or a failure is shown again when the link opens the sheet.
+		delineateOutcome = outcomeShown(r) ? r : null;
+	}
 	/**
 	 * The sheet closed. Its opener (the draw bar's Delineate…, the Review it link) is
 	 * usually gone by then, so the dialog had nothing to hand focus back to: the
@@ -413,7 +488,7 @@
 		delineateAt = at;
 		delineateMinKm2 = at ? (shownChannelKm2() ?? null) : null;
 		delineateStep = 'ask';
-		await goto(withParam(page.url, 'delineate', '1'), { reset: false });
+		await guardedGoto(withParam(page.url, 'delineate', '1'), { reset: false });
 	}
 	/** A proposal came back: the drawing mode ends and the sheet (still open) shows it from the reloaded state. */
 	async function proposed() {
@@ -473,7 +548,7 @@
 		const sheet = backToSheet;
 		if (!sheet) return;
 		backToSheet = null;
-		await goto(withParam(page.url, sheet, '1'), { reset: false });
+		await guardedGoto(withParam(page.url, sheet, '1'), { reset: false });
 	}
 	/**
 	 * Leave the sheet for one of the map's own tools (the sheet's param goes first, in place). Every tool
@@ -481,7 +556,7 @@
 	 * delineation, never brings the sheet back.
 	 */
 	async function fromStart(start: () => unknown, back = true, sheet: 'start' | 'divide' = 'start') {
-		await goto(withoutParam(page.url, sheet), { replace: true, reset: false });
+		await guardedGoto(withoutParam(page.url, sheet), { replace: true, reset: false });
 		await start();
 		backToSheet = back ? sheet : null;
 	}
@@ -589,7 +664,7 @@
 	);
 	/** The delineated catchment's sheet: a unit meant inside the boundary, so switch to Sub-catchments, one per click (the proposal stays waiting). */
 	async function subcatchmentsFromSheet() {
-		await goto(withoutParam(page.url, 'delineate'), { replace: true, reset: false });
+		await guardedGoto(withoutParam(page.url, 'delineate'), { replace: true, reset: false });
 		startDividing();
 	}
 	function startDividing() {
@@ -688,7 +763,7 @@
 	}
 	async function pickPiece(key: string) {
 		pieceFocus = key;
-		await goto(withParam(page.url, pendingStart ? 'start' : 'divide', '1'), { reset: false });
+		await guardedGoto(withParam(page.url, pendingStart ? 'start' : 'divide', '1'), { reset: false });
 	}
 	$effect(() => {
 		// A sheet closed: nothing is lit or waiting to be focused.
@@ -839,7 +914,7 @@
 			return;
 		}
 		if (draft.mode === 'place') {
-			await goto(withParam(page.url, 'place', '1'), { reset: false });
+			await guardedGoto(withParam(page.url, 'place', '1'), { reset: false });
 			return;
 		}
 		const f = draft.feature;
@@ -1051,11 +1126,23 @@
 	}
 	const useM2 = (f: MapFeature) => (f.areaM2 === null ? null : takenAreaM2(f.areaM2, f.nonContributingM2, basisOf(f)));
 
-	async function link(f: MapFeature, nodeId: string) {
+	/**
+	 * A select's change the server refused: the select goes back to the saved value. Its `value` is one-way from the
+	 * feature, which a refused save leaves unchanged, so nothing else would undo the choice shown beside the error.
+	 */
+	const revert = (el: HTMLSelectElement, saved: string) => {
+		el.value = saved;
+	};
+
+	async function link(f: MapFeature, el: HTMLSelectElement) {
+		const nodeId = el.value;
 		busy = f.id;
 		rowError = null;
 		try {
-			await api.map.update(projectId, f.id, { nodeId: nodeId || null });
+			await api.map.update(projectId, f.id, { nodeId: nodeId || null }).catch((err: unknown) => {
+				revert(el, f.nodeId ?? '');
+				throw err;
+			});
 			await load();
 		} catch (err) {
 			rowError = { id: f.id, text: msg(err) };
@@ -1065,11 +1152,15 @@
 	}
 
 	/** Where a dam stands against its river (194): Start and Divide place a water user at the dam by this, '' leaving it to its outline. */
-	async function setDamPosition(f: MapFeature, value: string) {
+	async function setDamPosition(f: MapFeature, el: HTMLSelectElement) {
+		const value = el.value;
 		busy = f.id;
 		rowError = null;
 		try {
-			await api.map.update(projectId, f.id, { damPosition: value === 'on_channel' || value === 'off_channel' ? value : null });
+			await api.map.update(projectId, f.id, { damPosition: value === 'on_channel' || value === 'off_channel' ? value : null }).catch((err: unknown) => {
+				revert(el, f.damPosition ?? '');
+				throw err;
+			});
 			await load();
 		} catch (err) {
 			rowError = { id: f.id, text: msg(err) };
@@ -1288,7 +1379,7 @@
 		onsave={saveDraft}
 		onpaste={() => (pasteOpen = true)}
 		oncoords={() =>
-			tracing ? goto(withParam(page.url, 'trace', '1'), { reset: false }) : delineating ? openDelineate(draft.coords[0] ?? null) : goto(withParam(page.url, 'place', '1'), { reset: false })}
+			tracing ? guardedGoto(withParam(page.url, 'trace', '1'), { reset: false }) : delineating ? openDelineate(draft.coords[0] ?? null) : guardedGoto(withParam(page.url, 'place', '1'), { reset: false })}
 		onlocated={located}
 		{delineating}
 		{tracing}
@@ -1329,7 +1420,7 @@
 {#snippet standsFor(f: MapFeature)}
 	{@const nodeKinds = KIND_NODES[f.kind]}
 	{#if canEdit && nodeKinds.length}
-		<select class="cap" aria-label="What {featureName(f)} stands for" value={f.nodeId ?? ''} disabled={busy === f.id} onchange={(e) => link(f, e.currentTarget.value)}>
+		<select class="cap" aria-label="What {featureName(f)} stands for" value={f.nodeId ?? ''} disabled={busy === f.id} onchange={(e) => link(f, e.currentTarget)}>
 			<option value="">Nothing</option>
 			{#each nodes.filter((n) => nodeKinds.includes(n.kind)) as n (n.id)}<option value={n.id}>{n.name}</option>{/each}
 		</select>
@@ -1341,7 +1432,7 @@
 <!-- A dam outline's position against its river (194): a select for editors, else its words. Start and Divide place a water user at the dam by it (a dam that is part of a unit is never placed, start-16). -->
 {#snippet damPosition(f: MapFeature)}
 	{#if canEdit}
-		<select class="cap" aria-label="Where {featureName(f)} stands against its river" aria-describedby="{uid}-dam-position" value={f.damPosition ?? ''} disabled={busy === f.id} onchange={(e) => setDamPosition(f, e.currentTarget.value)} data-testid="map-dam-position">
+		<select class="cap" aria-label="Where {featureName(f)} stands against its river" aria-describedby="{uid}-dam-position" value={f.damPosition ?? ''} disabled={busy === f.id} onchange={(e) => setDamPosition(f, e.currentTarget)} data-testid="map-dam-position">
 			{#each ['', 'on_channel', 'off_channel'] as const as v (v)}<option value={v}>{DAM_POSITION_LABEL[v]}</option>{/each}
 		</select>
 		<p class="hint muted" id="{uid}-dam-position">For your records, and for a water user placed at the dam in Start or Divide; unsaid, its outline decides. Its unit’s composite dam takes the shares of upstream inflow and runoff you enter on the unit.</p>
@@ -1550,7 +1641,7 @@
 			<p class="toast" data-testid="map-notice">
 				<span>{notice}{#if notice === runNotice}{' '}<a href="?tab=runs">Run the model</a> to see its effect.{/if}</span>
 				{#if noticeNext && noticeNext.text === notice}
-					<a class="btn btn-sm btn-ghost toast-next" href={withParam(page.url, noticeNext.step.sheet, '1')} data-testid="map-notice-next">{noticeNext.step.label}</a>
+					<a class="btn btn-sm btn-ghost toast-next" href={withParam(page.url, noticeNext.step.sheet, '1')} onclick={() => (delineateFromNotice = noticeNext?.step.sheet === 'delineate')} data-testid="map-notice-next">{noticeNext.step.label}</a>
 				{/if}
 				<button type="button" class="btn btn-sm btn-ghost" onclick={() => (notice = null)}>Dismiss</button>
 			</p>
@@ -1841,6 +1932,8 @@
 					onaccepted={delineationAccepted}
 					onrejected={delineationRejected}
 					onsubcatchments={delineation?.available ? () => subcatchmentsFromSheet() : null}
+					outcome={delineateFromNotice ? delineateOutcome : null}
+					onwaiting={(r) => (sheetWaiting = r)}
 				/>
 					{/snippet}
 				</Lazy>
@@ -1854,7 +1947,7 @@
 					{features}
 					info={startInfo!}
 					bind:draft={startDraft}
-					onupload={() => fromStart(() => goto(withParam(page.url, 'upload', '1'), { reset: false }), false)}
+					onupload={() => fromStart(() => guardedGoto(withParam(page.url, 'upload', '1'), { reset: false }), false)}
 					ondelineate={delineation?.available ? () => fromStart(startDelineate) : null}
 					ondraw={() => fromStart(() => startDraw('catchment_boundary'))}
 					onplace={() => fromStart(startPlace)}

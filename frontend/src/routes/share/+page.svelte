@@ -19,6 +19,8 @@
 	// is chosen on the page (SummaryControls), and in print only
 	// MemberSummary shows, on A4, black on white.
 	import { flushSync, onMount } from 'svelte';
+	// /share stays off the workspace's code (boundary.test.ts) and has no unsaved work for the leave guard to keep,
+	// so it uses SvelteKit's goto (leaveGuard.test.ts allows this file).
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { api } from '#lib/api/index.js';
@@ -76,6 +78,12 @@
 					? t('{name} · Shared catchment view', { name: ready.view.project.name })
 					: kindTitle
 	);
+	/**
+	 * A dead or incomplete link's way on (issue #942): the home page, which says what the app is and offers Sign in,
+	 * since most readers of a share link have no account. /welcome goes on to this device's language itself (the root
+	 * layout), so /share needs none of the session's code (boundary.test.ts).
+	 */
+	const homeHref = resolve('welcome');
 
 	/** A scenario link kept while its reader signed in (ScenarioView), once. */
 	function returning(): string {
@@ -147,6 +155,7 @@
 			<section class="card dead" aria-labelledby="dead-h">
 				<h1 id="dead-h">{t('This link doesn’t open anything')}</h1>
 				<p role="alert">{result.state === 'dead' ? t('This link has expired or was withdrawn. Ask whoever sent it for a new one.') : t('This page needs the whole link. Open the link you were sent again, or ask whoever sent it for a new one.')}</p>
+				<a class="next" href={homeHref} data-testid="share-dead-home">{t('Go to the home page')}</a>
 			</section>
 		{:else if result.state === 'error'}
 			<section class="card" aria-labelledby="err-h">
@@ -346,6 +355,14 @@
 	}
 	.dead {
 		gap: 12px;
+	}
+	/* The dead card's way on: a full tap target on a phone. */
+	.next {
+		align-self: flex-start;
+		min-height: var(--tap);
+		display: inline-flex;
+		align-items: center;
+		font-weight: 600;
 	}
 
 	/* Printing the catchment view prints the member summary alone (issue #118), on white paper. */

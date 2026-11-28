@@ -85,4 +85,25 @@ export const PLAN_FIGURES: readonly PlanFigures[] = [
 	}
 ];
 
+/**
+ * The app's own dunning limit (issue #927; docs/billing.md § Dunning limit): a
+ * subscription past_due (Stripe's past_due or unpaid) for longer than this many
+ * days lapses (405's `lapsed`): not live, so the paid features pause as after a
+ * cancellation, and a payment lifts it. 14, matching the downgrade grace
+ * (341), pending the operator's confirmation. The job tick passes it to
+ * app_billing_dunning_lapse.
+ */
+export const DUNNING_GRACE_DAYS = 14;
+
 export const planFigures = (code: PlanCode): PlanFigures => PLAN_FIGURES.find((p) => p.code === code)!;
+
+/**
+ * Days after a paid plan ends (or a trial runs out) before the catchments past Free's live limit pause:
+ * the grace of 341's app_plan_pause_sync, 345's keep picker and 346's notices (`interval '14 days'` in
+ * each; backend/src/billing/planFigures.db.test.ts pins them to this). Not the unpaid grace of a failed
+ * payment, which is the provider's dunning.
+ */
+export const PLAN_ENDED_GRACE_DAYS = 14;
+
+/** Free's live catchments, the one figure the workspace's live-limit words count (`liveCatchments`, never null on Free). */
+export const freeLiveCatchments = (): number => planFigures('free').liveCatchments ?? 1;

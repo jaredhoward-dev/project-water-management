@@ -75,8 +75,8 @@ export async function prepareRenewalNotice(db: Db, c: Claimed): Promise<Prepared
 	if (!u?.verified) return { skip: 'no confirmed address' };
 	if (u.suppressed) return { skip: 'the address is suppressed (a bounce or complaint)' };
 	// Under RLS: only the account's own person reads it (subscription_read, 323).
-	const { rows: subs } = await db.query<{ plan: string; amount: number; currency: string; current: boolean }>(
-		`SELECT p.name AS plan, p.price_annual_minor AS amount, p.currency,
+	const { rows: subs } = await db.query<{ plan: string; amount: number; currency: string; current: boolean; last_paid_at: Date }>(
+		`SELECT p.name AS plan, p.price_annual_minor AS amount, p.currency, s.period_end - interval '1 microsecond' AS last_paid_at,
 			(s.status IN ('active', 'past_due') AND NOT s.cancel_at_period_end AND s.period_end = $2::timestamptz) AS current
 		 FROM subscription s
 		 JOIN billing_account a ON a.id = s.billing_account_id AND a.kind = 'user' AND a.user_id = app_current_user_id()
@@ -87,7 +87,7 @@ export async function prepareRenewalNotice(db: Db, c: Claimed): Promise<Prepared
 	const s = subs[0];
 	if (!s) return { skip: 'the subscription is no longer theirs' };
 	if (!s.current) return { skip: 'cancelled, ended or moved to another period since it was queued' };
-	return { mail: renewalNoticeMail(u.email, { plan: s.plan, periodEnd: c.period_end, amountMinor: s.amount, currency: s.currency }, u.locale) };
+	return { mail: renewalNoticeMail(u.email, { plan: s.plan, periodEnd: c.period_end, lastPaidAt: s.last_paid_at, amountMinor: s.amount, currency: s.currency }, u.locale) };
 }
 
 const finish = (c: Claimed, status: 'sent' | 'skipped' | 'retry', reason: string | null = null) =>

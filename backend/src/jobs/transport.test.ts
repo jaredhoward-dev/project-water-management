@@ -137,7 +137,10 @@ describe('the report messages (render-requests / render-results)', () => {
 		const failed = { v: 1, type: 'rendered', reportId: ids.reportId, result: { ok: false, error: 'the render took longer than 90 s', retry: true } };
 		expect(parseWorkerMessage(JSON.stringify(ok))).toEqual(ok);
 		expect(parseWorkerMessage(JSON.stringify(failed))).toEqual(failed);
-		// A result can't name a key, a project or a URL.
+		// A result can't name a key or a URL. It may name its project, a UUID (398: only to queue the PDF of a
+		// report deleted while it rendered, once no report of that id exists anywhere).
+		expect(parseWorkerMessage(JSON.stringify({ ...ok, projectId: ids.projectId }))).toEqual({ ...ok, projectId: ids.projectId });
+		expect(parseWorkerMessage(JSON.stringify({ ...ok, projectId: 'reports/x.pdf' }))).toBeNull();
 		expect(parseWorkerMessage(JSON.stringify({ ...ok, key: 'reports/x.pdf' }))).toBeNull();
 		expect(parseWorkerMessage(JSON.stringify({ ...ok, result: { ...ok.result, key: 'reports/x.pdf' } }))).toBeNull();
 		expect(parseWorkerMessage(JSON.stringify({ ...failed, result: { ...failed.result, error: 'x'.repeat(301) } }))).toBeNull();

@@ -13,7 +13,7 @@
 # (never by iterating the data source object; see iam.tftest.hcl's header).
 #
 # The mocks, overrides and variables below are copied from
-# guardrails.tftest.hcl (each test file needs its own); keep them in step.
+# guardrails_*.tftest.hcl (each test file needs its own); keep them in step.
 #
 #   pnpm check:infra          (bin/check-infra.sh: fmt + validate + test)
 

@@ -29,7 +29,7 @@
 	import { untrack } from 'svelte';
 	import { APP_NAME, APP_SHORT_NAME } from '#lib/brand.js';
 	import { resolve } from '$app/paths';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { page } from '$app/state';
 	import { fdcPercentileTable, REPORT_FOOTER, toEpochDay, type NetworkNode, type ProjectModel, type SeriesMeta } from '@water-management/engine';
 	import { fdcReportDays, fdcReportRows } from '#lib/components/report/fdc.js';
@@ -154,7 +154,7 @@
 			// A member below viewer: a farmer's view of the project is their farm page (the workspace sends them there too).
 			else if (e instanceof ApiError && e.status === 403) {
 				const role = (await api.projects.list().catch(() => [])).find((p) => p.id === id)?.role;
-				if (role === 'farmer') await goto(resolve(`farm/${encodeURIComponent(id)}`), { replace: true });
+				if (role === 'farmer') await guardedGoto(resolve(`farm/${encodeURIComponent(id)}`), { replace: true });
 				else status = 'forbidden';
 			} else {
 				error = e instanceof Error ? e.message : String(e);
@@ -513,7 +513,7 @@
 						{#if prev.attribution}<p class="muted small">{attributionSummary(prev.attribution)}</p>{/if}
 						<ChangesList changes={prev.changes} authors={lineAuthors(prev.changes, prev.attribution)} />
 					{:else if s.id === 'validation'}
-						<ValidationStatement {summary} engineVersion={run.engineVersion} legacy={run.legacy} fitEngineVersion={runFitEngineVersions(run.settings, summary)} />
+						<ValidationStatement {summary} engineVersion={run.engineVersion} legacy={run.legacy} fitEngineVersion={runFitEngineVersions(run.settings, summary)} errata={run.errata} />
 					{:else if s.id === 'signoff' && signoffs}
 						<SignoffSection {projectId} target={{ kind: 'run', id: run.id }} list={signoffs} onchange={signoffsChanged} {timeZone} />
 					{:else if s.id === 'disclaimer'}

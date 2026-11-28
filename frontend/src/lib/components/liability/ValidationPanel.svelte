@@ -15,8 +15,9 @@
 		engineVersion,
 		legacy,
 		fitEngineVersion = null,
+		errata = undefined,
 		open = $bindable(false)
-	}: { summary: RunSummary; engineVersion: string; legacy: boolean; fitEngineVersion?: FitEngines; open?: boolean } = $props();
+	}: { summary: RunSummary; engineVersion: string; legacy: boolean; fitEngineVersion?: FitEngines; errata?: readonly string[] | null; open?: boolean } = $props();
 
 	const uid = $props.id();
 </script>
@@ -31,7 +32,7 @@
 			<div class="body">
 				<Lazy load={loadStatement}>
 					{#snippet children(ValidationStatement)}
-						<ValidationStatement {summary} {engineVersion} {legacy} {fitEngineVersion} headingLevel={4} />
+						<ValidationStatement {summary} {engineVersion} {legacy} {fitEngineVersion} {errata} headingLevel={4} />
 					{/snippet}
 				</Lazy>
 			</div>

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { Scenario } from '#lib/api/types.js';
 import {
+	applicationsViewHeading,
+	applicationConflictText,
 	applicationCounts,
 	applicationsContext,
 	daysSince,
@@ -9,6 +11,7 @@ import {
 	longestWaiting,
 	parseFilter,
 	parseSort,
+	rereadAfterConflict,
 	sortApplications,
 	statusPill
 } from './applications';
@@ -96,5 +99,56 @@ describe('statusPill', () => {
 		expect(statusPill({ status: 'decided', outcome: 'application_rejected' })).toEqual({ text: 'Application rejected (formal requirements)', tone: 'bad' });
 		expect(statusPill({ status: 'decided', outcome: 'not_considered' })).toEqual({ text: 'Not considered: use already authorised', tone: 'mixed' });
 		expect(statusPill({ status: 'withdrawn', outcome: null })).toEqual({ text: 'Withdrawn', tone: 'neutral' });
+	});
+});
+
+describe('rereadAfterConflict', () => {
+	const conflict = Object.assign(new Error("this scenario is decided; it can't become withdrawn"), { status: 409 });
+	it('reads the application again after a 409, so the panel shows where it stands', async () => {
+		let reads = 0;
+		expect(await rereadAfterConflict(conflict, async () => (reads++, 'fresh'))).toBe('fresh');
+		expect(reads).toBe(1);
+	});
+	it('reads nothing on any other refusal, and gives null when the read fails', async () => {
+		let reads = 0;
+		const read = async () => (reads++, 'fresh');
+		expect(await rereadAfterConflict(Object.assign(new Error('nope'), { status: 400 }), read)).toBeNull();
+		expect(await rereadAfterConflict(new Error('network'), read)).toBeNull();
+		expect(await rereadAfterConflict(null, read)).toBeNull();
+		expect(reads).toBe(0);
+		expect(
+			await rereadAfterConflict(conflict, async () => {
+				throw new Error('offline');
+			})
+		).toBeNull();
+	});
+});
+
+describe('applicationConflictText', () => {
+	it('composes one sentence, the server’s words in brackets (issue #934)', () => {
+		const t = applicationConflictText("a withdrawn scenario can't become submitted");
+		expect(t).toBe(
+			"The application changed since this page read it, so the move was refused (a withdrawn scenario can't become submitted); someone else may have withdrawn, reopened or decided it, and it now shows where it stands."
+		);
+		// One sentence: a capital first, one full stop, at the end.
+		expect(t.match(/\./g)).toHaveLength(1);
+		expect(t).not.toContain('. ');
+	});
+	it('drops a trailing stop from the server’s words, and the brackets when there are none', () => {
+		expect(applicationConflictText('already decided. ')).toContain('(already decided);');
+		expect(applicationConflictText('  ')).toBe(
+			'The application changed since this page read it, so the move was refused; someone else may have withdrawn, reopened or decided it, and it now shows where it stands.'
+		);
+	});
+});
+
+describe('applicationsViewHeading', () => {
+	it('lands on the new view’s heading when the view switches, and nowhere otherwise', () => {
+		expect(applicationsViewHeading(false, true)).toBe('assess-h');
+		expect(applicationsViewHeading(true, false)).toBe('applications-h');
+		// The first render and a step that keeps the view (a sort, a filter) keep the place.
+		expect(applicationsViewHeading(null, true)).toBeNull();
+		expect(applicationsViewHeading(false, false)).toBeNull();
+		expect(applicationsViewHeading(true, true)).toBeNull();
 	});
 });

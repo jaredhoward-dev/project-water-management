@@ -20,6 +20,27 @@ export function valueOn(s: DailyValues, date: string): number | null | undefined
 	return i >= 0 && i < s.values.length ? (s.values[i] ?? null) : undefined;
 }
 
+/** A day just saved by hand, with the values it was saved over (the copy loaded before the save). */
+export interface SavedDay {
+	values: DailyValues;
+	date: string;
+	value: number | null;
+}
+
+/** Whether a day just saved still stands in for the stored values: the same day, and those values not reloaded yet. */
+export const savedApplies = (saved: SavedDay | null, values: DailyValues | null, date: string): saved is SavedDay =>
+	!!saved && !!values && saved.values === values && saved.date === date;
+
+/**
+ * The value on `date` as Edit a day says it is stored (undefined: no values yet, no day, or outside the series). A day
+ * just saved reads as saved until the values reload (a new copy): the copy loaded before showed the old value beside a
+ * live Save (issue #932).
+ */
+export function storedValue(values: DailyValues | null, date: string, saved: SavedDay | null): number | null | undefined {
+	if (!values || !date) return undefined;
+	return savedApplies(saved, values, date) ? saved.value : valueOn(values, date);
+}
+
 export type TypedValue = { ok: true; value: number | null } | { ok: false; error: string };
 
 /**

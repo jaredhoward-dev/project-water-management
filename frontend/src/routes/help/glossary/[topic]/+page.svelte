@@ -9,7 +9,7 @@
 	// issue) stays in the data for maintainers and is not shown: it points
 	// readers at developer documents they can't open.
 	import { tick } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { resolve } from '$app/paths';
 	import { basePath } from '#lib/nav/base.js';
 	import { page } from '$app/state';
@@ -37,7 +37,7 @@
 		const here = entries.some((e) => e.id === id);
 		if (!here) {
 			const e = helpFor(id);
-			if (e && e.id === id) goto(`${basePath()}${glossaryPath(e)}`, { replace: true });
+			if (e && e.id === id) guardedGoto(`${basePath()}${glossaryPath(e)}`, { replace: true });
 			return;
 		}
 		let live = true;
@@ -312,6 +312,10 @@
 	}
 	.meta dd {
 		margin: 0;
+	}
+	/* The global underline doesn't reach a link inside this list, and colour alone fails WCAG 1.4.1 in dark mode (1.67:1 against the text). */
+	.meta dd a {
+		text-decoration: underline;
 	}
 	@media (max-width: 480px) {
 		.meta div {

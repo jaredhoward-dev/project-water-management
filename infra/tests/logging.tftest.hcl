@@ -11,7 +11,7 @@
 #
 #   pnpm check:infra          (bin/check-infra.sh: fmt + validate + test)
 #
-# The mocks, overrides and variables are guardrails.tftest.hcl's, copied so
+# The mocks, overrides and variables are guardrails_*.tftest.hcl's, copied so
 # this file plans on its own.
 
 mock_provider "aws" {

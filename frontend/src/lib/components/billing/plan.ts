@@ -3,6 +3,7 @@
 // shadow mode: usage is counted against the plan's limits, nothing is charged
 // or refused, so a count past its limit is said, never blocked. The workspace
 // is English; plan data never reaches a farmer page.
+import { PLAN_ENDED_GRACE_DAYS } from '@water-management/engine/plans';
 import type { AccountPlan, BillingInterval, LiveCatchment, LiveCatchments, Plan, Subscription } from '#lib/api/types.js';
 import { fmtDate, fmtNum } from '#lib/format/number.js';
 
@@ -41,12 +42,19 @@ export function subscriptionLine(s: Subscription | null): { text: string; warn: 
 		case 'trialing':
 			return { text: s.trialEnd ? `Trial ends ${fmtDate(s.trialEnd)}` : 'On a trial', warn: false };
 		case 'active':
+			// A plan the operator gave ends on its date by design (its cancel_at_period_end is set), so it is said
+			// plainly, never in the warning colour of a cancellation (330, 335).
+			if (s.granted === 'staff')
+				return { text: s.periodEnd ? `Granted by the operator until ${fmtDate(s.periodEnd)}` : 'Granted by the operator, with no end date', warn: false };
+			if (s.granted === 'invoice') return { text: s.periodEnd ? `Paid by invoice; runs until ${fmtDate(s.periodEnd)}` : 'Paid by invoice', warn: false };
 			if (!s.periodEnd) return { text: 'Active', warn: false };
 			return s.cancelAtPeriodEnd
 				? { text: `Ends ${fmtDate(s.periodEnd)}; it won't renew`, warn: true }
 				: { text: `Renews ${fmtDate(s.periodEnd)}`, warn: false };
 		case 'past_due':
 			return { text: 'Payment overdue', warn: true };
+		case 'lapsed':
+			return { text: 'Payment overdue; paid features paused until it is paid', warn: true };
 		case 'canceled':
 			return { text: s.periodEnd ? `Cancelled; ended ${fmtDate(s.periodEnd)}` : 'Cancelled', warn: true };
 		case 'expired':
@@ -201,8 +209,16 @@ export function hasPaidSubscription(p: Pick<AccountPlan, 'subscription'>): boole
  */
 export function billingActions(p: AccountPlan): { upgrade: { code: 'pro' | 'team'; name: string } | null; manage: boolean } {
 	if (p.provider !== 'mock' && p.provider !== 'stripe') return { upgrade: null, manage: false };
+	// A staff grant has nothing at the provider to manage (no customer, no subscription there; checkout refuses it
+	// too): the page says it is the operator's instead (grantNote).
+	if (p.subscription?.granted === 'staff') return { upgrade: null, manage: false };
 	if (hasPaidSubscription(p)) return { upgrade: null, manage: true };
 	return { upgrade: p.account.kind === 'team' ? { code: 'team', name: 'Team' } : { code: 'pro', name: 'Pro' }, manage: false };
+}
+
+/** The line a staff grant shows in place of the billing buttons: who changes it. Null for anything else. */
+export function grantNote(s: Subscription | null | undefined): string | null {
+	return s?.granted === 'staff' && s.status === 'active' ? 'To change or end this plan, ask the operator. Nothing is charged for it here.' : null;
 }
 
 /** The most editor seats one checkout sells; the API holds the same ceiling (billing/provider.ts MAX_CHECKOUT_SEATS) and refuses past it. */
@@ -254,6 +270,23 @@ export function startingSeats(seats: SeatOffer, editorCount: number | null | und
 export function editorsHint(editorCount: number | null | undefined): string | null {
 	if (typeof editorCount !== 'number' || !Number.isInteger(editorCount) || editorCount < 0) return null;
 	return `This team has ${fmtNum(editorCount)} editor${editorCount === 1 ? '' : 's'}.`;
+}
+
+/**
+ * The notice when a team has more editors than its plan pays for (403, issue #926: seats cut in the provider's
+ * portal): how many over, that no one loses access, that new editors are refused, and what to do. Null within its
+ * seats, on a person's account, or from an older API that sends no `overSeats`.
+ */
+export function overSeatsNotice(plan: Pick<AccountPlan, 'team'>): string | null {
+	const o = plan.team?.overSeats;
+	if (!o || !Number.isInteger(o.seats) || !Number.isInteger(o.editors) || o.editors <= o.seats) return null;
+	const over = o.editors - o.seats;
+	const since = o.since ? ` since ${fmtDate(o.since)}` : '';
+	return (
+		`This team has ${fmtNum(o.editors)} editors but its plan pays for ${fmtNum(o.seats)} editor seat${o.seats === 1 ? '' : 's'}${since}: ` +
+		`${fmtNum(over)} over. Everyone keeps their access, but no one new can be made an editor. ` +
+		`Add ${over === 1 ? 'a seat' : `${fmtNum(over)} seats`} with Change seats, or make ${over === 1 ? 'an editor a viewer' : `${fmtNum(over)} editors viewers`}.`
+	);
 }
 
 /** The line under the seat field: "3 editor seats included; each extra one is R 499.00 a month or R 4 990.00 a year." */
@@ -366,13 +399,16 @@ const catchments = (n: number) => `${fmtNum(n)} catchment${n === 1 ? '' : 's'}`;
  * plan that never ended).
  */
 export function keepPickerIntro(list: LiveCatchments, enforced: boolean, whose: string): string | null {
-	if (!list.overFreeSince || list.freeLimit === null || list.catchments.length <= list.freeLimit) return null;
+	// `planEnded` (migration 409), not `overFreeSince`, which stays null in shadow mode until the grace starts.
+	// An API from before 409 sends no `planEnded`: then the grace's start says it, as it did.
+	const ended = typeof list.planEnded === 'boolean' ? list.planEnded : !!list.overFreeSince;
+	if (!ended || list.freeLimit === null || list.catchments.length <= list.freeLimit) return null;
 	const head = `The plan for ${whose} has ended, so it is on Free, which keeps ${catchments(list.freeLimit)} live.`;
 	const lost = 'Nothing is lost: everyone can still open, run, edit and export them, and they carry on as they were on a plan again.';
 	const others = 'feeds, alerts and automatic runs';
 	let when: string;
 	if (list.catchments.some((c) => c.pausedAt)) when = `On the others, ${others} are paused.`;
-	else if (!enforced) when = `Once plan limits apply, ${others} pause on the others 14 days after the plan ended.`;
+	else if (!enforced) when = `Plan limits don't apply yet: the grace starts once limits apply, and ${others} pause on the others ${PLAN_ENDED_GRACE_DAYS} days after that.`;
 	else when = list.pausesFrom ? `From ${fmtDate(list.pausesFrom)}, ${others} pause on the others.` : `Soon, ${others} pause on the others.`;
 	return `${head} ${when} ${lost}`;
 }

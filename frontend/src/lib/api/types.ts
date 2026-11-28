@@ -4791,7 +4791,8 @@ export interface PlanOffer extends Plan {
 	trialDays: number | null;
 }
 
-export type SubscriptionStatus = 'trialing' | 'active' | 'past_due' | 'canceled' | 'expired';
+/** `lapsed`: past_due past the app's dunning limit (405, issue #927); not live, the paid features paused until it is paid. */
+export type SubscriptionStatus = 'trialing' | 'active' | 'past_due' | 'lapsed' | 'canceled' | 'expired';
 
 export interface Subscription {
 	status: SubscriptionStatus;
@@ -4808,6 +4809,11 @@ export interface Subscription {
 	 * older API.
 	 */
 	reverseTrial?: boolean;
+	/**
+	 * A plan the operator gave (provider `manual`, status `active`): `staff` for a staff grant (330), `invoice` for a
+	 * paid B2B invoice (335); null for a subscription the payment provider holds. Absent from an older API.
+	 */
+	granted?: 'staff' | 'invoice' | null;
 }
 
 /** One counted thing this month; `limit: null` is unlimited. */
@@ -4838,9 +4844,15 @@ export interface AccountPlan {
 	/**
 	 * A team account's editor seats in use (332): the distinct people with editor or owner on its projects; and the
 	 * share (1–100 %) of its monthly assistant dollars one member may use on a per-seat plan (339; default 50, a team
-	 * admin sets it with POST …/plan/assistant-share). null on a person's account.
+	 * admin sets it with POST …/plan/assistant-share). null on a person's account. `overSeats` (403, issue #926): more
+	 * editors than a live Team plan's paid seats (a seat cut in the provider's portal), worked out at each read, with
+	 * when the subscription was first seen so (null when not recorded yet); null within its seats, absent from an older API.
 	 */
-	team: { editorCount: number; assistantMemberMaxPct: number } | null;
+	team: {
+		editorCount: number;
+		assistantMemberMaxPct: number;
+		overSeats?: { seats: number; editors: number; since: string | null } | null;
+	} | null;
 	usage: {
 		/** "YYYY-MM", the month in Africa/Johannesburg. */
 		month: string;
@@ -4881,7 +4893,12 @@ export interface LiveCatchment {
 export interface LiveCatchments {
 	/** Free's live catchments (1); null if Free had no limit. */
 	freeLimit: number | null;
-	/** When the account, with its plan ended, went past Free's live catchments (the grace's start); null when within. */
+	/**
+	 * Whether the account's plan has ended (migration 409): the picker shows on this, since in shadow mode
+	 * `overFreeSince` and `pausesFrom` stay null until the grace really starts (once limits apply).
+	 */
+	planEnded: boolean;
+	/** When the account, with its plan ended, went past Free's live catchments (the grace's start); null when within, and in shadow mode. */
 	overFreeSince: string | null;
 	/** 14 days after overFreeSince: when, with billing enforced, the extra ones pause; null when within. */
 	pausesFrom: string | null;

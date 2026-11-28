@@ -11,7 +11,7 @@
 	import { untrack } from 'svelte';
 	import { focusAfterRemove } from '#lib/a11y/focusAfterRemove.js';
 	import { removeMemberConfirm } from '#lib/teams/removeConfirm.js';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { openAfterClose, trackClose } from '#lib/nav/closeNav.js';
 	import { resolve } from '$app/paths';
 	import { basePath } from '#lib/nav/base.js';
@@ -108,7 +108,7 @@
 	$effect(() => {
 		// Closed (Done, Esc, the ✕): drop `settings` in place.
 		// The sheet shuts before the URL follows: a link to it waits for the drop (lib/nav/closeNav.ts).
-		if (!settingsOpen && untrack(() => settingsParam)) void trackClose(goto(withoutParam(page.url, 'settings'), { replace: true, reset: false }));
+		if (!settingsOpen && untrack(() => settingsParam)) void trackClose(guardedGoto(withoutParam(page.url, 'settings'), { replace: true, reset: false }));
 	});
 	const settingsHref = $derived(withParam(page.url, 'settings', '1'));
 
@@ -197,7 +197,7 @@
 		error = null;
 		try {
 			await api.teams.removeMember(teamId, m.userId);
-			if (self) return void (await goto(resolve('teams')));
+			if (self) return void (await guardedGoto(resolve('teams')));
 			const at = members.findIndex((x) => x.userId === m.userId);
 			members = members.filter((x) => x.userId !== m.userId);
 			if (team) team.memberCount -= 1;
@@ -260,7 +260,7 @@
 		error = null;
 		try {
 			await api.teams.remove(team.id);
-			await goto(resolve('teams'));
+			await guardedGoto(resolve('teams'));
 		} catch (err) {
 			error = msg(err);
 		} finally {
@@ -342,7 +342,7 @@
 				<div class="head-actions">
 					<a class="btn" href={resolve('help/guides/share-with-a-team')}>How teams work</a>
 					<a class="btn" href={resolve(`?owner=team:${team.id}&sort=status`)}>Project list</a>
-					<a class="btn" href={settingsHref} data-sveltekit-noscroll bind:this={settingsLink} onclick={openAfterClose()}>Team settings</a>
+					<a class="btn" href={settingsHref} data-sveltekit-reset="false" bind:this={settingsLink} onclick={openAfterClose()}>Team settings</a>
 					<!-- The team's plan and usage (issue #641): its admins only, as the API answers. -->
 					{#if isAdmin}<a class="btn" href={resolve(`teams/${team.id}/plan`)}>Plan and usage</a>{/if}
 					{#if isAdmin}<button type="button" class="btn" onclick={focusAddMember}>Add member</button>{/if}
@@ -391,7 +391,7 @@
 							</ul>
 							<p class="rule muted small">
 								Traffic lights: {thresholdsRule(team.portfolioThresholds)}.
-								<a href={settingsHref} data-sveltekit-noscroll onclick={openAfterClose()}>{isAdmin ? 'Change them' : 'Which apply'}</a> in the team settings.
+								<a href={settingsHref} data-sveltekit-reset="false" onclick={openAfterClose()}>{isAdmin ? 'Change them' : 'Which apply'}</a> in the team settings.
 							</p>
 						{:else if totals}
 							<p class="muted">

@@ -107,6 +107,11 @@ export const RenderResultMessage = z
 		v: z.literal(1),
 		type: z.literal('rendered'),
 		reportId: Uuid,
+		/**
+		 * The report's project, so the worker can queue a PDF stored after its report was deleted for removal
+		 * (398, reports/schedule.ts acceptRenderResult). Optional: an answer from an older renderer has none.
+		 */
+		projectId: Uuid.optional(),
 		requestId: RequestId.optional(),
 		result: RenderResult
 	})

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { modelRuleIssues, SUPPLY_RULES, type NetworkNode, type ProjectModel } from '@water-management/engine';
-import { ewrSiteIssue, issueHref, operatingIssues, supplyIssues, transferAnchor, unitMapIssue, unitMapProblem, validateModel, withUnitMap } from './validate';
+import { ewrSiteIssue, issueHref, issueKeepsPlace, operatingIssues, supplyIssues, transferAnchor, unitMapIssue, unitMapProblem, validateModel, withUnitMap } from './validate';
 
 function node(id: string, name: string, down: string | null): NetworkNode {
 	return {
@@ -581,5 +581,14 @@ describe('a unit’s MAP (issue #482)', () => {
 
 	it('leaves a gauge that kept a MAP from being a unit alone, so a kind change never blocks Save with no field to fix', () => {
 		expect(unitMapIssue({ ...node('g', 'Gauge', null), mapMm: 800, mapSource: 'study' })).toBeNull();
+	});
+});
+
+describe('issueKeepsPlace', () => {
+	it('keeps the place for a link that opens a sheet, not for a jump to a transfer’s card', () => {
+		expect(issueKeepsPlace({ area: 'network', itemId: 'a' })).toBe(true);
+		expect(issueKeepsPlace({ area: 'crops', itemId: 'c1' })).toBe(true);
+		expect(issueKeepsPlace({ area: 'transfers', itemId: 't1' })).toBe(false);
+		expect(issueKeepsPlace({ area: 'network' })).toBe(false);
 	});
 });

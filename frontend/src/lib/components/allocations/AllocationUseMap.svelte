@@ -26,7 +26,7 @@
 	// the Registered users table's subtotals: no run needed, so with no run (or
 	// a run with nothing to compare) it is the only shading offered.
 	import { PUBLIC_TILES_GLYPHS_URL, PUBLIC_TILES_URL } from '$app/env/public';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { page } from '$app/state';
 	import { withoutParam, withParam } from '#lib/workspace/overlays.js';
 	import type { AllocationComparison } from '@water-management/engine';
@@ -116,14 +116,14 @@
 	const view = $derived<'run' | 'registered'>(comparison && shadeParam !== 'registered' ? 'run' : 'registered');
 	/** The page with one of the map's choices set (null or the default: left out). A choice pushes, so Back returns to the one before. */
 	function choose(name: 'mapMeasure' | 'mapSource' | 'mapYear' | 'mapShade', value: string | null) {
-		void goto(value === null ? withoutParam(url, name) : withParam(url, name, value), { reset: false });
+		void guardedGoto(value === null ? withoutParam(url, name) : withParam(url, name, value), { reset: false });
 	}
 	/** Hide the map: its choices go with it. */
 	function hide() {
 		const q = new URLSearchParams(url.search);
 		for (const k of ['map', 'mapMeasure', 'mapSource', 'mapYear', 'mapShade']) q.delete(k);
 		const s = q.toString();
-		void goto(`${url.pathname}${s ? `?${s}` : ''}${url.hash}`, { reset: false });
+		void guardedGoto(`${url.pathname}${s ? `?${s}` : ''}${url.hash}`, { reset: false });
 	}
 	const years = $derived(comparison ? wholeWaterYears(comparison) : []);
 	// A year the newly compared run doesn't cover falls back to the mean.
@@ -177,7 +177,7 @@
 		{#if open}
 			<button type="button" class="btn btn-sm" aria-expanded="true" aria-controls="alloc-map-body" onclick={hide}>Hide the map</button>
 		{:else}
-			<a class="btn btn-sm" href={withParam(url, 'map', '1')} data-sveltekit-noscroll data-sveltekit-keepfocus aria-expanded="false" aria-controls="alloc-map-body">Show the map</a>
+			<a class="btn btn-sm" href={withParam(url, 'map', '1')} data-sveltekit-reset="false" aria-expanded="false" aria-controls="alloc-map-body">Show the map</a>
 		{/if}
 	</div>
 	<p class="small muted lead">

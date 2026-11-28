@@ -78,7 +78,10 @@ test('the gauge’s MAP is the catchment rain station’s, set in Series details
 		lon: 18.86
 	});
 	await expect(station.getByTestId('station-saved')).toHaveText('Saved the station.');
+	// Nothing left to save: aria-disabled, not disabled, so the focus stays on the button (issue #932).
 	await expect(save).toBeDisabled();
+	await expect(save).toHaveAttribute('aria-disabled', 'true');
+	await expect(save).toBeFocused();
 
 	// Settings now reads the station's MAP, which wins over the settings'.
 	await openSettings(page, project.id);

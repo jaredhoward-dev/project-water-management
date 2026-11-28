@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
-import { CI_WAIT_DEFAULT_SECONDS, branchPolicyProblem, ciGateState, compareVersions, environmentProblem, missingConfig, notNewerThan, parseReleaseTag, runningCiRuns, tagRulesetProblem, trustedCiGateRuns } from './preflight.mjs';
+import { CI_WAIT_DEFAULT_SECONDS, branchPolicyProblem, ciGateState, compareVersions, environmentProblem, latestRelease, migrationBlobs, missingConfig, notNewerThan, parseReleaseTag, rollbackMigrationProblems, runningCiRuns, tagRulesetProblem, trustedCiGateRuns } from './preflight.mjs';
 
 test('release tags are <component>@semver', () => {
 	assert.deepEqual(parseReleaseTag('web@1.2.3', 'web'), { ok: true, version: '1.2.3', prerelease: false });
@@ -37,6 +37,54 @@ test('a release must be newer than every published release of its component', ()
 	assert.deepEqual(notNewerThan('0.3.0', 'web', 'web@0.3.0', releases), [], 'itself, drafts, prereleases and other components are ignored');
 	assert.deepEqual(notNewerThan('0.2.5', 'web', 'web@0.2.5', releases), ['0.3.0']);
 	assert.deepEqual(notNewerThan('0.2.0', 'web', 'web@0.2.0-again', releases), ['0.2.0', '0.3.0'], 'an equal version is not newer');
+});
+
+test('the latest release is the newest published, non-prerelease one of the component', () => {
+	const releases = [
+		{ tagName: 'backend@0.26.2', isDraft: false, isPrerelease: false },
+		{ tagName: 'backend@0.27.0', isDraft: false, isPrerelease: false },
+		{ tagName: 'backend@0.28.0', isDraft: true, isPrerelease: false },
+		{ tagName: 'backend@0.29.0-rc.1', isDraft: false, isPrerelease: true },
+		{ tagName: 'web@9.0.0', isDraft: false, isPrerelease: false }
+	];
+	assert.equal(latestRelease('backend', releases), 'backend@0.27.0');
+	assert.equal(latestRelease('backend', []), null);
+});
+
+test('migrationBlobs reads the numbered migration files of git ls-tree', () => {
+	const out = [
+		'100644 blob aaa111\tbackend/migrations/001_init.sql',
+		'100644 blob bbb222\tbackend/migrations/320_last.sql',
+		'100644 blob ccc333\tbackend/migrations/README.md',
+		'040000 tree ddd444\tbackend/migrations/sub',
+		'100644 blob eee555\tbackend/other/002_x.sql',
+		''
+	].join('\n');
+	assert.deepEqual([...migrationBlobs(out)], [['001_init.sql', 'aaa111'], ['320_last.sql', 'bbb222']]);
+});
+
+test('a rollback is safe only when every migration the tag ships is in the latest release unchanged', () => {
+	const tag = new Map([['001_a.sql', 'a1'], ['002_b.sql', 'b1']]);
+	// Positive control: the latest release has them all, plus newer ones.
+	assert.deepEqual(rollbackMigrationProblems(tag, new Map([['001_a.sql', 'a1'], ['002_b.sql', 'b1'], ['003_c.sql', 'c1']]), 'backend@0.1.0', 'backend@0.2.0'), []);
+	const missing = rollbackMigrationProblems(tag, new Map([['001_a.sql', 'a1']]), 'backend@0.1.0', 'backend@0.2.0');
+	assert.equal(missing.length, 1);
+	assert.match(missing[0], /ships migration\(s\) backend@0\.2\.0 does not: 002_b\.sql/);
+	const changed = rollbackMigrationProblems(tag, new Map([['001_a.sql', 'a1'], ['002_b.sql', 'b2']]), 'backend@0.1.0', 'backend@0.2.0');
+	assert.equal(changed.length, 1);
+	assert.match(changed[0], /002_b\.sql differ/);
+	assert.match(rollbackMigrationProblems(new Map(), new Map([['001_a.sql', 'a1']]), 'backend@0.1.0', 'backend@0.2.0')[0], /has no files/);
+});
+
+test('deploy-backend.yml skips only the migrate Lambda on a rollback, behind the preflight', () => {
+	const wf = readFileSync(new URL('../../.github/workflows/deploy-backend.yml', import.meta.url), 'utf8');
+	assert.match(wf, /rollback:\n\s+description: [^\n]+\n\s+required: false\n\s+type: boolean\n\s+default: false/);
+	assert.match(wf, /ROLLBACK: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.rollback \}\}/);
+	assert.match(wf, /rollback: \$\{\{ steps\.preflight\.outputs\.rollback \}\}/);
+	// The two migrate steps are skipped only on the preflight's say-so, never on the raw input.
+	const gated = wf.match(/- name: (Update migrate Lambda code|Run migrations)\n\s+if: needs\.preflight\.outputs\.rollback != 'true'\n/g) ?? [];
+	assert.equal(gated.length, 2);
+	assert.doesNotMatch(wf, /if:[^\n]*inputs\.rollback/);
 });
 
 test('the newest CI gate run decides', () => {

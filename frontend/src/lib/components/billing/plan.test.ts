@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AccountPlan, Subscription } from '#lib/api/types.js';
 import {
+	grantNote,
 	CONFIRM_DELAYS_MS,
 	MAX_CHECKOUT_SEATS,
 	billingActions,
@@ -13,6 +14,7 @@ import {
 	fmtPrice,
 	fmtUsdMicros,
 	monthName,
+	overSeatsNotice,
 	priceLine,
 	seatHint,
 	seatOffer,
@@ -110,6 +112,15 @@ describe('monthName', () => {
 describe('subscriptionLine', () => {
 	it('is nothing on Free (no subscription)', () => {
 		expect(subscriptionLine(null)).toBeNull();
+	});
+	it('says a granted plan is the operator’s, with its end, never in the warning colour', () => {
+		expect(subscriptionLine(sub({ granted: 'staff', cancelAtPeriodEnd: true }))).toEqual({ text: 'Granted by the operator until 1 Dec 2026', warn: false });
+		expect(subscriptionLine(sub({ granted: 'staff', periodEnd: null }))).toEqual({ text: 'Granted by the operator, with no end date', warn: false });
+		expect(subscriptionLine(sub({ granted: 'invoice', cancelAtPeriodEnd: true }))).toEqual({ text: 'Paid by invoice; runs until 1 Dec 2026', warn: false });
+		expect(grantNote(sub({ granted: 'staff' }))).toMatch(/ask the operator/);
+		expect(grantNote(sub({ granted: 'invoice' }))).toBeNull();
+		expect(grantNote(sub({}))).toBeNull();
+		expect(grantNote(null)).toBeNull();
 	});
 	it('gives the renewal day, or the end when it won’t renew', () => {
 		expect(subscriptionLine(sub({}))).toEqual({ text: 'Renews 1 Dec 2026', warn: false });
@@ -262,6 +273,12 @@ describe('billingActions (Phase 3)', () => {
 	it('offers Manage billing, not Upgrade, once there is a subscription', () => {
 		expect(billingActions(plan({ subscription: sub({}) }))).toEqual({ upgrade: null, manage: true });
 	});
+	it('offers neither on a staff grant (nothing at the provider to manage), and Manage billing on a paid invoice', () => {
+		expect(billingActions(plan({ subscription: sub({ granted: 'staff' }) }))).toEqual({ upgrade: null, manage: false });
+		expect(billingActions(plan({ provider: 'stripe', subscription: sub({ granted: 'staff' }) }))).toEqual({ upgrade: null, manage: false });
+		expect(billingActions(plan({ subscription: sub({ granted: 'invoice' }) }))).toEqual({ upgrade: null, manage: true });
+		expect(billingActions(plan({ subscription: sub({ granted: null }) }))).toEqual({ upgrade: null, manage: true });
+	});
 	it('offers Upgrade during a live reverse trial (checkout replaces it, 344), Manage billing on any other trial', () => {
 		const trial = sub({ status: 'trialing', trialEnd: '2026-12-07T10:00:00.000Z', reverseTrial: true });
 		expect(billingActions(plan({ subscription: trial }))).toEqual({ upgrade: { code: 'pro', name: 'Pro' }, manage: false });
@@ -359,6 +376,22 @@ describe('Team seats at checkout', () => {
 		expect(startingSeats(offer, MAX_CHECKOUT_SEATS + 10)).toBe(MAX_CHECKOUT_SEATS);
 	});
 
+	it('overSeatsNotice says how far over the paid seats a team is and what to do; nothing within them (403, issue #926)', () => {
+		const team = (overSeats: unknown) => ({ team: { editorCount: 5, assistantMemberMaxPct: 50, overSeats } }) as Parameters<typeof overSeatsNotice>[0];
+		const two = overSeatsNotice(team({ seats: 3, editors: 5, since: '2026-11-20T08:00:00.000Z' }))!;
+		expect(two).toMatch(/^This team has 5 editors but its plan pays for 3 editor seats since .+: 2 over\./);
+		expect(two).toContain('Everyone keeps their access, but no one new can be made an editor.');
+		expect(two).toContain('Add 2 seats with Change seats, or make 2 editors viewers.');
+		const one = overSeatsNotice(team({ seats: 3, editors: 4, since: null }))!;
+		expect(one).toMatch(/^This team has 4 editors but its plan pays for 3 editor seats: 1 over\./);
+		expect(one).toContain('Add a seat with Change seats, or make an editor a viewer.');
+		// Within its seats, none, an older API (absent), or a person's account: nothing.
+		expect(overSeatsNotice(team({ seats: 5, editors: 5, since: null }))).toBeNull();
+		expect(overSeatsNotice(team(null))).toBeNull();
+		expect(overSeatsNotice(team(undefined))).toBeNull();
+		expect(overSeatsNotice({ team: null })).toBeNull();
+	});
+
 	it('editorsHint says how many editors the team has; nothing when unknown', () => {
 		expect(editorsHint(4)).toBe('This team has 4 editors.');
 		expect(editorsHint(1)).toBe('This team has 1 editor.');
@@ -428,6 +461,7 @@ describe('the live-catchment picker (341, 345)', () => {
 	const live = (used: number, limit: number | null) => plan({ usage: { ...plan().usage, liveCatchments: { used, limit } } });
 	const list = (over: Partial<LiveCatchments> = {}): LiveCatchments => ({
 		freeLimit: 1,
+		planEnded: true,
 		overFreeSince: '2026-11-20T08:00:00Z',
 		pausesFrom: '2026-12-04T08:00:00Z',
 		catchments: [
@@ -446,7 +480,8 @@ describe('the live-catchment picker (341, 345)', () => {
 	});
 
 	it('says nothing on an account whose plan never ended, or within Free', () => {
-		expect(keepPickerIntro(list({ overFreeSince: null, pausesFrom: null }), true, 'your account')).toBeNull();
+		expect(keepPickerIntro(list({ planEnded: false, overFreeSince: null, pausesFrom: null }), true, 'your account')).toBeNull();
+		expect(keepPickerIntro(list({ planEnded: false, overFreeSince: null, pausesFrom: null }), false, 'your account')).toBeNull();
 		expect(keepPickerIntro(list({ catchments: list().catchments.slice(0, 1) }), true, 'your account')).toBeNull();
 	});
 
@@ -460,7 +495,27 @@ describe('the live-catchment picker (341, 345)', () => {
 	it('once paused, says so; with limits not applied yet, says when they would', () => {
 		const paused = list({ catchments: [list().catchments[0]!, { ...list().catchments[1]!, pausedAt: '2026-12-04T08:05:00Z' }] });
 		expect(keepPickerIntro(paused, true, 'this team')).toContain('On the others, feeds, alerts and automatic runs are paused.');
-		expect(keepPickerIntro(list(), false, 'this team')).toContain('Once plan limits apply');
+		expect(keepPickerIntro(list(), false, 'this team')).toContain('the grace starts once limits apply');
+	});
+
+	it('shows on planEnded in shadow mode, where the grace’s dates stay null until limits apply (409)', () => {
+		const shadow = list({ overFreeSince: null, pausesFrom: null });
+		const t = keepPickerIntro(shadow, false, 'your account')!;
+		expect(t).toMatch(/^The plan for your account has ended/);
+		expect(t).toContain("Plan limits don't apply yet");
+		expect(t).toContain('the grace starts once limits apply, and feeds, alerts and automatic runs pause on the others 14 days after that.');
+		expect(t).not.toContain('after the plan ended');
+		// Enforced, with the grace not dated yet: no date is made up.
+		expect(keepPickerIntro(shadow, true, 'your account')).toContain('Soon, feeds, alerts and automatic runs pause on the others.');
+		// Enforced in the grace: the date.
+		expect(keepPickerIntro(list(), true, 'your account')).toContain('From ');
+	});
+
+	it('reads the grace’s start from an API before 409 that sends no planEnded', () => {
+		const { planEnded: _drop, ...old } = list();
+		void _drop;
+		expect(keepPickerIntro(old as LiveCatchments, true, 'your account')).toMatch(/^The plan for your account has ended/);
+		expect(keepPickerIntro({ ...(old as LiveCatchments), overFreeSince: null }, true, 'your account')).toBeNull();
 	});
 
 	it('names each row’s state', () => {

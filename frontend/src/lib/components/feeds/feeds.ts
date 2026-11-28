@@ -480,6 +480,15 @@ export const DWS_RIVER_GAUGE = /^[A-Z]\d[H]\d{3}$/;
 
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 
+/**
+ * Whether an edit (an input or change event on `targetId`) is to the field the form's problem is about, so the problem
+ * steps aside (its line, the field's invalid mark and its description) until the next Attach checks again (issue #932).
+ * The station API form does this for its own fields (StationApiFeedForm's `edited`), so its source is left to it.
+ */
+export function editClearsProblem(field: string | null, source: FeedSource, targetId: string | null | undefined, uid: string): boolean {
+	return !!field && source !== 'station_api' && targetId === `${uid}-${field}`;
+}
+
 /** The request body for a draft, or the first problem in words and the field it is in. */
 export function draftToBody(d: FeedDraft): { body: FeedBody } | { error: string; field: 'cells' | 'bbox' | 'station' | 'start' } {
 	const common = { source: d.source, targetKind: d.targetKind, targetName: d.targetName.trim(), schedule: d.schedule };

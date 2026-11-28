@@ -73,6 +73,13 @@ export interface SubDailyInfo {
 	 * as a short total or a part-day average (issue #829). Absent when whole.
 	 */
 	partialEdges?: { first?: string; last?: string };
+	/**
+	 * Present with `partialEdges` when the readings run from the day boundary to one interval before it
+	 * (00:00 … 23:00 for hourly at midnight): the logger likely stamped the start of each interval, where
+	 * the rule is that a timestamp closes its interval (issues #829, #840), so both edge days read as part
+	 * days. The form says so, and how to fix the file; the rule itself doesn't change.
+	 */
+	startStamped?: true;
 }
 
 /** Order of a slash/dot/dash date whose year comes last: 05/01/2020. */
@@ -452,9 +459,11 @@ export function parseSeriesCsv(text: string, opts: ParseOptions = {}): ParsedSer
 		if (days.length > 1 && !closesWhole(days.at(-1)!)) partialEdges.last = fromEpochDay(days.at(-1)!);
 		// A one-day file must also close: its single day is both edges.
 		if (days.length === 1 && !partialEdges.first && !closesWhole(days[0]!)) partialEdges.first = fromEpochDay(days[0]!);
+		const startStamped = (partialEdges.first !== undefined || partialEdges.last !== undefined) && looksStartStamped(instants, step, BOUNDARY_MINUTES[opts.dayBoundary]);
 		if (partialEdges.first && (days.length === 1 || (days.length === 2 && partialEdges.last))) {
 			throw new CsvError(
-				`no whole day: the readings ${days.length === 1 ? `cover only part of ${partialEdges.first}` : `cover only parts of ${partialEdges.first} and ${partialEdges.last}`} (${opts.dayBoundary}–${opts.dayBoundary}), and a part day isn't stored`
+				`no whole day: the readings ${days.length === 1 ? `cover only part of ${partialEdges.first}` : `cover only parts of ${partialEdges.first} and ${partialEdges.last}`} (${opts.dayBoundary}–${opts.dayBoundary}), and a part day isn't stored` +
+					(startStamped ? `. ${startStampedHint(step, opts.dayBoundary)}` : '')
 			);
 		}
 		if (partialEdges.first) byDay.delete(days[0]!);
@@ -466,7 +475,8 @@ export function parseSeriesCsv(text: string, opts: ParseOptions = {}): ParsedSer
 			readings,
 			readingsPerDay: perDay,
 			incompleteDays,
-			...(partialEdges.first || partialEdges.last ? { partialEdges } : {})
+			...(partialEdges.first || partialEdges.last ? { partialEdges } : {}),
+			...(startStamped ? { startStamped: true as const } : {})
 		};
 	}
 	const out: ParsedSeries = {
@@ -477,6 +487,30 @@ export function parseSeriesCsv(text: string, opts: ParseOptions = {}): ParsedSer
 	};
 	if (subDaily) out.subDaily = subDaily;
 	return out;
+}
+
+/**
+ * Whether sub-daily readings look stamped at the start of each interval: the first sits on the day
+ * boundary and the last one interval before a boundary (00:00 … 23:00 hourly at midnight), so under the
+ * end-of-interval rule each edge day reads as a part day. Instants and the boundary in minutes.
+ */
+export function looksStartStamped(instants: readonly number[], step: number, boundaryMinutes: number): boolean {
+	if (instants.length < 2 || !(step > 0) || step >= 1440) return false;
+	const first = Math.min(...instants);
+	const last = Math.max(...instants);
+	const onBoundary = (t: number) => Math.abs((((t - boundaryMinutes) % 1440) + 1440) % 1440) < 1e-6;
+	return onBoundary(first) && onBoundary(last + step);
+}
+
+/** What to tell someone whose sub-daily file looks start-stamped (looksStartStamped). */
+export function startStampedHint(step: number, boundary: DayBoundary): string {
+	const last = fmtClock((BOUNDARY_MINUTES[boundary] - step + 1440) % 1440);
+	return `The readings run ${boundary} to ${last}, so they may mark the start of each interval; a timestamp here marks its end. Move every timestamp one interval later (${boundary} becomes ${fmtClock((BOUNDARY_MINUTES[boundary] + step) % 1440)}, ${last} becomes ${boundary} the next day) and upload it again`;
+}
+
+function fmtClock(minutes: number): string {
+	const m = Math.round(minutes);
+	return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 }
 
 /** The more common of two keys by count, the larger on a tie. */

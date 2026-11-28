@@ -128,7 +128,16 @@
 						onchange={(v) => edit({ lon: v })}
 					/>
 				</div>
-				<button type="submit" class="btn btn-sm btn-primary save" disabled={saving || !!problem || !changed}>{saving ? 'Saving…' : 'Save the station'}</button>
+				<!-- aria-disabled, not disabled, while saving and once nothing is left to save: the press keeps the focus on the
+				     button (a disabled one dropped it to the page the moment a save succeeded; ui-playbook § Don't disable a
+				     control while its own change saves). A problem holds before the press, so it disables. save() ignores the rest. -->
+				<button
+					type="submit"
+					class="btn btn-sm btn-primary save"
+					disabled={!!problem}
+					aria-disabled={saving || !changed ? 'true' : undefined}
+					data-testid="station-save">{saving ? 'Saving…' : 'Save the station'}</button
+				>
 			</div>
 			<p class="hint muted" id={id('map-h')}>
 				The station’s own mean annual rain, with the record or study it comes from and its years. Rain for each unit scales this station’s rain to a unit by

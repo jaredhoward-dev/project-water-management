@@ -91,7 +91,7 @@ export const handler = async (event: SQSEvent): Promise<SQSBatchResponse> => {
 				result = { ok: false, error: e.message.slice(0, 300), retry: e.retry };
 			}
 		}
-		const message: RenderResultMessage = { v: 1, type: 'rendered', reportId: req.reportId, requestId: renderRequestId(req.token), result };
+		const message: RenderResultMessage = { v: 1, type: 'rendered', reportId: req.reportId, projectId: req.projectId, requestId: renderRequestId(req.token), result };
 		try {
 			await sendToQueue(process.env.RENDER_RESULTS_QUEUE_URL, 'RENDER_RESULTS_QUEUE_URL', message);
 		} catch (err) {

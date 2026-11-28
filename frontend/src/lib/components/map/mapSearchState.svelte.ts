@@ -70,6 +70,16 @@ export class MapSearchState {
 		}
 	}
 
+	/**
+	 * The box's text changed (typing, or its clear button ×, issue #938): emptied, the list and the last error go, since
+	 * they answered text that is no longer there. The view, and the credit of the place it moved to, stay.
+	 */
+	edited(q: string) {
+		if (q.trim() !== '') return;
+		this.open = false;
+		this.error = null;
+	}
+
 	/** Escape: close the list; true when there was one to close. */
 	close(): boolean {
 		if (!this.open) return false;

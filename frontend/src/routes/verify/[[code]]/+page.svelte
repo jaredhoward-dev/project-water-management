@@ -16,7 +16,7 @@
 	// links are the engine's fixed URLs, never the database's.
 	import { untrack } from 'svelte';
 	import { APP_SHORT_NAME } from '#lib/brand.js';
-	import { goto } from '$app/navigation';
+	import { guardedGoto } from '#lib/nav/leaveGuard.js';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { packShortCode, parsePackCode, registrationBody, registrationLine } from '@water-management/engine';
@@ -58,7 +58,7 @@
 	const typedOk = $derived(parsePackCode(typed) !== null);
 	function lookUp(e: SubmitEvent) {
 		e.preventDefault();
-		if (typedOk) goto(resolve(`verify/${encodeURIComponent(typed.trim())}`));
+		if (typedOk) guardedGoto(resolve(`verify/${encodeURIComponent(typed.trim())}`));
 	}
 
 	// --- check a file, in the browser ---
