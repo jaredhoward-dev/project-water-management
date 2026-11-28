@@ -2149,6 +2149,8 @@ export const af: Catalogue = {
 	'5e907c8d': 'Nog geen hidrologiese eenheid is aan jou rekening gekoppel nie. Jou WGV koppel jou hidrologiese eenheid aan jou rekening.',
 	// Your projects
 	'1ec4a724': 'Jou projekte',
+	// Some of your catchments couldn’t be loaded, so their hydrological units aren’t listed here.
+	'34bc7f2f': 'Sommige van jou opvanggebiede kon nie gelaai word nie, so hul hidrologiese eenhede word nie hier gelys nie.',
 	// Not published yet
 	'b17ad0ae': 'Nog nie gepubliseer nie',
 	// WUA notice · {level}
