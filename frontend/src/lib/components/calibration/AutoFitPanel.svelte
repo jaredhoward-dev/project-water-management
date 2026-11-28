@@ -10,6 +10,7 @@
 	`start()` and asks `canRun()`.
 -->
 <script lang="ts">
+	import { tick } from 'svelte';
 	import { canonicalJson, rulesLines, waterYearLabel, type CalibrationRules } from '@water-management/engine';
 	import { api } from '#lib/api/index.js';
 	import { calibrationModelInput } from '#lib/calibration/modelInputShared.js';
@@ -106,8 +107,16 @@
 		return blocked;
 	}
 
-	function apply() {
-		if (latest && !blocker) void follower.apply(onApplied);
+	let appliedLine = $state<HTMLElement | null>(null);
+	/**
+	 * Applies the kept fit. The button goes once it's applied (its line takes its place), so the focus, left on the page,
+	 * moves to that line, which a screen reader then reads (WCAG 2.4.3, 4.1.3); a focus the person moved elsewhere stays.
+	 */
+	async function apply() {
+		if (!latest || blocker || busy) return;
+		await follower.apply(onApplied);
+		await tick();
+		if (follower.latest?.appliedAt && (document.activeElement === null || document.activeElement === document.body)) appliedLine?.focus();
 	}
 
 	// Another project, or the panel closing, drops whatever the last one had in flight.
@@ -215,15 +224,17 @@
 						</table>
 					</div>
 					{#if latest.appliedAt}
-						<p class="small" data-testid="auto-applied">
+						<p class="small" data-testid="auto-applied" tabindex="-1" bind:this={appliedLine}>
 							Applied by {latest.appliedBy ?? 'a former member'} on {fmtStamp(latest.appliedAt)}{latest.appliedRunId ? ', with a run' : ''}{latest.uncertaintyId
 								? ' and its uncertainty ensemble (Runs tab)'
 								: ''}.
 						</p>
-						{#if runError}<p class="alert alert-warning small">The fit is saved, but no run followed: {runError}</p>{/if}
+						{#if runError}<p class="alert alert-warning small" role="alert">The fit is saved, but no run followed: {runError}</p>{/if}
 					{:else if !readonly}
 						<div class="row">
-							<button type="button" class="btn btn-primary" onclick={apply} disabled={!!blocker || busy}>Apply and save the kept fit</button>
+							<button type="button" class="btn btn-primary" onclick={apply} disabled={!!blocker} aria-disabled={busy || undefined}
+								>Apply and save the kept fit</button
+							>
 							<span class="muted small" data-testid="auto-apply-hint">{blocker ?? `Saves its parameters with a record of how the rules chose it${kept.pan.values ? ', and the pan coefficient it was fitted under' : ''}, then runs the model.`}</span>
 						</div>
 					{/if}
