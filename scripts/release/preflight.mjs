@@ -31,6 +31,14 @@
 //                custom deployment branch policy allowing exactly `main`
 //                (branch) and `backend@*` / `web@*` (tags), so no other branch
 //                or tag can reach the deploy job's OIDC subject.
+//   rollback     (ROLLBACK=true, a manual run of deploy-backend.yml with
+//                `rollback`: the deploy skips the migrate Lambda) the tag is
+//                older than the latest published backend release, and every
+//                migration file the tag ships is in that release with the
+//                same contents (git blob ids), so a database that release
+//                migrated already has all of them. Git, not the database:
+//                this job holds no AWS credentials, and it refuses before the
+//                approval and before anything is built.
 //   tags         an active tag ruleset restricts creating, moving and deleting
 //                `backend@*` and `web@*` tags, so a released tag cannot be
 //                re-pointed at another commit after its checks passed.
@@ -45,7 +53,8 @@
 //                 workflow that deploys no release: load-reference.yml)
 //   env: RELEASE_TAG, GITHUB_EVENT_NAME, GITHUB_REPOSITORY, GH_TOKEN,
 //        REQUIRED_CONFIG (comma-separated env var names that must be set),
-//        CI_WAIT_SECONDS (default 5400), GITHUB_OUTPUT.
+//        CI_WAIT_SECONDS (default 5400), GITHUB_OUTPUT, ROLLBACK (backend
+//        only, manual runs only: "true" checks the rollback rule).
 // Usage (local):  RELEASE_TAG=web@0.1.0 GITHUB_EVENT_NAME=workflow_dispatch \
 //                 GITHUB_REPOSITORY=jaredhoward-dev/project-water-management \
 //                 node scripts/release/preflight.mjs web
@@ -101,6 +110,75 @@ export function notNewerThan(version, component, tag, releases) {
 		.filter((p) => p.ok && !p.prerelease)
 		.map((p) => /** @type {{ version: string }} */ (p).version)
 		.filter((v) => compareVersions(v, version) >= 0);
+}
+
+/** Where the backend's numbered migrations live, and their file names (backend/scripts/migrate.ts). */
+export const MIGRATIONS_PATH = 'backend/migrations';
+const MIGRATION_FILE = /^\d+_.+\.sql$/;
+
+/**
+ * The numbered migration files in `git ls-tree <ref> -- backend/migrations/`
+ * output ("<mode> blob <id>\t<path>" per line), as file name → blob id.
+ * @param {string} lsTree
+ * @returns {Map<string, string>}
+ */
+export function migrationBlobs(lsTree) {
+	/** @type {Map<string, string>} */
+	const out = new Map();
+	for (const line of lsTree.split('\n')) {
+		const m = line.match(/^\d+ blob ([0-9a-f]+)\t(.+)$/);
+		if (!m) continue;
+		const name = m[2].slice(m[2].lastIndexOf('/') + 1);
+		if (MIGRATION_FILE.test(name) && m[2] === `${MIGRATIONS_PATH}/${name}`) out.set(name, m[1]);
+	}
+	return out;
+}
+
+/**
+ * Why a rollback deploy to `tag` (which skips the migrate Lambda) is unsafe:
+ * a migration file the tag ships that `latest` lacks or ships with other
+ * contents. A database `latest` migrated then lacks it, and the old code
+ * would run against a schema missing its own migration. Empty when every
+ * file the tag ships is in `latest`, byte for byte.
+ * @param {Map<string, string>} tagFiles
+ * @param {Map<string, string>} latestFiles
+ * @param {string} tag
+ * @param {string} latest
+ * @returns {string[]}
+ */
+export function rollbackMigrationProblems(tagFiles, latestFiles, tag, latest) {
+	if (!tagFiles.size) return [`${tag} has no files under ${MIGRATIONS_PATH}/, so its migrations cannot be compared with ${latest}'s`];
+	/** @type {string[]} */
+	const missing = [];
+	/** @type {string[]} */
+	const changed = [];
+	for (const [name, blob] of [...tagFiles].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+		const other = latestFiles.get(name);
+		if (other === undefined) missing.push(name);
+		else if (other !== blob) changed.push(name);
+	}
+	/** @type {string[]} */
+	const problems = [];
+	if (missing.length) problems.push(`${tag} ships migration(s) ${latest} does not: ${missing.join(', ')}. A rollback skips the migrate Lambda, so the database may lack them; deploy ${tag} without rollback instead`);
+	if (changed.length) problems.push(`${tag}'s migration(s) ${changed.join(', ')} differ from ${latest}'s, so the database ran other contents than ${tag} expects (docs/deployment.md § Migration integrity)`);
+	return problems;
+}
+
+/**
+ * The newest published, non-prerelease release of this component.
+ * @param {string} component
+ * @param {{ tagName: string, isDraft: boolean, isPrerelease: boolean }[]} releases
+ * @returns {string | null} its tag
+ */
+export function latestRelease(component, releases) {
+	let best = null;
+	for (const r of releases) {
+		if (r.isDraft || r.isPrerelease) continue;
+		const p = parseReleaseTag(r.tagName, component);
+		if (!p.ok || p.prerelease) continue;
+		if (!best || compareVersions(p.version, best.version) > 0) best = { tag: r.tagName, version: p.version };
+	}
+	return best ? best.tag : null;
 }
 
 /** The GitHub Actions app, the only app whose `CI gate` check run counts. */
@@ -344,11 +422,12 @@ async function main() {
 	const repo = env.GITHUB_REPOSITORY ?? '';
 	const tag = (env.RELEASE_TAG ?? '').trim();
 	const isReleaseEvent = env.GITHUB_EVENT_NAME === 'release';
+	const rollback = (env.ROLLBACK ?? '').trim() === 'true';
 	const waitSeconds = Number(env.CI_WAIT_SECONDS ?? CI_WAIT_DEFAULT_SECONDS);
 	/** @type {string[]} */
 	const errors = [];
 	/** @type {Record<string, string>} */
-	const outputs = { deploy: 'false', tag, sha: '', version: '' };
+	const outputs = { deploy: 'false', tag, sha: '', version: '', rollback: 'false' };
 
 	const finish = () => {
 		for (const e of errors) console.log(`::error::${e}`);
@@ -417,6 +496,36 @@ async function main() {
 		else {
 			const newer = notNewerThan(parsed.version, component, tag, JSON.parse(list.out));
 			if (newer.length) errors.push(`${tag} is not newer than already-published ${newer.map((v) => `${component}@${v}`).join(', ')}. Bump the version; to roll back, run the workflow manually with the older tag (docs/deployment.md § Rollback)`);
+		}
+	}
+
+	// rollback: an older tag whose migrations the latest release already has
+	// (deploy-backend.yml skips the migrate Lambda for it)
+	if (rollback) {
+		if (component !== 'backend' || isReleaseEvent) {
+			errors.push(`rollback is only for a manual run of deploy-backend.yml (got ${component} on a ${env.GITHUB_EVENT_NAME ?? 'unknown'} event)`);
+		} else {
+			const list = tryRun('gh', ['release', 'list', '--repo', repo, '--limit', '200', '--json', 'tagName,isDraft,isPrerelease']);
+			if (!list.ok) errors.push(`could not list releases to check the rollback: ${list.out.trim().split('\n')[0]}`);
+			else {
+				const releases = JSON.parse(list.out);
+				const latest = latestRelease(component, releases);
+				if (!notNewerThan(parsed.version, component, tag, releases).length || !latest || latest === tag) {
+					errors.push(`rollback needs a tag older than the latest published backend release (${latest ?? 'none'}); ${tag} is not. Redeploy it without rollback, so its migrations run`);
+				} else {
+					const tagTree = tryRun('git', ['ls-tree', `refs/tags/${tag}`, '--', `${MIGRATIONS_PATH}/`]);
+					const latestTree = tryRun('git', ['ls-tree', `refs/tags/${latest}`, '--', `${MIGRATIONS_PATH}/`]);
+					if (!tagTree.ok || !latestTree.ok) errors.push(`could not list the migrations of ${tag} and ${latest}: ${(tagTree.ok ? latestTree : tagTree).out.trim().split('\n')[0]}`);
+					else {
+						const problems = rollbackMigrationProblems(migrationBlobs(tagTree.out), migrationBlobs(latestTree.out), tag, latest);
+						errors.push(...problems);
+						if (!problems.length) {
+							outputs.rollback = 'true';
+							console.log(`Rollback: every migration ${tag} ships is in ${latest} unchanged; the deploy skips the migrate Lambda.`);
+						}
+					}
+				}
+			}
 		}
 	}
 

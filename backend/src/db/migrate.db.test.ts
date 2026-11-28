@@ -86,9 +86,48 @@ describe('migrate', () => {
 	it('refuses when an applied file is missing', async () => {
 		await write('001_a.sql', 'CREATE TABLE a (id int);');
 		await write('002_b.sql', 'CREATE TABLE b (id int);');
+		// 003 keeps 002 below the highest file (a missing highest one reads as a newer release's).
+		await write('003_c.sql', 'CREATE TABLE c (id int);');
 		await migrate(URL_, quiet, { dir });
 		await unlink(join(dir, '002_b.sql'));
 		await expect(migrate(URL_, quiet, { dir })).rejects.toThrow(/002_b\.sql was applied but its file is missing/);
+	});
+
+	it('skips applied migrations newer than its highest file, with a log line (a rollback to an older release)', async () => {
+		await write('001_a.sql', 'CREATE TABLE a (id int);');
+		await write('002_b.sql', 'CREATE TABLE b (id int);');
+		await write('003_c.sql', 'CREATE TABLE c (id int);');
+		await migrate(URL_, quiet, { dir });
+		// The older release's checkout: 002 and 003 are a newer release's.
+		await unlink(join(dir, '002_b.sql'));
+		await unlink(join(dir, '003_c.sql'));
+		const lines: string[] = [];
+		expect(await migrate(URL_, (l: string) => lines.push(l), { dir })).toEqual([]);
+		expect(lines).toEqual([expect.stringMatching(/^skipping 2 applied migration\(s\) newer than this release's highest file \(002_b\.sql … 003_c\.sql\)/)]);
+		// Nothing was undone or re-recorded.
+		expect((await rows()).map((r) => r.name)).toEqual(['001_a.sql', '002_b.sql', '003_c.sql']);
+		expect(await tables()).toEqual(['a', 'b', 'c']);
+	});
+
+	it('still refuses a deleted older file when newer applied ones are skipped', async () => {
+		await write('001_a.sql', 'CREATE TABLE a (id int);');
+		await write('002_b.sql', 'CREATE TABLE b (id int);');
+		await write('003_c.sql', 'CREATE TABLE c (id int);');
+		await migrate(URL_, quiet, { dir });
+		await unlink(join(dir, '001_a.sql'));
+		await unlink(join(dir, '003_c.sql'));
+		await expect(migrate(URL_, quiet, { dir })).rejects.toMatchObject({ code: 'integrity', migrations: ['001_a.sql'] });
+		await expect(migrate(URL_, quiet, { dir })).rejects.toThrow(/001_a\.sql was applied but its file is missing/);
+	});
+
+	it('still refuses an edited older file when newer applied ones are skipped', async () => {
+		await write('001_a.sql', 'CREATE TABLE a (id int);');
+		await write('002_b.sql', 'CREATE TABLE b (id int);');
+		await migrate(URL_, quiet, { dir });
+		await unlink(join(dir, '002_b.sql'));
+		await write('001_a.sql', 'CREATE TABLE a (id int, extra text);');
+		await expect(migrate(URL_, quiet, { dir })).rejects.toMatchObject({ code: 'integrity', migrations: ['001_a.sql'] });
+		expect(await tables()).toEqual(['a', 'b']);
 	});
 
 	it('refuses a pending file that sorts before the latest applied one', async () => {
