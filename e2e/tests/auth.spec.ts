@@ -108,6 +108,8 @@ test('cancelling "Sign out everywhere" leaves the session signed in', async ({ p
 
 	await expect(page.getByRole('heading', { level: 1, name: 'Projects' })).toBeVisible();
 	await expect(page).toHaveURL('/');
+	// The keyboard is back on the account menu's button, not at the top of the page (its item is hidden with the list).
+	await expect(page.getByRole('button', { name: /^Account menu for / })).toBeFocused();
 });
 
 test('a wrong password shows an error and stays on the login page', async ({ page, playwright }) => {

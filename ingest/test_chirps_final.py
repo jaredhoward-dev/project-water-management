@@ -526,5 +526,77 @@ class MetricOnEveryExit(Base):
         self.assertEqual(cloudwatch.lag_days("rnl", "2024-02-29", dt.date(2024, 3, 1)), 1)
 
 
+class MonthFiles(unittest.TestCase):
+    """ingest_file's month check and the manifest it keeps, file by file:
+    a file must run to its month's last day (29 February in a leap year),
+    hold only that month, and months copied out of order or across New Year
+    move finalThrough only over the contiguous run."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+        self.root = self.dir / "mirror"
+        self.mirror = zarrstore.Mirror.from_url(f"file://{self.root}")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def nc(self, name, day0, days, value=1.0):
+        region = np.full((days, chcnetcdf.grid.ROWS, chcnetcdf.grid.COLS), np.nan, dtype=np.float32)
+        region[:, 0, 0] = value + np.arange(days, dtype=np.float32)
+        return fx.write_nc(self.dir / "files" / name, day0, region, chunks=(days, 190, 320))
+
+    def ingest(self, y, mo, day0, days, value=1.0, url=None):
+        path = self.nc(fx.name(y, mo), day0, days, value)
+        return chirps_final.ingest_file(self.mirror, "rnl", url or chirps_final.file_url("rnl", y, mo), path, now=lambda: "2026-11-27T00:00:00Z")
+
+    def test_a_february_without_its_leap_day_is_refused_and_writes_nothing(self):
+        with self.assertRaisesRegex(ValueError, r"holds 2024-02-27\.\.2024-02-28, not days of 2024-02 through 2024-02-29"):
+            self.ingest(2024, 2, dt.date(2024, 2, 27), 2)
+        self.assertFalse(self.root.exists())
+        # Positive controls: with the 29th it is whole, and a non-leap February ends on the 28th.
+        self.assertEqual(self.ingest(2024, 2, dt.date(2024, 2, 27), 3)["days"], ["2024-02-27", "2024-02-29"])
+        self.assertEqual(self.ingest(2023, 2, dt.date(2023, 2, 27), 2)["days"], ["2023-02-27", "2023-02-28"])
+        with self.assertRaisesRegex(ValueError, "not days of 2023-02 through 2023-02-28"):
+            self.ingest(2023, 2, dt.date(2023, 2, 27), 3)  # runs into 1 March
+
+    def test_a_file_of_another_month_than_its_name_is_refused(self):
+        with self.assertRaisesRegex(ValueError, "not days of 2024-02"):
+            self.ingest(2024, 2, dt.date(2024, 1, 29), 3)  # January's last days under February's name
+        with self.assertRaisesRegex(ValueError, "names no month"):
+            self.ingest(2024, 2, dt.date(2024, 2, 27), 3, url="https://example.org/chirps-v3.0.days_p05.nc")
+        self.assertFalse(self.root.exists())
+
+    def test_december_ends_on_the_31st_and_lands_in_its_own_year(self):
+        out = self.ingest(2023, 12, dt.date(2023, 12, 29), 3, value=4.0)
+        self.assertEqual(out["days"], ["2023-12-29", "2023-12-31"])
+        a = zarrstore.read_finals(self.root, "rnl", dt.date(2023, 12, 29), 3)
+        self.assertEqual(list(a[:, 0, 0]), [4.0, 5.0, 6.0])
+        m = manifest.read(self.mirror, "rnl")
+        self.assertEqual((m["years"], m["finalThrough"]), ({"first": 2023, "last": 2023}, "2023-12-31"))
+
+    def test_months_out_of_order_across_new_year(self):
+        # December, then February: January is missing, so the copy is final only through December.
+        self.ingest(2023, 12, dt.date(2023, 12, 29), 3)
+        self.ingest(2024, 2, dt.date(2024, 2, 27), 3, value=10.0)
+        m = manifest.read(self.mirror, "rnl")
+        self.assertEqual((m["years"], m["finalThrough"], m["revision"], m["changes"]), ({"first": 2023, "last": 2024}, "2023-12-31", 1, []))
+        # January fills the gap: final through 29 February.
+        self.ingest(2024, 1, dt.date(2024, 1, 29), 3, value=20.0)
+        m = manifest.read(self.mirror, "rnl")
+        self.assertEqual(m["finalThrough"], "2024-02-29")
+        # An earlier month moves the first year back, and the run now starts there.
+        self.ingest(2022, 11, dt.date(2022, 11, 28), 3)
+        m = manifest.read(self.mirror, "rnl")
+        self.assertEqual((m["years"], m["finalThrough"]), ({"first": 2022, "last": 2024}, "2022-11-30"))
+        self.assertEqual([f["url"] for f in m["files"]], sorted(f["url"] for f in m["files"]))  # kept in URL order
+        # Each month sits in its own year's doy rows; 2023's 366th row stays empty.
+        import zarr
+
+        a = zarr.open_array(store=zarr.storage.LocalStore(self.root), path="rnl", mode="r")
+        self.assertEqual((a[42, 364, 0, 0], a[43, 30, 0, 0], a[43, 59, 0, 0]), (np.float32(3.0), np.float32(22.0), np.float32(12.0)))
+        self.assertTrue(np.isnan(a[42, 365, 0, 0]))
+
+
 if __name__ == "__main__":
     unittest.main()

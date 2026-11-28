@@ -14,7 +14,7 @@
 // storage. So a row is read by its water-use code and its unit and frequency,
 // and a row that can't be read one way only is refused rather than guessed.
 
-import { ALLOCATION_WATER_USES, type AllocationWaterUse } from '@water-management/engine';
+import { ALLOCATION_WATER_USES, isIsoDate, type AllocationWaterUse } from '@water-management/engine';
 
 export type AllocationSourceKind = 'warms_extract' | 'csv';
 // A registration (WARMS) is not an entitlement, and existing lawful use is
@@ -302,15 +302,14 @@ export function separatorHint(cell: string, delimiter: ',' | ';'): string {
 	return '';
 }
 
-/** YYYY-MM-DD or YYYY/MM/DD, a real calendar date; null for empty; undefined for anything else. */
+/** YYYY-MM-DD or YYYY/MM/DD, a real calendar date the database can store (isIsoDate: from year 1); null for empty; undefined for anything else. */
 export function parseDate(cell: string): string | null | undefined {
 	const v = cell.trim();
 	if (v === '') return null;
 	const m = /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/.exec(v);
 	if (!m) return undefined;
 	const iso = `${m[1]}-${m[2]!.padStart(2, '0')}-${m[3]!.padStart(2, '0')}`;
-	const t = Date.parse(`${iso}T00:00:00Z`);
-	return Number.isNaN(t) || new Date(t).toISOString().slice(0, 10) !== iso ? undefined : iso;
+	return isIsoDate(iso) ? iso : undefined;
 }
 
 const MONTH_NAMES = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];

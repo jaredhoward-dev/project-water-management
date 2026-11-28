@@ -45,6 +45,7 @@
 	// A workbook export in progress: its progress and how to stop it.
 	let progress = $state<ExportProgress | null>(null);
 	let cancelExport = $state<(() => void) | null>(null);
+	let progressBox: HTMLDivElement | undefined = $state();
 	const progressText = $derived(
 		!progress
 			? ''
@@ -79,8 +80,12 @@
 		} catch (e) {
 			error = `Workbook failed: ${e instanceof Error ? e.message : String(e)}`;
 		} finally {
+			// The progress row (and its Cancel, which has the focus after a Cancel press) goes: the focus goes back to
+			// the Download button rather than falling to the page (WCAG 2.4.3).
+			const hadFocus = !!progressBox?.contains(document.activeElement);
 			progress = null;
 			cancelExport = null;
+			if (hadFocus) trigger?.focus();
 		}
 	}
 
@@ -188,7 +193,7 @@
 	</ul>
 
 	{#if progress}
-		<div class="progress" data-testid="workbook-progress">
+		<div class="progress" data-testid="workbook-progress" bind:this={progressBox}>
 			<progress max={progress.total} value={progress.phase === 'build' ? progress.total : progress.done} aria-label="Workbook download progress"></progress>
 			<button type="button" class="btn btn-sm" onclick={() => cancelExport?.()} disabled={!cancelExport}>Cancel</button>
 		</div>

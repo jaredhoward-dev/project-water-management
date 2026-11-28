@@ -10,6 +10,7 @@
 	import { session } from '#lib/auth/session.svelte.js';
 	import PasswordInput from '#lib/components/common/PasswordInput.svelte';
 	import { errorText } from '#lib/i18n/apiError.js';
+	import { setupRefusal } from './addFactor.js';
 	import { t } from '#lib/i18n/locale.svelte.js';
 
 	const emailAuth = emailAuthApi(api);
@@ -19,7 +20,7 @@
 	let busy = $state(false);
 	let error = $state<string | null>(null);
 	let errorField = $state<'email' | 'password' | null>(null);
-	/** The address the link went to, once sent. */
+	/** The address the link went to, once sent; cleared as soon as the address is edited, since it names the old one. */
 	let sentTo = $state<string | null>(null);
 
 	async function submit(e: SubmitEvent) {
@@ -44,8 +45,10 @@
 			sentTo = email;
 			newEmail = password = '';
 		} catch (err) {
-			error = err instanceof ApiError && err.status === 403 ? t('Your current password is wrong.') : errorText(err);
-			errorField = err instanceof ApiError && err.status === 403 ? 'password' : err instanceof ApiError && err.status === 400 ? 'email' : null;
+			// With a second factor on, a password-only session gets 403 mfa_step_up (sign in again with a code), not a wrong password.
+			const refusal = setupRefusal(err);
+			error = refusal === 'wrong-password' ? t('Your current password is wrong.') : errorText(err);
+			errorField = refusal === 'wrong-password' ? 'password' : err instanceof ApiError && err.status === 400 ? 'email' : null;
 		} finally {
 			busy = false;
 		}
@@ -68,6 +71,7 @@
 				aria-invalid={errorField === 'email' ? 'true' : undefined}
 				aria-describedby={errorField === 'email' ? 'change-email-error' : undefined}
 				bind:value={newEmail}
+				oninput={() => (sentTo = null)}
 			/>
 		</div>
 		<div class="field">

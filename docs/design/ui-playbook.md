@@ -2102,7 +2102,16 @@ Interaction details that bit:
   `.btn[aria-disabled='true']` in `app.css` dims it as `:disabled` does) and
   have its handler ignore the press; keep `disabled` for a reason that holds
   before the press (an empty required field). Test it with `toBeFocused()`
-  after the action (`runs-record-actions.spec.ts`, issue #586).
+  after the action (`runs-record-actions.spec.ts`, issue #586). Choose
+  sections' Reset to default, which has nothing left to reset once pressed,
+  is the same (`own-sections.spec.ts`). Where the next step is a field, send
+  the focus there instead: the fresh-code dialog's "Email me a code instead"
+  waits out its resend disabled, and a refused code empties the field and
+  disables Continue, so both put the keyboard in the Code field
+  (`mfa-email-mailpit.spec.ts`). A menu item that asks a question (the
+  account menu's Sign out everywhere) is hidden with its list, so put the
+  focus on the menu's button before asking, or Cancel hands it to nothing
+  (`auth.spec.ts`).
 - **A joined switch of radios: cover the border box.** A radio laid over
   its segment with `inset: 0` sits inside the border, so a 32 px segment
   gave a 30 px target; use `inset: -1px` and `calc(100% + 2px)`. And

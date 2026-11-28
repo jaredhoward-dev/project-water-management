@@ -213,6 +213,13 @@ describe('entering allocations by hand', () => {
 		const base = { nodeId: null, authorisation: 'licence', waterSource: 'surface', volumeM3PerYear: 1 };
 		expect((await editor.call('POST', `/projects/${projectId}/allocations`, { ...base, nodeId: outlet.id })).status).toBe(400);
 		expect((await editor.call('POST', `/projects/${projectId}/allocations`, { ...base, validFrom: '2021-01-01', validTo: '2020-01-01' })).status).toBe(400);
+		// Year 0000 is a date to JavaScript, not to Postgres: the schema's 400, never the insert's 500 (create and edit alike).
+		const year0 = await editor.call('POST', `/projects/${projectId}/allocations`, { ...base, validFrom: '0000-01-01' });
+		expect(year0.status, JSON.stringify(year0.body)).toBe(400);
+		const year1 = await editor.call('POST', `/projects/${projectId}/allocations`, { ...base, validFrom: '0001-01-01' });
+		expect(year1.status, JSON.stringify(year1.body)).toBe(201);
+		expect((await editor.call('PATCH', `/projects/${projectId}/allocations/${year1.body.allocation.id}`, { validTo: '0000-12-31' })).status).toBe(400);
+		expect((await editor.call('DELETE', `/projects/${projectId}/allocations/${year1.body.allocation.id}`)).status).toBe(204);
 		expect((await editor.call('POST', `/projects/${projectId}/allocations`, { ...base, volumeM3PerYear: -1 })).status).toBe(400);
 		// The column's CHECK allows 100 characters (038): 101 is a 400 from the schema, not the database's 500.
 		const long = await editor.call('POST', `/projects/${projectId}/allocations`, { ...base, registrationNo: 'R'.repeat(100) });

@@ -169,6 +169,40 @@ test("Settings: the one save bar's Preview takes the settings and the model's ed
 	await expect(dialog.getByTestId('unsaved-preview-units').getByRole('rowheader', { name: 'Upper farm', exact: true })).toBeVisible();
 });
 
+test('a preview that fails says why and offers Try again, whose answer is announced and lands the focus on the dialog title', async ({ page, owner }) => {
+	void owner;
+	const project = await seedRunnableProject(page.request, 'Preview retry');
+	await createRun(page.request, project.id, 'Base');
+	// The run's input fails once; Try again asks for it again.
+	let failed = 0;
+	await page.route(
+		(url) => url.pathname.endsWith('/model-input'),
+		async (route) => {
+			if (failed === 0) {
+				failed++;
+				await route.fulfill({ status: 500, json: { error: 'down' } });
+			} else await route.continue();
+		}
+	);
+	await openSettings(page, project.id);
+	await page.getByLabel('A-pan evaporation, Oct, mm').fill('450');
+	await page.getByLabel('A-pan evaporation, Oct, mm').blur();
+	await page.getByRole('button', { name: 'Preview', exact: true }).click();
+
+	const dialog = preview(page);
+	await expect(dialog.getByTestId('unsaved-preview')).toHaveAttribute('data-state', 'error');
+	await expect(dialog.getByRole('alert')).toContainText("The preview couldn't be worked out");
+	await expectNoViolations(page, { include: '[data-testid="unsaved-preview"]' });
+	await dialog.getByRole('button', { name: 'Try again' }).click();
+	await expect(dialog.getByTestId('unsaved-preview')).toHaveAttribute('data-state', 'done');
+	expect(failed).toBe(1);
+	// The figures' arrival is a status, not only the wait; the keyboard is on the dialog's title, not thrown out of it.
+	await expect(dialog.getByTestId('unsaved-preview-status')).toHaveAttribute('role', 'status');
+	await expect(dialog.getByTestId('unsaved-preview-status')).toHaveText('The preview is worked out: the figures are below.');
+	await expect(dialog.getByRole('heading', { level: 2, name: 'Preview: your unsaved settings' })).toBeFocused();
+	await expect(figure(page, 'Demand (m³/day)')).toBeVisible();
+});
+
 test('with no run yet, the preview says to run the model first', async ({ page, owner }) => {
 	void owner;
 	const project = await createProject(page.request, 'Preview no run');

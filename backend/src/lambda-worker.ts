@@ -18,7 +18,12 @@
 //     emails (mail/suppression.ts). A record is read as an SES event only
 //     when it came from that queue (MAIL_EVENTS_QUEUE_ARN), and one from that
 //     queue is never read as a job message: each queue is trusted for its own
-//     kind of message only.
+//     kind of message only. The same holds for the job messages
+//     (MESSAGE_QUEUES): a fetch result only from `ingest-results`
+//     (INGEST_RESULTS_QUEUE_ARN), a render's answer only from `render-results`
+//     (RENDER_RESULTS_QUEUE_ARN), a wake only from `jobs` (JOBS_QUEUE_ARN), so
+//     the fetcher (open internet egress, parsing upstream data) can't answer
+//     for a render, nor the renderer (headless Chromium) for a fetch.
 // Each SQS record is handled on its own. One that throws (a database error
 // while queueing it) is reported back as a batch item failure
 // (ReportBatchItemFailures on every worker trigger, infra/), so SQS retries
@@ -108,6 +113,35 @@ const isSqs = (event: unknown): event is SQSEvent => Array.isArray((event as SQS
 /** Whether a record came from the mail-events queue (and so carries an SES event, and nothing else). */
 export const fromMailEventsQueue = (record: Pick<SQSRecord, 'eventSourceARN'>, arn = process.env.MAIL_EVENTS_QUEUE_ARN) => !!arn && record.eventSourceARN === arn;
 
+/**
+ * The queue each kind of job message may arrive on, by the variable that
+ * holds its ARN (infra/jobs.tf). Each sender can send to its own queue only
+ * (IAM), so binding a kind to its queue keeps one compromised sender from
+ * forging another's messages. A variable that isn't set binds nothing (local
+ * dev and tests run no SQS triggers; a stack older than the variable keeps
+ * working until its next apply).
+ */
+type Env = Record<string, string | undefined>;
+// Each read names its setting, so config/production.security.test.ts can inventory and classify it.
+export const MESSAGE_QUEUES = {
+	wake: (env: Env) => env.JOBS_QUEUE_ARN,
+	ingest: (env: Env) => env.INGEST_RESULTS_QUEUE_ARN,
+	rendered: (env: Env) => env.RENDER_RESULTS_QUEUE_ARN,
+	rendered_pack: (env: Env) => env.RENDER_RESULTS_QUEUE_ARN
+} as const satisfies Record<NonNullable<ReturnType<typeof parseWorkerMessage>>['type'], (env: Env) => string | undefined>;
+
+/**
+ * Whether a message of `type` may be read from the queue the record came
+ * from: when its own queue is configured, only from that queue; and never
+ * from a configured queue that belongs to another kind.
+ */
+export function fromItsQueue(type: keyof typeof MESSAGE_QUEUES, record: Pick<SQSRecord, 'eventSourceARN'>, env: Env = process.env): boolean {
+	const own = MESSAGE_QUEUES[type](env);
+	if (own) return record.eventSourceARN === own;
+	const source = record.eventSourceARN;
+	return !source || !Object.values(MESSAGE_QUEUES).some((arnOf) => arnOf(env) === source);
+}
+
 /** Handle one SQS record. Throws only when it should be retried (a database error). */
 async function acceptRecord(record: SQSRecord): Promise<void> {
 	// An SES bounce or complaint (mail-events queue). Ids and counts in the
@@ -122,6 +156,8 @@ async function acceptRecord(record: SQSRecord): Promise<void> {
 	// An unknown message is dropped (logged), never retried into the DLQ:
 	// it can't become valid on a retry.
 	if (!message) logEvent('warn', { event: 'job_message_ignored', messageId: record.messageId });
+	// A message on a queue that isn't its kind's (MESSAGE_QUEUES): dropped, never retried. Its type and the queue, no body.
+	else if (!fromItsQueue(message.type, record)) logEvent('warn', { event: 'job_message_wrong_queue', messageId: record.messageId, type: message.type });
 	// A fetch result (ingest-results queue): becomes a feed_ingest job, which
 	// the tick runs.
 	else if (message.type === 'ingest') {

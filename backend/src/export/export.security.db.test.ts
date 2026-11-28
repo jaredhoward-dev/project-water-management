@@ -9,12 +9,15 @@
 // any whitespace, or full-width), tab, CR or LF unless it is a plain number
 // (csv.ts FORMULA_START; the API trims names, so no leading-whitespace payload
 // can be seeded here: csv.test.ts covers those), and quoting holds (no bare quote in an
-// unquoted field, no unterminated field). Positive controls: the hostile
+// unquoted field, no unterminated field). Each line is also split on `;`, as
+// Excel in a comma-decimal locale reads it, and no piece after a `;` may start
+// with a trigger either (csv.ts SEPARATOR_FORMULA; the holder carries `;=`).
+// Positive controls: the hostile
 // strings do reach the files (apostrophe-prefixed), and an ordinary name with
 // a comma and quotes round-trips unchanged.
 import { beforeAll, describe, expect, it } from 'vitest';
 import { app, monthly, node, signUp } from '../__tests__/helpers.js';
-import { FORMULA_START } from './csv.js';
+import { FORMULA_START, SEPARATOR_FORMULA } from './csv.js';
 
 type User = Awaited<ReturnType<typeof signUp>>;
 const ORIGIN = 'http://localhost:7777';
@@ -30,7 +33,7 @@ const EVIL = {
 	author: '@Mallory',
 	seriesName: '=series',
 	registrationNo: '=REG-1',
-	holder: '+Holder',
+	holder: '+Holder;=SUM(4;5)',
 	reference: '@ref, "x"'
 } as const;
 /** An ordinary name with a comma and quotes: must come back exactly (the positive control). */
@@ -87,6 +90,14 @@ function parseCsv(text: string): string[][] {
 
 /** Cells that would run as a formula when the file is opened. */
 const live = (cells: string[]) => cells.filter((c) => TRIGGER.test(c) && !isNumber(c));
+/**
+ * The same for a reader that splits each line on `;` (Excel in a comma-decimal
+ * locale, LibreOffice with `;` as its separator): what follows each `;` is a
+ * cell of its own, quotes or not (csv.ts SEPARATOR_FORMULA).
+ */
+const liveAfterSemicolons = (text: string) => live(text.split(/\r\n/).flatMap((line) => line.split(';').slice(1)));
+/** How the exports write `text` where it leads a cell: an apostrophe first, and after each `;` that a trigger follows. */
+const defused = (text: string) => `'${text}`.replace(SEPARATOR_FORMULA, ";'");
 
 let owner: User;
 let projectId: string;
@@ -173,6 +184,7 @@ describe('CSV exports neutralise user text (formula injection, RFC 4180 quoting)
 
 	it('the checks catch a live formula and broken quoting (the checks work)', () => {
 		expect(live(['=1+1', '-12.5', "'=1+1", 'Dam = full', '\tx', '-dam'])).toEqual(['=1+1', '\tx', '-dam']);
+		expect(liveAfterSemicolons('a,"x;=1+1",2\r\n# k=v; run=r\r\nb;\'=2')).toEqual(['=1+1",2']);
 		expect(() => parseCsv('a,b"c\r\n')).toThrow(/bare quote/);
 		expect(() => parseCsv('"a\r\n')).toThrow(/unterminated/);
 		expect(() => parseCsv('"a"b\r\n')).toThrow(/after a closing quote/);
@@ -183,7 +195,9 @@ describe('CSV exports neutralise user text (formula injection, RFC 4180 quoting)
 		const seen = new Set<string>();
 		for (const [route, urls] of Object.entries(SWEEP)) {
 			for (const url of urls()) {
-				const rows = parseCsv(await download(url));
+				const text = await download(url);
+				expect(liveAfterSemicolons(text), `${route}: ${url} (split on ';')`).toEqual([]);
+				const rows = parseCsv(text);
 				expect(rows.length, url).toBeGreaterThan(1);
 				const cells = rows.flat();
 				expect(live(cells), `${route}: ${url}`).toEqual([]);
@@ -201,7 +215,7 @@ describe('CSV exports neutralise user text (formula injection, RFC 4180 quoting)
 				expect(all.some((c) => c.startsWith('flow_observed_m3s – ') && c.includes(text)), field).toBe(true);
 				continue;
 			}
-			expect(all.some((c) => c === `'${text}` || c.startsWith(`'${text} `)), field).toBe(true);
+			expect(all.some((c) => c === defused(text) || c.startsWith(`${defused(text)} `)), field).toBe(true);
 		}
 		expect(all.some((c) => c === PLAIN || c.startsWith(`${PLAIN} [`)), 'plain name round-trips').toBe(true);
 	});

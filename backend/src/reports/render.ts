@@ -57,8 +57,10 @@ export const STALE_REQUEST_ERROR = 'the request waited too long in the queue: it
 
 /** Whether a request SQS first had at `sentTimestamp` (epoch ms, as a string; SentTimestamp) is too old to render. No time: not stale. */
 export function staleRenderRequest(sentTimestamp: string | undefined, now = Date.now()): boolean {
+	// A blank attribute is no time too: Number('') is 0 (1970), which would refuse every request as stale.
+	if (sentTimestamp === undefined || sentTimestamp.trim() === '') return false;
 	const sent = Number(sentTimestamp);
-	return sentTimestamp !== undefined && Number.isFinite(sent) && now - sent > RENDER_REQUEST_MAX_AGE_MS;
+	return Number.isFinite(sent) && now - sent > RENDER_REQUEST_MAX_AGE_MS;
 }
 
 /** A run's report: the report route, /projects/:id/report?run=…. */

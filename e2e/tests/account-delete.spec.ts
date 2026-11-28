@@ -128,3 +128,32 @@ for (const colorScheme of ['light', 'dark'] as const) {
 		});
 	}
 }
+
+test('Escape doesn’t close the dialog while the delete is out, so its answer is still there', async ({ page, owner }) => {
+	// Hold DELETE /auth/me until Escape has been pressed, then answer it with a refusal.
+	let release!: () => void;
+	const held = new Promise<void>((r) => (release = r));
+	let reached!: () => void;
+	const sent = new Promise<void>((r) => (reached = r));
+	await page.route(`${API_URL}/auth/me`, async (route) => {
+		if (route.request().method() !== 'DELETE') return route.fallback();
+		reached();
+		await held;
+		await route.fulfill({ status: 403, json: { error: 'Your current password is wrong.', code: 'wrong_current_password' } });
+	});
+
+	const dialog = await openDialog(page);
+	await dialog.getByLabel('Your password').fill(owner.password);
+	await dialog.getByRole('button', { name: 'Delete my account' }).click();
+	await sent;
+	await expect(dialog.getByRole('button', { name: 'Deleting…' })).toBeDisabled();
+	await page.keyboard.press('Escape');
+	await expect(dialog).toBeVisible();
+
+	release();
+	await expect(dialog.getByRole('alert')).toHaveText('Your current password is wrong.');
+	await expect(dialog).toBeVisible();
+	// Once the answer is in, Escape closes it as before.
+	await page.keyboard.press('Escape');
+	await expect(dialog).toBeHidden();
+});

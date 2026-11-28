@@ -9,7 +9,7 @@
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { CHIRPS_CHOICES } from '#lib/series/provenance.js';
 	import ImportReportLists from './ImportReportLists.svelte';
-	import { DEFAULT_CHIRPS_KEY, type WorkbookReport } from './workbookFile';
+	import { DEFAULT_CHIRPS_KEY, type GaugeOptionsError, type WorkbookReport } from './workbookFile';
 
 	let {
 		report,
@@ -19,6 +19,7 @@
 		runOfRiver = $bindable(false),
 		chirpsKey = $bindable(DEFAULT_CHIRPS_KEY),
 		optionsError = null,
+		optionsErrorField = null,
 		updating = false,
 		disabled = false,
 		onoptions
@@ -33,12 +34,19 @@
 		chirpsKey?: string;
 		/** Why the gauge options don't go together, or the importer refused the options. */
 		optionsError?: string | null;
+		/** The gauge field `optionsError` is about, if it is one: marked invalid, with the message tied to it. */
+		optionsErrorField?: GaugeOptionsError['field'] | null;
 		/** Re-extracting with new options. */
 		updating?: boolean;
 		disabled?: boolean;
 		/** The options changed (a checkbox toggled, a field committed). */
 		onoptions: () => void;
 	} = $props();
+
+	// The scaling fields' descriptions: the shared hint, then the problem when it is that field's (WCAG 3.3.1).
+	const ERR_ID = 'wb-options-err';
+	const fieldError = (field: GaugeOptionsError['field']) => (optionsError && optionsErrorField === field ? true : undefined);
+	const describedBy = (field: GaugeOptionsError['field']) => (fieldError(field) ? `wb-scale-hint ${ERR_ID}` : 'wb-scale-hint');
 </script>
 
 {#if report.hasGauge}
@@ -55,7 +63,14 @@
 			<div class="scaling">
 				<div class="field">
 					<label for="wb-scale-from">Scaling starts on (optional)</label>
-					<DayInput id="wb-scale-from" bind:value={scalingFrom} commit="change" onchange={onoptions} aria-describedby="wb-scale-hint" />
+					<DayInput
+						id="wb-scale-from"
+						bind:value={scalingFrom}
+						commit="change"
+						onchange={onoptions}
+						aria-invalid={fieldError('scalingFrom')}
+						aria-describedby={describedBy('scalingFrom')}
+					/>
 				</div>
 				<div class="field">
 					<label for="wb-scale-factor">Scale factor (optional)</label>
@@ -64,7 +79,8 @@
 						inputmode="decimal"
 						bind:value={scaleFactor}
 						onchange={onoptions}
-						aria-describedby="wb-scale-hint"
+						aria-invalid={fieldError('scaleFactor')}
+						aria-describedby={describedBy('scaleFactor')}
 						placeholder="e.g. 0.8"
 					/>
 				</div>
@@ -95,7 +111,7 @@
 {/if}
 
 {#if report.hasGauge || report.runOfRiverUnits.length}
-	{#if optionsError}<p class="options-error" role="alert">{optionsError}</p>{/if}
+	{#if optionsError}<p class="options-error" id={ERR_ID} role="alert">{optionsError}</p>{/if}
 	<p class="muted small" role="status">{updating ? 'Updating the preview…' : ''}</p>
 {/if}
 

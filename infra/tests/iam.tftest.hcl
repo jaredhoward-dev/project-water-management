@@ -895,6 +895,15 @@ run "sqs_endpoint_send_only" {
     )
     error_message = "Every queue the worker consumes has its event source mapping."
   }
+  # And it reads each kind of message only from its own queue (lambda-worker.ts MESSAGE_QUEUES).
+  assert {
+    condition = (
+      aws_lambda_function.worker.environment[0].variables["JOBS_QUEUE_ARN"] == aws_sqs_queue.jobs.arn &&
+      aws_lambda_function.worker.environment[0].variables["INGEST_RESULTS_QUEUE_ARN"] == aws_sqs_queue.ingest_results[0].arn &&
+      aws_lambda_function.worker.environment[0].variables["RENDER_RESULTS_QUEUE_ARN"] == aws_sqs_queue.render_results.arn
+    )
+    error_message = "The worker binds each job message to its queue: wake to jobs, fetch results to ingest-results, render answers to render-results."
+  }
   # Only the API wakes the worker (jobs/wake.ts, called from routes only).
   assert {
     condition     = length([for s in data.aws_iam_policy_document.worker_lambda.statement : s if contains(s.actions, "sqs:SendMessage")]) == 0

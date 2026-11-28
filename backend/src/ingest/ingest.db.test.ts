@@ -501,6 +501,48 @@ describe('automatic re-runs from an ingest (042_auto_rerun.sql, WP-2.11)', () =>
 		const [row] = await asOwner(`SELECT "values" FROM time_series WHERE project_id = $1 AND kind = 'rain_catchment_mm'`, [pid]);
 		expect(row.values).toEqual([4, 5]);
 	});
+
+	// 414: a creator removed from the project, or demoted below editor, has an account but no right to run the model:
+	// the re-run is skipped as for a deleted creator, never queued as someone the runner refuses.
+	async function creatorKey(name: string) {
+		const creator = await signUp(name);
+		const pid = (await owner.call('POST', '/projects', { name })).body.project.id as string;
+		expect((await owner.call('POST', `/projects/${pid}/members`, { email: creator.email, role: 'owner' })).status).toBe(201);
+		await addSeries(owner, pid, rain('2026-03-01', [null]));
+		expect((await owner.call('PATCH', `/projects/${pid}`, { settings: { autoRun: { enabled: true } } })).status).toBe(200);
+		const res = await createKey(pid, {}, creator);
+		expect(res.status).toBe(201);
+		return { creator, pid, secret: (res.body as { secret: string }).secret };
+	}
+
+	it('a key whose creator is still an editor queues the re-run as them (positive control)', async () => {
+		const { creator, pid, secret } = await creatorKey('Kstays');
+		const res = await merge(secret, rain('2026-03-01', [1, 2]));
+		expect(res.status).toBe(200);
+		const jobs = await rerunJobs(pid);
+		expect(jobs).toHaveLength(1);
+		expect(jobs[0]!.acting_user_id).toBe(creator.id);
+		expect(res.body.rerunQueuedFor).toBe(jobs[0]!.run_after.toISOString());
+		await asOwner('DELETE FROM job WHERE project_id = $1', [pid]);
+	});
+
+	it('a key whose creator was removed from the project still ingests, and skips the re-run', async () => {
+		const { creator, pid, secret } = await creatorKey('Kremoved');
+		await asOwner('DELETE FROM project_member WHERE project_id = $1 AND user_id = $2', [pid, creator.id]);
+		const res = await merge(secret, rain('2026-03-01', [4, 5]));
+		expect(res.status, JSON.stringify(res.body)).toBe(200);
+		expect(res.body).toMatchObject({ daysChanged: 2, rerunQueuedFor: null });
+		expect(await rerunJobs(pid)).toHaveLength(0);
+	});
+
+	it('a key whose creator was demoted to viewer still ingests, and skips the re-run', async () => {
+		const { creator, pid, secret } = await creatorKey('Kdemoted');
+		await asOwner(`UPDATE project_member SET role = 'viewer' WHERE project_id = $1 AND user_id = $2`, [pid, creator.id]);
+		const res = await merge(secret, rain('2026-03-01', [6, 7]));
+		expect(res.status, JSON.stringify(res.body)).toBe(200);
+		expect(res.body).toMatchObject({ daysChanged: 2, rerunQueuedFor: null });
+		expect(await rerunJobs(pid)).toHaveLength(0);
+	});
 });
 
 

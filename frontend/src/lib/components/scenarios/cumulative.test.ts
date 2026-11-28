@@ -84,6 +84,13 @@ describe('assessmentCsv', () => {
 		expect(assessmentCsv(report).split('\r\n')[0]).toContain(",' =Raise alone,");
 	});
 
+	it("guards a formula after a ';' in a scenario name (Excel in a comma-decimal locale splits on it)", () => {
+		const report: CumulativeReport = { scenarios: [{ id: 'a', name: 'Raise;=SUM(4)' }], rows: [row()], warnings: [] };
+		const head = assessmentCsv(report).split('\r\n')[0]!;
+		expect(head).toContain(",Raise;'=SUM(4) alone,");
+		for (const piece of head.split(';')) expect(piece).not.toMatch(/^\s*[=+\-@]/);
+	});
+
 	it('one line per row, raw numbers, names guarded against CSV injection', () => {
 		const report: CumulativeReport = { scenarios: [{ id: 'a', name: '=Raise, dam' }, { id: 'b', name: 'More "lucerne"' }], rows: [row(), row({ metric: 'outlet_flow', site: null, isOutlet: false, unit: 'm³/day', baseline: 1000.5, interaction: null })], warnings: [] };
 		const lines = assessmentCsv(report).split('\r\n');

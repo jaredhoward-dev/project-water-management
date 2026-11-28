@@ -17,6 +17,7 @@
 	import { api, type MyInvite } from '#lib/api/index.js';
 	import SectionHeader from '#lib/components/workspace/SectionHeader.svelte';
 	import { pageStart } from '#lib/a11y/focusPage.js';
+	import { focusAfterRemove } from '#lib/a11y/focusAfterRemove.js';
 	import { followRetry } from '#lib/components/common/loadState.js';
 	import { wordsHref } from '#lib/components/farm/load.js';
 	import { invitesChanged } from '#lib/components/auth-extras/inviteCount.svelte.js';
@@ -61,11 +62,18 @@
 		void load();
 	}
 
+	/**
+	 * An answered invitation's card goes, and the button that had the focus with it (WCAG 2.4.3): the focus
+	 * fell to <body>. The next card's Accept takes it (the same place in the list), else the page's title.
+	 */
+	const answered = (at: number) => focusAfterRemove(at, '[data-invite] .actions .btn-primary', pageStart());
+
 	async function accept(inv: MyInvite) {
 		busy = inv.id;
 		error = null;
 		done = null;
 		try {
+			const at = (invites ?? []).findIndex((x) => x.id === inv.id);
 			const joined = await api.invites.accept(inv.id);
 			invites = (invites ?? []).filter((x) => x.id !== inv.id);
 			invitesChanged();
@@ -76,6 +84,7 @@
 				href: joined.kind === 'team' ? resolve(`teams/${id}`) : farmer ? resolve(`farm/${id}`) : resolve(`projects/${id}`),
 				link: farmer ? t('Open your hydrological unit') : t('Open it')
 			};
+			void answered(at);
 		} catch (e) {
 			error = errorText(e);
 			// Gone meanwhile (revoked, expired, accepted in another tab): show the list as it is now.
@@ -90,10 +99,12 @@
 		error = null;
 		done = null;
 		try {
+			const at = (invites ?? []).findIndex((x) => x.id === inv.id);
 			await api.invites.decline(inv.id);
 			invites = (invites ?? []).filter((x) => x.id !== inv.id);
 			invitesChanged();
 			done = { text: t('You declined the invitation to {name}.', { name: inv.name }) };
+			void answered(at);
 		} catch (e) {
 			error = errorText(e);
 			await load();

@@ -307,6 +307,14 @@ for (const colorScheme of ['light', 'dark'] as const) {
 					}
 				},
 				{ path: '/help/glossary', ready: (p) => expect(p.getByRole('heading', { level: 1, name: 'Glossary' })).toBeVisible() },
+				// Every upload box's Expected format, with its example-file links (issue #477).
+				{
+					path: '/help/formats',
+					ready: async (p) => {
+						await expect(p.getByRole('heading', { level: 1, name: 'File formats' })).toBeVisible();
+						await expect(p.getByTestId('file-format').first()).toBeVisible();
+					}
+				},
 				// A topic page: its entries' See also links (underlined, WCAG 1.4.1).
 				{ path: '/help/glossary/goodness-of-fit', ready: (p) => expect(p.getByRole('heading', { level: 1, name: 'Goodness of fit' })).toBeVisible() },
 				{

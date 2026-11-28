@@ -293,6 +293,8 @@ describe('resolveRainSource and rainSourcePeriodError (the API schema’s twin)'
 		const bad: [unknown, RegExp][] = [
 			[{ ...FIXED, reason: ' ' }, /needs a reason/],
 			[{ ...FIXED, start: '2010-01-01', end: '2009-01-01' }, /ends before it starts/],
+			// Year 0000 is no date (engine ≥ 1.123.1: Postgres's date has none): a period saved starting then is dropped with its warning.
+			[{ ...FIXED, start: '0000-10-01' }, /dates must be YYYY-MM-DD/],
 			[{ ...FIXED, series: 'rain_chirps_mm' }, /series must be one of rain_catchment_alt_mm/],
 			[{ ...FIXED, factors: new Array(11).fill(1) }, /12 monthly values/],
 			[{ ...FIXED, factors: [...new Array(11).fill(1), 5] }, /from 0.25 to 4/],

@@ -71,6 +71,9 @@
 
 	async function stopMaking() {
 		making = false;
+		// The card's own complaint ("Pick at least one series…", a refused make) goes with the card: it sits above
+		// where the card was, and stayed there about a form no longer on screen.
+		error = null;
 		name = '';
 		picked = [];
 		limit = false;

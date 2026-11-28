@@ -1276,7 +1276,8 @@ def read_ewr_pivot(wb: Workbook) -> list[dict[str, Any]] | None:
     out = []
     for r in rows[1:]:
         year, month, farm, vol, cnt = r[0], r[1], r[2], r[3], r[4]
-        if not isinstance(year, (int, float)) or not is_name(farm):
+        # A row without a numeric year and month (a total, a blank) or without a farm is not a data row.
+        if not isinstance(year, (int, float)) or not isinstance(month, (int, float)) or isinstance(month, bool) or not is_name(farm):
             continue
         out.append({"year": int(year), "month": int(month), "farm": clean(farm), "volM3": num(vol), "daysNotMet": int(num(cnt))})
     return out

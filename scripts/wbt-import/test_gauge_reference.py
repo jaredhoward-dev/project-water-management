@@ -95,6 +95,8 @@ class CommandLine(unittest.TestCase):
             ["--gauge-as-reference", "--gauge-scaling-from", "2006-07-01"],
             ["--gauge-as-reference", "--gauge-scale-factor", "0.5"],
             ["--gauge-as-reference", "--gauge-scaling-from", "07/01/2006", "--gauge-scale-factor", "0.5"],
+            # Year 0000: date.fromisoformat refuses it (MINYEAR is 1), as the TypeScript importer does (gauge.test.ts).
+            ["--gauge-as-reference", "--gauge-scaling-from", "0000-07-01", "--gauge-scale-factor", "0.5"],
             ["--gauge-as-reference", "--gauge-scaling-from", "2006-07-01", "--gauge-scale-factor", "0"],
         ]
         for extra in bad:

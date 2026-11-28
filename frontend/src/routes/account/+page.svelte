@@ -12,7 +12,7 @@
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { PUBLIC_API_URL } from '$app/env/public';
-	import { api, ApiError } from '#lib/api/index.js';
+	import { api } from '#lib/api/index.js';
 	import { displayNameProblem, passwordProblem } from '#lib/api/emailAuth.js';
 	import { session } from '#lib/auth/session.svelte.js';
 	import { hashId, landOnAnchor } from '#lib/help/anchor.js';
@@ -24,6 +24,7 @@
 	import LanguageSwitch from '#lib/i18n/LanguageSwitch.svelte';
 	import TwoStepSignIn from '#lib/components/account/TwoStepSignIn.svelte';
 	import ChangeEmail from '#lib/components/account/ChangeEmail.svelte';
+	import { setupRefusal } from '#lib/components/account/addFactor.js';
 	import { t } from '#lib/i18n/locale.svelte.js';
 	import { APP_SHORT_NAME } from '#lib/brand.js';
 	import { errorText } from '#lib/i18n/apiError.js';
@@ -194,7 +195,8 @@
 			current = next = repeat = '';
 			passwordChanged = true;
 		} catch (err) {
-			if (err instanceof ApiError && err.status === 403) {
+			// With a second factor on, a password-only session gets 403 mfa_step_up (sign in again with a code), not a wrong password.
+			if (setupRefusal(err) === 'wrong-password') {
 				passwordError = t('Your current password is wrong.');
 				passwordErrorField = 'current';
 			} else {

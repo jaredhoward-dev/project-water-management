@@ -263,6 +263,88 @@ describe('reproduce:pack', () => {
 		});
 	});
 
+	describe('a bundle that isn’t the pack’s (docs/evidence-pack.md § Reproduction: archive, files, manifest, runs)', () => {
+		/** The good bundle's files, changed by `edit` (which may add, drop or replace any, bundle.json included), written as `name`. */
+		async function rewrite(name: string, edit: (files: Map<string, Uint8Array<ArrayBuffer>>, index: { files: Record<string, string>; runs: Record<string, unknown>; pack: Record<string, unknown> }) => void) {
+			const archive = await ZipArchive.open(new Uint8Array(await readFile(good)));
+			const files = new Map<string, Uint8Array<ArrayBuffer>>();
+			for (const n of archive.names) files.set(n, new Uint8Array(await archive.read(n)));
+			const index = JSON.parse(new TextDecoder().decode(files.get('bundle.json')!));
+			edit(files, index);
+			files.set('bundle.json', new TextEncoder().encode(canonicalJson(index)));
+			await writeFile(join(dir, name), await zip([...files].map(([n, data]) => ({ name: n, data }))));
+			return run([name]);
+		}
+		const drop = (files: Map<string, unknown>, index: { files: Record<string, string> }, prefix: string) => {
+			for (const n of [...files.keys()]) if (n.startsWith(prefix)) files.delete(n);
+			for (const n of Object.keys(index.files)) if (n.startsWith(prefix)) delete index.files[n];
+		};
+
+		it('the unchanged rewrite reproduces (positive control for the cases below)', async () => {
+			const { code, out } = await rewrite('rewritten.zip', () => {});
+			expect(code, out).toBe(0);
+		});
+
+		it('another expected manifest hash fails the manifest check alone, naming both hashes', async () => {
+			const { code, out } = await run([good, '--expect', 'a'.repeat(64), '--no-run']);
+			expect(code).toBe(1);
+			expect(out).toMatch(/ok\s+archive\s/);
+			expect(out).toMatch(/ok\s+files\s/);
+			expect(out).toMatch(new RegExp(`FAIL\\s+manifest\\s+manifest\\.json hashes to ${manifestSha256}, not the expected a{64}`));
+			expect(out).toContain('NOT reproduced: 1 check failed.');
+		});
+
+		it('a file listed in bundle.json but missing from the zip fails the archive check, naming it', async () => {
+			const { code, out } = await rewrite('missing-file.zip', (files) => files.delete('README.md'));
+			expect(code).toBe(1);
+			expect(out).toMatch(/FAIL\s+archive\s+the bundle can't be read: listed entries missing: README\.md/);
+			expect(out).not.toMatch(/ok\s+files/);
+		});
+
+		it('an entry bundle.json doesn’t list fails the archive check, naming it', async () => {
+			const { code, out } = await rewrite('extra-file.zip', (files) => files.set('extra.txt', new TextEncoder().encode('slipped in')));
+			expect(code).toBe(1);
+			expect(out).toMatch(/FAIL\s+archive\s+.*entries bundle\.json doesn't list: extra\.txt/);
+		});
+
+		it('a manifest changed with its file hash updated still fails: it isn’t the pack’s manifest hash', async () => {
+			const { code, out } = await rewrite('manifest-edited.zip', (files, index) => {
+				const m = JSON.parse(new TextDecoder().decode(files.get('manifest.json')!));
+				m.report.builtBy = `${String(m.report.builtBy)}-edited`;
+				const data = new TextEncoder().encode(packManifestText(m));
+				files.set('manifest.json', data);
+				index.files['manifest.json'] = hash(data);
+			});
+			expect(code).toBe(1);
+			expect(out).toMatch(/ok\s+files\s/);
+			expect(out).toMatch(new RegExp(`FAIL\\s+manifest\\s+manifest\\.json hashes to [0-9a-f]{64}, not the ${manifestSha256} bundle\\.json names`));
+		});
+
+		it('a run the manifest names but the bundle leaves out fails the runs check, naming it', async () => {
+			const { code, out } = await rewrite('missing-run.zip', (files, index) => {
+				drop(files, index, 'runs/application/');
+				delete index.runs.application;
+			});
+			expect(code).toBe(1);
+			expect(out).toMatch(/ok\s+manifest\s/);
+			expect(out).toMatch(/FAIL\s+runs\s+the application run is null, the manifest names \S+/);
+			// Nothing is re-run from a bundle whose runs aren't the manifest's.
+			expect(out).not.toContain('reproduce:');
+		});
+
+		it('a run bundle.json names without its input fails the runs check, and no baseline run is a malformed bundle', async () => {
+			const noInput = await rewrite('missing-input.zip', (files, index) => {
+				files.delete('runs/application/input.json');
+				delete index.files['runs/application/input.json'];
+			});
+			expect(noInput.code).toBe(1);
+			expect(noInput.out).toMatch(/FAIL\s+runs\s+the application run's input\.json or results\.json is missing/);
+			const noBaseline = await rewrite('missing-baseline.zip', (_files, index) => delete index.runs.baseline);
+			expect(noBaseline.code).toBe(1);
+			expect(noBaseline.out).toMatch(/FAIL\s+archive\s+the bundle can't be read: its bundle\.json doesn't name the baseline run/);
+		});
+	});
+
 	it('checks without re-running with --no-run, and prints JSON with --json', async () => {
 		const noRun = await run([good, '--no-run']);
 		expect(noRun.code).toBe(0);

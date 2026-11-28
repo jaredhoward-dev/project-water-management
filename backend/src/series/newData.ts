@@ -15,8 +15,9 @@
 //   - `db` acts as an editor of the project (withUser, or a job as its acting
 //     user; that person becomes the re-run's acting user), or as a live API
 //     key of it (withApiKey), whose re-run runs as the key's creator
-//     (app_rerun_acting_user, 042_auto_rerun.sql). A key whose creator's
-//     account was deleted queues nothing (null): the ingest still commits.
+//     (app_rerun_acting_user, 042_auto_rerun.sql, 414). A key whose creator's
+//     account was deleted, or who is no longer an editor of the project,
+//     queues nothing (null): the ingest still commits.
 //     Anyone else gets 42501, and the caller's transaction rolls back.
 //   - Returns when the project's automatic re-run is due (ISO), or null when
 //     the project hasn't turned automatic runs on: the `rerunQueuedFor` the

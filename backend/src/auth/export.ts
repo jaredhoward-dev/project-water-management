@@ -197,6 +197,51 @@ export const MEMBER_FK_COVERAGE: Record<string, { section: string } | { excluded
 	'scenario_member.user_id': { section: 'scenarioMemberships' }
 };
 
+/**
+ * Every column that can hold a person with no foreign key to app_user,
+ * project_member or team_member, so neither list above sees it: an address
+ * typed as text, an id in an array or a jsonb subject, a name copied as
+ * written. The same guard (export.db.test.ts) finds them by name and type
+ * (an email, actor, subject, recipient, author, owner, holder, signer,
+ * contact, phone, ip, address, postal or member word; a `_by` or `_to`
+ * ending; a user id or display; a full, register or display name; an inet or
+ * citext type) and fails when a new one isn't listed. A jsonb column under
+ * another name (a snapshot of settings, a manifest) is beyond any name test:
+ * personal-data.security.db.test.ts's deletion scan is what finds those.
+ */
+export const PERSON_COLUMN_COVERAGE: Record<string, { section: string } | { excluded: string }> = {
+	'allocation_holder.user_display': {
+		excluded: 'the registered user’s name as the project’s allocation register gives it, linked to no account; a linked farm’s volumes carry it (farms[].allocations, holderName)'
+	},
+	'audit_event.actor_api_key_id': { excluded: 'the project API key that acted, not a person; who made the key is api_key.created_by' },
+	'audit_event.actor_label': { section: 'auditEvents' },
+	// The events about the person (subject.userId, a note's authorId), beside the ones they made.
+	'audit_event.subject': { section: 'auditEvents' },
+	// Billing is an open operator decision (#944): what is exported today is listed, not widened here.
+	'billing_conflict.resolved_by': {
+		excluded: 'the operator’s staff member who resolved a price conflict by hand, or `event` (406): the operator’s own audit trail, owner-only, never the customer’s'
+	},
+	'billing_grant_log.granted_by': { section: 'billing.grants' },
+	'email_change.new_email': { section: 'pendingEmailChange' },
+	'erasure_log.subject_id': { excluded: 'written only once the account is deleted, so there is no one left to export it to' },
+	'invite.email': { section: 'invites' },
+	'login_device_throttle.email': { excluded: 'sign-in attempts keyed by the typed address, linked to no account and maybe a stranger’s; a count, a day at most' },
+	'login_throttle.email': { excluded: 'sign-in attempts keyed by the typed address, linked to no account and maybe a stranger’s; a count, a day at most' },
+	'registration_check.register_name': { section: 'registrationChecks' },
+	'report.email_to': {
+		excluded: 'who a report was emailed to, chosen by its requester: operational rows, 8 days; the requester’s act is a report.* audit event, and a schedule’s recipients are in reportSubscriptions'
+	},
+	'reverse_trial_claim.email_hash': { section: 'reverseTrialClaim' },
+	'run_allocation_holder.holder': { excluded: 'a salted pseudonym of a registered user’s name frozen with a run to count holders (219), linked to no account' },
+	// The application's notice details (166): where written objections go, as the applicant typed it (415).
+	'scenario.objection_address': { section: 'scenarios' },
+	'seasonal_outlook_member.member': { excluded: 'not a person: the engine’s outlook member, one analogue season of the outlook (063)' },
+	'signoff.full_name': { section: 'signoffs' },
+	'team.privacy_contact_email': { excluded: 'the team’s privacy contact (168), the organisation’s, linked to no account; shown to its members' },
+	'team.privacy_contact_name': { excluded: 'the team’s privacy contact (168), the organisation’s, linked to no account; shown to its members' },
+	'team.privacy_contact_postal': { excluded: 'the team’s privacy contact (168), the organisation’s, linked to no account; shown to its members' }
+};
+
 /** The RLS-hidden sections, as app_subject_export returns them (054_subject_export.sql). */
 interface DefinerSections {
 	auditEvents: unknown[];
@@ -294,7 +339,9 @@ export async function buildSubjectExport(userId: string, now = new Date()) {
 		// 229: where the person is proposed or confirmed to act for the authority (a team editor's too, with no membership row).
 		const { rows: authorityDelegations } = await db.query(
 			`SELECT d.project_id AS "projectId", p.name AS "projectName", CASE WHEN d.confirmed_at IS NULL THEN 'proposed' ELSE 'confirmed' END AS status,
-				d.proposed_at AS "proposedAt", d.confirmed_at AS "confirmedAt", d.confirmed_via AS "confirmedVia"
+				d.proposed_at AS "proposedAt", d.confirmed_at AS "confirmedAt", d.confirmed_via AS "confirmedVia",
+				-- The letter or reference the confirmation rests on (229), as members read it on the delegates list.
+				d.confirmation_note AS reference
 			 FROM authority_delegate d LEFT JOIN project p ON p.id = d.project_id
 			 WHERE d.user_id = $1 ORDER BY d.proposed_at, d.project_id`,
 			[userId]

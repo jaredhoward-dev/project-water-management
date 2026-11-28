@@ -251,6 +251,63 @@ test('a workbook that is not b023 names the ranges it lacks, and Cancel leaves n
 	expect(list.projects).toEqual([]);
 });
 
+// WCAG 2.4.3 and 4.1.3: the file input is disabled while it reads, which drops its focus, so a failed read hands
+// the focus back to it; and the line that says what is being read is one live region, on the page before the read
+// starts, never one inserted with its text already in it (screen readers don't reliably announce those).
+test('a failed read hands the focus back to the file input, through one status line', async ({ page, owner }) => {
+	void owner;
+	await page.goto('/');
+	const dialog = await openWorkbookImport(page);
+	const input = dialog.getByLabel('Workbook (.xlsm or .xlsx)');
+	await input.focus();
+	const status = dialog.getByRole('status');
+	await expect(status).toHaveText('');
+	await status.evaluate((el) => (el.dataset.before = 'yes'));
+	await input.setInputFiles(otherWorkbook());
+	await expect(dialog.getByRole('alert')).toContainText("This isn't a Water Balance Tool workbook.");
+	await expect(input).toBeEnabled();
+	await expect(input).toBeFocused();
+	await expect(dialog.getByRole('status')).toHaveAttribute('data-before', 'yes');
+});
+
+// WCAG 3.3.1: a gauge option problem marks the field it is in and is that field's description, not just a line below.
+test('a gauge scaling problem marks its field and describes it', async ({ page, owner }) => {
+	void owner;
+	await page.goto('/');
+	const dialog = await openWorkbookImport(page);
+	await review(dialog, synthetic(), 'synthetic_b023');
+	await dialog.getByLabel("It's a gauge on another river: import it as a reference gauge").check();
+	const from = dialog.getByLabel('Scaling starts on (optional)');
+	const factor = dialog.getByLabel('Scale factor (optional)');
+	await expect(factor).not.toHaveAttribute('aria-invalid');
+
+	// A factor with no date: the date is the field at fault.
+	await factor.fill('0.8');
+	await factor.blur();
+	const both = 'Give both the date the scaling starts and its factor, or neither.';
+	await expect(dialog.getByRole('alert')).toHaveText(both);
+	await expect(from).toHaveAttribute('aria-invalid', 'true');
+	await expect(from).toHaveAccessibleDescription(new RegExp(`${both}$`));
+	await expect(factor).not.toHaveAttribute('aria-invalid');
+
+	// A date and a factor that isn't positive: now the factor is.
+	await from.fill('2021-10-01');
+	await from.blur();
+	await factor.fill('-1');
+	await factor.blur();
+	await expect(dialog.getByRole('alert')).toHaveText('The scale factor must be a positive number.');
+	await expect(factor).toHaveAttribute('aria-invalid', 'true');
+	await expect(factor).toHaveAccessibleDescription(/The scale factor must be a positive number\.$/);
+	await expect(from).not.toHaveAttribute('aria-invalid');
+
+	// Fixed: neither is marked, and the message is gone.
+	await factor.fill('0.8');
+	await factor.blur();
+	await expect(dialog.getByRole('alert')).toHaveCount(0);
+	await expect(factor).not.toHaveAttribute('aria-invalid');
+	await expect(factor).toHaveAccessibleDescription(/^If the workbook's gauge values were scaled/);
+});
+
 test('closing the dialog mid-import: the late answer never overwrites a new pick', async ({ page, owner }) => {
 	void owner;
 	await page.goto('/');

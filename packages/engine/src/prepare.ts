@@ -48,7 +48,7 @@ import { et0DailyInfo, type Et0DailyInfo } from './evaporation/et0Daily';
 import { rainDriverSpan } from './driverSpan';
 import { applyGapRain, fitGapProducts, type GapRainFits, type GapRainRun } from './gapRain';
 import { doubleMass as doubleMassOf, doubleMassRunWarning, type DoubleMass } from './doublemass';
-import { dayText, fromEpochDay, monthOfEpochDay, toEpochDay, type Monthly } from './calendar';
+import { dayText, fromEpochDay, isIsoDate, monthOfEpochDay, toEpochDay, type Monthly } from './calendar';
 import { DEFAULT_ANNUAL_THRESHOLD } from './network/reliability';
 import { sanitizeExclusions } from './calibrate/provenance';
 import { sanitizeCalibrationZones } from './calibrate/zones';
@@ -888,7 +888,9 @@ export function mergeSettings(raw: ModelInput['settings'], warnings: string[], n
 		const v = s[key];
 		if (v == null || v === '') {
 			s[key] = null;
-		} else if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v) || Number.isNaN(Date.parse(`${v}T00:00:00Z`))) {
+		} else if (!isIsoDate(v)) {
+			// isIsoDate, the one date rule (engine ≥ 1.123.1): a real calendar day from year 0001. A year-0000 window
+			// start was clamped to the record before, so ignoring it runs the same window, now with this warning.
 			warnings.push(`${key} "${String(v)}" is not an ISO date (YYYY-MM-DD); ignored`);
 			s[key] = null;
 		}
@@ -896,7 +898,9 @@ export function mergeSettings(raw: ModelInput['settings'], warnings: string[], n
 	// The seasonal outlook's demand-factor start (engine ≥ 0.44.0, issue #53 R5).
 	if (s.demandFactorFrom !== null && s.demandFactorFrom !== undefined) {
 		const v = s.demandFactorFrom;
-		if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v) || Number.isNaN(Date.parse(`${v}T00:00:00Z`))) {
+		// isIsoDate (engine ≥ 1.123.1): year 0000 was clamped to the run's first day, the same as every day; an
+		// impossible day (2001-02-30), which the API never saves, now warns here instead of failing toEpochDay later.
+		if (!isIsoDate(v)) {
 			warnings.push(`demandFactorFrom "${String(v)}" is not an ISO date (YYYY-MM-DD); demand factors apply on every day`);
 			s.demandFactorFrom = null;
 		}

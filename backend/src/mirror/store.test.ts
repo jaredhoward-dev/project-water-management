@@ -4,7 +4,9 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { afterAll, describe, expect, it } from 'vitest';
-import { MirrorUrlError, NodeGzip, openStore, S3Store } from './store.js';
+import { gzipSync } from 'node:zlib';
+import * as zarr from 'zarrita';
+import { GZIP_MAX_DECODED_BYTES, gzipDecodedLimit, MirrorUrlError, NodeGzip, openStore, registerNodeGzip, S3Store } from './store.js';
 
 /** An in-memory S3: GetObject answers NoSuchKey for a missing key, as S3 does. */
 function fakeS3() {
@@ -98,4 +100,48 @@ describe('NodeGzip', () => {
 		expect([packed[0], packed[1]]).toEqual([0x1f, 0x8b]);
 		expect(codec.decode(packed)).toEqual(bytes);
 	});
+
+	it('bounds a decode by the chunk zarrita describes: a gzip bomb fails the read (no unbounded inflate)', () => {
+		// A day of the D1 grid's chunk: 1 × 55 × 62 float32.
+		const codec = NodeGzip.fromConfig({ level: 6 }, { shape: [1, 55, 62], dataType: 'float32' });
+		const chunk = new Uint8Array(55 * 62 * 4).fill(7);
+		expect(codec.decode(codec.encode(chunk))).toEqual(chunk);
+		// 4 MB of zeros packs to ~4 KB: far past what that chunk can hold.
+		const bomb = new Uint8Array(gzipSync(new Uint8Array(4 * 1024 * 1024)));
+		expect(bomb.length).toBeLessThan(10_000);
+		expect(() => codec.decode(bomb)).toThrow(/inflates past the 14664 bytes/);
+	});
+
+	it('limits by shape and type, with a fixed ceiling for anything unknown or huge', () => {
+		expect(gzipDecodedLimit({ shape: [1, 55, 62], dataType: 'float32' })).toBe(55 * 62 * 4 + 1024);
+		expect(gzipDecodedLimit({ shape: [2, 3], dataType: 'float64' })).toBe(48 + 1024);
+		expect(gzipDecodedLimit({ shape: [100_000, 100_000], dataType: 'float32' })).toBe(GZIP_MAX_DECODED_BYTES);
+		expect(gzipDecodedLimit({ shape: [10], dataType: 'string' })).toBe(GZIP_MAX_DECODED_BYTES);
+		expect(gzipDecodedLimit(undefined)).toBe(GZIP_MAX_DECODED_BYTES);
+		expect(gzipDecodedLimit({ shape: [-1], dataType: 'float32' })).toBe(GZIP_MAX_DECODED_BYTES);
+	});
+
+	it('is the codec zarrita reads a mirror array through: a bomb chunk on disk fails getChunk', async () => {
+		registerNodeGzip();
+		const store = new Map<string, Uint8Array>();
+		const s = { get: async (k: string) => store.get(k), set: async (k: string, v: Uint8Array) => void store.set(k, v) };
+		const arr = await zarr.create(zarr.root(s as never).resolve('rain'), {
+			shape: [2, 4],
+			chunkShape: [1, 4],
+			dtype: 'float32',
+			codecs: [{ name: 'bytes', configuration: { endian: 'little' } }, { name: 'gzip', configuration: { level: 6 } }]
+		});
+		// A good chunk as the writers store it: little-endian float32, gzipped (positive control).
+		store.set('/rain/c/0/0', new Uint8Array(gzipSync(new Uint8Array(new Float32Array([1, 2, 3, 4]).buffer))));
+		expect(Array.from((await arr.getChunk([0, 0])).data as Float32Array)).toEqual([1, 2, 3, 4]);
+		store.set('/rain/c/1/0', new Uint8Array(gzipSync(new Uint8Array(1024 * 1024))));
+		// zarrita wraps a codec's failure; ours is its cause.
+		const err = await arr.getChunk([1, 0]).then(
+			() => null,
+			(e: unknown) => e as { cause?: unknown }
+		);
+		expect(err).not.toBeNull();
+		expect(String((err!.cause as Error | undefined)?.message)).toMatch(/inflates past the 1040 bytes/);
+	});
 });
+

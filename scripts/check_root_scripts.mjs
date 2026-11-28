@@ -9,12 +9,14 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { recreateProblems } from './guards/docker_recreate.mjs';
 import { volumeWipeProblems } from './guards/docker_volumes.mjs';
 
 const root = new URL('..', import.meta.url).pathname;
 const { scripts } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 // Only dev:docker:wipe may delete the shared docker volumes (guards/docker_volumes.mjs).
-const errors = volumeWipeProblems(scripts);
+// A start script never recreates a running shared container (guards/docker_recreate.mjs, issue #945).
+const errors = [...volumeWipeProblems(scripts), ...recreateProblems(scripts)];
 let inGroup = false;
 
 for (const [name, cmd] of Object.entries(scripts)) {

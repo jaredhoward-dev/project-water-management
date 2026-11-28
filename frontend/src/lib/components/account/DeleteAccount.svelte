@@ -67,7 +67,8 @@
 	<button class="btn btn-danger" type="button" onclick={start}>{t('Delete my account')}</button>
 </section>
 
-<Dialog bind:open title={t('Delete your account?')} wide closeButton={false}>
+<!-- No Escape while the delete is out, as Cancel is disabled: closing then hid its answer (a refusal, the list to hand over). -->
+<Dialog bind:open title={t('Delete your account?')} wide closeButton={false} beforeclose={() => !deleting}>
 	<p class="lead">{t('Deleting your account can’t be undone. This is what happens:')}</p>
 	<div class="what">
 		<div>

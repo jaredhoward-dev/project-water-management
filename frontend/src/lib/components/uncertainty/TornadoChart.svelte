@@ -4,6 +4,8 @@
 	its low setting and one to its high setting, each named beside it. The
 	central value is the vertical line, the decision threshold (when this
 	metric has one) the dashed line. The panel's table gives the same numbers.
+	Its 11 px labels never draw under 9.5 px (ui-playbook § 3): the drawing
+	keeps 560 × 9.5 / 11 px and scrolls sideways in its box on a phone.
 -->
 <script lang="ts">
 	import { TORNADO_METRICS, rowText, tornadoScale, type TornadoMetric, type TornadoRow } from './sensitivity';
@@ -34,42 +36,49 @@
 	};
 </script>
 
-<svg viewBox="0 0 {W} {H}" role="img" aria-labelledby="{uid}-t" data-testid="tornado">
-	<title id="{uid}-t">
-		{title}. Central run {m.fmt(central)}{metric === 'reserveRate' ? '' : ` ${m.unit}`}.{#if threshold !== null}{' '}Threshold {m.fmt(threshold)}.{/if}
-		{#each rows as r (r.factor)}{' '}{rowText(r, metric)}{/each}
-	</title>
-	{#each scale.ticks as t (t)}
-		<line class="grid" x1={x(t)} x2={x(t)} y1={TOP} y2={TOP + rows.length * ROW} />
-		<text class="tick" x={x(t)} y={TOP + rows.length * ROW + 14} text-anchor="middle">{m.fmt(t)}</text>
-	{/each}
-	{#each rows as r, i (r.factor)}
-		{@const y = TOP + i * ROW}
-		{@const lo = bar(central, r.low)}
-		{@const hi = bar(central, r.high)}
-		<text class="name" x="0" y={y + 13}>{r.label}</text>
-		<text class="setting" x={LABEL - 6} y={y + 27} text-anchor="end">{r.lowLabel}</text>
-		<text class="setting" x={LABEL - 6} y={y + 41} text-anchor="end">{r.highLabel}</text>
-		{#if lo}<rect class="low" x={lo.x} y={y + 18} width={lo.w} height="11" rx="1.5" />{/if}
-		{#if hi}<rect class="high" x={hi.x} y={y + 32} width={hi.w} height="11" rx="1.5" />{/if}
-	{/each}
-	{#if central !== null}
-		<line class="central" x1={x(central)} x2={x(central)} y1={TOP - 4} y2={TOP + rows.length * ROW} />
-		<text class="central-l" x={x(central)} y={TOP - 7} text-anchor={scale.at(central) > 0.8 ? 'end' : scale.at(central) < 0.2 ? 'start' : 'middle'}>
-			central {m.fmt(central)}
-		</text>
-	{/if}
-	{#if threshold !== null}
-		<line class="threshold" x1={x(threshold)} x2={x(threshold)} y1={TOP} y2={TOP + rows.length * ROW + 2} />
-		<text class="threshold-l" x={x(threshold)} y={TOP + rows.length * ROW + 29} text-anchor={scale.at(threshold) > 0.8 ? 'end' : scale.at(threshold) < 0.2 ? 'start' : 'middle'}>
-			threshold {m.fmt(threshold)}
-		</text>
-	{/if}
-</svg>
+<div class="scroll" data-scroll-region data-scroll-label="Sensitivity tornado">
+	<svg viewBox="0 0 {W} {H}" role="img" aria-labelledby="{uid}-t" data-testid="tornado">
+		<title id="{uid}-t">
+			{title}. Central run {m.fmt(central)}{metric === 'reserveRate' ? '' : ` ${m.unit}`}.{#if threshold !== null}{' '}Threshold {m.fmt(threshold)}.{/if}
+			{#each rows as r (r.factor)}{' '}{rowText(r, metric)}{/each}
+		</title>
+		{#each scale.ticks as t (t)}
+			<line class="grid" x1={x(t)} x2={x(t)} y1={TOP} y2={TOP + rows.length * ROW} />
+			<text class="tick" x={x(t)} y={TOP + rows.length * ROW + 14} text-anchor="middle">{m.fmt(t)}</text>
+		{/each}
+		{#each rows as r, i (r.factor)}
+			{@const y = TOP + i * ROW}
+			{@const lo = bar(central, r.low)}
+			{@const hi = bar(central, r.high)}
+			<text class="name" x="0" y={y + 13}>{r.label}</text>
+			<text class="setting" x={LABEL - 6} y={y + 27} text-anchor="end">{r.lowLabel}</text>
+			<text class="setting" x={LABEL - 6} y={y + 41} text-anchor="end">{r.highLabel}</text>
+			{#if lo}<rect class="low" x={lo.x} y={y + 18} width={lo.w} height="11" rx="1.5" />{/if}
+			{#if hi}<rect class="high" x={hi.x} y={y + 32} width={hi.w} height="11" rx="1.5" />{/if}
+		{/each}
+		{#if central !== null}
+			<line class="central" x1={x(central)} x2={x(central)} y1={TOP - 4} y2={TOP + rows.length * ROW} />
+			<text class="central-l" x={x(central)} y={TOP - 7} text-anchor={scale.at(central) > 0.8 ? 'end' : scale.at(central) < 0.2 ? 'start' : 'middle'}>
+				central {m.fmt(central)}
+			</text>
+		{/if}
+		{#if threshold !== null}
+			<line class="threshold" x1={x(threshold)} x2={x(threshold)} y1={TOP} y2={TOP + rows.length * ROW + 2} />
+			<text class="threshold-l" x={x(threshold)} y={TOP + rows.length * ROW + 29} text-anchor={scale.at(threshold) > 0.8 ? 'end' : scale.at(threshold) < 0.2 ? 'start' : 'middle'}>
+				threshold {m.fmt(threshold)}
+			</text>
+		{/if}
+	</svg>
+</div>
 
 <style>
+	.scroll {
+		overflow-x: auto;
+	}
 	svg {
 		width: 100%;
+		/* 560 × 9.5 / 11 (ui-playbook § 3): narrower, the box scrolls rather than shrink the labels. */
+		min-width: 484px;
 		max-width: 600px;
 		height: auto;
 		display: block;

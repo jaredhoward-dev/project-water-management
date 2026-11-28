@@ -85,8 +85,9 @@ export interface QueuedRerun {
  * nothing when the project hasn't turned automatic runs on (null). As the
  * transaction's user, who must be an editor, or as a live API key of the
  * project, whose re-run then runs as the key's creator
- * (app_rerun_acting_user). A key whose creator's account was deleted has
- * nobody to run as: nothing is queued (null), and the ingest still commits.
+ * (app_rerun_acting_user). A key whose creator's account was deleted, or who
+ * is no longer an editor of the project (414), has nobody to run as: nothing
+ * is queued (null), and the ingest still commits.
  * Anyone else: 42501, and the caller's transaction rolls back.
  */
 export async function enqueueRerun(db: Db, projectId: string, cause: NewDataCause): Promise<QueuedRerun | null> {

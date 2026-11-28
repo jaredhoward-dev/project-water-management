@@ -18,7 +18,7 @@ import { requireUser, type AuthEnv } from './middleware.js';
 import { dummyHash, hashPassword, needsRehash, verifyPassword } from './password.js';
 import { clearSession, issueMfaChallenge, issueSession, revokeSession } from './session.js';
 import { confirmedMethods } from './mfa.js';
-import { hasConfirmedFactor } from './stepUp.js';
+import { hasConfirmedFactor, requireCodeIfEnrolled } from './stepUp.js';
 import { clearDevice, issueDevice, trustedDevice } from './device.js';
 import { parseToken } from './tokens.js';
 import { readJson } from '../http/body.js';
@@ -334,8 +334,10 @@ export const authRoutes = new Hono<AuthEnv>()
 			const verify = await verificationMail(db, row.id, row.email);
 			return { kind: 'confirm', mail: 'mail' in verify ? verify.mail : null };
 		});
-		// An invite link names its address, so saying it's taken there tells the holder nothing new.
-		if (result.kind === 'taken' && inviteHash) throw ApiError.coded(409, 'account_exists', 'an account with that email already exists');
+		// A live invite for exactly this address names it, so saying it's taken there tells the holder nothing new.
+		// Only then: any well-formed token (made up, expired, or another address's invite) must get the same 202 as
+		// no token, or it would tell anyone which addresses have an account.
+		if (result.kind === 'taken' && (await invited())) throw ApiError.coded(409, 'account_exists', 'an account with that email already exists');
 		if (result.kind !== 'joined') {
 			if (result.mail) await trySendMail(result.mail);
 			return c.json({ confirm: true as const, email: body.email }, 202);
@@ -562,6 +564,8 @@ export const authRoutes = new Hono<AuthEnv>()
 	.delete('/me', requireUser, async (c) => {
 		const body = DeleteMeBody.parse(await readJson(c));
 		const userId = c.get('userId');
+		// With a second factor on, only a session that gave a code may delete the account (stepUp.ts requireCodeIfEnrolled).
+		await withUser(userId, (db) => requireCodeIfEnrolled(db, userId, c.get('amr') ?? [], 'to delete your account'));
 		const account = await checkPasswordAgain(c, '/auth/me', body.password);
 		type Outcome = { kind: 'held'; held: SoleHoldings } | { kind: 'deleted'; left: Departure };
 		// First, the person's own paid plan, cancelled at the provider (docs/billing.md § Deleting an account): only once
@@ -613,6 +617,9 @@ export const authRoutes = new Hono<AuthEnv>()
 	.post('/change-password', requireUser, async (c) => {
 		const body = ChangePasswordBody.parse(await readJson(c));
 		const userId = c.get('userId');
+		// With a second factor on, only a session that gave a code may change the password (stepUp.ts requireCodeIfEnrolled):
+		// otherwise a password-only session from before the factor, with the password, signs out every session of the owner.
+		await withUser(userId, (db) => requireCodeIfEnrolled(db, userId, c.get('amr') ?? [], 'to change your password'));
 		const row = await checkPasswordAgain(c, '/auth/change-password', body.currentPassword);
 		const newHash = await hashPassword(body.newPassword);
 		const watermark = new Date();

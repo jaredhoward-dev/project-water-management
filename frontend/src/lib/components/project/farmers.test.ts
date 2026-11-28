@@ -85,6 +85,12 @@ describe('inviteExampleCsv (issue #456)', () => {
 		expect(parseFarmerCsv(csv).rows.map((r) => r.farm)).toEqual([evil, '@SUM(1)']);
 	});
 
+	it("defuses a formula after a ';' in a name, and reads the name back (Excel in a comma-decimal locale)", () => {
+		const csv = inviteExampleCsv([{ name: 'North;=SUM(4;5)' }]);
+		for (const piece of csv.split('\r\n')[1]!.split(';')) expect(piece).not.toMatch(/^\s*[=+\-@]/);
+		expect(parseFarmerCsv(csv).rows.map((r) => r.farm)).toEqual(['North;=SUM(4;5)']);
+	});
+
 	it('defuses a name with whitespace before the formula sign too, and reads it back (issue #902)', () => {
 		const csv = inviteExampleCsv([{ name: ' =1+1' }, { name: '＋SUM(1)' }]);
 		const farmCells = csv

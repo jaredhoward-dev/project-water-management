@@ -89,6 +89,13 @@ describe('cell parsers', () => {
 		expect(parseDate('01/06/2005')).toBeUndefined();
 	});
 
+	it('refuses year 0000, which Date takes but the database’s date has no year for; year 1 and 9999 read (positive controls)', () => {
+		expect(parseDate('0000-01-01')).toBeUndefined();
+		expect(parseDate('0000/12/31')).toBeUndefined();
+		expect(parseDate('0001-01-01')).toBe('0001-01-01');
+		expect(parseDate('9999-12-31')).toBe('9999-12-31');
+	});
+
 	it('maps authorisation, purpose and source words', () => {
 		expect(parseAuthorisation('WUL')).toBe('licence');
 		expect(parseAuthorisation('General Authorisation')).toBe('general_authorisation');
@@ -229,6 +236,33 @@ describe('parseAllocationTable', () => {
 
 	it('lists columns it does not read', () => {
 		expect(parseAllocationTable(`${TEMPLATE},Catchment\n`, 'csv').ignoredColumns).toEqual(['Catchment']);
+	});
+
+	it('lists a valid-from in year 0000 as the row’s problem, so the commit never sends the database a date it refuses', () => {
+		const [row] = parseAllocationTable(`${TEMPLATE}\nR1,,Farm A,,licence,irrigation,surface,100,,0000-01-01,,`, 'csv').rows;
+		expect(row!.validFrom).toBeNull();
+		expect(row!.errors).toEqual(['valid_from “0000-01-01” is not a date (use YYYY-MM-DD)']);
+	});
+
+	it('reads the first of two headings for one field and lists the second as not read', () => {
+		const t = parseAllocationTable('registration_no,authorisation,water_source,volume_m3_year,Registered Volume\nR1,licence,surface,100,999\n', 'csv');
+		expect(t.columns.volumeM3PerYear).toBe('volume_m3_year');
+		expect(t.ignoredColumns).toEqual(['Registered Volume']);
+		expect(t.rows[0]).toMatchObject({ volumeM3PerYear: 100, errors: [] });
+	});
+
+	it('reads a row shorter than the header as blanks there, not shifted: here a missing volume', () => {
+		const [short] = parseAllocationTable('registration_no,authorisation,water_source,volume_m3_year\nR1,licence,surface\n', 'csv').rows;
+		expect(short).toMatchObject({ registrationNo: 'R1', waterSource: 'surface', volumeM3PerYear: null });
+		expect(short!.errors).toEqual(['volume is missing']);
+	});
+
+	it('caps a take at 10¹² m³ a year after its unit: 999 999 999 Ml/a reads, 1 000 000 000 Ml/a and an overflowing exponent don’t', () => {
+		const head = 'registration_no,authorisation,water_source,volume_m3_year,unit';
+		const [under, at, inf] = parseAllocationTable([head, 'R1,licence,surface,999999999,Ml/a', 'R2,licence,surface,1000000000,Ml/a', 'R3,licence,surface,1e999,m3/a'].join('\n'), 'csv').rows;
+		expect(under).toMatchObject({ volumeM3PerYear: 999_999_999_000, errors: [] });
+		expect(at).toMatchObject({ volumeM3PerYear: null, errors: ['volume “1000000000” is not a number ≥ 0'] });
+		expect(inf).toMatchObject({ volumeM3PerYear: null, errors: ['volume “1e999” is not a number ≥ 0'] });
 	});
 });
 
@@ -460,6 +494,21 @@ describe('matchRow', () => {
 	it('leaves an ambiguous or unknown name unmatched', () => {
 		expect(matchRow({ registrationNo: '', propertyRef: '', farm: 'Farm B' }, nodes, [])).toEqual({ nodeId: null, matchedBy: null });
 		expect(matchRow({ registrationNo: '', propertyRef: '', farm: 'Farm Z' }, nodes, [])).toEqual({ nodeId: null, matchedBy: null });
+	});
+
+	it('passes over a registration number the project matched to two nodes, to the property and then the name', () => {
+		const twice = [
+			{ registrationNo: 'R-7', propertyRef: '', nodeId: 'a' },
+			{ registrationNo: 'R-7', propertyRef: '', nodeId: 'b' }
+		];
+		expect(matchRow({ registrationNo: 'R-7', propertyRef: '', farm: 'Farm A' }, nodes, twice)).toEqual({ nodeId: 'a', matchedBy: 'name' });
+		expect(matchRow({ registrationNo: 'R-7', propertyRef: '', farm: '' }, nodes, twice)).toEqual({ nodeId: null, matchedBy: null });
+		// Control: known on one node, it matches by registration.
+		expect(matchRow({ registrationNo: 'R-7', propertyRef: '', farm: 'Farm A' }, nodes, twice.slice(1))).toEqual({ nodeId: 'b', matchedBy: 'registration' });
+	});
+
+	it('tries the property as a name when the farm name is ambiguous', () => {
+		expect(matchRow({ registrationNo: '', propertyRef: 'Farm A', farm: 'Farm B' }, nodes, [])).toEqual({ nodeId: 'a', matchedBy: 'name' });
 	});
 
 	it('ignores a known match to a node that is gone', () => {

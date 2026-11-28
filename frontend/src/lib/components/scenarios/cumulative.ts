@@ -5,7 +5,7 @@
 import { CUMULATIVE_METRIC_LABEL, type CumulativeReport, type CumulativeRow } from '@water-management/engine';
 import type { Assessment, AssessmentBackground, AssessorQuestion, Scenario } from '#lib/api/types.js';
 import { fmtNum, fmtPct, fmtQty } from '#lib/format/number.js';
-import { defuse } from '#lib/spreadsheet/export/names.js';
+import { defuseCsv } from '#lib/spreadsheet/export/names.js';
 
 /** Applications an assessor can assess together: submitted or decided (a draft is the applicant's, a withdrawn one is off the table). */
 export function assessable(items: readonly Scenario[]): Scenario[] {
@@ -68,7 +68,7 @@ export function interactionWords(r: CumulativeRow): string {
 function cell(v: string | number | null): string {
 	if (v === null) return '';
 	if (typeof v === 'number') return Number.isFinite(v) ? String(v) : '';
-	const guarded = defuse(v);
+	const guarded = defuseCsv(v);
 	return /[",\n\r]/.test(guarded) ? `"${guarded.replace(/"/g, '""')}"` : guarded;
 }
 

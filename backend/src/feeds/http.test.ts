@@ -347,7 +347,11 @@ describe('liveHttp: where it may go', () => {
 			'https://api.digitalearth.africa/stac/search',
 			'https://api.digitalearth.africa/waterbodies/../admin',
 			'https://geoserver.digitalearth.africa/geoserver/ows?service=WFS',
-			'https://geoserver.digitalearth.africa/geoserver/web/'
+			'https://geoserver.digitalearth.africa/geoserver/web/',
+			// The WFS prefix is an endpoint, not a tree: a longer name or a path under it is another service.
+			'https://geoserver.digitalearth.africa/geoserver/wfsadmin',
+			'https://geoserver.digitalearth.africa/geoserver/wfs-internal/ows',
+			'https://geoserver.digitalearth.africa/geoserver/wfs/rest/about'
 		]) {
 			await expect(http.text(url), url).rejects.toThrow(/not a known source host/);
 		}

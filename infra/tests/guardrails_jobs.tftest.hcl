@@ -954,6 +954,14 @@ run "mail_suppression" {
   }
   assert {
     condition = (
+      aws_lambda_function.worker.environment[0].variables["JOBS_QUEUE_ARN"] == aws_sqs_queue.jobs.arn &&
+      aws_lambda_function.worker.environment[0].variables["RENDER_RESULTS_QUEUE_ARN"] == aws_sqs_queue.render_results.arn &&
+      aws_lambda_event_source_mapping.worker_render_results.event_source_arn == aws_sqs_queue.render_results.arn
+    )
+    error_message = "The worker reads a wake only from jobs and a render's answer only from render-results (lambda-worker.ts MESSAGE_QUEUES)."
+  }
+  assert {
+    condition = (
       toset(flatten([for s in data.aws_iam_policy_document.worker_mail_events.statement : s.resources])) == toset([aws_sqs_queue.mail_events.arn]) &&
       alltrue([for s in data.aws_iam_policy_document.worker_mail_events.statement : alltrue([for a in s.actions : startswith(a, "sqs:") && !strcontains(a, "*") && a != "sqs:SendMessage"])]) &&
       aws_iam_role_policy.worker_mail_events.role == aws_iam_role.worker_lambda.id
