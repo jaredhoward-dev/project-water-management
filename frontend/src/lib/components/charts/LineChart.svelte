@@ -11,10 +11,11 @@
 	import { fmtDay, fmtNum, fmtReading } from '#lib/format/number.js';
 	import { forceLightForPrint, restoreThemeAfterPrint } from '#lib/components/report/printTheme.js';
 	import { alignDaily, bandSpan, chartName, decadeTicks, fmtCompact, focusWindow, isolatedIndices, laneRoom, logFloor, panWindow, pointMarks, printScale, swatchFill, TIME_TICKS, type ChartSeries } from './series';
+	import { stableProp } from './stableProp';
 	import { zoomHint } from './zoomHint';
 
 	let {
-		series,
+		series: seriesIn,
 		unit = '',
 		height = 320,
 		title,
@@ -29,13 +30,13 @@
 		toolbar,
 		toolsLabel,
 		caption,
-		shade = [],
+		shade: shadeIn = [],
 		shadeKey,
-		lanes = [],
+		lanes: lanesIn = [],
 		lanesLabel = 'Flagged days',
 		lanesNote = '',
 		lanesRoom = false,
-		band,
+		band: bandIn,
 		focus,
 		pannable = true,
 		print = false,
@@ -149,6 +150,16 @@
 	// The visible x range (epoch s), kept in step with the plot's scale.
 	let view = $state<{ min: number; max: number } | null>(null);
 
+	// The data props as the chart holds them: the same object while a re-evaluated inline prop carries the same
+	// content, so a parent's unrelated change doesn't rebuild the plot (stableProp.ts).
+	const keepSeries = stableProp<ChartSeries[]>();
+	const keepShade = stableProp<NonNullable<typeof shadeIn>>();
+	const keepLanes = stableProp<NonNullable<typeof lanesIn>>();
+	const keepBand = stableProp<typeof bandIn>();
+	const series = $derived(keepSeries(seriesIn));
+	const shade = $derived(keepShade(shadeIn));
+	const lanes = $derived(keepLanes(lanesIn));
+	const band = $derived(keepBand(bandIn));
 	const isTime = $derived(!xy);
 	const aligned = $derived(xy ?? alignDaily(series));
 	const plotted = $derived(

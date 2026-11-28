@@ -7529,6 +7529,25 @@ that changes over the run) gets "Workbook
 failed: The audit workbook can't recompute *unit* yet: …" naming each, never a
 file whose numbers disagree.
 
+### Series tab performance
+
+The Data tab (`SeriesTab.svelte`) loads each series' values on its own
+request and replaces its `values` map as each one lands. Two things keep
+that from costing more as a project gains series:
+
+- Each record's coverage stats, coverage strip bins and data checks are
+  worked out once per values object (`series/perValues.ts`), not again for
+  every series on every arrival. Loading 30 series of 40 years did that work
+  N(N+1)/2 = 465 times, about 4.5 s of main-thread time; now 30 times, about
+  0.3 s (`perValues.test.ts` counts the passes).
+- `LineChart` holds its `series`, `shade`, `lanes` and `band` props through
+  `charts/stableProp.ts`: an inline prop that re-evaluates to the same
+  content keeps its identity, so the chart is not realigned and rebuilt in
+  uPlot. The Data tab's chart rebuilt once per arriving series; now once,
+  and again only when what it draws changes (`stableProp.svelte.test.ts`).
+  This holds for every chart, so a parent passing inline arrays costs a
+  content comparison, not a redraw.
+
 ### Data feeds
 
 On the Data page, after the series and their chart, is **Data feeds**

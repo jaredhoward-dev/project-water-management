@@ -95,6 +95,7 @@
 		type SeriesGroupId
 	} from './groups';
 	import { coverageBins, coverageStats, daysBetween, mergePreview, type Daily } from './coverage';
+	import { perValues } from './perValues';
 	import { agoText } from '#lib/format/age.js';
 	import AgreementTable from './AgreementTable.svelte';
 	import CoverageStrip from './CoverageStrip.svelte';
@@ -385,10 +386,15 @@
 		return l[0]!.id;
 	}
 
+	// Each record's stats, bins and checks are worked out once per values object (perValues.ts): `values` is replaced
+	// as each series arrives, and recomputing every series on every arrival was O(N²) over the records.
+	const statsOf = perValues(coverageStats);
+	const binsOf = perValues(coverageBins);
+	const checksOf = perValues((v: Daily, kind: SeriesKind, limits: typeof dq, chirps: Daily | null) => checkSeries(kind, v, limits, chirps));
 	const stats = $derived(
-		Object.fromEntries(list.map((s) => [s.id, values[s.id] ? coverageStats(values[s.id]!, s.kind) : null]))
+		Object.fromEntries(list.map((s) => [s.id, values[s.id] ? statsOf(values[s.id]!, s.kind) : null]))
 	);
-	const bins = $derived(Object.fromEntries(list.map((s) => [s.id, values[s.id] ? coverageBins(values[s.id]!) : []])));
+	const bins = $derived(Object.fromEntries(list.map((s) => [s.id, values[s.id] ? binsOf(values[s.id]!) : []])));
 
 	// The series a run reads for a kind: the first of that kind by name (byte order, lib/series/pick.ts), among the outlet's (a gauge's record,
 	// 084_gauge_records, is read only at its gauge: seriesInUse and the backend's loadLiveInput skip it too).
@@ -584,7 +590,7 @@
 			if (!v || !(SERIES_KINDS as readonly string[]).includes(s.kind)) return [];
 			// The catchment rain's zero-run check reads CHIRPS when the CHIRPS check is on, as a run does.
 			const h = s.kind === 'rain_catchment_mm' ? first('rain_chirps_mm') : null;
-			return checkSeries(s.kind as SeriesKind, v, dq, (h && values[h.id]) || null).map((c) => ({ id: `${s.id}-${c.check}`, series: s, check: c }));
+			return checksOf(v, s.kind as SeriesKind, dq, (h && values[h.id]) || null).map((c) => ({ id: `${s.id}-${c.check}`, series: s, check: c }));
 		}),
 		...(lowVsChirps ? [lowVsChirps] : []),
 		...(dmCheck ? [dmCheck] : [])
