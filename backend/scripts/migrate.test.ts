@@ -14,11 +14,11 @@ describe('planMigrations', () => {
 	const c = file('003_last.sql');
 
 	it('a fresh database: everything pending, in order', () => {
-		expect(planMigrations([a, b, c], [])).toEqual({ pending: [a, b, c], backfill: [], problems: [] });
+		expect(planMigrations([a, b, c], [])).toEqual({ pending: [a, b, c], backfill: [], newer: [], problems: [] });
 	});
 
 	it('an up-to-date database: nothing to do', () => {
-		expect(planMigrations([a, b], [row(a), row(b)])).toEqual({ pending: [], backfill: [], problems: [] });
+		expect(planMigrations([a, b], [row(a), row(b)])).toEqual({ pending: [], backfill: [], newer: [], problems: [] });
 	});
 
 	it('only files after the latest applied one are pending', () => {
@@ -59,13 +59,48 @@ describe('planMigrations', () => {
 
 	it('backfills rows recorded before checksums instead of refusing them', () => {
 		const plan = planMigrations([a, b, c], [row(a, null), row(b, null)]);
-		expect(plan).toEqual({ pending: [c], backfill: [a, b], problems: [] });
+		expect(plan).toEqual({ pending: [c], backfill: [a, b], newer: [], problems: [] });
 	});
 
 	it('reports every problem at once', () => {
 		const edited = file('001_init.sql', 'changed');
-		const { problems } = planMigrations([edited, file('000_early.sql')], [row(a), row(b)]);
+		// c keeps 002 at or below the highest file, so its absence is a problem, not a newer release's.
+		const { problems } = planMigrations([edited, file('000_early.sql'), c], [row(a), row(b)]);
 		expect(problems).toHaveLength(3);
+	});
+
+	describe('a database ahead of this code (a rollback deploy)', () => {
+		const d = file('004_newer.sql');
+		const e = file('005_newest.sql');
+
+		it('skips applied names after the highest file instead of refusing them', () => {
+			expect(planMigrations([a, b], [row(a), row(b), row(c), row(d)])).toEqual({ pending: [], backfill: [], newer: ['003_last.sql', '004_newer.sql'], problems: [] });
+		});
+
+		it('still refuses a missing file at or below the highest file (positive control: the newer ones alone pass)', () => {
+			const { problems, newer } = planMigrations([a, c], [row(a), row(b), row(c), row(d), row(e)]);
+			expect(newer).toEqual(['004_newer.sql', '005_newest.sql']);
+			expect(problems).toEqual([expect.stringMatching(/^002_more\.sql was applied but its file is missing/)]);
+		});
+
+		it('still refuses an edited file below the newer ones', () => {
+			const edited = file('002_more.sql', 'changed');
+			const { problems, newer } = planMigrations([a, edited], [row(a), row(b), row(d)]);
+			expect(newer).toEqual(['004_newer.sql']);
+			expect(problems).toEqual([expect.stringMatching(/^002_more\.sql was applied but its contents have changed/)]);
+		});
+
+		it('still refuses a file of its own the database never applied (pending before a newer applied one)', () => {
+			const { problems, pending } = planMigrations([a, b, c], [row(a), row(b), row(d)]);
+			expect(pending).toEqual([c]);
+			expect(problems).toEqual([expect.stringMatching(/^003_last\.sql is pending but sorts before 004_newer\.sql/)]);
+		});
+
+		it('with no files at all, an applied name is missing, not newer', () => {
+			const { problems, newer } = planMigrations([], [row(a)]);
+			expect(newer).toEqual([]);
+			expect(problems).toEqual([expect.stringMatching(/^001_init\.sql was applied but its file is missing/)]);
+		});
 	});
 
 	it('orders by code unit, the same order the files are applied in', () => {

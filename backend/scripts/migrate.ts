@@ -12,6 +12,13 @@
 // file sorts before the latest applied one (an out-of-order merge). Rows from
 // before checksums existed get theirs backfilled from the current file.
 //
+// An applied name that sorts after this checkout's highest file is a newer
+// release's migration, not a missing one: the database is ahead of this code
+// (a rollback deploy, docs/deployment.md § Rollback). Those are skipped with a
+// log line, never refused; only a missing or edited file at or below the
+// highest file is. The old code runs against the newer schema because
+// migrations are expand/contract (CLAUDE.md rule 2).
+//
 // Runs as the schema owner (MIGRATION_DATABASE_URL), never as water_app.
 // The CLI is scripts/migrate-cli.ts, so this module (bundled into the migrate
 // Lambda) never reaches the dev env loader or dotenv:
@@ -59,6 +66,8 @@ export interface MigrationPlan {
 	pending: MigrationFile[];
 	/** Applied rows recorded before checksums existed: store the current file's. */
 	backfill: MigrationFile[];
+	/** Applied names that sort after the highest file here: a newer release's migrations, skipped. */
+	newer: string[];
 	/** Why the run must stop; empty when it may go on. */
 	problems: string[];
 }
@@ -100,9 +109,14 @@ export function planMigrations(files: readonly MigrationFile[], applied: readonl
 	const done = new Map(applied.map((r) => [r.name, r]));
 	const problems: string[] = [];
 	const backfill: MigrationFile[] = [];
+	const newer: string[] = [];
+	// No files at all (a wrong directory) is not "everything applied is newer".
+	const highest = files.map((f) => f.name).sort(cmp).at(-1);
 	for (const row of [...applied].sort((a, b) => cmp(a.name, b.name))) {
 		const file = onDisk.get(row.name);
-		if (!file) {
+		if (!file && highest !== undefined && cmp(row.name, highest) > 0) {
+			newer.push(row.name);
+		} else if (!file) {
 			problems.push(`${row.name} was applied but its file is missing (deleted or renamed)`);
 		} else if (row.checksum === null) {
 			backfill.push(file);
@@ -128,7 +142,7 @@ export function planMigrations(files: readonly MigrationFile[], applied: readonl
 			problems.push(`${f.name} is pending but sorts before ${latest}, which is already applied (out-of-order merge: renumber it after ${latest})`);
 		}
 	}
-	return { pending, backfill, problems };
+	return { pending, backfill, newer, problems };
 }
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
@@ -201,6 +215,13 @@ export async function migrate(databaseUrl: string, log = console.log, opts: Migr
 			await client.query('UPDATE schema_migrations SET checksum = $2 WHERE name = $1 AND checksum IS NULL', [f.name, f.checksum]);
 		}
 		if (plan.backfill.length) log(`recorded checksums for ${plan.backfill.length} earlier migration(s)`);
+		if (plan.newer.length) {
+			log(
+				`skipping ${plan.newer.length} applied migration(s) newer than this release's highest file ` +
+					`(${plan.newer[0]}${plan.newer.length > 1 ? ` … ${plan.newer.at(-1)}` : ''}): the database is ahead of this code, ` +
+					'as after a rollback deploy (docs/deployment.md § Rollback)'
+			);
+		}
 		const byName = new Map(files.map((f) => [f.name, f]));
 		for (const { name, checksum } of plan.pending) {
 			const { sql } = byName.get(name)!;

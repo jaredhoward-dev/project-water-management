@@ -980,7 +980,11 @@ deploy log shows code `integrity` and the files; its error, in CloudWatch
   database to make the error go away: the change would never reach the
   schema, and every environment would differ from the files.
 - **"… was applied but its file is missing"**: a migration was deleted or
-  renamed. Restore it under its original name.
+  renamed. Restore it under its original name. (A name after the release's
+  highest file isn't missing: it's a newer release's, and the runner skips
+  it with a log line, as on a rollback, § Rollback. Releases up to
+  backend@0.26.2 refuse those too, which is why a rollback to one needs
+  `-f rollback=true`.)
 - **"… is pending but sorts before …"**: two branches took migration
   numbers out of order, and the one merged later has the lower number.
   Renumber it after the latest applied file and release again.
@@ -1115,7 +1119,7 @@ Each deployable has its own release line, named `<component>@<semver>`
 
 | Tag | Workflow | Deploys |
 | --- | --- | --- |
-| `backend@X.Y.Z` | `deploy-backend.yml` | migrate Lambda (runs the migrations), then the API, worker and fetcher Lambdas, then the renderer's and the mirror ingest job's images (pushed to ECR; each function moved to its image once it exists), then the health check |
+| `backend@X.Y.Z` | `deploy-backend.yml` | migrate Lambda (runs the migrations; skipped on a manual `rollback` run, § Rollback), then the API, worker and fetcher Lambdas, then the renderer's and the mirror ingest job's images (pushed to ECR; each function moved to its image once it exists), then the health check |
 | `web@X.Y.Z` | `deploy-frontend.yml` | the engine suite and a 1 600-case soak (a failure stops the release; the result is the build record the report's validation statement prints, model.md §2.10f), then the static build to S3, then a CloudFront invalidation |
 
 **Publishing a GitHub Release is the trigger.** Pushing a tag on its own does
@@ -5845,14 +5849,56 @@ Every step is an ordinary app action by an owner unless it says "operator".
 
 ## Rollback
 
-- **Code:** deploy the last good tag by hand. It goes through the same
-  preflight (without the "newer than" rule) and the same approval:
-  `gh workflow run deploy-backend.yml -f tag=backend@0.1.0`, or
-  `gh workflow run deploy-frontend.yml -f tag=web@0.1.0`. The artifacts that
-  shipped are also attached to each Release. A backend tag from before
-  response streaming (WP-1.29a) exports a buffered handler, so rolling back
-  past it also needs the Function URL put back to `BUFFERED` in Terraform,
-  applied back to back with the deploy (§ Response streaming).
+- **Backend code:** deploy the last good tag by hand with `rollback`:
+
+  ```bash
+  gh workflow run deploy-backend.yml -f tag=backend@0.26.2 -f rollback=true
+  ```
+
+  It goes through the same preflight (without the "newer than" rule) and the
+  same `production` approval, builds the tag's code, and deploys the API,
+  worker, fetcher, assistant, renderer and mirror ingest functions from it.
+  It **doesn't** touch the migrate Lambda: neither its code nor a run. The
+  database stays at the newer release's schema, and the migrate Lambda keeps
+  the newer release's code (so a later owner action or reference load still
+  works). The old code tolerates the newer schema because migrations are
+  expand/contract (CLAUDE.md rule 2); the rehearsal before the release after
+  backend@0.26.2 ran 0.26.2's code against the schema of migrations 321–411
+  without a problem.
+
+  Why the flag: without it the workflow runs the tag's migrate Lambda first,
+  and a release up to backend@0.26.2 refuses a database that has applied
+  migrations it has no file for ("applied but its file is missing"), so the
+  deploy stops at "Migrate Lambda failed — API code NOT updated" and the old
+  API never ships. From the release after 0.26.2 on, `migrate.ts` skips
+  applied migrations newer than its own highest file with a log line (it
+  still refuses a missing or edited file at or below it), so a rollback to
+  one of those releases works with or without the flag; the flag still
+  saves the migrate Lambda's round trip.
+
+  The preflight (`scripts/release/preflight.mjs`, no AWS) allows `rollback`
+  only on a manual run, only for a tag **older than the latest published
+  backend release**, and only when every migration file the tag ships is in
+  that latest release with the same contents (git blob ids). It checks git,
+  not the database, because the preflight holds no AWS credentials and
+  refuses before the approval and before anything is built. That assumes the
+  database has the latest release's migrations, or at least the tag's: roll
+  back to a release that has run in production (normally the one before the
+  release you're undoing), not to one between an older running release and
+  a newer release whose migrate never ran. A tag that is the latest release
+  is refused: redeploy it without `rollback`, so its migrations run.
+
+  Use it when a release's code misbehaves in production and the fix isn't
+  quick: the migrate step of the bad release either succeeded (the database
+  is ahead) or stopped part way (some of its migrations applied); both are
+  fine for the older code. Don't use it to undo a migration: ship a new one
+  (**Database**, below).
+- **Frontend code:** `gh workflow run deploy-frontend.yml -f tag=web@0.1.0`
+  (same preflight and approval; there are no migrations).
+- The artifacts that shipped are also attached to each Release. A backend tag
+  from before response streaming (WP-1.29a) exports a buffered handler, so
+  rolling back past it also needs the Function URL put back to `BUFFERED` in
+  Terraform, applied back to back with the deploy (§ Response streaming).
 - **Database:** migrations are forward-only, so a backend rollback runs old
   API code against the current schema. That is safe only because migrations
   are expand/contract. To undo a migration, ship a new one. For data loss,
